@@ -121,9 +121,10 @@ type smartctlJSON struct {
 			} `json:"raw"`
 		} `json:"table"`
 	} `json:"ata_smart_attributes"`
-	RotationRate int    `json:"rotation_rate"`
-	DeviceType   string `json:"device_type"`
-	FormFactor   string `json:"form_factor"`
+	RotationRate int `json:"rotation_rate"`
+	FormFactor   struct {
+		Name string `json:"name"`
+	} `json:"form_factor"`
 }
 
 func parseSMARTJSON(device, out string) (internal.SMARTInfo, error) {
