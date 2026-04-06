@@ -4,6 +4,7 @@ package collector
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,6 +54,16 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 	smart, err := collectSMART()
 	if err != nil {
 		c.logger.Warn("SMART collection partial failure", "error", err)
+	}
+	// Enrich SMART data with Unraid array slot mapping (md -> physical device)
+	if smart != nil {
+		mdMap := buildMDToPhysicalMap() // "sdb" -> "1" (for /mnt/disk1)
+		for i := range smart {
+			devName := strings.TrimPrefix(smart[i].Device, "/dev/")
+			if mdNum, ok := mdMap[devName]; ok {
+				smart[i].ArraySlot = "disk" + mdNum
+			}
+		}
 	}
 	snap.SMART = smart
 

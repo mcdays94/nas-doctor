@@ -1260,8 +1260,9 @@ td.mono {
         html += "</div>";
 
         /* Meta tags */
-        if (f.priority || f.cost) {
+        if (f.priority || f.cost || f.detected_at) {
           html += "<div class=\"finding-meta\">";
+          if (f.detected_at) html += "<span class=\"finding-meta-tag\" style=\"opacity:0.6\">" + new Date(f.detected_at).toLocaleString() + "</span>";
           if (f.priority) html += "<span class=\"finding-meta-tag\">" + esc(f.priority) + "</span>";
           if (f.cost) html += "<span class=\"finding-meta-tag\">" + esc(f.cost) + "</span>";
           html += "</div>";

@@ -331,6 +331,7 @@ type Finding struct {
 	Priority    string   `json:"priority"`               // immediate, short-term, medium-term
 	Cost        string   `json:"cost"`                   // "$10-20", "Free", etc.
 	RelatedDisk string   `json:"related_disk,omitempty"` // if disk-specific
+	DetectedAt  string   `json:"detected_at,omitempty"`  // ISO timestamp when first detected
 }
 
 // ---------- Configuration ----------

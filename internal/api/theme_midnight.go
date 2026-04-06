@@ -393,6 +393,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         if (f.action) h += '<div class="finding-detail-row"><div class="finding-detail-label">Action</div><div class="finding-detail-value val-accent">' + esc(f.action) + '</div></div>';
         if (f.impact) h += '<div class="finding-detail-row"><div class="finding-detail-label">Impact</div><div class="finding-detail-value val-italic">' + esc(f.impact) + '</div></div>';
         h += '<div class="finding-meta">';
+        if (f.detected_at) h += '<span><strong>Detected:</strong> ' + new Date(f.detected_at).toLocaleString() + '</span>';
         if (f.priority) h += '<span><strong>Priority:</strong> ' + esc(f.priority) + '</span>';
         if (f.cost) h += '<span><strong>Cost:</strong> ' + esc(f.cost) + '</span>';
         if (f.category) h += '<span><strong>Category:</strong> ' + esc(f.category) + '</span>';

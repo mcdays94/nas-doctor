@@ -896,6 +896,7 @@ body {
         if (f.action) html += '<div class="finding-detail-row"><div class="finding-detail-label">Action</div><div class="finding-detail-value val-accent">' + escapeHTML(f.action) + '</div></div>';
         if (f.impact) html += '<div class="finding-detail-row"><div class="finding-detail-label">Impact</div><div class="finding-detail-value val-italic">' + escapeHTML(f.impact) + '</div></div>';
         html += '<div class="finding-meta">';
+        if (f.detected_at) html += '<div class="finding-meta-item"><strong>Detected:</strong> ' + new Date(f.detected_at).toLocaleString() + '</div>';
         if (f.priority) html += '<div class="finding-meta-item"><strong>Priority:</strong> ' + escapeHTML(f.priority) + '</div>';
         if (f.cost) html += '<div class="finding-meta-item"><strong>Cost:</strong> ' + escapeHTML(f.cost) + '</div>';
         html += '<div class="finding-meta-item" style="margin-left:auto"><a href="#" onclick="event.stopPropagation();window._dismissFinding(\'' + escapeHTML(f.title).replace(/\x27/g, "\\\x27") + '\');return false" style="font-size:11px;color:#808080;text-decoration:none">Dismiss</a></div>';

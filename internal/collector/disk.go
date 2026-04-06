@@ -2,6 +2,7 @@ package collector
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -217,6 +218,29 @@ func isContainerRootOrBind(device, mount string) bool {
 		return true
 	}
 	return false
+}
+
+// buildMDToPhysicalMap reads /sys/block/md*/slaves/ to build a mapping
+// from physical device (e.g. "sdb") to md device number (e.g. "1" for md1).
+// This allows correlating SMART devices (/dev/sdb) to Unraid disk mounts (/mnt/disk1).
+func buildMDToPhysicalMap() map[string]string {
+	result := make(map[string]string) // "sdb" -> "1" (md number)
+	mdDirs, _ := filepath.Glob("/sys/block/md*/slaves")
+	for _, dir := range mdDirs {
+		// Extract md number: /sys/block/md1/slaves -> "1"
+		mdName := filepath.Base(filepath.Dir(dir)) // "md1"
+		mdNum := strings.TrimPrefix(mdName, "md")
+
+		// List slaves (physical devices)
+		slaves, _ := os.ReadDir(dir)
+		for _, slave := range slaves {
+			name := slave.Name() // e.g. "sdb" or "sdb1"
+			// Strip partition number
+			devName := strings.TrimRight(name, "0123456789")
+			result[devName] = mdNum
+		}
+	}
+	return result
 }
 
 // guessLabel tries to derive a friendly label from mount and device.

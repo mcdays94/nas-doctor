@@ -149,6 +149,11 @@ func (s *Scheduler) RunOnce() {
 
 	// Analyze
 	snap.Findings = analyzer.Analyze(snap)
+	// Stamp findings with detection timestamp
+	ts := snap.Timestamp.Format(time.RFC3339)
+	for i := range snap.Findings {
+		snap.Findings[i].DetectedAt = ts
+	}
 	s.logger.Info("analysis complete",
 		"critical", countSeverity(snap.Findings, internal.SeverityCritical),
 		"warnings", countSeverity(snap.Findings, internal.SeverityWarning),
