@@ -21,7 +21,7 @@ type Settings struct {
 	ScanInterval  string                `json:"scan_interval"`
 	Theme         string                `json:"theme"`
 	Notifications SettingsNotifications `json:"notifications"`
-	LogPush       SettingsLogPush       `json:"log_push"`
+	LogPush       SettingsLogForward    `json:"log_push"`
 }
 
 // SettingsNotifications holds the webhook list within settings.
@@ -29,14 +29,14 @@ type SettingsNotifications struct {
 	Webhooks []internal.WebhookConfig `json:"webhooks"`
 }
 
-// SettingsLogPush holds the log-push configuration within settings.
-type SettingsLogPush struct {
-	Enabled      bool                 `json:"enabled"`
-	Destinations []LogPushDestination `json:"destinations"`
+// SettingsLogForward holds the log-forwarding configuration within settings.
+type SettingsLogForward struct {
+	Enabled      bool                    `json:"enabled"`
+	Destinations []LogForwardDestination `json:"destinations"`
 }
 
-// LogPushDestination represents a single log-push target.
-type LogPushDestination struct {
+// LogForwardDestination represents a single log-forwarding target.
+type LogForwardDestination struct {
 	Name    string `json:"name"`
 	Type    string `json:"type"`
 	URL     string `json:"url"`
@@ -53,9 +53,9 @@ func defaultSettings() Settings {
 		Notifications: SettingsNotifications{
 			Webhooks: []internal.WebhookConfig{},
 		},
-		LogPush: SettingsLogPush{
+		LogPush: SettingsLogForward{
 			Enabled:      false,
-			Destinations: []LogPushDestination{},
+			Destinations: []LogForwardDestination{},
 		},
 	}
 }
@@ -102,7 +102,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		settings.Notifications.Webhooks = []internal.WebhookConfig{}
 	}
 	if settings.LogPush.Destinations == nil {
-		settings.LogPush.Destinations = []LogPushDestination{}
+		settings.LogPush.Destinations = []LogForwardDestination{}
 	}
 
 	writeJSON(w, http.StatusOK, settings)
@@ -146,7 +146,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		settings.Notifications.Webhooks = []internal.WebhookConfig{}
 	}
 	if settings.LogPush.Destinations == nil {
-		settings.LogPush.Destinations = []LogPushDestination{}
+		settings.LogPush.Destinations = []LogForwardDestination{}
 	}
 
 	// Persist
@@ -158,6 +158,13 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SetConfig(settingsConfigKey, string(data)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save settings: " + err.Error()})
 		return
+	}
+
+	// Dynamically update the scheduler interval if it changed.
+	if s.scheduler != nil {
+		if d, err := time.ParseDuration(settings.ScanInterval); err == nil {
+			s.scheduler.UpdateInterval(d)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, settings)
@@ -343,13 +350,59 @@ var SettingsPage = `<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
+/* Midnight theme (default) */
+:root, body.theme-midnight{
   --bg:#0f1011;--surface:#191a1b;--text:#f7f8f8;--text2:#8a8f98;
   --accent:#5e6ad2;--accent-hover:#7170ff;--success:#27a644;--error:#dc2626;
   --border:rgba(255,255,255,0.08);--radius:8px;
+  --input-bg:rgba(255,255,255,0.04);--code-bg:rgba(255,255,255,0.06);
 }
+/* Clean theme */
+body.theme-clean{
+  --bg:#ffffff;--surface:#ffffff;--text:#171717;--text2:#808080;
+  --accent:#171717;--accent-hover:#404040;--success:#16a34a;--error:#dc2626;
+  --border:rgba(0,0,0,0.08);--radius:8px;
+  --input-bg:rgba(0,0,0,0.03);--code-bg:rgba(0,0,0,0.04);
+}
+body.theme-clean a{color:#171717}
+body.theme-clean a:hover{color:#404040}
+body.theme-clean .btn-primary{background:#171717;border-color:#171717}
+body.theme-clean .btn-primary:hover{background:#333}
+body.theme-clean .btn-secondary{background:#fff;color:#4d4d4d;border-color:rgba(0,0,0,0.15)}
+body.theme-clean .btn-secondary:hover{color:#171717;background:#fafafa;border-color:rgba(0,0,0,0.2)}
+body.theme-clean .btn-danger{background:rgba(220,38,38,0.06);border-color:rgba(220,38,38,0.15)}
+body.theme-clean .btn-success{background:rgba(22,163,74,0.06);color:var(--success);border-color:rgba(22,163,74,0.15)}
+body.theme-clean .card{border-color:rgba(0,0,0,0.08);box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+body.theme-clean .toggle{background:rgba(0,0,0,0.1)}
+body.theme-clean .toggle.on{background:var(--accent)}
+body.theme-clean .webhook-item{background:rgba(0,0,0,0.01);border-color:rgba(0,0,0,0.08)}
+body.theme-clean .webhook-item:hover{background:rgba(0,0,0,0.03)}
+body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,0.02)}
+body.theme-clean .theme-option{border-color:rgba(0,0,0,0.12)}
+body.theme-clean .theme-option:hover{border-color:rgba(0,0,0,0.2)}
+body.theme-clean .theme-option.active{border-color:var(--accent);background:rgba(0,0,0,0.03)}
+body.theme-clean .log-table th{color:#808080;border-bottom-color:rgba(0,0,0,0.08)}
+body.theme-clean .log-table td{color:#171717;border-bottom-color:rgba(0,0,0,0.04)}
+body.theme-clean .log-table tr:hover td{background:rgba(0,0,0,0.02)}
+body.theme-clean .swatch{border-color:rgba(0,0,0,0.1)}
+body.theme-clean select,body.theme-clean input[type="text"],body.theme-clean input[type="url"],body.theme-clean input[type="password"],body.theme-clean input[type="number"]{
+  background:var(--input-bg);border-color:rgba(0,0,0,0.12);color:var(--text)}
+body.theme-clean select:focus,body.theme-clean input:focus{border-color:var(--accent)}
+body.theme-clean .back-link{color:#808080;border-color:rgba(0,0,0,0.12)}
+body.theme-clean .back-link:hover{color:#171717;border-color:rgba(0,0,0,0.2);background:rgba(0,0,0,0.02)}
+body.theme-clean .coming-soon::after{color:var(--accent);background:rgba(0,0,0,0.05)}
+/* Ember theme */
+body.theme-ember{
+  --bg:#07080a;--surface:#101111;--text:#f9f9f9;--text2:#9c9c9d;
+  --accent:#55b3ff;--accent-hover:#7ec8ff;--success:#5fc992;--error:#FF6363;
+  --border:rgba(255,255,255,0.06);--radius:8px;
+  --input-bg:rgba(255,255,255,0.04);--code-bg:rgba(255,255,255,0.06);
+}
+body.theme-ember .btn-primary{background:var(--accent);border-color:var(--accent)}
+body.theme-ember .btn-primary:hover{background:var(--accent-hover)}
+body.theme-ember .coming-soon::after{color:var(--accent);background:rgba(85,179,255,0.12)}
 html{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
-body{min-height:100vh;padding:24px}
+body{min-height:100vh;padding:24px;transition:background 0.2s ease,color 0.2s ease}
 a{color:var(--accent);text-decoration:none}
 a:hover{color:var(--accent-hover)}
 
@@ -365,14 +418,14 @@ a:hover{color:var(--accent-hover)}
 .back-link:hover{color:var(--text);border-color:rgba(255,255,255,0.15);background:rgba(255,255,255,0.03)}
 
 /* Cards */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:24px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:24px;transition:background 0.2s ease,border-color 0.2s ease}
 .card-title{font-size:16px;font-weight:600;margin-bottom:4px}
 .card-desc{font-size:13px;color:var(--text2);margin-bottom:20px}
 
 /* Form elements */
 label{display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px}
-select,input[type="text"],input[type="url"],input[type="password"]{
-  width:100%;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid var(--border);
+select,input[type="text"],input[type="url"],input[type="password"],input[type="number"]{
+  width:100%;padding:8px 12px;background:var(--input-bg);border:1px solid var(--border);
   border-radius:var(--radius);color:var(--text);font-size:14px;font-family:inherit;outline:none;transition:border 0.15s}
 select:focus,input:focus{border-color:var(--accent)}
 select{cursor:pointer;-webkit-appearance:none;appearance:none;
@@ -481,16 +534,40 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     <div class="card-desc">Configure scan interval and appearance.</div>
     <div class="form-row">
       <div>
-        <label for="scan-interval">Scan Interval</label>
-        <select id="scan-interval">
+        <label for="scan-preset">Scan Interval</label>
+        <select id="scan-preset" onchange="onPresetChange()">
+          <option value="30m">Every 30 minutes</option>
           <option value="1h">Every 1 hour</option>
           <option value="2h">Every 2 hours</option>
           <option value="6h" selected>Every 6 hours</option>
           <option value="12h">Every 12 hours</option>
           <option value="24h">Every 24 hours</option>
+          <option value="custom">Custom...</option>
         </select>
       </div>
       <div></div>
+    </div>
+    <div id="custom-interval-panel" style="display:none;margin-bottom:16px;padding:16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+        <div style="flex:1;min-width:70px">
+          <label for="scan-days" style="font-size:11px;margin-bottom:4px">Days</label>
+          <input type="number" id="scan-days" min="0" max="365" value="0" style="text-align:center">
+        </div>
+        <div style="flex:1;min-width:70px">
+          <label for="scan-hours" style="font-size:11px;margin-bottom:4px">Hours</label>
+          <input type="number" id="scan-hours" min="0" max="23" value="0" style="text-align:center">
+        </div>
+        <div style="flex:1;min-width:70px">
+          <label for="scan-minutes" style="font-size:11px;margin-bottom:4px">Minutes</label>
+          <input type="number" id="scan-minutes" min="0" max="59" value="30" style="text-align:center">
+        </div>
+        <div style="flex:1;min-width:70px">
+          <label for="scan-seconds" style="font-size:11px;margin-bottom:4px">Seconds</label>
+          <input type="number" id="scan-seconds" min="0" max="59" value="0" style="text-align:center">
+        </div>
+      </div>
+      <div id="scan-interval-preview" style="font-size:12px;color:var(--text2);margin-bottom:4px">Scans every 30 minutes</div>
+      <div id="scan-cron-preview" style="font-size:11px;font-family:monospace;color:var(--accent);background:rgba(94,106,210,0.06);padding:4px 10px;border-radius:4px;display:inline-block"></div>
     </div>
     <label>Theme</label>
     <div class="theme-options" id="theme-options">
@@ -563,24 +640,27 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 3. Log Push (coming soon) -->
-  <div class="card coming-soon" id="card-logpush">
-    <div class="card-title">Log Push</div>
-    <div class="card-desc">Forward scan results to an external logging endpoint.</div>
+  <!-- 3. Log Forwarding (coming soon) -->
+  <div class="card coming-soon" id="card-logfwd">
+    <div class="card-title">Log Forwarding</div>
+    <div class="card-desc">Forward scan results and metrics to external logging or observability endpoints (e.g. Grafana via Prometheus).</div>
     <div class="form-group">
       <div class="toggle-wrap" style="margin-bottom:16px">
-        <div class="toggle" id="logpush-toggle"><div class="toggle-knob"></div></div>
-        <span class="toggle-label">Enable Log Push</span>
+        <div class="toggle" id="logfwd-toggle"><div class="toggle-knob"></div></div>
+        <span class="toggle-label">Enable Log Forwarding</span>
       </div>
-      <label for="logpush-url">Destination URL</label>
-      <input type="url" id="logpush-url" placeholder="https://..." disabled>
+      <label for="logfwd-url">Destination URL</label>
+      <input type="url" id="logfwd-url" placeholder="https://..." disabled>
     </div>
     <div class="form-group">
-      <label for="logpush-format">Format</label>
-      <select id="logpush-format" disabled>
+      <label for="logfwd-format">Format</label>
+      <select id="logfwd-format" disabled>
         <option value="json">JSON</option>
         <option value="syslog">Syslog</option>
       </select>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <p style="font-size:12px;color:var(--text2);line-height:1.6">Prometheus metrics are already available at <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:11px">/metrics</code> for Grafana integration. Configure your Prometheus scraper to target this endpoint.</p>
     </div>
   </div>
 
@@ -636,19 +716,132 @@ function getSelectedTheme() {
   return checked ? checked.value : "midnight";
 }
 
+/* ---------- Interval helpers ---------- */
+var presetValues = ["30m", "1h", "2h", "6h", "12h", "24h"];
+
+function parseDurationToFields(dur) {
+  var days = 0, hours = 0, minutes = 0, seconds = 0;
+  if (!dur) return { days: 0, hours: 6, minutes: 0, seconds: 0 };
+  var m;
+  m = dur.match(/(\d+)h/);
+  if (m) { var h = parseInt(m[1], 10); days = Math.floor(h / 24); hours = h % 24; }
+  m = dur.match(/(\d+)m(?!s)/);
+  if (m) { minutes = parseInt(m[1], 10); }
+  m = dur.match(/(\d+)s/);
+  if (m) { seconds = parseInt(m[1], 10); }
+  return { days: days, hours: hours, minutes: minutes, seconds: seconds };
+}
+
+function fieldsToDuration() {
+  var d = parseInt(document.getElementById("scan-days").value, 10) || 0;
+  var h = parseInt(document.getElementById("scan-hours").value, 10) || 0;
+  var m = parseInt(document.getElementById("scan-minutes").value, 10) || 0;
+  var s = parseInt(document.getElementById("scan-seconds").value, 10) || 0;
+  var totalH = d * 24 + h;
+  var parts = [];
+  if (totalH > 0) parts.push(totalH + "h");
+  if (m > 0) parts.push(m + "m");
+  if (s > 0) parts.push(s + "s");
+  if (parts.length === 0) return "6h";
+  return parts.join("");
+}
+
+function getScanInterval() {
+  var preset = document.getElementById("scan-preset").value;
+  if (preset !== "custom") return preset;
+  return fieldsToDuration();
+}
+
+function isPresetValue(dur) {
+  for (var i = 0; i < presetValues.length; i++) {
+    if (presetValues[i] === dur) return true;
+  }
+  return false;
+}
+
+function durationToCron(dur) {
+  var f = parseDurationToFields(dur);
+  var totalSecs = f.days * 86400 + f.hours * 3600 + f.minutes * 60 + f.seconds;
+  if (totalSecs <= 0) return "";
+  if (totalSecs < 60) return "*/" + totalSecs + "s (every " + totalSecs + " seconds)";
+  var totalMin = Math.round(totalSecs / 60);
+  if (totalMin <= 0) totalMin = 1;
+  if (totalMin < 60) return "*/" + totalMin + " * * * *";
+  var totalHrs = f.days * 24 + f.hours;
+  var extraMin = f.minutes;
+  if (totalHrs > 0 && extraMin === 0 && f.seconds === 0) {
+    if (totalHrs < 24) return "0 */" + totalHrs + " * * *";
+    if (totalHrs % 24 === 0) {
+      var d = totalHrs / 24;
+      return "0 0 */" + d + " * *";
+    }
+    return "0 */" + totalHrs + " * * *";
+  }
+  if (totalSecs < 3600) return "*/" + totalMin + " * * * *";
+  return "0 */" + totalHrs + " * * *";
+}
+
+function onPresetChange() {
+  var preset = document.getElementById("scan-preset").value;
+  var panel = document.getElementById("custom-interval-panel");
+  if (preset === "custom") {
+    panel.style.display = "block";
+    updateIntervalPreview();
+  } else {
+    panel.style.display = "none";
+  }
+}
+
+function updateIntervalPreview() {
+  var d = parseInt(document.getElementById("scan-days").value, 10) || 0;
+  var h = parseInt(document.getElementById("scan-hours").value, 10) || 0;
+  var m = parseInt(document.getElementById("scan-minutes").value, 10) || 0;
+  var s = parseInt(document.getElementById("scan-seconds").value, 10) || 0;
+  var parts = [];
+  if (d > 0) parts.push(d + (d === 1 ? " day" : " days"));
+  if (h > 0) parts.push(h + (h === 1 ? " hour" : " hours"));
+  if (m > 0) parts.push(m + (m === 1 ? " minute" : " minutes"));
+  if (s > 0) parts.push(s + (s === 1 ? " second" : " seconds"));
+  var el = document.getElementById("scan-interval-preview");
+  var cronEl = document.getElementById("scan-cron-preview");
+  if (parts.length === 0) {
+    el.textContent = "Invalid: set at least 1 second";
+    el.style.color = "var(--error)";
+    cronEl.textContent = "";
+  } else {
+    el.textContent = "Scans every " + parts.join(", ");
+    el.style.color = "var(--text2)";
+    var dur = fieldsToDuration();
+    var cron = durationToCron(dur);
+    cronEl.textContent = cron ? "cron: " + cron : "";
+  }
+}
+
+document.getElementById("scan-days").addEventListener("input", updateIntervalPreview);
+document.getElementById("scan-hours").addEventListener("input", updateIntervalPreview);
+document.getElementById("scan-minutes").addEventListener("input", updateIntervalPreview);
+document.getElementById("scan-seconds").addEventListener("input", updateIntervalPreview);
+
 /* ---------- Load settings ---------- */
 function loadSettings() {
   fetch("/api/v1/settings")
     .then(function(r) { return r.json(); })
     .then(function(data) {
       settings = data;
-      /* Scan interval */
-      var sel = document.getElementById("scan-interval");
-      for (var i = 0; i < sel.options.length; i++) {
-        if (sel.options[i].value === data.scan_interval) {
-          sel.selectedIndex = i;
-          break;
-        }
+      /* Scan interval — check if it matches a preset */
+      var sel = document.getElementById("scan-preset");
+      if (isPresetValue(data.scan_interval)) {
+        sel.value = data.scan_interval;
+        document.getElementById("custom-interval-panel").style.display = "none";
+      } else {
+        sel.value = "custom";
+        document.getElementById("custom-interval-panel").style.display = "block";
+        var f = parseDurationToFields(data.scan_interval);
+        document.getElementById("scan-days").value = f.days;
+        document.getElementById("scan-hours").value = f.hours;
+        document.getElementById("scan-minutes").value = f.minutes;
+        document.getElementById("scan-seconds").value = f.seconds;
+        updateIntervalPreview();
       }
       /* Theme */
       var opts = document.querySelectorAll(".theme-option");
@@ -657,6 +850,9 @@ function loadSettings() {
         opts[j].classList.toggle("active", isActive);
         opts[j].querySelector("input").checked = isActive;
       }
+      /* Apply theme to settings page */
+      applyTheme(data.theme);
+      try { localStorage.setItem("nas-doctor-theme", data.theme); } catch(e) {}
       /* Webhooks */
       webhooks = (data.notifications && data.notifications.webhooks) ? data.notifications.webhooks : [];
       renderWebhooks();
@@ -667,7 +863,7 @@ function loadSettings() {
 /* ---------- Save settings ---------- */
 function buildSettingsPayload() {
   return {
-    scan_interval: document.getElementById("scan-interval").value,
+    scan_interval: getScanInterval(),
     theme: getSelectedTheme(),
     notifications: { webhooks: webhooks },
     log_push: { enabled: false, destinations: [] }
@@ -685,7 +881,12 @@ function saveSettings() {
     if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Save failed"); });
     return r.json();
   })
-  .then(function() { showToast("Settings saved", "success"); })
+  .then(function() {
+    showToast("Settings saved", "success");
+    /* Apply theme live */
+    applyTheme(payload.theme);
+    try { localStorage.setItem("nas-doctor-theme", payload.theme); } catch(e) {}
+  })
   .catch(function(e) { showToast("Error: " + e.message, "error"); });
 }
 
@@ -868,6 +1069,24 @@ function escapeHtml(str) {
   if (!str) return "";
   return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
+
+/* ---------- Apply saved theme ---------- */
+function applyTheme(theme) {
+  document.body.classList.remove("theme-midnight", "theme-clean", "theme-ember");
+  if (theme === "clean" || theme === "ember") {
+    document.body.classList.add("theme-" + theme);
+  } else {
+    document.body.classList.add("theme-midnight");
+  }
+}
+
+/* Load theme before anything else to avoid flash */
+(function() {
+  try {
+    var stored = localStorage.getItem("nas-doctor-theme");
+    if (stored) applyTheme(stored);
+  } catch(e) {}
+})();
 
 /* ---------- Init ---------- */
 loadSettings();

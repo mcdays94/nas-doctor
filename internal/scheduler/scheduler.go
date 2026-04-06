@@ -26,6 +26,7 @@ type Scheduler struct {
 	latest  *internal.Snapshot
 	running bool
 	stop    chan struct{}
+	restart chan time.Duration // signal to update interval
 }
 
 // New creates a new Scheduler.
@@ -45,6 +46,7 @@ func New(
 		logger:    logger,
 		interval:  interval,
 		stop:      make(chan struct{}),
+		restart:   make(chan time.Duration, 1),
 	}
 }
 
@@ -63,12 +65,31 @@ func (s *Scheduler) Start() {
 			select {
 			case <-ticker.C:
 				s.RunOnce()
+			case newInterval := <-s.restart:
+				ticker.Stop()
+				s.mu.Lock()
+				s.interval = newInterval
+				s.mu.Unlock()
+				ticker = time.NewTicker(newInterval)
+				s.logger.Info("scheduler interval updated", "new_interval", newInterval)
 			case <-s.stop:
 				s.logger.Info("scheduler stopped")
 				return
 			}
 		}
 	}()
+}
+
+// UpdateInterval dynamically changes the scan interval without restarting.
+func (s *Scheduler) UpdateInterval(d time.Duration) {
+	if d < 1*time.Second {
+		d = 1 * time.Second // minimum 1 second
+	}
+	select {
+	case s.restart <- d:
+	default:
+		// channel full, skip (a previous update is pending)
+	}
 }
 
 // Stop halts the scheduler.

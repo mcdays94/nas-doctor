@@ -305,10 +305,14 @@ Available at `/icons/icon1.png`, `/icons/icon2.png`, `/icons/icon3.png`.
 ## Roadmap
 
 - [ ] Historical trend charts (sparklines in dashboard)
-- [ ] Config UI in dashboard (manage webhooks, scan interval, icon selection)
+- [x] Config UI in dashboard (manage webhooks, scan interval, theme, icon selection)
 - [x] Unraid Community Apps template
 - [ ] GitHub Actions CI for multi-arch Docker builds (amd64/arm64)
-- [x] PDF report export
+- [x] PDF report export (Clean theme styled, print-ready)
+- [x] Custom scan frequency with full granularity
+- [x] Dynamic scheduler interval updates (no restart required)
+- [x] Settings page inherits active theme
+- [ ] Log Forwarding (export to external logging endpoints)
 - [ ] ZFS pool health detection
 - [ ] Optional cloud AI integration for deep root-cause analysis
 

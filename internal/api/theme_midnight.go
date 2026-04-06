@@ -32,49 +32,66 @@ a:hover{color:var(--hover)}
 .container{max-width:1200px;margin:0 auto}
 
 /* Header */
-.header{display:flex;align-items:center;justify-content:space-between;padding:calc(var(--sp)*2) 0;margin-bottom:calc(var(--sp)*4);border-bottom:1px solid var(--border)}
+.header{display:flex;align-items:center;justify-content:space-between;padding:calc(var(--sp)*2) 0;margin-bottom:0;border-bottom:1px solid var(--border)}
 .header-left{display:flex;align-items:center;gap:calc(var(--sp)*2)}
 .logo{display:flex;align-items:center;gap:var(--sp);font-size:20px;font-weight:600;letter-spacing:-0.5px;color:var(--text-primary)}
 .logo-emoji{font-size:24px}
 .hostname{font-size:13px;color:var(--text-tertiary);font-weight:400;padding:4px 10px;background:var(--btn-bg);border:1px solid var(--border);border-radius:var(--radius)}
-.theme-nav{display:flex;gap:4px}
-.theme-link{padding:6px 12px;border-radius:var(--radius);font-size:12px;font-weight:500;color:var(--text-tertiary);border:1px solid transparent;transition:all 0.15s ease}
-.theme-link:hover{color:var(--text-secondary);background:var(--btn-bg-hover);border-color:var(--border-hover)}
-.theme-link.active{color:var(--accent);background:rgba(94,106,210,0.08);border-color:rgba(94,106,210,0.2)}
+.header-right{display:flex;align-items:center;gap:16px}
+.theme-switcher{display:flex;align-items:center;gap:2px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:2px}
+.theme-switcher a{padding:5px 10px;border-radius:6px;font-size:11px;font-weight:500;color:var(--text-quaternary);text-decoration:none;transition:all 0.15s ease;line-height:1.3}
+.theme-switcher a:hover{color:var(--text-tertiary)}
+.theme-switcher a.active{color:var(--text-primary);background:var(--btn-bg-hover);box-shadow:0 1px 2px rgba(0,0,0,0.3)}
+.nav-links{display:flex;gap:4px}
+.nav-link{padding:6px 12px;border-radius:var(--radius);font-size:12px;font-weight:500;color:var(--text-tertiary);border:1px solid transparent;transition:all 0.15s ease;text-decoration:none}
+.nav-link:hover{color:var(--text-secondary);background:var(--btn-bg-hover);border-color:var(--border-hover)}
+
+/* Top bar — compact health + stats */
+.top-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);gap:calc(var(--sp)*2);min-height:48px;max-height:48px}
+.top-bar-health{display:flex;align-items:center;gap:calc(var(--sp)*1.5);flex-shrink:0}
+.health-pill{display:flex;align-items:center;gap:8px;padding:4px 14px;border-radius:20px;font-size:13px;font-weight:600}
+.health-pill.healthy{background:var(--green-bg);color:var(--green)}
+.health-pill.warning{background:var(--amber-bg);color:var(--amber)}
+.health-pill.critical{background:var(--red-bg);color:var(--red)}
+.health-pill-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.health-pill.healthy .health-pill-dot{background:var(--green)}
+.health-pill.warning .health-pill-dot{background:var(--amber)}
+.health-pill.critical .health-pill-dot{background:var(--red)}
+.health-badges{display:flex;align-items:center;gap:6px;margin-left:4px}
+.health-badge{font-size:11px;font-weight:600;padding:2px 7px;border-radius:10px;line-height:1.3}
+.health-badge.badge-red{color:var(--red);background:var(--red-bg)}
+.health-badge.badge-amber{color:var(--amber);background:var(--amber-bg)}
+.health-badge.badge-brand{color:var(--accent);background:rgba(94,106,210,0.1)}
+.top-bar-stats{display:flex;align-items:center;gap:calc(var(--sp)*3)}
+.stat-item{display:flex;align-items:baseline;gap:6px;font-size:13px;white-space:nowrap}
+.stat-item-label{color:var(--text-quaternary);font-weight:500;font-size:12px}
+.stat-item-value{font-weight:600;font-size:14px;letter-spacing:-0.3px}
+@media(max-width:700px){
+  .top-bar{flex-wrap:wrap;max-height:none;padding:8px 0}
+  .top-bar-stats{flex-wrap:wrap;gap:calc(var(--sp)*2)}
+}
+
+/* Scan bar — compact */
+.scan-bar{display:flex;align-items:center;justify-content:space-between;padding:8px 0;margin-bottom:calc(var(--sp)*2);gap:calc(var(--sp)*2);border-bottom:1px solid var(--border)}
+.scan-info{font-size:12px;color:var(--text-quaternary)}
+.scan-info strong{color:var(--text-tertiary);font-weight:500}
 
 /* Section titles */
-.section-title{font-size:13px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:calc(var(--sp)*2);margin-top:calc(var(--sp)*4)}
-.section-title:first-of-type{margin-top:0}
+.section-title{font-size:13px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:calc(var(--sp)*1.5);margin-top:0}
 
-/* Health overview card */
-.health-card{background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:calc(var(--sp)*4);margin-bottom:calc(var(--sp)*4);display:flex;align-items:center;justify-content:space-between;gap:calc(var(--sp)*4)}
-.health-main{display:flex;align-items:center;gap:calc(var(--sp)*3)}
-.health-dot{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0}
-.health-dot.healthy{background:var(--green-bg);color:var(--green)}
-.health-dot.warning{background:var(--amber-bg);color:var(--amber)}
-.health-dot.critical{background:var(--red-bg);color:var(--red)}
-.health-label{font-size:32px;font-weight:600;letter-spacing:-1px}
-.health-label.healthy{color:var(--green)}
-.health-label.warning{color:var(--amber)}
-.health-label.critical{color:var(--red)}
-.health-sub{font-size:13px;color:var(--text-tertiary);margin-top:2px}
-.health-counts{display:flex;gap:calc(var(--sp)*3)}
-.health-count{text-align:center}
-.health-count-num{font-size:24px;font-weight:600;letter-spacing:-0.5px}
-.health-count-label{font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.3px;margin-top:2px}
+/* Two-column layout */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.two-col{grid-template-columns:1fr}}
+.col-left{min-width:0;display:flex;flex-direction:column;min-height:0}
+.col-right{min-width:0;display:flex;flex-direction:column;gap:calc(var(--sp)*3)}
 
-/* Stat cards grid */
-.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:calc(var(--sp)*2);margin-bottom:calc(var(--sp)*4)}
-@media(max-width:900px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:500px){.stats-grid{grid-template-columns:1fr}}
-.stat-card{background:var(--btn-bg);border:1px solid var(--border-hover);border-radius:var(--radius);padding:calc(var(--sp)*2.5)}
-.stat-label{font-size:12px;font-weight:500;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:var(--sp)}
-.stat-value{font-size:28px;font-weight:600;letter-spacing:-1px}
-.stat-sub{font-size:12px;color:var(--text-quaternary);margin-top:4px}
-
-/* Findings — Luminance-Stepped Status Tiles */
-.findings-list{display:flex;flex-direction:column;gap:calc(var(--sp)*1);margin-bottom:calc(var(--sp)*4)}
-.finding{border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px;margin-bottom:8px;transition:all 200ms ease}
+/* Findings — compact */
+.findings-list{display:flex;flex-direction:column;gap:6px;flex:1;overflow-y:auto;min-height:0;scrollbar-width:thin;scrollbar-color:var(--border-hover) transparent}
+.findings-list::-webkit-scrollbar{width:5px}
+.findings-list::-webkit-scrollbar-track{background:transparent}
+.findings-list::-webkit-scrollbar-thumb{background:var(--border-hover);border-radius:3px}
+.findings-list::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.12)}
+.finding{border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px;transition:all 200ms ease}
 .finding:hover{border-color:rgba(255,255,255,0.10)}
 .finding-critical{background:rgba(220,38,38,0.06)}
 .finding-critical:hover{background:rgba(220,38,38,0.10)}
@@ -84,25 +101,25 @@ a:hover{color:var(--hover)}
 .finding-info:hover{background:rgba(94,106,210,0.10)}
 .finding-ok{background:rgba(16,185,129,0.06)}
 .finding-ok:hover{background:rgba(16,185,129,0.10)}
-.sev-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle;flex-shrink:0}
+.sev-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle;flex-shrink:0}
 .sev-dot-critical{background:#dc2626}
 .sev-dot-warning{background:#d97706}
 .sev-dot-info{background:#5e6ad2}
 .sev-dot-ok{background:#10b981}
-.finding-title{font-size:14px;font-weight:600;color:var(--text-primary)}
-.finding-desc{font-size:13px;color:var(--text-secondary);margin-bottom:8px;line-height:1.5}
-.finding-action{font-size:13px;color:var(--accent);margin-bottom:8px}
-.finding-meta{display:flex;flex-wrap:wrap;gap:calc(var(--sp)*2);font-size:12px;color:var(--text-quaternary)}
-.finding-meta span{display:flex;align-items:center;gap:4px}
+.finding-title{font-size:13px;font-weight:600;color:var(--text-primary)}
+.finding-desc{font-size:12px;color:var(--text-secondary);margin-bottom:6px;line-height:1.45}
+.finding-action{font-size:12px;color:var(--accent);margin-bottom:6px}
+.finding-meta{display:flex;flex-wrap:wrap;gap:calc(var(--sp)*1.5);font-size:11px;color:var(--text-quaternary)}
+.finding-meta span{display:flex;align-items:center;gap:3px}
 .finding-meta strong{color:var(--text-tertiary);font-weight:500}
-.finding-tag{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:2px 8px;border-radius:4px}
+.finding-tag{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:2px 7px;border-radius:4px}
 .finding-tag.sev-critical{color:var(--red);background:var(--red-bg)}
 .finding-tag.sev-warning{color:var(--amber);background:var(--amber-bg)}
 .finding-tag.sev-info{color:var(--accent);background:rgba(94,106,210,0.1)}
 .finding-tag.sev-ok{color:var(--green);background:var(--green-bg)}
 
 /* Tables */
-.table-wrap{background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden;margin-bottom:calc(var(--sp)*4)}
+.table-wrap{background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden}
 table{width:100%;border-collapse:collapse}
 thead{background:var(--bg-elevated)}
 th{font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;padding:calc(var(--sp)*1.5) calc(var(--sp)*2);text-align:left;border-bottom:1px solid var(--border)}
@@ -114,30 +131,25 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
 .td-warn{color:var(--amber)}
 .td-crit{color:var(--red)}
 
-/* Disk bars */
-.disk-list{display:flex;flex-direction:column;gap:calc(var(--sp)*1.5);margin-bottom:calc(var(--sp)*4)}
-.disk-item{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);padding:calc(var(--sp)*2)}
-.disk-header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:var(--sp)}
-.disk-name{font-size:13px;font-weight:600;color:var(--text-primary)}
-.disk-info{font-size:12px;color:var(--text-quaternary)}
-.disk-bar-bg{height:6px;background:var(--bg-elevated);border-radius:3px;overflow:hidden}
-.disk-bar-fill{height:100%;border-radius:3px;transition:width 0.5s ease}
+/* Disk bars — compact */
+.disk-list{display:flex;flex-direction:column;gap:8px}
+.disk-item{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px}
+.disk-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.disk-name{font-size:12px;font-weight:600;color:var(--text-primary)}
+.disk-info{font-size:11px;color:var(--text-quaternary)}
+.disk-bar-bg{height:8px;background:var(--bg-elevated);border-radius:4px;overflow:hidden}
+.disk-bar-fill{height:100%;border-radius:4px;transition:width 0.5s ease}
 
 /* Ghost button */
-.ghost-btn{display:inline-flex;align-items:center;gap:var(--sp);padding:8px 16px;background:var(--btn-bg);border:1px solid var(--border-hover);border-radius:var(--radius);color:var(--text-secondary);font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;transition:all 0.15s ease}
+.ghost-btn{display:inline-flex;align-items:center;gap:var(--sp);padding:6px 14px;background:var(--btn-bg);border:1px solid var(--border-hover);border-radius:var(--radius);color:var(--text-secondary);font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s ease}
 .ghost-btn:hover{background:var(--btn-bg-hover);border-color:rgba(255,255,255,0.12);color:var(--text-primary)}
 .ghost-btn:active{transform:scale(0.98)}
 .ghost-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none}
 .ghost-btn.scanning{color:var(--accent)}
 
-/* Scan bar */
-.scan-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:calc(var(--sp)*4);gap:calc(var(--sp)*2)}
-.scan-info{font-size:12px;color:var(--text-quaternary)}
-.scan-info strong{color:var(--text-tertiary);font-weight:500}
-
 /* Empty state */
-.empty{text-align:center;padding:calc(var(--sp)*8);color:var(--text-quaternary);font-size:14px}
-.empty-icon{font-size:32px;margin-bottom:calc(var(--sp)*2);opacity:0.5}
+.empty{text-align:center;padding:calc(var(--sp)*6);color:var(--text-quaternary);font-size:13px}
+.empty-icon{font-size:28px;margin-bottom:calc(var(--sp)*1.5);opacity:0.5}
 
 /* Status dot */
 .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px}
@@ -231,12 +243,6 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     return "text-green";
   }
 
-  function healthIcon(h) {
-    if (h === "critical") return "&#10060;";
-    if (h === "warning") return "&#9888;&#65039;";
-    return "&#10003;";
-  }
-
   function formatUptime(s) {
     if (!s) return "N/A";
     if (typeof s === "string") return s;
@@ -257,6 +263,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     var infoCount = st ? (st.info_count || 0) : 0;
     var lastScan = (st && st.last_scan) ? new Date(st.last_scan).toLocaleString() : "Never";
     var sys = sn ? sn.system : null;
+    var healthLabel = esc(health.charAt(0).toUpperCase() + health.slice(1));
 
     var h = "";
 
@@ -266,16 +273,47 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     h += '<div class="logo"><img src="/icon.png" alt="" style="width:24px;height:24px;border-radius:4px;vertical-align:middle;margin-right:8px;">NAS Doctor</div>';
     h += '<span class="hostname">' + esc(hostname) + '</span>';
     h += '</div>';
-    h += '<nav class="theme-nav">';
-    h += '<a href="/" class="theme-link active">Midnight</a>';
-    h += '<a href="/theme/clean" class="theme-link">Clean</a>';
-    h += '<a href="/theme/ember" class="theme-link">Ember</a>';
-    h += '<a href="/api/v1/report" class="theme-link" target="_blank">Export Report</a>';
-    h += '<a href="/settings" class="theme-link">Settings</a>';
-    h += '</nav>';
+    h += '<div class="header-right">';
+    h += '<div class="theme-switcher">';
+    h += '<a href="/" class="active">Midnight</a>';
+    h += '<a href="/theme/clean">Clean</a>';
+    h += '<a href="/theme/ember">Ember</a>';
+    h += '</div>';
+    h += '<div class="nav-links">';
+    h += '<a href="/api/v1/report" class="nav-link" target="_blank">Export Report</a>';
+    h += '<a href="/settings" class="nav-link">Settings</a>';
+    h += '</div>';
+    h += '</div>';
     h += '</header>';
 
-    // Scan bar
+    // Top bar — compact health pill + inline stats
+    h += '<div class="top-bar fade-in">';
+    h += '<div class="top-bar-health">';
+    h += '<div class="health-pill ' + esc(health) + '">';
+    h += '<span class="health-pill-dot"></span>';
+    h += healthLabel;
+    h += '</div>';
+    h += '<div class="health-badges">';
+    if (critCount > 0) h += '<span class="health-badge badge-red">' + critCount + '&#x1F534;</span>';
+    if (warnCount > 0) h += '<span class="health-badge badge-amber">' + warnCount + '&#x1F7E1;</span>';
+    if (infoCount > 0) h += '<span class="health-badge badge-brand">' + infoCount + '&#x1F535;</span>';
+    h += '</div>';
+    h += '</div>';
+    h += '<div class="top-bar-stats">';
+    if (sys) {
+      var cpu = sys.cpu_usage_percent || 0;
+      var mem = sys.mem_percent || 0;
+      var io = sys.io_wait_percent || 0;
+      var uptime = formatUptime(sys.uptime_seconds || (st ? st.uptime : null));
+      h += '<div class="stat-item"><span class="stat-item-label">CPU</span><span class="stat-item-value ' + classForPct(cpu) + '">' + cpu.toFixed(1) + '%</span></div>';
+      h += '<div class="stat-item"><span class="stat-item-label">Mem</span><span class="stat-item-value ' + classForPct(mem) + '">' + mem.toFixed(1) + '%</span></div>';
+      h += '<div class="stat-item"><span class="stat-item-label">I/O</span><span class="stat-item-value ' + classForPct(io > 20 ? 90 : io > 10 ? 75 : 0) + '">' + io.toFixed(1) + '%</span></div>';
+      h += '<div class="stat-item"><span class="stat-item-label">Up</span><span class="stat-item-value" style="color:var(--text-primary)">' + esc(uptime) + '</span></div>';
+    }
+    h += '</div>';
+    h += '</div>';
+
+    // Scan bar — compact
     h += '<div class="scan-bar fade-in">';
     h += '<div class="scan-info">Last scan: <strong>' + esc(lastScan) + '</strong></div>';
     if (scanInProgress || (st && st.scan_running)) {
@@ -285,76 +323,24 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     }
     h += '</div>';
 
-    // Health overview
-    h += '<div class="health-card fade-in">';
-    h += '<div class="health-main">';
-    h += '<div class="health-dot ' + esc(health) + '">' + healthIcon(health) + '</div>';
-    h += '<div>';
-    h += '<div class="health-label ' + esc(health) + '">' + esc(health.charAt(0).toUpperCase() + health.slice(1)) + '</div>';
-    h += '<div class="health-sub">Overall system health</div>';
-    h += '</div>';
-    h += '</div>';
-    h += '<div class="health-counts">';
-    h += '<div class="health-count"><div class="health-count-num text-red">' + critCount + '</div><div class="health-count-label">Critical</div></div>';
-    h += '<div class="health-count"><div class="health-count-num text-amber">' + warnCount + '</div><div class="health-count-label">Warning</div></div>';
-    h += '<div class="health-count"><div class="health-count-num text-brand">' + infoCount + '</div><div class="health-count-label">Info</div></div>';
-    h += '</div>';
-    h += '</div>';
+    // Two-column layout
+    h += '<div class="two-col fade-in">';
 
-    // System stats
-    if (sys) {
-      h += '<div class="section-title fade-in">System Stats</div>';
-      h += '<div class="stats-grid fade-in">';
-
-      // CPU
-      var cpu = sys.cpu_usage_percent || 0;
-      h += '<div class="stat-card">';
-      h += '<div class="stat-label">CPU Usage</div>';
-      h += '<div class="stat-value ' + classForPct(cpu) + '">' + cpu.toFixed(1) + '%</div>';
-      h += '<div class="stat-sub">' + esc(sys.cpu_model || "N/A") + ' &middot; ' + (sys.cpu_cores || 0) + ' cores</div>';
-      h += '</div>';
-
-      // Memory
-      var mem = sys.mem_percent || 0;
-      h += '<div class="stat-card">';
-      h += '<div class="stat-label">Memory</div>';
-      h += '<div class="stat-value ' + classForPct(mem) + '">' + mem.toFixed(1) + '%</div>';
-      h += '<div class="stat-sub">' + (sys.mem_used_mb || 0) + ' / ' + (sys.mem_total_mb || 0) + ' MB</div>';
-      h += '</div>';
-
-      // IO Wait
-      var io = sys.io_wait_percent || 0;
-      h += '<div class="stat-card">';
-      h += '<div class="stat-label">I/O Wait</div>';
-      h += '<div class="stat-value ' + classForPct(io > 20 ? 90 : io > 10 ? 75 : 0) + '">' + io.toFixed(1) + '%</div>';
-      h += '<div class="stat-sub">Load ' + ((sys.load_avg_1 || 0).toFixed(2)) + ' / ' + ((sys.load_avg_5 || 0).toFixed(2)) + ' / ' + ((sys.load_avg_15 || 0).toFixed(2)) + '</div>';
-      h += '</div>';
-
-      // Uptime
-      h += '<div class="stat-card">';
-      h += '<div class="stat-label">Uptime</div>';
-      h += '<div class="stat-value" style="color:var(--text-primary)">' + esc(formatUptime(sys.uptime_seconds || (st ? st.uptime : null))) + '</div>';
-      h += '<div class="stat-sub">' + esc(sys.platform || "") + ' ' + esc(sys.platform_version || "") + '</div>';
-      h += '</div>';
-
-      h += '</div>';
-    }
-
-    // Findings
+    // ======= Left column: Findings =======
+    h += '<div class="col-left">';
     var findings = sn ? (sn.findings || []) : [];
-    h += '<div class="section-title fade-in">Findings (' + findings.length + ')</div>';
+    h += '<div class="section-title">Findings (' + findings.length + ')</div>';
     if (findings.length === 0) {
-      h += '<div class="empty fade-in"><div class="empty-icon">&#9989;</div>No findings yet. Run a scan to check your NAS health.</div>';
+      h += '<div class="empty"><div class="empty-icon">&#9989;</div>No findings yet. Run a scan to check your NAS health.</div>';
     } else {
-      h += '<div class="findings-list fade-in">';
-      // Sort: critical first, then warning, then info, then ok
+      h += '<div class="findings-list">';
       var sevOrder = { critical: 0, warning: 1, info: 2, ok: 3 };
       findings.sort(function(a, b) { return (sevOrder[a.severity] || 9) - (sevOrder[b.severity] || 9); });
       for (var fi = 0; fi < findings.length; fi++) {
         var f = findings[fi];
         var sev = esc(f.severity);
         h += '<div class="finding finding-' + sev + '">';
-        h += '<div style="display:flex;align-items:center;margin-bottom:8px">';
+        h += '<div style="display:flex;align-items:center;margin-bottom:5px">';
         h += '<span class="sev-dot sev-dot-' + sev + '"></span>';
         h += '<span class="finding-title">' + esc(f.title) + '</span>';
         h += '</div>';
@@ -370,12 +356,17 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       }
       h += '</div>';
     }
+    h += '</div>';
 
-    // Disk space
+    // ======= Right column: System Details =======
+    h += '<div class="col-right">';
+
+    // Disk Space
     var disks = sn ? (sn.disks || []) : [];
     if (disks.length > 0) {
-      h += '<div class="section-title fade-in">Disk Space</div>';
-      h += '<div class="disk-list fade-in">';
+      h += '<div>';
+      h += '<div class="section-title">Disk Space</div>';
+      h += '<div class="disk-list">';
       for (var di = 0; di < disks.length; di++) {
         var d = disks[di];
         var pct = d.used_percent || 0;
@@ -388,13 +379,15 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         h += '</div>';
       }
       h += '</div>';
+      h += '</div>';
     }
 
-    // SMART health table
+    // SMART Health
     var smart = sn ? (sn.smart || []) : [];
     if (smart.length > 0) {
-      h += '<div class="section-title fade-in">SMART Health</div>';
-      h += '<div class="table-wrap fade-in">';
+      h += '<div>';
+      h += '<div class="section-title">SMART Health</div>';
+      h += '<div class="table-wrap">';
       h += '<table><thead><tr>';
       h += '<th>Device</th><th>Model</th><th>Health</th><th>Temp</th><th>Reallocated</th><th>Pending</th><th>UDMA CRC</th><th>Power Hours</th>';
       h += '</tr></thead><tbody>';
@@ -418,14 +411,16 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         h += '</tr>';
       }
       h += '</tbody></table></div>';
+      h += '</div>';
     }
 
-    // Docker containers
+    // Docker Containers
     var docker = sn ? sn.docker : null;
     if (docker && docker.available && docker.containers && docker.containers.length > 0) {
       var containers = docker.containers;
-      h += '<div class="section-title fade-in">Docker Containers (' + containers.length + ')</div>';
-      h += '<div class="table-wrap fade-in">';
+      h += '<div>';
+      h += '<div class="section-title">Docker Containers (' + containers.length + ')</div>';
+      h += '<div class="table-wrap">';
       h += '<table><thead><tr>';
       h += '<th>Name</th><th>Image</th><th>Status</th><th>CPU</th><th>Memory</th><th>Uptime</th>';
       h += '</tr></thead><tbody>';
@@ -442,7 +437,11 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         h += '</tr>';
       }
       h += '</tbody></table></div>';
+      h += '</div>';
     }
+
+    h += '</div>'; // end col-right
+    h += '</div>'; // end two-col
 
     // Footer
     h += '<div style="text-align:center;padding:' + 'calc(var(--sp)*4) 0;color:var(--text-quaternary);font-size:12px" class="fade-in">';

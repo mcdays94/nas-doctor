@@ -34,6 +34,7 @@ var DashboardEmber = `<!DOCTYPE html>
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
   --shadow-card: rgb(27, 28, 30) 0px 0px 0px 1px, rgb(7, 8, 10) 0px 0px 0px 1px inset;
   --shadow-btn: rgba(255, 255, 255, 0.05) 0px 1px 0px 0px inset, rgba(255, 255, 255, 0.1) 0px 0px 0px 1px;
+  --shadow-ring: rgba(255, 255, 255, 0.06) 0px 0px 0px 1px, rgba(0, 0, 0, 0.4) 0px 2px 6px, rgba(0, 0, 0, 0.2) 0px 8px 24px;
 }
 
 html {
@@ -104,6 +105,11 @@ body {
   to { opacity: 1; transform: scale(1); }
 }
 
+@keyframes pulseSlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+  50% { box-shadow: 0 0 10px 2px rgba(255, 255, 255, 0.15); }
+}
+
 .section {
   opacity: 0;
   animation: slideUp 500ms var(--ease-out) forwards;
@@ -126,7 +132,7 @@ body {
 
 /* ---- Layout ---- */
 .wrapper {
-  max-width: 1080px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 0 24px 80px;
 }
@@ -170,21 +176,50 @@ body {
   line-height: 1;
 }
 
-.header-hostname {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--text-tertiary);
-  letter-spacing: 0;
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
-.header-nav {
+.theme-switcher {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface-200);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.theme-switcher a {
+  font-family: var(--font-sans);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: all 200ms var(--ease-out);
+  line-height: 1.3;
+}
+
+.theme-switcher a:hover {
+  color: var(--text-tertiary);
+}
+
+.theme-switcher a.active {
+  color: var(--text-primary);
+  background: var(--surface-100);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+.nav-links {
   display: flex;
   gap: 4px;
-  position: relative;
 }
 
-.header-nav a {
+.nav-link {
   font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 500;
@@ -192,42 +227,198 @@ body {
   text-decoration: none;
   padding: 6px 12px;
   border-radius: 6px;
-  transition: color 200ms var(--ease-out), background 200ms var(--ease-out);
-  position: relative;
+  transition: color 200ms var(--ease-out);
 }
 
-.header-nav a:hover {
+.nav-link:hover {
   color: var(--text-secondary);
 }
 
-.header-nav a.active {
+/* ---- Compact Top Bar (health + stats combined) ---- */
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  background: var(--surface-100);
+  border-radius: 12px;
+  box-shadow: var(--shadow-ring);
+  max-height: 52px;
+  overflow: hidden;
+  flex-wrap: nowrap;
+}
+
+.top-bar-health {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.top-bar-dot-wrap {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+.top-bar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.top-bar-dot-ring {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.top-bar-dot.dot-green       { background: var(--green); }
+.top-bar-dot-ring.dot-green  { background: var(--green); animation: pulseRing 2s ease infinite; }
+.top-bar-dot.dot-yellow      { background: var(--yellow); }
+.top-bar-dot-ring.dot-yellow { background: var(--yellow); animation: pulseRing 1.5s ease infinite; }
+.top-bar-dot.dot-red         { background: var(--red); }
+.top-bar-dot-ring.dot-red    { background: var(--red); animation: pulseRing 0.8s ease infinite; }
+
+.top-bar-label {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  letter-spacing: -0.2px;
+}
+
+.top-bar-label.text-critical {
+  font-weight: 600;
+  color: var(--red);
+}
+
+.top-bar-sep {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.top-bar-pills {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.top-bar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.top-bar-pill-critical { background: rgba(255, 99, 99, 0.12); color: var(--red); }
+.top-bar-pill-warning  { background: rgba(255, 188, 51, 0.12); color: var(--yellow); }
+.top-bar-pill-info     { background: rgba(85, 179, 255, 0.12); color: var(--blue); }
+.top-bar-pill-ok       { background: rgba(95, 201, 146, 0.12); color: var(--green); }
+
+.top-bar-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.top-bar-stat {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.top-bar-stat-label {
+  color: var(--text-dim);
+  font-weight: 400;
+  margin-right: 3px;
+}
+
+.top-bar-stat-value {
+  font-weight: 600;
   color: var(--text-primary);
 }
 
-.header-nav a.active::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 12px;
-  right: 12px;
-  height: 2px;
-  background: var(--blue);
-  border-radius: 1px;
-  transition: all 300ms var(--ease-out);
+.top-bar-mid-dot {
+  color: var(--text-dim);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .top-bar {
+    flex-wrap: wrap;
+    max-height: none;
+    gap: 8px;
+    padding: 12px 16px;
+  }
+  .top-bar-stats {
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
 }
 
 /* ---- Section spacing ---- */
 .section {
-  margin-top: 40px;
+  margin-top: 16px;
 }
 
 .section-title {
   font-family: var(--font-serif);
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 500;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.2px;
   color: var(--text-primary);
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+}
+
+/* ---- Two Column Grid ---- */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.col-left {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.col-right {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
 }
 
 /* ---- Cards ---- */
@@ -248,17 +439,17 @@ body {
   background: var(--surface-100);
   border-radius: 12px;
   box-shadow: var(--shadow-card);
-  padding: 24px;
+  padding: 20px;
 }
 
 /* ---- Badges / Pills ---- */
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
-  border-radius: 6px;
+  padding: 3px 8px;
+  border-radius: 5px;
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -290,134 +481,48 @@ body {
 .pill-healthy  { background: rgba(95, 201, 146, 0.12); color: var(--green); }
 .pill-neutral  { background: var(--surface-200); color: var(--text-dim); }
 
-/* ---- Health overview ---- */
-.health-overview {
+/* ---- Scan bar (compact) ---- */
+.scan-bar {
   display: flex;
   align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.health-status-area {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex: 1;
-  min-width: 280px;
-}
-
-.health-dot-wrap {
-  position: relative;
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.health-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  position: absolute;
-  top: 3px;
-  left: 3px;
-}
-
-.health-dot-ring {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  position: absolute;
-  top: 0;
-  left: 0;
-}
-
-.health-dot.dot-green       { background: var(--green); }
-.health-dot-ring.dot-green  { background: var(--green); animation: pulseRing 2s ease infinite; }
-.health-dot.dot-yellow      { background: var(--yellow); }
-.health-dot-ring.dot-yellow { background: var(--yellow); animation: pulseRing 1.5s ease infinite; }
-.health-dot.dot-red         { background: var(--red); }
-.health-dot-ring.dot-red    { background: var(--red); animation: pulseRing 0.8s ease infinite; }
-
-.health-text {
-  font-family: var(--font-serif);
-  font-size: 22px;
-  font-weight: 500;
-  letter-spacing: -0.3px;
-  color: var(--text-primary);
-}
-
-.health-text.text-critical {
-  font-weight: 700;
-  color: var(--red);
-}
-
-.health-pills {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* ---- Stats grid ---- */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
-@media (max-width: 768px) {
-  .stats-grid { grid-template-columns: repeat(2, 1fr); }
-}
-
-.stat-card {
-  background: var(--surface-100);
-  border-radius: 12px;
-  box-shadow: var(--shadow-card);
-  padding: 20px 24px;
-  transition: transform 200ms var(--ease-out), box-shadow 200ms ease;
-}
-
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-card), 0 8px 24px rgba(0, 0, 0, 0.3);
-}
-
-.stat-value {
-  font-family: var(--font-sans);
-  font-size: 28px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.5px;
-  color: var(--text-primary);
-  line-height: 1.2;
-}
-
-.stat-label {
+.scan-info {
   font-family: var(--font-sans);
   font-size: 12px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
   color: var(--text-dim);
-  margin-top: 6px;
+  font-weight: 400;
 }
 
-/* ---- Findings ---- */
-@keyframes pulseSlow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
-  50% { box-shadow: 0 0 10px 2px rgba(255, 255, 255, 0.15); }
+.scan-info strong {
+  color: var(--yellow);
+  font-weight: 500;
 }
 
+/* ---- Findings (compact) ---- */
 .findings-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-300) transparent;
 }
+.findings-list::-webkit-scrollbar { width: 5px; }
+.findings-list::-webkit-scrollbar-track { background: transparent; }
+.findings-list::-webkit-scrollbar-thumb { background: var(--surface-300); border-radius: 3px; }
+.findings-list::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
 .finding-card {
   position: relative;
   background: var(--surface-100);
-  border-radius: 12px;
-  padding: 20px 20px 16px 56px;
+  border-radius: 10px;
+  padding: 14px 14px 12px 48px;
   margin-bottom: 0;
   box-shadow: rgb(27, 28, 30) 0px 0px 0px 1px, rgb(7, 8, 10) 0px 0px 0px 1px inset;
   cursor: pointer;
@@ -430,10 +535,10 @@ body {
   position: absolute;
   top: 0;
   left: 0;
-  width: 120px;
-  height: 120px;
+  width: 100px;
+  height: 100px;
   border-radius: 50%;
-  filter: blur(40px);
+  filter: blur(36px);
   opacity: 0.08;
   pointer-events: none;
   transition: opacity 200ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -457,15 +562,15 @@ body {
 
 .sev-icon {
   position: absolute;
-  top: 16px;
-  left: 16px;
-  width: 28px;
-  height: 28px;
+  top: 13px;
+  left: 12px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 700;
   color: white;
   z-index: 1;
@@ -479,21 +584,22 @@ body {
 .finding-top {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .finding-title {
   font-family: var(--font-serif);
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text-primary);
   letter-spacing: -0.2px;
+  line-height: 1.3;
 }
 
 .finding-category {
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   color: var(--text-dim);
   text-transform: uppercase;
@@ -502,12 +608,12 @@ body {
 
 .finding-desc {
   font-family: var(--font-serif);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 400;
   font-style: italic;
   color: var(--text-secondary);
-  line-height: 1.6;
-  margin-top: 4px;
+  line-height: 1.5;
+  margin-top: 2px;
 }
 
 .finding-expandable {
@@ -523,12 +629,12 @@ body {
 }
 
 .finding-details {
-  margin-top: 16px;
-  padding-top: 14px;
+  margin-top: 12px;
+  padding-top: 10px;
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .finding-detail-row {
@@ -538,18 +644,18 @@ body {
 
 .finding-detail-label {
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-dim);
-  min-width: 80px;
+  min-width: 64px;
   padding-top: 2px;
 }
 
 .finding-detail-value {
   font-family: var(--font-serif);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--text-secondary);
   line-height: 1.5;
@@ -563,14 +669,14 @@ body {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .finding-evidence-item {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-tertiary);
-  padding: 4px 8px;
+  padding: 3px 6px;
   background: rgba(255, 255, 255, 0.02);
   border-radius: 4px;
   line-height: 1.4;
@@ -578,34 +684,34 @@ body {
 
 .finding-meta {
   display: flex;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 8px;
   flex-wrap: wrap;
 }
 
 .finding-meta-tag {
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  padding: 3px 8px;
-  border-radius: 6px;
+  padding: 2px 6px;
+  border-radius: 5px;
   background: var(--surface-200);
   color: var(--text-dim);
 }
 
-/* ---- Disk bars ---- */
+/* ---- Disk bars (compact) ---- */
 .disk-list {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
 }
 
 .disk-item {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 
 .disk-info {
@@ -616,28 +722,29 @@ body {
 
 .disk-label {
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
 }
 
 .disk-device {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-dim);
-  margin-left: 8px;
+  margin-left: 6px;
 }
 
 .disk-detail {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 
 .disk-bar-track {
   width: 100%;
-  height: 6px;
+  height: 8px;
   background: var(--surface-200);
   border-radius: 9999px;
   overflow: hidden;
@@ -668,12 +775,12 @@ body {
 
 .table-wrap thead th {
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 1px;
   color: var(--text-dim);
-  padding: 12px 16px;
+  padding: 10px 12px;
   text-align: left;
   background: rgba(255, 255, 255, 0.02);
   border-bottom: 1px solid var(--border);
@@ -692,10 +799,10 @@ body {
 
 .table-wrap tbody td {
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--text-primary);
-  padding: 11px 16px;
+  padding: 9px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
@@ -705,16 +812,16 @@ body {
 
 td.mono {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 /* ---- Status dot ---- */
 .status-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  margin-right: 6px;
+  margin-right: 5px;
   vertical-align: middle;
 }
 
@@ -729,7 +836,7 @@ td.mono {
   align-items: center;
   gap: 8px;
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.3px;
   border: none;
@@ -751,7 +858,7 @@ td.mono {
 .btn-primary {
   background: var(--surface-200);
   color: var(--text-primary);
-  padding: 10px 24px;
+  padding: 8px 20px;
   border-radius: 9999px;
   box-shadow: var(--shadow-btn);
   animation: breathe 2s ease infinite;
@@ -767,35 +874,14 @@ td.mono {
   color: var(--bg);
 }
 
-/* ---- Scan bar ---- */
-.scan-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.scan-info {
-  font-family: var(--font-sans);
-  font-size: 13px;
-  color: var(--text-dim);
-  font-weight: 400;
-}
-
-.scan-info strong {
-  color: var(--yellow);
-  font-weight: 500;
-}
-
 /* ---- Empty state ---- */
 .empty-state {
   text-align: center;
-  padding: 48px 24px;
+  padding: 32px 16px;
   font-family: var(--font-serif);
   font-style: italic;
   color: var(--text-dim);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 400;
 }
 
@@ -814,7 +900,7 @@ td.mono {
 /* ---- Footer ---- */
 .footer {
   text-align: center;
-  padding: 32px 24px;
+  padding: 24px 24px;
   font-family: var(--font-sans);
   font-size: 12px;
   color: var(--text-dim);
@@ -857,14 +943,17 @@ td.mono {
     <img src="/icon.png" alt="" style="width:26px;height:26px;border-radius:5px;vertical-align:middle;margin-right:8px;">
     NAS Doctor
   </a>
-  <span class="header-hostname" id="hostname">-</span>
-  <nav class="header-nav">
-    <a href="/">Midnight</a>
-    <a href="/theme/clean">Clean</a>
-    <a href="/theme/ember" class="active">Ember</a>
-    <a href="/api/v1/report" target="_blank">Export Report</a>
-    <a href="/settings">Settings</a>
-  </nav>
+  <div class="header-right">
+    <div class="theme-switcher">
+      <a href="/">Midnight</a>
+      <a href="/theme/clean">Clean</a>
+      <a href="/theme/ember" class="active">Ember</a>
+    </div>
+    <div class="nav-links">
+      <a href="/api/v1/report" class="nav-link" target="_blank">Export Report</a>
+      <a href="/settings" class="nav-link">Settings</a>
+    </div>
+  </div>
 </header>
 
 <div class="wrapper">
@@ -959,7 +1048,13 @@ td.mono {
     return "dot-green";
   }
 
-  function healthLabel(h) {
+  function healthLabelShort(h) {
+    if (h === "critical") return "Critical";
+    if (h === "warning") return "Warning";
+    return "Healthy";
+  }
+
+  function healthDesc(h) {
     if (h === "critical") return "Your server has critical issues";
     if (h === "warning") return "Attention needed";
     return "All systems healthy";
@@ -968,6 +1063,15 @@ td.mono {
   function healthTextClass(h) {
     if (h === "critical") return " text-critical";
     return "";
+  }
+
+  function fmtUptime(u) {
+    if (!u) return "-";
+    var m = u.match(/(\d+)d/);
+    if (m) return m[1] + "d";
+    m = u.match(/(\d+)h/);
+    if (m) return m[1] + "h";
+    return u;
   }
 
   function fetchJSON(url) {
@@ -999,37 +1103,66 @@ td.mono {
 
   function renderDashboard(status, snapshot) {
     var html = "";
+    var sys = (snapshot && snapshot.system) ? snapshot.system : null;
 
-    /* ---- Health Overview ---- */
+    /* ---- Compact Top Bar: hostname + health + pills + inline stats ---- */
     html += "<div class=\"section\">";
-    html += "<div class=\"card-static\">";
-    html += "<div class=\"health-overview\">";
-    html += "<div class=\"health-status-area\">";
-    html += "<div class=\"health-dot-wrap\">";
-    html += "<div class=\"health-dot-ring " + healthDotClass(status.overall_health) + "\"></div>";
-    html += "<div class=\"health-dot " + healthDotClass(status.overall_health) + "\"></div>";
+    html += "<div class=\"top-bar\">";
+
+    /* Hostname */
+    if (status.hostname) {
+      html += "<span id=\"hostname\" style=\"font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text-secondary);letter-spacing:-0.2px\">" + esc(status.hostname) + "</span>";
+      html += "<div class=\"top-bar-sep\"></div>";
+    }
+
+    /* Health dot + label */
+    html += "<div class=\"top-bar-health\">";
+    html += "<div class=\"top-bar-dot-wrap\">";
+    html += "<div class=\"top-bar-dot-ring " + healthDotClass(status.overall_health) + "\"></div>";
+    html += "<div class=\"top-bar-dot " + healthDotClass(status.overall_health) + "\"></div>";
     html += "</div>";
-    html += "<div class=\"health-text" + healthTextClass(status.overall_health) + "\">" + esc(healthLabel(status.overall_health)) + "</div>";
+    html += "<span class=\"top-bar-label" + healthTextClass(status.overall_health) + "\">" + esc(healthLabelShort(status.overall_health)) + " &mdash; " + esc(healthDesc(status.overall_health)) + "</span>";
     html += "</div>";
-    html += "<div class=\"health-pills\">";
+
+    html += "<div class=\"top-bar-sep\"></div>";
+
+    /* Severity pills */
+    html += "<div class=\"top-bar-pills\">";
     if (status.critical_count > 0) {
-      html += "<span class=\"pill pill-critical\">" + status.critical_count + " Critical</span>";
+      html += "<span class=\"top-bar-pill top-bar-pill-critical\">" + status.critical_count + " \u25cf</span>";
     }
     if (status.warning_count > 0) {
-      html += "<span class=\"pill pill-warning\">" + status.warning_count + " Warning</span>";
+      html += "<span class=\"top-bar-pill top-bar-pill-warning\">" + status.warning_count + " \u25cf</span>";
     }
     if (status.info_count > 0) {
-      html += "<span class=\"pill pill-info\">" + status.info_count + " Info</span>";
+      html += "<span class=\"top-bar-pill top-bar-pill-info\">" + status.info_count + " \u25cf</span>";
     }
     if (status.critical_count === 0 && status.warning_count === 0 && status.info_count === 0) {
-      html += "<span class=\"pill pill-neutral\">No findings</span>";
+      html += "<span class=\"top-bar-pill top-bar-pill-ok\">0 findings</span>";
     }
     html += "</div>";
-    html += "</div>";
-    html += "</div>";
+
+    html += "<div class=\"top-bar-sep\"></div>";
+
+    /* Inline stats */
+    html += "<div class=\"top-bar-stats\">";
+    if (sys) {
+      html += "<span class=\"top-bar-stat\"><span class=\"top-bar-stat-label\">CPU</span><span class=\"top-bar-stat-value\" data-counter=\"cpu\" data-target=\"" + (sys.cpu_usage_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</span></span>";
+      html += "<span class=\"top-bar-mid-dot\">&middot;</span>";
+      html += "<span class=\"top-bar-stat\"><span class=\"top-bar-stat-label\">Mem</span><span class=\"top-bar-stat-value\" data-counter=\"mem\" data-target=\"" + (sys.mem_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</span></span>";
+      html += "<span class=\"top-bar-mid-dot\">&middot;</span>";
+      html += "<span class=\"top-bar-stat\"><span class=\"top-bar-stat-label\">I/O</span><span class=\"top-bar-stat-value\" data-counter=\"io\" data-target=\"" + (sys.io_wait_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</span></span>";
+      html += "<span class=\"top-bar-mid-dot\">&middot;</span>";
+      html += "<span class=\"top-bar-stat\"><span class=\"top-bar-stat-value\" data-counter=\"uptime\">" + esc(fmtUptime(status.uptime)) + "</span></span>";
+    } else {
+      html += "<span class=\"top-bar-stat\" style=\"color:var(--text-dim)\">No system data</span>";
+    }
     html += "</div>";
 
-    /* ---- Scan bar ---- */
+    html += "</div>"; /* .top-bar */
+    html += "</div>"; /* .section */
+
+    /* ---- Scan bar (compact) ---- */
     html += "<div class=\"section\">";
     html += "<div class=\"scan-bar\">";
     html += "<div class=\"scan-info\">";
@@ -1048,40 +1181,12 @@ td.mono {
     html += "</div>";
     html += "</div>";
 
-    /* ---- System Stats ---- */
-    if (snapshot && snapshot.system) {
-      var sys = snapshot.system;
-      html += "<div class=\"section\">";
-      html += "<div class=\"section-title\">System</div>";
-      html += "<div class=\"stats-grid\">";
+    /* ---- Two-Column Grid ---- */
+    html += "<div class=\"two-col\">";
 
-      html += "<div class=\"stat-card\">";
-      html += "<div class=\"stat-value\" data-counter=\"cpu\" data-target=\"" + (sys.cpu_usage_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</div>";
-      html += "<div class=\"stat-label\">CPU Usage</div>";
-      html += "</div>";
-
-      html += "<div class=\"stat-card\">";
-      html += "<div class=\"stat-value\" data-counter=\"mem\" data-target=\"" + (sys.mem_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</div>";
-      var memDetail = (sys.mem_used_mb || 0) + " / " + (sys.mem_total_mb || 0) + " MB";
-      html += "<div class=\"stat-label\">Memory (" + esc(memDetail) + ")</div>";
-      html += "</div>";
-
-      html += "<div class=\"stat-card\">";
-      html += "<div class=\"stat-value\" data-counter=\"io\" data-target=\"" + (sys.io_wait_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</div>";
-      html += "<div class=\"stat-label\">I/O Wait</div>";
-      html += "</div>";
-
-      html += "<div class=\"stat-card\">";
-      html += "<div class=\"stat-value\" data-counter=\"uptime\">" + esc(status.uptime || "-") + "</div>";
-      html += "<div class=\"stat-label\">Uptime</div>";
-      html += "</div>";
-
-      html += "</div>";
-      html += "</div>";
-    }
-
-    /* ---- Findings ---- */
-    html += "<div class=\"section\">";
+    /* ==== LEFT COLUMN: Findings ==== */
+    html += "<div class=\"col-left\">";
+    html += "<div class=\"section\" style=\"margin-top:0\">";
     html += "<div class=\"section-title\">Findings</div>";
     if (snapshot && snapshot.findings && snapshot.findings.length > 0) {
       html += "<div class=\"findings-list\">";
@@ -1141,16 +1246,20 @@ td.mono {
           html += "</div>";
         }
 
-        html += "</div>";
+        html += "</div>"; /* .finding-card */
       }
-      html += "</div>";
+      html += "</div>"; /* .findings-list */
     } else {
       html += "<div class=\"card-static\"><div class=\"empty-state\">No findings to display. Run a scan to check your system.</div></div>";
     }
-    html += "</div>";
+    html += "</div>"; /* .section */
+    html += "</div>"; /* .col-left */
+
+    /* ==== RIGHT COLUMN: System Details ==== */
+    html += "<div class=\"col-right\">";
 
     /* ---- Disk Space ---- */
-    html += "<div class=\"section\">";
+    html += "<div class=\"section\" style=\"margin-top:0\">";
     html += "<div class=\"section-title\">Disk Space</div>";
     if (snapshot && snapshot.disks && snapshot.disks.length > 0) {
       html += "<div class=\"card-static\">";
@@ -1164,7 +1273,7 @@ td.mono {
         html += "<span class=\"disk-label\">" + esc(disk.label || disk.mount_point || disk.device);
         if (disk.device) html += "<span class=\"disk-device\">" + esc(disk.device) + "</span>";
         html += "</span>";
-        html += "<span class=\"disk-detail\">" + fmtGB(disk.used_gb) + " / " + fmtGB(disk.total_gb) + " (" + fmtPct(pct) + ")</span>";
+        html += "<span class=\"disk-detail\">" + fmtPct(pct) + "</span>";
         html += "</div>";
         html += "<div class=\"disk-bar-track\"><div class=\"disk-bar-fill c-" + col + "\" style=\"width:" + pct.toFixed(1) + "%;animation-delay:" + (d * 60) + "ms\"></div></div>";
         html += "</div>";
@@ -1177,13 +1286,13 @@ td.mono {
     html += "</div>";
 
     /* ---- SMART Health ---- */
-    html += "<div class=\"section\">";
+    html += "<div class=\"section\" style=\"margin-top:0\">";
     html += "<div class=\"section-title\">SMART Health</div>";
     if (snapshot && snapshot.smart && snapshot.smart.length > 0) {
       html += "<div class=\"table-wrap\">";
       html += "<table>";
       html += "<thead><tr>";
-      html += "<th>Device</th><th>Model</th><th>Health</th><th>Temp</th><th>Power-On</th><th>Reallocated</th><th>Pending</th><th>UDMA CRC</th>";
+      html += "<th>Device</th><th>Health</th><th>Temp</th><th>Power-On</th><th>Realloc</th><th>Pending</th>";
       html += "</tr></thead>";
       html += "<tbody>";
       for (var s = 0; s < snapshot.smart.length; s++) {
@@ -1191,15 +1300,13 @@ td.mono {
         var healthOk = sm.health_passed;
         var hrs = sm.power_on_hours;
         var hrsStr = hrs != null ? (hrs > 8760 ? (hrs / 8760).toFixed(1) + "y" : hrs + "h") : "-";
-        html += "<tr>";
+        html += "<tr style=\"cursor:pointer\" title=\"" + esc(sm.model || sm.device) + "\">";
         html += "<td class=\"mono\">" + esc(sm.device) + "</td>";
-        html += "<td>" + esc(sm.model) + "</td>";
-        html += "<td><span class=\"status-dot " + (healthOk ? "s-green" : "s-red") + "\"></span>" + (healthOk ? "Passed" : "<strong style=\"color:#FF6363\">FAILED</strong>") + "</td>";
-        html += "<td class=\"mono\" style=\"" + tempColor(sm.temperature_c) + "\">" + (sm.temperature_c != null ? sm.temperature_c + "&deg;C" : "-") + "</td>";
+        html += "<td><span class=\"status-dot " + (healthOk ? "s-green" : "s-red") + "\"></span>" + (healthOk ? "OK" : "<strong style=\"color:#FF6363\">FAIL</strong>") + "</td>";
+        html += "<td class=\"mono\" style=\"" + tempColor(sm.temperature_c) + "\">" + (sm.temperature_c != null ? sm.temperature_c + "&deg;" : "-") + "</td>";
         html += "<td class=\"mono\" style=\"" + powerColor(hrs) + "\">" + hrsStr + "</td>";
         html += "<td class=\"mono\">" + (sm.reallocated_sectors != null ? sm.reallocated_sectors : "-") + "</td>";
         html += "<td class=\"mono\">" + (sm.pending_sectors != null ? sm.pending_sectors : "-") + "</td>";
-        html += "<td class=\"mono\">" + (sm.udma_crc_errors != null ? sm.udma_crc_errors : "-") + "</td>";
         html += "</tr>";
       }
       html += "</tbody>";
@@ -1211,33 +1318,34 @@ td.mono {
     html += "</div>";
 
     /* ---- Docker Containers ---- */
-    html += "<div class=\"section\">";
-    html += "<div class=\"section-title\">Docker Containers</div>";
+    html += "<div class=\"section\" style=\"margin-top:0\">";
+    html += "<div class=\"section-title\">Docker</div>";
     if (snapshot && snapshot.docker && snapshot.docker.available && snapshot.docker.containers && snapshot.docker.containers.length > 0) {
       html += "<div class=\"table-wrap\">";
       html += "<table>";
       html += "<thead><tr>";
-      html += "<th>Name</th><th>Image</th><th>State</th><th>CPU</th><th>Memory</th><th>Uptime</th>";
+      html += "<th>Name</th><th>State</th><th>CPU</th><th>Mem</th>";
       html += "</tr></thead>";
       html += "<tbody>";
       for (var c = 0; c < snapshot.docker.containers.length; c++) {
         var ct = snapshot.docker.containers[c];
-        html += "<tr>";
-        html += "<td style=\"font-weight:500\">" + esc(ct.name) + "</td>";
-        html += "<td style=\"color:#9c9c9d;font-size:13px\">" + esc(ct.image) + "</td>";
-        html += "<td style=\"" + containerColor(ct.state) + "\"><span class=\"status-dot " + containerDot(ct.state) + "\"></span>" + esc(ct.state) + "</td>";
+        html += "<tr title=\"" + esc(ct.image || "") + "\">";
+        html += "<td style=\"font-weight:500;font-size:12px\">" + esc(ct.name) + "</td>";
+        html += "<td style=\"" + containerColor(ct.state) + ";font-size:12px\"><span class=\"status-dot " + containerDot(ct.state) + "\"></span>" + esc(ct.state) + "</td>";
         html += "<td class=\"mono\">" + fmtPct(ct.cpu_percent) + "</td>";
-        html += "<td class=\"mono\">" + (ct.mem_mb != null ? ct.mem_mb.toFixed(1) + " MB" : "-") + "</td>";
-        html += "<td style=\"color:#6a6b6c\">" + esc(ct.uptime || "-") + "</td>";
+        html += "<td class=\"mono\">" + (ct.mem_mb != null ? ct.mem_mb.toFixed(0) + "M" : "-") + "</td>";
         html += "</tr>";
       }
       html += "</tbody>";
       html += "</table>";
       html += "</div>";
     } else {
-      html += "<div class=\"card-static\"><div class=\"empty-state\">No Docker containers found or Docker not available.</div></div>";
+      html += "<div class=\"card-static\"><div class=\"empty-state\">No Docker containers found.</div></div>";
     }
     html += "</div>";
+
+    html += "</div>"; /* .col-right */
+    html += "</div>"; /* .two-col */
 
     /* ---- Footer ---- */
     html += "<div class=\"section\">";
