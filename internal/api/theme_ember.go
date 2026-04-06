@@ -1278,22 +1278,19 @@ td.mono {
     html += "</div>"; /* section-block findings */
 
     /* ==== Section: Disk Space ==== */
-    /* ==== Section: Drives (unified SMART + Disk Space) ==== */
+    /* ==== Section: Drives (SMART-centric like Scrutiny) ==== */
     html += "<div class=\"section-block\" data-section=\"drives\">";
     html += "<div class=\"section\" style=\"margin-top:0\">";
     html += "<div class=\"section-title\">Drives</div>";
     var _sm = (snapshot && snapshot.smart) ? snapshot.smart : [];
     var _dk = (snapshot && snapshot.disks) ? snapshot.disks : [];
     if (_sm.length > 0) {
-      var _dkMap = {};
-      for (var dm=0;dm<_dk.length;dm++){_dkMap[_dk[dm].mount_point]=_dk[dm];if(_dk[dm].label)_dkMap[_dk[dm].label]=_dk[dm];}
       for (var si=0;si<_sm.length;si++) {
         var sm = _sm[si];
         var hlOk = sm.health_passed;
         var szStr = sm.size_gb>=1000?(sm.size_gb/1000).toFixed(1)+" TB":(sm.size_gb||0).toFixed(0)+" GB";
+        var ageStr = sm.power_on_hours > 8766 ? (sm.power_on_hours/8766).toFixed(1)+"y" : (sm.power_on_hours||0).toLocaleString()+"h";
         var slot = sm.array_slot||"";
-        var matched = null;
-        if(slot){var n=slot.replace(/[^0-9]/g,"");matched=_dkMap["/mnt/disk"+n]||_dkMap["Disk "+n];}
         html += "<div class=\"card-static\" style=\"margin-bottom:6px;padding:10px 12px;cursor:pointer\" onclick=\"window.location='/disk/"+encodeURIComponent(sm.serial||"")+"'\">";
         html += "<div style=\"display:flex;align-items:center;gap:8px;flex-wrap:wrap\">";
         html += "<span class=\"status-dot "+(hlOk?"s-green":"s-red")+"\"></span>";
@@ -1302,29 +1299,19 @@ td.mono {
         html+="<span style=\"font-size:12px;color:var(--text-tertiary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">"+esc(sm.model)+"</span>";
         html+="<span style=\"font-size:12px;color:var(--text-dim)\">"+szStr+"</span>";
         html+="<span class=\"mono\" style=\"font-size:12px;font-weight:600;"+tempColor(sm.temperature_c)+"\">"+(sm.temperature_c||0)+"&deg;</span>";
+        html+="<span style=\"font-size:11px;color:var(--text-dim)\">"+ageStr+"</span>";
         html+="<canvas id=\"spark-temp-"+si+"\" width=\"50\" height=\"18\" style=\"flex-shrink:0\"></canvas>";
         if(!hlOk)html+="<span style=\"font-size:10px;font-weight:600;color:var(--red);background:rgba(255,99,99,0.1);padding:1px 6px;border-radius:9999px\">FAIL</span>";
         if(sm.reallocated_sectors>0)html+="<span style=\"font-size:10px;color:#FACC15;background:rgba(250,204,21,0.1);padding:1px 6px;border-radius:9999px\">"+sm.reallocated_sectors+" realloc</span>";
         if(sm.pending_sectors>0)html+="<span style=\"font-size:10px;color:var(--red);background:rgba(255,99,99,0.1);padding:1px 6px;border-radius:9999px\">"+sm.pending_sectors+" pending</span>";
-        html+="</div>";
-        if(matched){var mp=matched.used_percent||0;var col=diskBarColor(mp);
-          html+="<div style=\"margin-top:6px\"><div style=\"display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);margin-bottom:2px\"><span>"+esc(matched.label||matched.mount_point)+"</span><span>"+(matched.used_gb||0).toFixed(0)+" / "+(matched.total_gb||0).toFixed(0)+" GB ("+mp.toFixed(0)+"%)</span></div>";
-          html+="<div class=\"disk-bar-track\" style=\"height:4px\"><div class=\"disk-bar-fill c-"+col+"\" style=\"width:"+mp.toFixed(1)+"%;height:4px\"></div></div></div>";
-        }
-        html+="</div>";
+        html+="</div></div>";
       }
-      var unmatched=_dk.filter(function(dk){for(var x=0;x<_sm.length;x++){var n=((_sm[x].array_slot||"").replace(/[^0-9]/g,""));if(n&&(dk.mount_point==="/mnt/disk"+n||dk.label==="Disk "+n))return false;}return true;});
-      if(unmatched.length>0){
-        html+="<div style=\"margin-top:8px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px\">Other Volumes</div>";
-        for(var ui=0;ui<unmatched.length;ui++){var ud=unmatched[ui];var up=ud.used_percent||0;var uc=diskBarColor(up);
-          html+="<div class=\"card-static\" style=\"margin-bottom:4px;padding:8px 12px\"><div style=\"display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px\"><span style=\"font-weight:500\">"+esc(ud.label||ud.mount_point)+"</span><span style=\"color:var(--text-dim)\">"+(ud.used_gb||0).toFixed(0)+" / "+(ud.total_gb||0).toFixed(0)+" GB ("+up.toFixed(0)+"%)</span></div>";
-          html+="<div class=\"disk-bar-track\" style=\"height:4px\"><div class=\"disk-bar-fill c-"+uc+"\" style=\"width:"+up.toFixed(1)+"%;height:4px\"></div></div></div>";
-        }
-      }
-    } else if(_dk.length>0){
-      for(var dd=0;dd<_dk.length;dd++){var d=_dk[dd];var p=d.used_percent||0;var c=diskBarColor(p);
-        html+="<div class=\"disk-item\"><div class=\"disk-info\"><span class=\"disk-label\">"+esc(d.label||d.mount_point)+"</span><span class=\"disk-detail\">"+fmtPct(p)+"</span></div>";
-        html+="<div class=\"disk-bar-track\"><div class=\"disk-bar-fill c-"+c+"\" style=\"width:"+p.toFixed(1)+"%\"></div></div></div>";
+    }
+    if (_dk.length > 0) {
+      html+="<div style=\"margin-top:10px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px\">Storage</div>";
+      for(var di=0;di<_dk.length;di++){var dk=_dk[di];var p=dk.used_percent||0;var c=diskBarColor(p);
+        html+="<div class=\"card-static\" style=\"margin-bottom:4px;padding:8px 12px\"><div style=\"display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px\"><span style=\"font-weight:500\">"+esc(dk.label||dk.mount_point)+"</span><span style=\"color:var(--text-dim)\">"+(dk.used_gb||0).toFixed(0)+" / "+(dk.total_gb||0).toFixed(0)+" GB ("+p.toFixed(0)+"%)</span></div>";
+        html+="<div class=\"disk-bar-track\" style=\"height:4px\"><div class=\"disk-bar-fill c-"+c+"\" style=\"width:"+p.toFixed(1)+"%;height:4px\"></div></div></div>";
       }
     }
     html += "</div>"; /* section */

@@ -913,22 +913,19 @@ body {
     html += '</div>'; // end section-block findings
 
     // ==== Section: Disk Space ====
-    // ==== Section: Drives (unified SMART + Disk Space) ====
+    // ==== Section: Drives (SMART-centric like Scrutiny) ====
     html += '<div class="section-block" data-section="drives">';
     html += '<div class="section">';
     html += '<div class="section-title">Drives</div>';
     var _smart = (snapshot && snapshot.smart) ? snapshot.smart : [];
     var _disks = (snapshot && snapshot.disks) ? snapshot.disks : [];
     if (_smart.length > 0) {
-      var _diskMap = {};
-      for (var dm = 0; dm < _disks.length; dm++) { _diskMap[_disks[dm].mount_point] = _disks[dm]; if (_disks[dm].label) _diskMap[_disks[dm].label] = _disks[dm]; }
       for (var si = 0; si < _smart.length; si++) {
         var sm = _smart[si];
         var hlOk = sm.health_passed;
         var sizeStr = sm.size_gb >= 1000 ? (sm.size_gb/1000).toFixed(1)+' TB' : (sm.size_gb||0).toFixed(0)+' GB';
+        var ageStr = sm.power_on_hours > 8766 ? (sm.power_on_hours/8766).toFixed(1)+'y' : (sm.power_on_hours||0).toLocaleString()+'h';
         var slot = sm.array_slot || '';
-        var matched = null;
-        if (slot) { var num = slot.replace(/[^0-9]/g,''); matched = _diskMap['/mnt/disk'+num] || _diskMap['Disk '+num]; }
         html += '<div class="card" style="margin-bottom:6px;padding:10px 14px;cursor:pointer" onclick="window.location=\'/disk/'+encodeURIComponent(sm.serial||'')+'\'">';
         html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
         html += '<span class="status-dot '+(hlOk?'green':'red')+'"></span>';
@@ -937,31 +934,19 @@ body {
         html += '<span style="font-size:12px;color:#4d4d4d;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHTML(sm.model)+'</span>';
         html += '<span style="font-size:12px;color:#808080">'+sizeStr+'</span>';
         html += '<span style="font-size:12px;font-weight:600;color:'+(sm.temperature_c>=55?'#dc2626':sm.temperature_c>=45?'#d97706':'#16a34a')+'">'+(sm.temperature_c||0)+'&deg;C</span>';
+        html += '<span style="font-size:11px;color:#b3b3b3">'+ageStr+'</span>';
         html += '<canvas id="spark-temp-'+si+'" width="50" height="18" style="flex-shrink:0"></canvas>';
         if (!hlOk) html += '<span style="font-size:10px;font-weight:600;color:#dc2626;background:rgba(220,38,38,0.06);padding:1px 6px;border-radius:9999px">FAILED</span>';
         if (sm.reallocated_sectors>0) html += '<span style="font-size:10px;color:#d97706;background:rgba(217,119,6,0.06);padding:1px 6px;border-radius:9999px">'+sm.reallocated_sectors+' realloc</span>';
         if (sm.pending_sectors>0) html += '<span style="font-size:10px;color:#dc2626;background:rgba(220,38,38,0.06);padding:1px 6px;border-radius:9999px">'+sm.pending_sectors+' pending</span>';
-        html += '</div>';
-        if (matched) {
-          var mp = matched.used_percent||0;
-          html += '<div style="margin-top:6px"><div style="display:flex;justify-content:space-between;font-size:11px;color:#808080;margin-bottom:2px"><span>'+escapeHTML(matched.label||matched.mount_point)+'</span><span>'+(matched.used_gb||0).toFixed(0)+' / '+(matched.total_gb||0).toFixed(0)+' GB ('+mp.toFixed(0)+'%)</span></div>';
-          html += '<div class="disk-bar-track" style="height:4px"><div class="disk-bar-fill color-'+diskBarColor(mp)+'" style="width:'+mp.toFixed(1)+'%;height:4px"></div></div></div>';
-        }
-        html += '</div>';
+        html += '</div></div>';
       }
-      // Unmatched volumes
-      var unmatched = _disks.filter(function(dk){ for(var x=0;x<_smart.length;x++){var n=((_smart[x].array_slot||'').replace(/[^0-9]/g,''));if(n&&(dk.mount_point==='/mnt/disk'+n||dk.label==='Disk '+n))return false;} return true; });
-      if (unmatched.length > 0) {
-        html += '<div style="margin-top:8px;font-size:11px;color:#808080;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Other Volumes</div>';
-        for (var ui=0;ui<unmatched.length;ui++){var ud=unmatched[ui];var up=ud.used_percent||0;
-          html+='<div class="card" style="margin-bottom:4px;padding:8px 14px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px"><span style="font-weight:500">'+escapeHTML(ud.label||ud.mount_point)+'</span><span style="color:#808080">'+(ud.used_gb||0).toFixed(0)+' / '+(ud.total_gb||0).toFixed(0)+' GB ('+up.toFixed(0)+'%)</span></div>';
-          html+='<div class="disk-bar-track" style="height:4px"><div class="disk-bar-fill color-'+diskBarColor(up)+'" style="width:'+up.toFixed(1)+'%;height:4px"></div></div></div>';
-        }
-      }
-    } else if (_disks.length > 0) {
-      for (var dd=0;dd<_disks.length;dd++){var d=_disks[dd];var p=d.used_percent||0;
-        html+='<div class="disk-item"><div class="disk-info"><span class="disk-label">'+escapeHTML(d.label||d.mount_point)+'</span><span class="disk-detail">'+formatGB(d.used_gb)+' / '+formatGB(d.total_gb)+' ('+formatPct(p)+')</span></div>';
-        html+='<div class="disk-bar-track"><div class="disk-bar-fill color-'+diskBarColor(p)+'" style="width:'+p.toFixed(1)+'%"></div></div></div>';
+    }
+    if (_disks.length > 0) {
+      html += '<div style="margin-top:10px;font-size:11px;color:#808080;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Storage</div>';
+      for (var di=0;di<_disks.length;di++){var dk=_disks[di];var p=dk.used_percent||0;
+        html+='<div class="card" style="margin-bottom:4px;padding:8px 14px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px"><span style="font-weight:500">'+escapeHTML(dk.label||dk.mount_point)+'</span><span style="color:#808080">'+(dk.used_gb||0).toFixed(0)+' / '+(dk.total_gb||0).toFixed(0)+' GB ('+p.toFixed(0)+'%)</span></div>';
+        html+='<div class="disk-bar-track" style="height:4px"><div class="disk-bar-fill color-'+diskBarColor(p)+'" style="width:'+p.toFixed(1)+'%;height:4px"></div></div></div>';
       }
     }
     html += '</div>'; // section
