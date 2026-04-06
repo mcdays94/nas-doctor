@@ -27,6 +27,20 @@ type Settings struct {
 	LogPush       SettingsLogForward    `json:"log_push"`
 	Retention     RetentionSettings     `json:"retention"`
 	Backup        BackupSettings        `json:"backup"`
+	Sections      DashboardSections     `json:"sections"`
+}
+
+// DashboardSections controls which sections appear on the dashboard.
+// All default to true (visible). Users can hide sections they don't use.
+type DashboardSections struct {
+	Findings  bool `json:"findings"`
+	DiskSpace bool `json:"disk_space"`
+	SMART     bool `json:"smart"`
+	Docker    bool `json:"docker"`
+	ZFS       bool `json:"zfs"`
+	UPS       bool `json:"ups"`
+	Parity    bool `json:"parity"`
+	Network   bool `json:"network"`
 }
 
 // BackupSettings controls automatic backup of the application database.
@@ -88,6 +102,16 @@ func defaultSettings() Settings {
 			KeepCount: 4,
 			IntervalH: 168, // weekly
 		},
+		Sections: DashboardSections{
+			Findings:  true,
+			DiskSpace: true,
+			SMART:     true,
+			Docker:    true,
+			ZFS:       true,
+			UPS:       true,
+			Parity:    true,
+			Network:   true,
+		},
 	}
 }
 
@@ -148,6 +172,14 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if settings.Retention.NotifyLogDays == 0 {
 		settings.Retention.NotifyLogDays = 30
+	}
+	// Section defaults: if all are false (zero-value from old settings), set all to true
+	s_sec := settings.Sections
+	if !s_sec.Findings && !s_sec.DiskSpace && !s_sec.SMART && !s_sec.Docker && !s_sec.ZFS && !s_sec.UPS {
+		settings.Sections = DashboardSections{
+			Findings: true, DiskSpace: true, SMART: true, Docker: true,
+			ZFS: true, UPS: true, Parity: true, Network: true,
+		}
 	}
 
 	writeJSON(w, http.StatusOK, settings)
@@ -848,7 +880,23 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 5. Backup -->
+  <!-- 5. Dashboard Sections -->
+  <div class="card" id="card-sections">
+    <div class="card-title">Dashboard Sections</div>
+    <div class="card-desc">Toggle which sections appear on the dashboard. Disabled sections are hidden but data is still collected.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;margin-top:12px">
+      <div class="toggle-wrap"><div class="toggle on" id="sec-findings" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Findings</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-disk" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Disk Space</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-smart" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">SMART Health</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-docker" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Docker</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-zfs" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">ZFS Pools</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-ups" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">UPS / Power</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-parity" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Parity (Unraid)</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-network" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Network</span></div>
+    </div>
+  </div>
+
+  <!-- 6. Backup -->
   <div class="card" id="card-backup">
     <div class="card-title">Automatic Backup</div>
     <div class="card-desc">Periodically back up settings and historical data so you can restore after a Docker reinstall.</div>
@@ -1105,6 +1153,17 @@ function loadSettings() {
       var bk = data.backup || {};
       var bkToggle = document.getElementById("backup-toggle");
       if (bk.enabled === false) { bkToggle.classList.remove("on"); } else { bkToggle.classList.add("on"); }
+      /* Sections */
+      var sec = data.sections || {};
+      function setSecToggle(id, val) { var el = document.getElementById(id); if (el) { if (val === false) el.classList.remove("on"); else el.classList.add("on"); } }
+      setSecToggle("sec-findings", sec.findings);
+      setSecToggle("sec-disk", sec.disk_space);
+      setSecToggle("sec-smart", sec.smart);
+      setSecToggle("sec-docker", sec.docker);
+      setSecToggle("sec-zfs", sec.zfs);
+      setSecToggle("sec-ups", sec.ups);
+      setSecToggle("sec-parity", sec.parity);
+      setSecToggle("sec-network", sec.network);
       document.getElementById("backup-path").value = bk.path || "";
       document.getElementById("backup-keep").value = bk.keep_count || 4;
       setBackupIntervalUI(bk.interval_hours || 168);
@@ -1123,6 +1182,16 @@ function buildSettingsPayload() {
       snapshot_days: parseInt(document.getElementById("ret-snapshot-days").value, 10) || 90,
       max_db_size_mb: parseInt(document.getElementById("ret-max-db").value, 10) || 500,
       notify_log_days: parseInt(document.getElementById("ret-notify-days").value, 10) || 30
+    },
+    sections: {
+      findings: document.getElementById("sec-findings").classList.contains("on"),
+      disk_space: document.getElementById("sec-disk").classList.contains("on"),
+      smart: document.getElementById("sec-smart").classList.contains("on"),
+      docker: document.getElementById("sec-docker").classList.contains("on"),
+      zfs: document.getElementById("sec-zfs").classList.contains("on"),
+      ups: document.getElementById("sec-ups").classList.contains("on"),
+      parity: document.getElementById("sec-parity").classList.contains("on"),
+      network: document.getElementById("sec-network").classList.contains("on")
     },
     backup: {
       enabled: document.getElementById("backup-toggle").classList.contains("on"),

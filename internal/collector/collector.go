@@ -90,6 +90,16 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 		snap.Parity = parity
 	}
 
+	// UPS (NUT or apcupsd)
+	c.logger.Info("collecting UPS info")
+	upsInfo, err := collectUPS()
+	if err != nil {
+		c.logger.Warn("UPS collection partial failure", "error", err)
+	}
+	if upsInfo != nil && upsInfo.Available {
+		snap.UPS = upsInfo
+	}
+
 	// ZFS (if available)
 	c.logger.Info("collecting ZFS info")
 	zfsInfo, err := collectZFS()

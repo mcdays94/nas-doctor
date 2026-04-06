@@ -970,6 +970,7 @@ td.mono {
   var REFRESH_INTERVAL = 30000;
   var refreshTimer = null;
   var activeFindingId = null;
+  var _cachedStatus = null;
   var prevStatValues = {};
 
   function esc(s) {
@@ -1396,6 +1397,31 @@ td.mono {
     }
 
     html += "</div>"; /* section-block zfs */
+
+    /* ==== Section: UPS ==== */
+    html += "<div class=\"section-block\" data-section=\"ups\">";
+    if (snapshot && snapshot.ups && snapshot.ups.available) {
+      var ups = snapshot.ups;
+      html += "<div class=\"section\" style=\"margin-top:0\">";
+      html += "<div class=\"section-title\">UPS / Power</div>";
+      var upsDot = ups.on_battery ? "s-red" : "s-green";
+      html += "<div class=\"card-static\" style=\"padding:12px\">";
+      html += "<div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:6px\">";
+      html += "<span style=\"font-family:var(--font-mono);font-weight:500;font-size:14px\">" + esc(ups.name || ups.model) + "</span>";
+      html += "<span class=\"status-dot " + upsDot + "\"></span><span class=\"mono\" style=\"font-size:11px\">" + esc(ups.status_human) + "</span>";
+      html += "</div>";
+      html += "<div style=\"display:flex;gap:14px;font-size:12px;color:var(--text-tertiary);flex-wrap:wrap\">";
+      html += "<span>Battery: <strong style=\"color:var(--text-primary)\">" + (ups.battery_percent || 0).toFixed(0) + "%</strong></span>";
+      html += "<span>Load: <strong style=\"color:var(--text-primary)\">" + (ups.load_percent || 0).toFixed(0) + "%</strong></span>";
+      html += "<span>Runtime: <strong style=\"color:var(--text-primary)\">" + (ups.runtime_minutes || 0).toFixed(0) + " min</strong></span>";
+      if (ups.wattage_watts > 0) html += "<span>" + (ups.wattage_watts || 0).toFixed(0) + "W / " + (ups.nominal_watts || 0).toFixed(0) + "W</span>";
+      html += "</div>";
+      if (ups.last_transfer) html += "<div style=\"font-size:11px;color:var(--text-dim);margin-top:4px\">Last transfer: " + esc(ups.last_transfer) + "</div>";
+      html += "</div>";
+      html += "</div>";
+    }
+    html += "</div>"; /* section-block ups */
+
     html += "</div>"; /* section-staging */
 
     /* ---- Footer ---- */
@@ -1446,6 +1472,7 @@ td.mono {
       fetchJSON("/api/v1/snapshot/latest").catch(function() { return null; })
     ]).then(function(results) {
       var status = results[0];
+      _cachedStatus = status;
       var snapshot = results[1];
 
       var hostnameEl = document.getElementById("hostname");
@@ -1481,21 +1508,21 @@ td.mono {
     var colL = document.getElementById("col-left");
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
+    var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
+    var sectionMap = { "findings": sec.findings !== false, "disk-space": sec.disk_space !== false, "smart": sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var items = [];
     for (var i = 0; i < blocks.length; i++) {
+      var name = blocks[i].getAttribute("data-section");
+      if (sectionMap[name] === false) continue;
+      if (blocks[i].offsetHeight < 10) continue;
       items.push({ el: blocks[i], h: blocks[i].offsetHeight });
     }
     var leftH = 0, rightH = 0;
     for (var j = 0; j < items.length; j++) {
-      if (leftH <= rightH) {
-        colL.appendChild(items[j].el);
-        leftH += items[j].h;
-      } else {
-        colR.appendChild(items[j].el);
-        rightH += items[j].h;
-      }
+      if (leftH <= rightH) { colL.appendChild(items[j].el); leftH += items[j].h; }
+      else { colR.appendChild(items[j].el); rightH += items[j].h; }
     }
     staging.parentNode.removeChild(staging);
   }

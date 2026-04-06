@@ -526,6 +526,32 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     }
 
     h += '</div>'; // end section-block zfs
+
+    // ======= Section: UPS =======
+    h += '<div class="section-block" data-section="ups">';
+    var ups = sn ? sn.ups : null;
+    if (ups && ups.available) {
+      h += '<div>';
+      h += '<div class="section-title">UPS / Power</div>';
+      var upsStateClass = ups.on_battery ? "td-crit" : "td-healthy";
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px">';
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+      h += '<span style="font-weight:600;font-size:13px;color:var(--text-primary)">' + esc(ups.name || ups.model) + '</span>';
+      h += '<span class="' + upsStateClass + '" style="font-weight:600;font-size:11px;text-transform:uppercase">' + esc(ups.status_human) + '</span>';
+      h += '</div>';
+      h += '<div style="display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);flex-wrap:wrap">';
+      h += '<span>Battery: <strong style="color:var(--text-primary)">' + (ups.battery_percent || 0).toFixed(0) + '%</strong></span>';
+      h += '<span>Load: <strong style="color:var(--text-primary)">' + (ups.load_percent || 0).toFixed(0) + '%</strong></span>';
+      h += '<span>Runtime: <strong style="color:var(--text-primary)">' + (ups.runtime_minutes || 0).toFixed(0) + ' min</strong></span>';
+      if (ups.wattage_watts > 0) h += '<span>Power: <strong style="color:var(--text-primary)">' + (ups.wattage_watts || 0).toFixed(0) + 'W / ' + (ups.nominal_watts || 0).toFixed(0) + 'W</strong></span>';
+      if (ups.input_voltage > 0) h += '<span>Input: ' + (ups.input_voltage || 0).toFixed(0) + 'V</span>';
+      h += '</div>';
+      if (ups.last_transfer) h += '<div style="font-size:11px;color:var(--text-quaternary);margin-top:4px">Last transfer: ' + esc(ups.last_transfer) + '</div>';
+      h += '</div>';
+      h += '</div>';
+    }
+    h += '</div>'; // end section-block ups
+
     h += '</div>'; // end section-staging
 
     // Footer
@@ -582,16 +608,28 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
 
+    // Get section visibility from status response
+    var sec = (statusData && statusData.sections) ? statusData.sections : {};
+    var sectionMap = {
+      "findings": sec.findings !== false,
+      "disk-space": sec.disk_space !== false,
+      "smart": sec.smart !== false,
+      "docker": sec.docker !== false,
+      "zfs": sec.zfs !== false,
+      "ups": sec.ups !== false
+    };
+
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
 
-    // Measure heights while in staging (which has width:50% to simulate column width)
     var items = [];
     for (var i = 0; i < blocks.length; i++) {
+      var name = blocks[i].getAttribute("data-section");
+      if (sectionMap[name] === false) continue; // skip hidden sections
+      if (blocks[i].offsetHeight < 10) continue; // skip empty sections
       items.push({ el: blocks[i], h: blocks[i].offsetHeight });
     }
 
-    // Greedy bin-packing: assign each section to the shorter column
     var leftH = 0, rightH = 0;
     for (var j = 0; j < items.length; j++) {
       if (leftH <= rightH) {
@@ -603,7 +641,6 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       }
     }
 
-    // Remove staging div
     staging.parentNode.removeChild(staging);
   }
 

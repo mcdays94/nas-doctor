@@ -26,6 +26,7 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.Logs = demoLogs()
 	snap.Parity = demoParity()
 	snap.ZFS = demoZFS()
+	snap.UPS = demoUPS()
 
 	return snap
 }
@@ -197,6 +198,29 @@ func demoParity() *internal.ParityInfo {
 			{Date: "2026-01-22", Duration: 151200, SpeedMBs: 50.5, Errors: 5, ExitCode: 0, Action: "check", SizeGB: 28000},
 			{Date: "2026-03-30", Duration: 172800, SpeedMBs: 44.1, Errors: 12, ExitCode: 0, Action: "check", SizeGB: 28000},
 		},
+	}
+}
+
+func demoUPS() *internal.UPSInfo {
+	return &internal.UPSInfo{
+		Available:    true,
+		Source:       "apcupsd",
+		Name:         "ServerUPS",
+		Model:        "APC Back-UPS XS 1400U",
+		Status:       "ONLINE",
+		StatusHuman:  "Online",
+		BatteryPct:   100,
+		BatteryV:     27.2,
+		InputV:       122,
+		OutputV:      122,
+		LoadPct:      34,
+		RuntimeMins:  48,
+		WattageW:     294,
+		NominalW:     865,
+		Temperature:  31,
+		OnBattery:    false,
+		LowBattery:   false,
+		LastTransfer: "Low line voltage",
 	}
 }
 

@@ -31,6 +31,10 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 		findings = append(findings, analyzeZFS(snap.ZFS)...)
 	}
 
+	if snap.UPS != nil && snap.UPS.Available {
+		findings = append(findings, analyzeUPS(snap.UPS)...)
+	}
+
 	// Cross-correlation: combine related findings
 	findings = correlate(findings, snap)
 
@@ -959,4 +963,117 @@ func buildPoolEvidence(pool internal.ZPool) []string {
 		}
 	}
 	return ev
+}
+
+// ---------- UPS Rules ----------
+
+func analyzeUPS(ups *internal.UPSInfo) []internal.Finding {
+	var findings []internal.Finding
+
+	// On battery power
+	if ups.OnBattery {
+		desc := fmt.Sprintf("UPS '%s' (%s) is running on battery power.", ups.Name, ups.Model)
+		if ups.LastTransfer != "" {
+			desc += fmt.Sprintf(" Reason: %s.", ups.LastTransfer)
+		}
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityCritical,
+			Category:    internal.CategoryUPS,
+			Title:       fmt.Sprintf("UPS On Battery — %s", ups.StatusHuman),
+			Description: desc,
+			Evidence: []string{
+				fmt.Sprintf("Status: %s", ups.Status),
+				fmt.Sprintf("Battery: %.0f%%, Runtime: %.0f min", ups.BatteryPct, ups.RuntimeMins),
+			},
+			Impact:   "Server will shut down when battery is depleted.",
+			Action:   "Check mains power. If outage is extended, initiate graceful shutdown.",
+			Priority: "immediate",
+		})
+	}
+
+	// Low battery
+	if ups.LowBattery || (ups.OnBattery && ups.BatteryPct < 20) {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityCritical,
+			Category:    internal.CategoryUPS,
+			Title:       fmt.Sprintf("UPS Low Battery (%.0f%%)", ups.BatteryPct),
+			Description: fmt.Sprintf("UPS battery is critically low at %.0f%% with approximately %.0f minutes remaining.", ups.BatteryPct, ups.RuntimeMins),
+			Evidence:    []string{fmt.Sprintf("Battery: %.0f%%, Runtime: %.0f min", ups.BatteryPct, ups.RuntimeMins)},
+			Impact:      "Imminent unclean shutdown. Data corruption risk.",
+			Action:      "Initiate graceful shutdown immediately.",
+			Priority:    "immediate",
+		})
+	}
+
+	// Battery not holding charge while on mains
+	if !ups.OnBattery && ups.BatteryPct > 0 && ups.BatteryPct < 80 {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityWarning,
+			Category:    internal.CategoryUPS,
+			Title:       fmt.Sprintf("UPS Battery Not Fully Charged (%.0f%%)", ups.BatteryPct),
+			Description: fmt.Sprintf("UPS battery is at %.0f%% while on mains power. This may indicate a degraded battery.", ups.BatteryPct),
+			Evidence:    []string{fmt.Sprintf("Battery: %.0f%%", ups.BatteryPct), fmt.Sprintf("Runtime: %.0f min", ups.RuntimeMins)},
+			Impact:      "Reduced backup time during power outage.",
+			Action:      "Replace battery if it stays below 80%% after several hours of charging.",
+			Priority:    "short-term",
+			Cost:        "$30-80 for replacement battery",
+		})
+	}
+
+	// Replace battery flag
+	if strings.Contains(ups.Status, "RB") {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityWarning,
+			Category:    internal.CategoryUPS,
+			Title:       "UPS Battery Replacement Needed",
+			Description: fmt.Sprintf("UPS '%s' is reporting that its battery needs replacement.", ups.Name),
+			Evidence:    []string{fmt.Sprintf("Status: %s", ups.Status)},
+			Impact:      "UPS may not provide adequate backup time.",
+			Action:      "Replace the UPS battery.",
+			Priority:    "short-term",
+			Cost:        "$30-80 for replacement battery",
+		})
+	}
+
+	// Overloaded
+	if ups.LoadPct > 90 {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityCritical,
+			Category:    internal.CategoryUPS,
+			Title:       fmt.Sprintf("UPS Overloaded (%.0f%% load)", ups.LoadPct),
+			Description: fmt.Sprintf("UPS '%s' is at %.0f%% load (%.0fW / %.0fW). May fail to protect equipment.", ups.Name, ups.LoadPct, ups.WattageW, ups.NominalW),
+			Evidence:    []string{fmt.Sprintf("Load: %.0f%% (%.0fW / %.0fW)", ups.LoadPct, ups.WattageW, ups.NominalW)},
+			Impact:      "UPS may fail to provide backup power.",
+			Action:      "Reduce load or upgrade UPS.",
+			Priority:    "immediate",
+		})
+	} else if ups.LoadPct > 75 {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityWarning,
+			Category:    internal.CategoryUPS,
+			Title:       fmt.Sprintf("UPS High Load (%.0f%%)", ups.LoadPct),
+			Description: fmt.Sprintf("UPS '%s' is at %.0f%% load. Keep below 75%% for adequate headroom.", ups.Name, ups.LoadPct),
+			Evidence:    []string{fmt.Sprintf("Load: %.0f%% (%.0fW / %.0fW)", ups.LoadPct, ups.WattageW, ups.NominalW)},
+			Impact:      "Reduced runtime on battery.",
+			Action:      "Consider upgrading UPS or reducing load.",
+			Priority:    "medium-term",
+		})
+	}
+
+	// Very low runtime
+	if !ups.OnBattery && ups.RuntimeMins > 0 && ups.RuntimeMins < 5 {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityCritical,
+			Category:    internal.CategoryUPS,
+			Title:       fmt.Sprintf("UPS Very Low Runtime (%.0f min)", ups.RuntimeMins),
+			Description: fmt.Sprintf("Only %.0f minutes of estimated runtime at current load. Not enough for graceful shutdown.", ups.RuntimeMins),
+			Evidence:    []string{fmt.Sprintf("Runtime: %.0f min at %.0f%% load", ups.RuntimeMins, ups.LoadPct)},
+			Impact:      "Server may not shut down cleanly during an outage.",
+			Action:      "Replace battery or reduce load.",
+			Priority:    "immediate",
+			Cost:        "$30-80 for battery",
+		})
+	}
+
+	return findings
 }

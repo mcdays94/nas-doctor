@@ -27,6 +27,7 @@ const (
 	CategoryLogs    Category = "logs"
 	CategoryParity  Category = "parity"
 	CategoryZFS     Category = "zfs"
+	CategoryUPS     Category = "ups"
 )
 
 // ---------- Snapshot (one complete diagnostic run) ----------
@@ -44,6 +45,7 @@ type Snapshot struct {
 	Logs      LogInfo     `json:"logs"`
 	Parity    *ParityInfo `json:"parity,omitempty"`
 	ZFS       *ZFSInfo    `json:"zfs,omitempty"`
+	UPS       *UPSInfo    `json:"ups,omitempty"`
 	Findings  []Finding   `json:"findings"`
 }
 
@@ -182,6 +184,30 @@ type ParityCheck struct {
 	ExitCode int     `json:"exit_code"`
 	Action   string  `json:"action"` // check, correct, recon
 	SizeGB   float64 `json:"size_gb"`
+}
+
+// ---------- UPS ----------
+
+type UPSInfo struct {
+	Available    bool    `json:"available"`
+	Source       string  `json:"source"` // "nut", "apcupsd"
+	Name         string  `json:"name"`   // UPS model/name
+	Model        string  `json:"model"`
+	Status       string  `json:"status"`       // "OL" (online), "OB" (on battery), "LB" (low battery), "OL CHRG", etc.
+	StatusHuman  string  `json:"status_human"` // "Online", "On Battery", "Low Battery", etc.
+	BatteryPct   float64 `json:"battery_percent"`
+	BatteryV     float64 `json:"battery_voltage"`
+	InputV       float64 `json:"input_voltage"`
+	OutputV      float64 `json:"output_voltage"`
+	LoadPct      float64 `json:"load_percent"`
+	RuntimeMins  float64 `json:"runtime_minutes"`
+	WattageW     float64 `json:"wattage_watts"`
+	NominalW     float64 `json:"nominal_watts"`
+	Temperature  float64 `json:"temperature_c"`
+	OnBattery    bool    `json:"on_battery"`
+	LowBattery   bool    `json:"low_battery"`
+	LastTransfer string  `json:"last_transfer"` // reason for last transfer to battery
+	LastEvent    string  `json:"last_event"`
 }
 
 // ---------- ZFS ----------
