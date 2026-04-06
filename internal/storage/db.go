@@ -524,6 +524,139 @@ func (d *DB) ListDisks() ([]DiskSummary, error) {
 	return disks, rows.Err()
 }
 
+// ---------- Data lifecycle / pruning ----------
+
+// PruneNotificationLog deletes notification log entries older than the given duration.
+func (d *DB) PruneNotificationLog(olderThan time.Duration) (int, error) {
+	cutoff := time.Now().Add(-olderThan)
+	result, err := d.db.Exec("DELETE FROM notification_log WHERE created_at < ?", cutoff)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
+}
+
+// PruneAlerts deletes resolved alerts older than the given duration.
+func (d *DB) PruneAlerts(olderThan time.Duration) (int, error) {
+	cutoff := time.Now().Add(-olderThan)
+	result, err := d.db.Exec("DELETE FROM alerts WHERE created_at < ? AND resolved_at IS NOT NULL", cutoff)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
+}
+
+// PruneOrphanedFindings deletes findings whose snapshot_id no longer exists.
+func (d *DB) PruneOrphanedFindings() (int, error) {
+	result, err := d.db.Exec("DELETE FROM findings WHERE snapshot_id NOT IN (SELECT id FROM snapshots)")
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
+}
+
+// Vacuum runs SQLite VACUUM to reclaim disk space after pruning.
+func (d *DB) Vacuum() error {
+	_, err := d.db.Exec("VACUUM")
+	return err
+}
+
+// DBStats returns size information about the database.
+type DBStats struct {
+	FileSizeMB     float64 `json:"file_size_mb"`
+	SnapshotCount  int     `json:"snapshot_count"`
+	SMARTRows      int     `json:"smart_history_rows"`
+	SystemRows     int     `json:"system_history_rows"`
+	FindingRows    int     `json:"finding_rows"`
+	NotifyLogRows  int     `json:"notify_log_rows"`
+	AlertRows      int     `json:"alert_rows"`
+	OldestSnapshot string  `json:"oldest_snapshot,omitempty"`
+	NewestSnapshot string  `json:"newest_snapshot,omitempty"`
+}
+
+// GetDBStats returns statistics about the database contents.
+func (d *DB) GetDBStats() (*DBStats, error) {
+	stats := &DBStats{}
+
+	// Row counts
+	for _, q := range []struct {
+		query string
+		dest  *int
+	}{
+		{"SELECT COUNT(*) FROM snapshots", &stats.SnapshotCount},
+		{"SELECT COUNT(*) FROM smart_history", &stats.SMARTRows},
+		{"SELECT COUNT(*) FROM system_history", &stats.SystemRows},
+		{"SELECT COUNT(*) FROM findings", &stats.FindingRows},
+		{"SELECT COUNT(*) FROM notification_log", &stats.NotifyLogRows},
+		{"SELECT COUNT(*) FROM alerts", &stats.AlertRows},
+	} {
+		if err := d.db.QueryRow(q.query).Scan(q.dest); err != nil {
+			return nil, err
+		}
+	}
+
+	// DB file size via page_count * page_size
+	var pageCount, pageSize int64
+	d.db.QueryRow("PRAGMA page_count").Scan(&pageCount)
+	d.db.QueryRow("PRAGMA page_size").Scan(&pageSize)
+	stats.FileSizeMB = float64(pageCount*pageSize) / (1024 * 1024)
+
+	// Oldest and newest snapshot timestamps
+	d.db.QueryRow("SELECT COALESCE(MIN(timestamp), '') FROM snapshots").Scan(&stats.OldestSnapshot)
+	d.db.QueryRow("SELECT COALESCE(MAX(timestamp), '') FROM snapshots").Scan(&stats.NewestSnapshot)
+
+	return stats, nil
+}
+
+// PruneToSizeMB aggressively deletes the oldest snapshots until the DB is under the target size.
+// Returns the number of snapshots deleted.
+func (d *DB) PruneToSizeMB(targetMB float64) (int, error) {
+	totalPruned := 0
+	for i := 0; i < 20; i++ { // max 20 iterations to avoid infinite loop
+		stats, err := d.GetDBStats()
+		if err != nil {
+			return totalPruned, err
+		}
+		if stats.FileSizeMB <= targetMB || stats.SnapshotCount <= 5 {
+			break // under target or at minimum
+		}
+		// Delete the oldest 10% of snapshots (at least 5)
+		batchSize := stats.SnapshotCount / 10
+		if batchSize < 5 {
+			batchSize = 5
+		}
+		// Delete oldest batch
+		_, err = d.db.Exec(`
+			DELETE FROM findings WHERE snapshot_id IN (
+				SELECT id FROM snapshots ORDER BY timestamp ASC LIMIT ?
+			)`, batchSize)
+		if err != nil {
+			return totalPruned, err
+		}
+		for _, table := range []string{"smart_history", "system_history"} {
+			d.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE snapshot_id IN (
+				SELECT id FROM snapshots ORDER BY timestamp ASC LIMIT ?
+			)`, table), batchSize)
+		}
+		result, err := d.db.Exec("DELETE FROM snapshots WHERE id IN (SELECT id FROM snapshots ORDER BY timestamp ASC LIMIT ?)", batchSize)
+		if err != nil {
+			return totalPruned, err
+		}
+		n, _ := result.RowsAffected()
+		totalPruned += int(n)
+		if n == 0 {
+			break
+		}
+	}
+	if totalPruned > 0 {
+		d.Vacuum()
+	}
+	return totalPruned, nil
+}
+
 // ---------- Notification log ----------
 
 // NotificationLogEntry represents a single notification delivery attempt.

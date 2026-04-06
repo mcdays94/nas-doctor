@@ -13,6 +13,13 @@ import (
 	"github.com/mcdays94/nas-doctor/internal/storage"
 )
 
+// RetentionConfig holds configurable data lifecycle settings.
+type RetentionConfig struct {
+	SnapshotDays  int // days to keep snapshots (default 90)
+	MaxDBSizeMB   int // hard cap on DB file size (default 500)
+	NotifyLogDays int // days to keep notification logs (default 30)
+}
+
 // Scheduler periodically runs diagnostic collections and analysis.
 type Scheduler struct {
 	collector *collector.Collector
@@ -21,6 +28,7 @@ type Scheduler struct {
 	metrics   *notifier.Metrics
 	logger    *slog.Logger
 	interval  time.Duration
+	retention RetentionConfig
 
 	mu      sync.RWMutex
 	latest  *internal.Snapshot
@@ -45,8 +53,13 @@ func New(
 		metrics:   metrics,
 		logger:    logger,
 		interval:  interval,
-		stop:      make(chan struct{}),
-		restart:   make(chan time.Duration, 1),
+		retention: RetentionConfig{
+			SnapshotDays:  90,
+			MaxDBSizeMB:   500,
+			NotifyLogDays: 30,
+		},
+		stop:    make(chan struct{}),
+		restart: make(chan time.Duration, 1),
 	}
 }
 
@@ -155,12 +168,8 @@ func (s *Scheduler) RunOnce() {
 		s.notifier.NotifyFindings(snap.Findings, hostname)
 	}
 
-	// Prune old snapshots (keep 30 days, minimum 100)
-	if pruned, err := s.store.PruneSnapshots(30*24*time.Hour, 100); err != nil {
-		s.logger.Warn("prune failed", "error", err)
-	} else if pruned > 0 {
-		s.logger.Info("pruned old snapshots", "count", pruned)
-	}
+	// Data lifecycle: prune old data
+	s.pruneData()
 }
 
 // Latest returns the most recent snapshot from the cache.
@@ -175,6 +184,87 @@ func (s *Scheduler) SetLatest(snap *internal.Snapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.latest = snap
+}
+
+// UpdateRetention updates the data lifecycle configuration.
+func (s *Scheduler) UpdateRetention(cfg RetentionConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cfg.SnapshotDays > 0 {
+		s.retention.SnapshotDays = cfg.SnapshotDays
+	}
+	if cfg.MaxDBSizeMB > 0 {
+		s.retention.MaxDBSizeMB = cfg.MaxDBSizeMB
+	}
+	if cfg.NotifyLogDays > 0 {
+		s.retention.NotifyLogDays = cfg.NotifyLogDays
+	}
+	s.logger.Info("retention config updated",
+		"snapshot_days", s.retention.SnapshotDays,
+		"max_db_mb", s.retention.MaxDBSizeMB,
+		"notify_log_days", s.retention.NotifyLogDays,
+	)
+}
+
+// pruneData runs all data lifecycle maintenance tasks.
+func (s *Scheduler) pruneData() {
+	s.mu.RLock()
+	ret := s.retention
+	s.mu.RUnlock()
+
+	snapshotAge := time.Duration(ret.SnapshotDays) * 24 * time.Hour
+	notifyAge := time.Duration(ret.NotifyLogDays) * 24 * time.Hour
+	needsVacuum := false
+
+	// 1. Prune old snapshots (cascades to smart_history, system_history)
+	if pruned, err := s.store.PruneSnapshots(snapshotAge, 10); err != nil {
+		s.logger.Warn("prune snapshots failed", "error", err)
+	} else if pruned > 0 {
+		s.logger.Info("pruned old snapshots", "count", pruned, "retention_days", ret.SnapshotDays)
+		needsVacuum = true
+	}
+
+	// 2. Prune orphaned findings (safety net)
+	if pruned, err := s.store.PruneOrphanedFindings(); err != nil {
+		s.logger.Warn("prune orphaned findings failed", "error", err)
+	} else if pruned > 0 {
+		s.logger.Info("pruned orphaned findings", "count", pruned)
+		needsVacuum = true
+	}
+
+	// 3. Prune notification log
+	if pruned, err := s.store.PruneNotificationLog(notifyAge); err != nil {
+		s.logger.Warn("prune notification log failed", "error", err)
+	} else if pruned > 0 {
+		s.logger.Info("pruned notification log", "count", pruned)
+		needsVacuum = true
+	}
+
+	// 4. Prune resolved alerts (same retention as notifications)
+	if pruned, err := s.store.PruneAlerts(notifyAge); err != nil {
+		s.logger.Warn("prune alerts failed", "error", err)
+	} else if pruned > 0 {
+		s.logger.Info("pruned old alerts", "count", pruned)
+		needsVacuum = true
+	}
+
+	// 5. Check DB size cap — if over the limit, aggressively delete oldest data
+	if ret.MaxDBSizeMB > 0 {
+		if pruned, err := s.store.PruneToSizeMB(float64(ret.MaxDBSizeMB)); err != nil {
+			s.logger.Warn("prune to size failed", "error", err)
+		} else if pruned > 0 {
+			s.logger.Warn("DB size exceeded cap, pruned snapshots",
+				"pruned", pruned, "cap_mb", ret.MaxDBSizeMB)
+			needsVacuum = false // PruneToSizeMB already vacuums
+		}
+	}
+
+	// 6. VACUUM to reclaim space (only if we pruned and didn't already vacuum)
+	if needsVacuum {
+		if err := s.store.Vacuum(); err != nil {
+			s.logger.Warn("vacuum failed", "error", err)
+		}
+	}
 }
 
 // IsRunning returns true if a collection is currently in progress.

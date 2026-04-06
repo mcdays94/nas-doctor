@@ -11,6 +11,7 @@ import (
 
 	"github.com/mcdays94/nas-doctor/internal"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
+	"github.com/mcdays94/nas-doctor/internal/scheduler"
 	"github.com/mcdays94/nas-doctor/internal/storage"
 )
 
@@ -22,6 +23,14 @@ type Settings struct {
 	Theme         string                `json:"theme"`
 	Notifications SettingsNotifications `json:"notifications"`
 	LogPush       SettingsLogForward    `json:"log_push"`
+	Retention     RetentionSettings     `json:"retention"`
+}
+
+// RetentionSettings controls data lifecycle / auto-pruning.
+type RetentionSettings struct {
+	SnapshotDays  int `json:"snapshot_days"`   // Keep snapshots for N days (0 = default 90)
+	MaxDBSizeMB   int `json:"max_db_size_mb"`  // Hard cap on DB file size in MB (0 = default 500)
+	NotifyLogDays int `json:"notify_log_days"` // Keep notification log entries for N days (0 = default 30)
 }
 
 // SettingsNotifications holds the webhook list within settings.
@@ -57,6 +66,11 @@ func defaultSettings() Settings {
 			Enabled:      false,
 			Destinations: []LogForwardDestination{},
 		},
+		Retention: RetentionSettings{
+			SnapshotDays:  90,
+			MaxDBSizeMB:   500,
+			NotifyLogDays: 30,
+		},
 	}
 }
 
@@ -72,6 +86,7 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/disks/{serial}", s.handleGetDisk)
 	r.Get("/api/v1/history/system", s.handleSystemHistory)
 	r.Get("/api/v1/notifications/log", s.handleNotificationLog)
+	r.Get("/api/v1/db/stats", s.handleDBStats)
 
 	// Pages
 	r.Get("/settings", s.handleSettingsPage)
@@ -103,6 +118,16 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
+	}
+	// Apply retention defaults for settings that predate this field.
+	if settings.Retention.SnapshotDays == 0 {
+		settings.Retention.SnapshotDays = 90
+	}
+	if settings.Retention.MaxDBSizeMB == 0 {
+		settings.Retention.MaxDBSizeMB = 500
+	}
+	if settings.Retention.NotifyLogDays == 0 {
+		settings.Retention.NotifyLogDays = 30
 	}
 
 	writeJSON(w, http.StatusOK, settings)
@@ -148,6 +173,16 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
 	}
+	// Retention defaults and bounds
+	if settings.Retention.SnapshotDays < 7 {
+		settings.Retention.SnapshotDays = 90
+	}
+	if settings.Retention.MaxDBSizeMB < 50 {
+		settings.Retention.MaxDBSizeMB = 500
+	}
+	if settings.Retention.NotifyLogDays < 1 {
+		settings.Retention.NotifyLogDays = 30
+	}
 
 	// Persist
 	data, err := json.Marshal(settings)
@@ -160,14 +195,31 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dynamically update the scheduler interval if it changed.
+	// Dynamically update the scheduler if changed.
 	if s.scheduler != nil {
 		if d, err := time.ParseDuration(settings.ScanInterval); err == nil {
 			s.scheduler.UpdateInterval(d)
 		}
+		// Update retention config
+		s.scheduler.UpdateRetention(scheduler.RetentionConfig{
+			SnapshotDays:  settings.Retention.SnapshotDays,
+			MaxDBSizeMB:   settings.Retention.MaxDBSizeMB,
+			NotifyLogDays: settings.Retention.NotifyLogDays,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, settings)
+}
+
+// handleDBStats returns database size and row count statistics.
+// GET /api/v1/db/stats
+func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.store.GetDBStats()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
 }
 
 // handleTestWebhook sends a test notification through a single webhook config.
@@ -664,7 +716,34 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 4. Notification History -->
+  <!-- 4. Data Lifecycle -->
+  <div class="card" id="card-retention">
+    <div class="card-title">Data Lifecycle</div>
+    <div class="card-desc">Control how long diagnostic data is stored. Older data is automatically pruned after each scan.</div>
+    <div class="form-row">
+      <div>
+        <label for="ret-snapshot-days">Snapshot retention (days)</label>
+        <input type="number" id="ret-snapshot-days" min="7" max="365" value="90" style="text-align:center">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Snapshots, SMART history, and system metrics older than this are deleted.</p>
+      </div>
+      <div>
+        <label for="ret-notify-days">Notification log (days)</label>
+        <input type="number" id="ret-notify-days" min="1" max="365" value="30" style="text-align:center">
+      </div>
+    </div>
+    <div class="form-row" style="margin-top:12px">
+      <div>
+        <label for="ret-max-db">Max database size (MB)</label>
+        <input type="number" id="ret-max-db" min="50" max="10000" value="500" style="text-align:center">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Hard cap. Oldest data is aggressively deleted if exceeded.</p>
+      </div>
+      <div>
+        <div id="db-stats" style="font-size:12px;color:var(--text2);line-height:1.8;padding-top:20px">Loading database stats...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Notification History -->
   <div class="card" id="card-history">
     <div class="card-title">Notification History</div>
     <div class="card-desc">Recent webhook delivery attempts. <span class="log-refresh">Auto-refreshes every 30s.</span></div>
@@ -856,6 +935,11 @@ function loadSettings() {
       /* Webhooks */
       webhooks = (data.notifications && data.notifications.webhooks) ? data.notifications.webhooks : [];
       renderWebhooks();
+      /* Retention */
+      var ret = data.retention || {};
+      document.getElementById("ret-snapshot-days").value = ret.snapshot_days || 90;
+      document.getElementById("ret-notify-days").value = ret.notify_log_days || 30;
+      document.getElementById("ret-max-db").value = ret.max_db_size_mb || 500;
     })
     .catch(function(e) { showToast("Failed to load settings: " + e, "error"); });
 }
@@ -866,7 +950,12 @@ function buildSettingsPayload() {
     scan_interval: getScanInterval(),
     theme: getSelectedTheme(),
     notifications: { webhooks: webhooks },
-    log_push: { enabled: false, destinations: [] }
+    log_push: { enabled: false, destinations: [] },
+    retention: {
+      snapshot_days: parseInt(document.getElementById("ret-snapshot-days").value, 10) || 90,
+      max_db_size_mb: parseInt(document.getElementById("ret-max-db").value, 10) || 500,
+      notify_log_days: parseInt(document.getElementById("ret-notify-days").value, 10) || 30
+    }
   };
 }
 
@@ -1088,9 +1177,33 @@ function applyTheme(theme) {
   } catch(e) {}
 })();
 
+/* ---------- DB Stats ---------- */
+function loadDBStats() {
+  fetch("/api/v1/db/stats")
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var el = document.getElementById("db-stats");
+      var lines = [];
+      lines.push("<strong>" + d.file_size_mb.toFixed(1) + " MB</strong> database size");
+      lines.push(d.snapshot_count + " snapshots stored");
+      lines.push(d.smart_history_rows + " SMART history rows");
+      lines.push(d.system_history_rows + " system history rows");
+      if (d.oldest_snapshot) {
+        var oldest = d.oldest_snapshot.substring(0, 10);
+        var newest = d.newest_snapshot.substring(0, 10);
+        lines.push("Range: " + oldest + " → " + newest);
+      }
+      el.innerHTML = lines.join("<br>");
+    })
+    .catch(function() {
+      document.getElementById("db-stats").textContent = "Failed to load stats";
+    });
+}
+
 /* ---------- Init ---------- */
 loadSettings();
 loadNotificationLog();
+loadDBStats();
 setInterval(loadNotificationLog, 30000);
 </script>
 </body>
