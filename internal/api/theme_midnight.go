@@ -335,11 +335,17 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     }
     h += '</div>';
 
-    // Two-column layout
-    h += '<div class="two-col fade-in">';
+    // Two-column layout — sections auto-distributed by height
+    h += '<div class="two-col fade-in" id="two-col">';
+    h += '<div class="col-left" id="col-left"></div>';
+    h += '<div class="col-right" id="col-right"></div>';
+    h += '</div>';
 
-    // ======= Left column: Findings =======
-    h += '<div class="col-left">';
+    // Hidden staging area for sections — JS will measure and distribute
+    h += '<div id="section-staging" style="position:absolute;visibility:hidden;width:50%;left:-9999px">';
+
+    // ======= Section: Findings =======
+    h += '<div class="section-block" data-section="findings">';
     var findings = sn ? (sn.findings || []) : [];
     h += '<div class="section-title">Findings (' + findings.length + ')</div>';
     if (findings.length === 0) {
@@ -380,10 +386,10 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       }
       h += '</div>';
     }
-    h += '</div>';
+    h += '</div>'; // end section-block findings
 
-    // ======= Right column: System Details =======
-    h += '<div class="col-right">';
+    // ======= Section: Disk Space =======
+    h += '<div class="section-block" data-section="disk-space">';
 
     // Disk Space
     var disks = sn ? (sn.disks || []) : [];
@@ -406,7 +412,10 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '</div>';
     }
 
-    // SMART Health
+    h += '</div>'; // end section-block disk-space
+
+    // ======= Section: SMART Health =======
+    h += '<div class="section-block" data-section="smart">';
     var smart = sn ? (sn.smart || []) : [];
     if (smart.length > 0) {
       h += '<div>';
@@ -439,7 +448,10 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '</div>';
     }
 
-    // Docker Containers
+    h += '</div>'; // end section-block smart
+
+    // ======= Section: Docker =======
+    h += '<div class="section-block" data-section="docker">';
     var docker = sn ? sn.docker : null;
     if (docker && docker.available && docker.containers && docker.containers.length > 0) {
       var containers = docker.containers;
@@ -465,7 +477,10 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '</div>';
     }
 
-    // ZFS Pools
+    h += '</div>'; // end section-block docker
+
+    // ======= Section: ZFS Pools =======
+    h += '<div class="section-block" data-section="zfs">';
     var zfs = sn ? sn.zfs : null;
     if (zfs && zfs.available && zfs.pools && zfs.pools.length > 0) {
       h += '<div>';
@@ -510,8 +525,8 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '</div>';
     }
 
-    h += '</div>'; // end col-right
-    h += '</div>'; // end two-col
+    h += '</div>'; // end section-block zfs
+    h += '</div>'; // end section-staging
 
     // Footer
     h += '<div style="text-align:center;padding:' + 'calc(var(--sp)*4) 0;color:var(--text-quaternary);font-size:12px" class="fade-in">';
@@ -519,6 +534,9 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     h += '</div>';
 
     document.getElementById("app").innerHTML = h;
+
+    // Auto-distribute sections across two columns for balanced height
+    distributeSections();
 
     // Render sparklines after DOM is updated
     renderSparklines();
@@ -556,6 +574,37 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         }
       })
       .catch(function() {});
+  }
+
+  function distributeSections() {
+    var staging = document.getElementById("section-staging");
+    var colL = document.getElementById("col-left");
+    var colR = document.getElementById("col-right");
+    if (!staging || !colL || !colR) return;
+
+    var blocks = staging.querySelectorAll(".section-block");
+    if (blocks.length === 0) return;
+
+    // Measure heights while in staging (which has width:50% to simulate column width)
+    var items = [];
+    for (var i = 0; i < blocks.length; i++) {
+      items.push({ el: blocks[i], h: blocks[i].offsetHeight });
+    }
+
+    // Greedy bin-packing: assign each section to the shorter column
+    var leftH = 0, rightH = 0;
+    for (var j = 0; j < items.length; j++) {
+      if (leftH <= rightH) {
+        colL.appendChild(items[j].el);
+        leftH += items[j].h;
+      } else {
+        colR.appendChild(items[j].el);
+        rightH += items[j].h;
+      }
+    }
+
+    // Remove staging div
+    staging.parentNode.removeChild(staging);
   }
 
   window._toggleFinding = function(el) {

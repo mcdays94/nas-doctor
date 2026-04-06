@@ -1183,10 +1183,15 @@ td.mono {
     html += "</div>";
 
     /* ---- Two-Column Grid ---- */
-    html += "<div class=\"two-col\">";
+    html += "<div class=\"two-col\" id=\"two-col\">";
+    html += "<div class=\"col-left\" id=\"col-left\"></div>";
+    html += "<div class=\"col-right\" id=\"col-right\"></div>";
+    html += "</div>";
 
-    /* ==== LEFT COLUMN: Findings ==== */
-    html += "<div class=\"col-left\">";
+    html += "<div id=\"section-staging\" style=\"position:absolute;visibility:hidden;width:50%;left:-9999px\">";
+
+    /* ==== Section: Findings ==== */
+    html += "<div class=\"section-block\" data-section=\"findings\">";
     html += "<div class=\"section\" style=\"margin-top:0\">";
     html += "<div class=\"section-title\">Findings</div>";
     if (snapshot && snapshot.findings && snapshot.findings.length > 0) {
@@ -1254,12 +1259,10 @@ td.mono {
       html += "<div class=\"card-static\"><div class=\"empty-state\">No findings to display. Run a scan to check your system.</div></div>";
     }
     html += "</div>"; /* .section */
-    html += "</div>"; /* .col-left */
+    html += "</div>"; /* section-block findings */
 
-    /* ==== RIGHT COLUMN: System Details ==== */
-    html += "<div class=\"col-right\">";
-
-    /* ---- Disk Space ---- */
+    /* ==== Section: Disk Space ==== */
+    html += "<div class=\"section-block\" data-section=\"disk-space\">";
     html += "<div class=\"section\" style=\"margin-top:0\">";
     html += "<div class=\"section-title\">Disk Space</div>";
     if (snapshot && snapshot.disks && snapshot.disks.length > 0) {
@@ -1284,9 +1287,11 @@ td.mono {
     } else {
       html += "<div class=\"card-static\"><div class=\"empty-state\">No disk data available.</div></div>";
     }
-    html += "</div>";
+    html += "</div>"; /* section */
+    html += "</div>"; /* section-block disk-space */
 
-    /* ---- SMART Health ---- */
+    /* ==== Section: SMART Health ==== */
+    html += "<div class=\"section-block\" data-section=\"smart\">";
     html += "<div class=\"section\" style=\"margin-top:0\">";
     html += "<div class=\"section-title\">SMART Health</div>";
     if (snapshot && snapshot.smart && snapshot.smart.length > 0) {
@@ -1317,9 +1322,11 @@ td.mono {
     } else {
       html += "<div class=\"card-static\"><div class=\"empty-state\">No SMART data available.</div></div>";
     }
-    html += "</div>";
+    html += "</div>"; /* section */
+    html += "</div>"; /* section-block smart */
 
-    /* ---- Docker Containers ---- */
+    /* ==== Section: Docker ==== */
+    html += "<div class=\"section-block\" data-section=\"docker\">";
     html += "<div class=\"section\" style=\"margin-top:0\">";
     html += "<div class=\"section-title\">Docker</div>";
     if (snapshot && snapshot.docker && snapshot.docker.available && snapshot.docker.containers && snapshot.docker.containers.length > 0) {
@@ -1344,9 +1351,11 @@ td.mono {
     } else {
       html += "<div class=\"card-static\"><div class=\"empty-state\">No Docker containers found.</div></div>";
     }
-    html += "</div>";
+    html += "</div>"; /* section */
+    html += "</div>"; /* section-block docker */
 
-    /* ---- ZFS Pools ---- */
+    /* ==== Section: ZFS Pools ==== */
+    html += "<div class=\"section-block\" data-section=\"zfs\">";
     if (snapshot && snapshot.zfs && snapshot.zfs.available && snapshot.zfs.pools && snapshot.zfs.pools.length > 0) {
       html += "<div class=\"section\" style=\"margin-top:0\">";
       html += "<div class=\"section-title\">ZFS Pools</div>";
@@ -1386,8 +1395,8 @@ td.mono {
       html += "</div>";
     }
 
-    html += "</div>"; /* .col-right */
-    html += "</div>"; /* .two-col */
+    html += "</div>"; /* section-block zfs */
+    html += "</div>"; /* section-staging */
 
     /* ---- Footer ---- */
     html += "<div class=\"section\">";
@@ -1451,6 +1460,7 @@ td.mono {
       var app = document.getElementById("app");
       if (app) {
         app.innerHTML = renderDashboard(status, snapshot);
+        _distributeSections();
         _renderSparklines(snapshot);
         postRender(snapshot);
       }
@@ -1464,6 +1474,30 @@ td.mono {
         }
       }
     });
+  }
+
+  function _distributeSections() {
+    var staging = document.getElementById("section-staging");
+    var colL = document.getElementById("col-left");
+    var colR = document.getElementById("col-right");
+    if (!staging || !colL || !colR) return;
+    var blocks = staging.querySelectorAll(".section-block");
+    if (blocks.length === 0) return;
+    var items = [];
+    for (var i = 0; i < blocks.length; i++) {
+      items.push({ el: blocks[i], h: blocks[i].offsetHeight });
+    }
+    var leftH = 0, rightH = 0;
+    for (var j = 0; j < items.length; j++) {
+      if (leftH <= rightH) {
+        colL.appendChild(items[j].el);
+        leftH += items[j].h;
+      } else {
+        colR.appendChild(items[j].el);
+        rightH += items[j].h;
+      }
+    }
+    staging.parentNode.removeChild(staging);
   }
 
   function _renderSparklines(snapshot) {
