@@ -96,8 +96,22 @@ func (s *Server) Router() http.Handler {
 	})
 
 	// Icons
-	r.Get("/icon.png", func(w http.ResponseWriter, r *http.Request) { serveIcon(w, "default") })
-	r.Get("/favicon.png", func(w http.ResponseWriter, r *http.Request) { serveIcon(w, "default") })
+	r.Get("/icon.png", func(w http.ResponseWriter, r *http.Request) {
+		settings := s.getSettings()
+		icon := settings.Icon
+		if icon == "" {
+			icon = "icon3"
+		}
+		serveIcon(w, icon)
+	})
+	r.Get("/favicon.png", func(w http.ResponseWriter, r *http.Request) {
+		settings := s.getSettings()
+		icon := settings.Icon
+		if icon == "" {
+			icon = "icon3"
+		}
+		serveIcon(w, icon)
+	})
 	r.Get("/icons/{name}.png", func(w http.ResponseWriter, r *http.Request) {
 		serveIcon(w, chi.URLParam(r, "name"))
 	})

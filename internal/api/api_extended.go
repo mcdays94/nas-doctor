@@ -24,6 +24,7 @@ import (
 type Settings struct {
 	ScanInterval  string                  `json:"scan_interval"`
 	Theme         string                  `json:"theme"`
+	Icon          string                  `json:"icon"`
 	Notifications SettingsNotifications   `json:"notifications"`
 	LogPush       SettingsLogForward      `json:"log_push"`
 	Retention     RetentionSettings       `json:"retention"`
@@ -87,6 +88,7 @@ func defaultSettings() Settings {
 	return Settings{
 		ScanInterval: "6h",
 		Theme:        ThemeMidnight,
+		Icon:         "icon3",
 		Notifications: SettingsNotifications{
 			Webhooks: []internal.WebhookConfig{},
 		},
@@ -860,7 +862,24 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
         <span class="theme-name">Ember</span>
       </div>
     </div>
-    <button class="btn btn-primary" onclick="saveSettings()">Save General Settings</button>
+    <div style="margin-top:20px">
+      <label>App Icon</label>
+      <div id="icon-options" style="display:flex;gap:12px;margin-top:8px">
+        <div class="theme-option" data-icon="icon1" onclick="selectIcon(this)" style="padding:8px 12px">
+          <input type="radio" name="icon" value="icon1">
+          <img src="/icons/icon1.png" alt="Icon 1" style="width:36px;height:36px;border-radius:6px">
+        </div>
+        <div class="theme-option" data-icon="icon2" onclick="selectIcon(this)" style="padding:8px 12px">
+          <input type="radio" name="icon" value="icon2">
+          <img src="/icons/icon2.png" alt="Icon 2" style="width:36px;height:36px;border-radius:6px">
+        </div>
+        <div class="theme-option active" data-icon="icon3" onclick="selectIcon(this)" style="padding:8px 12px">
+          <input type="radio" name="icon" value="icon3">
+          <img src="/icons/icon3.png" alt="Icon 3" style="width:36px;height:36px;border-radius:6px">
+        </div>
+      </div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:16px" onclick="saveSettings()">Save General Settings</button>
   </div>
 
   <!-- 2. Notifications — Webhooks -->
@@ -1087,13 +1106,28 @@ function showToast(msg, type) {
 
 /* ---------- Theme selection ---------- */
 function selectTheme(el) {
-  var opts = document.querySelectorAll(".theme-option");
+  var opts = document.getElementById("theme-options").querySelectorAll(".theme-option");
   for (var i = 0; i < opts.length; i++) {
     opts[i].classList.remove("active");
     opts[i].querySelector("input").checked = false;
   }
   el.classList.add("active");
   el.querySelector("input").checked = true;
+}
+
+function selectIcon(el) {
+  var opts = document.getElementById("icon-options").querySelectorAll(".theme-option");
+  for (var i = 0; i < opts.length; i++) {
+    opts[i].classList.remove("active");
+    opts[i].querySelector("input").checked = false;
+  }
+  el.classList.add("active");
+  el.querySelector("input").checked = true;
+}
+
+function getSelectedIcon() {
+  var checked = document.querySelector('input[name="icon"]:checked');
+  return checked ? checked.value : "icon3";
 }
 
 function getSelectedTheme() {
@@ -1229,11 +1263,19 @@ function loadSettings() {
         updateIntervalPreview();
       }
       /* Theme */
-      var opts = document.querySelectorAll(".theme-option");
-      for (var j = 0; j < opts.length; j++) {
-        var isActive = opts[j].getAttribute("data-theme") === data.theme;
-        opts[j].classList.toggle("active", isActive);
-        opts[j].querySelector("input").checked = isActive;
+      var themeOpts = document.getElementById("theme-options").querySelectorAll(".theme-option");
+      for (var j = 0; j < themeOpts.length; j++) {
+        var isActive = themeOpts[j].getAttribute("data-theme") === data.theme;
+        themeOpts[j].classList.toggle("active", isActive);
+        themeOpts[j].querySelector("input").checked = isActive;
+      }
+      /* Icon */
+      var iconVal = data.icon || "icon3";
+      var iconOpts = document.getElementById("icon-options").querySelectorAll(".theme-option");
+      for (var k = 0; k < iconOpts.length; k++) {
+        var isIconActive = iconOpts[k].getAttribute("data-icon") === iconVal;
+        iconOpts[k].classList.toggle("active", isIconActive);
+        iconOpts[k].querySelector("input").checked = isIconActive;
       }
       /* Apply theme to settings page */
       applyTheme(data.theme);
@@ -1273,6 +1315,7 @@ function buildSettingsPayload() {
   return {
     scan_interval: getScanInterval(),
     theme: getSelectedTheme(),
+    icon: getSelectedIcon(),
     notifications: { webhooks: webhooks },
     log_push: { enabled: false, destinations: [] },
     retention: {
