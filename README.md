@@ -10,6 +10,8 @@
   Beautiful dashboards, Prometheus metrics, webhook alerts — no cloud account required.
 </p>
 
+> **Early Access** — NAS Doctor is under active development. Expect bugs, missing features, and breaking changes. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
+
 ---
 
 ![NAS Doctor Dashboard](screenshots/midnight-top.jpg)

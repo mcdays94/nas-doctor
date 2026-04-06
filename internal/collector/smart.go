@@ -14,16 +14,33 @@ import (
 func collectSMART() ([]internal.SMARTInfo, error) {
 	devices := discoverDrives()
 	if len(devices) == 0 {
+		// Fallback: try smartctl --scan
+		out, err := execCmd("smartctl", "--scan")
+		if err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				fields := strings.Fields(line)
+				if len(fields) >= 1 && strings.HasPrefix(fields[0], "/dev/") {
+					devices = append(devices, fields[0])
+				}
+			}
+		}
+	}
+	if len(devices) == 0 {
 		return nil, fmt.Errorf("no drives discovered")
 	}
 
 	var results []internal.SMARTInfo
+	var lastErr error
 	for _, dev := range devices {
 		info, err := readSMARTDevice(dev)
 		if err != nil {
+			lastErr = err
 			continue // skip devices that fail (USB, virtual, etc.)
 		}
 		results = append(results, info)
+	}
+	if len(results) == 0 && lastErr != nil {
+		return nil, fmt.Errorf("all %d drives failed SMART read, last error: %w", len(devices), lastErr)
 	}
 	return results, nil
 }
@@ -43,19 +60,22 @@ func discoverDrives() []string {
 }
 
 // readSMARTDevice uses `smartctl --json` for reliable parsing.
+// Note: smartctl returns non-zero exit codes even on success (bit-masked status).
+// We check the output content instead of relying on the exit code.
 func readSMARTDevice(device string) (internal.SMARTInfo, error) {
 	info := internal.SMARTInfo{Device: device}
 
 	// Try JSON output first (smartctl 7.0+)
-	out, err := execCmd("smartctl", "--json=c", "-a", device)
-	if err == nil && strings.Contains(out, "json_format_version") {
+	// Ignore exit code — smartctl uses bitmask exit codes even for successful reads
+	out, _ := execCmd("smartctl", "--json=c", "-a", device)
+	if strings.Contains(out, "json_format_version") {
 		return parseSMARTJSON(device, out)
 	}
 
-	// Fallback to text parsing
-	out, err = execCmd("smartctl", "-a", device)
-	if err != nil {
-		return info, err
+	// Fallback to text parsing (also ignore exit code)
+	out, _ = execCmd("smartctl", "-a", device)
+	if out == "" {
+		return info, fmt.Errorf("smartctl returned no output for %s", device)
 	}
 	return parseSMARTText(device, out), nil
 }
