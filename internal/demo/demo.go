@@ -203,13 +203,14 @@ func demoParity() *internal.ParityInfo {
 }
 
 func demoUpdate(platform, version string) *internal.UpdateInfo {
+	// Simulate the installed version being slightly behind stable
 	return &internal.UpdateInfo{
 		Platform:         platform,
-		InstalledVersion: version,
-		LatestVersion:    "7.2.0",
+		InstalledVersion: "7.0.0",
+		LatestVersion:    "7.0.1",
 		UpdateAvailable:  true,
-		ReleaseName:      "Unraid 7.2.0",
-		ReleaseURL:       "https://unraid.net/blog/7-2-0",
+		ReleaseName:      "Unraid 7.0.1",
+		ReleaseURL:       "https://docs.unraid.net/unraid-os/release-notes/7.0.1/",
 		CheckedAt:        time.Now().Format(time.RFC3339),
 	}
 }

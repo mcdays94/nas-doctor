@@ -152,10 +152,16 @@ func detectPlatform(hp internal.HostPaths) (platform, version string) {
 	if _, err := os.Stat(unraidVer); err == nil {
 		platform = "unraid"
 	}
-	// Also check /etc/unraid-version
+	// Also check /etc/unraid-version (format: version="7.1.4")
 	if data, err := os.ReadFile("/etc/unraid-version"); err == nil {
 		platform = "unraid"
-		version = strings.TrimSpace(string(data))
+		raw := strings.TrimSpace(string(data))
+		// Parse version="X.Y.Z" format
+		if strings.Contains(raw, "=") {
+			parts := strings.SplitN(raw, "=", 2)
+			raw = parts[len(parts)-1]
+		}
+		version = strings.Trim(raw, "\"'")
 	}
 	if platform != "" {
 		return

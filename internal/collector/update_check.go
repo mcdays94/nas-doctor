@@ -1,11 +1,13 @@
 // OS update checker — compares installed version against latest available.
-// Fetches latest version from GitHub releases, caches for 24 hours.
+// Uses platform-specific sources: Unraid PLG endpoint, GitHub API for others.
+// Caches results for 24 hours.
 package collector
 
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,12 +15,6 @@ import (
 
 	"github.com/mcdays94/nas-doctor/internal"
 )
-
-// Platform-to-GitHub-repo mapping for version checks.
-var platformRepos = map[string]string{
-	"unraid":  "unraid/webgui",      // Unraid WebGUI releases track OS versions
-	"truenas": "truenas/middleware", // TrueNAS SCALE middleware releases
-}
 
 // Cached latest version info per platform (refreshed every 24h).
 var (
@@ -39,22 +35,15 @@ const versionCacheTTL = 24 * time.Hour
 func collectUpdateInfo(platform, installedVersion string) *internal.UpdateInfo {
 	info := &internal.UpdateInfo{
 		Platform:         platform,
-		InstalledVersion: installedVersion,
+		InstalledVersion: normalizeVersion(installedVersion),
 	}
 
-	if installedVersion == "" {
+	if info.InstalledVersion == "" {
 		info.Error = "installed version not detected"
 		return info
 	}
 
-	repo, ok := platformRepos[platform]
-	if !ok {
-		// Platform not supported for update checks
-		info.Error = "update checks not supported for " + platform
-		return info
-	}
-
-	latest, err := getLatestVersion(platform, repo)
+	latest, err := getLatestVersion(platform)
 	if err != nil {
 		info.Error = "failed to check: " + err.Error()
 		return info
@@ -65,16 +54,15 @@ func collectUpdateInfo(platform, installedVersion string) *internal.UpdateInfo {
 	info.ReleaseURL = latest.url
 	info.CheckedAt = latest.checkedAt.Format(time.RFC3339)
 
-	// Compare versions
-	if latest.version != "" && installedVersion != "" {
-		info.UpdateAvailable = isNewerVersion(latest.version, installedVersion)
+	if latest.version != "" && info.InstalledVersion != "" {
+		info.UpdateAvailable = isNewerVersion(latest.version, info.InstalledVersion)
 	}
 
 	return info
 }
 
-// getLatestVersion returns the latest version from cache or GitHub.
-func getLatestVersion(platform, repo string) (*cachedVersion, error) {
+// getLatestVersion returns the latest version from cache or fresh fetch.
+func getLatestVersion(platform string) (*cachedVersion, error) {
 	versionCacheMu.RLock()
 	cached, ok := versionCache[platform]
 	versionCacheMu.RUnlock()
@@ -83,12 +71,21 @@ func getLatestVersion(platform, repo string) (*cachedVersion, error) {
 		return cached, nil
 	}
 
-	// Fetch from GitHub releases API
-	latest, err := fetchGitHubLatestRelease(repo)
+	var latest *cachedVersion
+	var err error
+
+	switch platform {
+	case "unraid":
+		latest, err = fetchUnraidLatest()
+	case "truenas":
+		latest, err = fetchGitHubLatestRelease("truenas/middleware")
+	default:
+		return nil, fmt.Errorf("update checks not supported for %s", platform)
+	}
+
 	if err != nil {
-		// If we have a stale cache, return it
 		if ok {
-			return cached, nil
+			return cached, nil // return stale cache on failure
 		}
 		return nil, err
 	}
@@ -100,14 +97,58 @@ func getLatestVersion(platform, repo string) (*cachedVersion, error) {
 	return latest, nil
 }
 
-// githubRelease represents a GitHub API release response (minimal fields).
+// ── Unraid: fetch from official PLG endpoint ────────────────────────
+
+// Unraid publishes its latest version in the stable PLG file at:
+// https://stable.dl.unraid.net/unRAIDServer.plg
+// The version is in an XML entity: <!ENTITY version "7.0.1">
+var unraidVersionRegex = regexp.MustCompile(`<!ENTITY\s+version\s+"([^"]+)"`)
+
+func fetchUnraidLatest() (*cachedVersion, error) {
+	url := "https://stable.dl.unraid.net/unRAIDServer.plg"
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetch Unraid PLG: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Unraid PLG returned %d", resp.StatusCode)
+	}
+
+	// Read first 2KB — the version entity is near the top
+	buf := make([]byte, 2048)
+	n, _ := resp.Body.Read(buf)
+	body := string(buf[:n])
+
+	matches := unraidVersionRegex.FindStringSubmatch(body)
+	if len(matches) < 2 {
+		return nil, fmt.Errorf("could not parse version from Unraid PLG")
+	}
+
+	version := matches[1]
+
+	// Also extract the release notes URL from CHANGES section
+	releaseURL := fmt.Sprintf("https://docs.unraid.net/unraid-os/release-notes/%s/", version)
+
+	return &cachedVersion{
+		version:   version,
+		name:      "Unraid " + version,
+		url:       releaseURL,
+		checkedAt: time.Now(),
+	}, nil
+}
+
+// ── GitHub: for TrueNAS and other platforms ─────────────────────────
+
 type githubRelease struct {
 	TagName string `json:"tag_name"`
 	Name    string `json:"name"`
 	HTMLURL string `json:"html_url"`
 }
 
-// fetchGitHubLatestRelease fetches the latest release from GitHub API.
 func fetchGitHubLatestRelease(repo string) (*cachedVersion, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
 
@@ -134,26 +175,31 @@ func fetchGitHubLatestRelease(repo string) (*cachedVersion, error) {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	version := normalizeVersion(release.TagName)
-
 	return &cachedVersion{
-		version:   version,
+		version:   normalizeVersion(release.TagName),
 		name:      release.Name,
 		url:       release.HTMLURL,
 		checkedAt: time.Now(),
 	}, nil
 }
 
-// normalizeVersion strips common prefixes ("v", "V") and whitespace.
+// ── Version comparison utilities ────────────────────────────────────
+
+// normalizeVersion strips common prefixes ("v", "V"), quotes, and key= prefixes.
 func normalizeVersion(v string) string {
 	v = strings.TrimSpace(v)
+	// Handle Unraid format: version="7.1.4"
+	if strings.Contains(v, "=") {
+		parts := strings.SplitN(v, "=", 2)
+		v = parts[len(parts)-1]
+	}
+	v = strings.Trim(v, "\"'")
 	v = strings.TrimPrefix(v, "v")
 	v = strings.TrimPrefix(v, "V")
-	return v
+	return strings.TrimSpace(v)
 }
 
 // isNewerVersion returns true if latest is newer than installed.
-// Uses simple semantic versioning comparison (major.minor.patch).
 func isNewerVersion(latest, installed string) bool {
 	latestParts := parseVersion(latest)
 	installedParts := parseVersion(installed)
@@ -166,14 +212,12 @@ func isNewerVersion(latest, installed string) bool {
 			return false
 		}
 	}
-	// If all compared parts are equal, newer if latest has more parts
 	return len(latestParts) > len(installedParts)
 }
 
 // parseVersion splits a version string into numeric parts.
 // "7.1.4" -> [7, 1, 4], "6.12.10-Unraid" -> [6, 12, 10]
 func parseVersion(v string) []int {
-	// Strip anything after a dash or plus (pre-release tags)
 	if idx := strings.IndexAny(v, "-+"); idx >= 0 {
 		v = v[:idx]
 	}

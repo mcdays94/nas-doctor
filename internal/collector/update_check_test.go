@@ -67,6 +67,9 @@ func TestNormalizeVersion(t *testing.T) {
 		{"V3.0.0", "3.0.0"},
 		{"  7.1.4  ", "7.1.4"},
 		{"7.1.4", "7.1.4"},
+		{`version="7.1.4"`, "7.1.4"},     // Unraid /etc/unraid-version format
+		{`version="6.12.10"`, "6.12.10"}, // Unraid 6.x format
+		{`VERSION_ID="24.10"`, "24.10"},  // os-release format
 	}
 	for _, tt := range tests {
 		got := normalizeVersion(tt.input)
