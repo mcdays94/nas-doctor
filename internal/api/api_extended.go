@@ -795,7 +795,7 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
   <!-- Header -->
   <div class="header">
     <div class="header-left">
-      <div class="logo"><img src="/icon.png" alt="">NAS Doctor</div>
+      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a>
       <span class="page-title">Settings</span>
     </div>
     <a href="/" class="back-link">&#8592; Dashboard</a>

@@ -27,14 +27,13 @@ LABEL org.opencontainers.image.title="NAS Doctor" \
 RUN apk add --no-cache \
     smartmontools \
     hdparm \
-    ethtool \
     iproute2 \
     docker-cli \
-    dmidecode \
     util-linux \
     procps \
     ca-certificates \
-    tzdata
+    tzdata \
+    && apk add --no-cache dmidecode ethtool 2>/dev/null || true
 
 # Create non-root user (though we need root for smartctl/dmesg)
 # Run as root for hardware access

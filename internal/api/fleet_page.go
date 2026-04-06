@@ -56,13 +56,13 @@ a.card-link{text-decoration:none;color:inherit;display:block}
 <body>
 <div class="container">
   <div class="header">
-    <div class="header-left">
+    <a href="/" class="header-left" style="text-decoration:none;color:inherit">
       <img src="/icon.png" alt="">
       <div>
         <div class="header-title">Fleet Overview</div>
         <div class="header-sub">Monitor all your NAS Doctor instances</div>
       </div>
-    </div>
+    </a>
     <div style="display:flex;gap:8px">
       <a href="/" class="back">&larr; Dashboard</a>
       <a href="/settings" class="back">Settings</a>

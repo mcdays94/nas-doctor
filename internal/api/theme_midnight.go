@@ -282,7 +282,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     // Header
     h += '<header class="header fade-in">';
     h += '<div class="header-left">';
-    h += '<div class="logo"><img src="/icon.png" alt="" style="width:24px;height:24px;border-radius:4px;vertical-align:middle;margin-right:8px;">NAS Doctor</div>';
+    h += '<a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="" style="width:24px;height:24px;border-radius:4px;vertical-align:middle;margin-right:8px;">NAS Doctor</a>';
     h += '<span class="hostname">' + esc(hostname) + '</span>';
     h += '</div>';
     h += '<div class="header-right">';
