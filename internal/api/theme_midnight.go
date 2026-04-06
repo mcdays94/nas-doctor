@@ -177,9 +177,11 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
   </div>
 </div>
 
+<script src="/js/charts.js"></script>
 <script>
 (function(){
   "use strict";
+  var cachedSnapshot = null;
 
   var REFRESH_MS = 30000;
   var refreshTimer = null;
@@ -256,6 +258,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
   function render() {
     var st = statusData;
     var sn = snapshotData;
+    cachedSnapshot = sn;
     var hostname = (st && st.hostname) ? st.hostname : (sn && sn.system ? sn.system.hostname : "Unknown");
     var health = (st && st.overall_health) ? st.overall_health : "healthy";
     var critCount = st ? (st.critical_count || 0) : 0;
@@ -305,9 +308,9 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       var mem = sys.mem_percent || 0;
       var io = sys.io_wait_percent || 0;
       var uptime = formatUptime(sys.uptime_seconds || (st ? st.uptime : null));
-      h += '<div class="stat-item"><span class="stat-item-label">CPU</span><span class="stat-item-value ' + classForPct(cpu) + '">' + cpu.toFixed(1) + '%</span></div>';
-      h += '<div class="stat-item"><span class="stat-item-label">Mem</span><span class="stat-item-value ' + classForPct(mem) + '">' + mem.toFixed(1) + '%</span></div>';
-      h += '<div class="stat-item"><span class="stat-item-label">I/O</span><span class="stat-item-value ' + classForPct(io > 20 ? 90 : io > 10 ? 75 : 0) + '">' + io.toFixed(1) + '%</span></div>';
+      h += '<div class="stat-item"><span class="stat-item-label">CPU</span><span class="stat-item-value ' + classForPct(cpu) + '">' + cpu.toFixed(1) + '%</span><canvas id="spark-cpu" width="48" height="20" style="margin-left:4px;vertical-align:middle"></canvas></div>';
+      h += '<div class="stat-item"><span class="stat-item-label">Mem</span><span class="stat-item-value ' + classForPct(mem) + '">' + mem.toFixed(1) + '%</span><canvas id="spark-mem" width="48" height="20" style="margin-left:4px;vertical-align:middle"></canvas></div>';
+      h += '<div class="stat-item"><span class="stat-item-label">I/O</span><span class="stat-item-value ' + classForPct(io > 20 ? 90 : io > 10 ? 75 : 0) + '">' + io.toFixed(1) + '%</span><canvas id="spark-io" width="48" height="20" style="margin-left:4px;vertical-align:middle"></canvas></div>';
       h += '<div class="stat-item"><span class="stat-item-label">Up</span><span class="stat-item-value" style="color:var(--text-primary)">' + esc(uptime) + '</span></div>';
     }
     h += '</div>';
@@ -389,7 +392,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '<div class="section-title">SMART Health</div>';
       h += '<div class="table-wrap">';
       h += '<table><thead><tr>';
-      h += '<th>Device</th><th>Model</th><th>Health</th><th>Temp</th><th>Reallocated</th><th>Pending</th><th>UDMA CRC</th><th>Power Hours</th>';
+      h += '<th>Device</th><th>Model</th><th>Health</th><th>Temp</th><th style="width:80px">Trend</th><th>Reallocated</th><th>Pending</th><th>UDMA CRC</th><th>Power Hours</th>';
       h += '</tr></thead><tbody>';
       for (var si = 0; si < smart.length; si++) {
         var s = smart[si];
@@ -404,6 +407,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         h += '<td>' + esc(s.model) + '</td>';
         h += '<td class="' + healthClass + '">' + healthText + '</td>';
         h += '<td class="' + tempClass + '">' + (s.temperature_c || 0) + '&deg;C</td>';
+        h += '<td><canvas id="spark-temp-' + si + '" width="70" height="24"></canvas></td>';
         h += '<td class="' + reallocClass + '">' + (s.reallocated_sectors || 0) + '</td>';
         h += '<td class="' + pendClass + '">' + (s.pending_sectors || 0) + '</td>';
         h += '<td class="' + crcClass + '">' + (s.udma_crc_errors || 0) + '</td>';
@@ -449,6 +453,43 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     h += '</div>';
 
     document.getElementById("app").innerHTML = h;
+
+    // Render sparklines after DOM is updated
+    renderSparklines();
+  }
+
+  function renderSparklines() {
+    fetch("/api/v1/sparklines")
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        // System sparklines
+        if (data.system && data.system.length >= 2 && window.NasChart) {
+          var cpuData = data.system.map(function(p) { return p.cpu_usage; });
+          var memData = data.system.map(function(p) { return p.mem_percent; });
+          var ioData = data.system.map(function(p) { return p.io_wait; });
+          try { NasChart.sparkline("spark-cpu", { data: cpuData, color: "#5e6ad2", width: 48, height: 20 }); } catch(e) {}
+          try { NasChart.sparkline("spark-mem", { data: memData, color: "#7170ff", width: 48, height: 20 }); } catch(e) {}
+          try { NasChart.sparkline("spark-io", { data: ioData, color: "#f59e0b", width: 48, height: 20 }); } catch(e) {}
+        }
+        // SMART temperature sparklines
+        if (data.disks && window.NasChart) {
+          var smart = cachedSnapshot ? (cachedSnapshot.smart || []) : [];
+          for (var i = 0; i < smart.length; i++) {
+            var serial = smart[i].serial || "";
+            var diskData = null;
+            for (var d = 0; d < data.disks.length; d++) {
+              if (data.disks[d].serial === serial) { diskData = data.disks[d]; break; }
+            }
+            if (diskData && diskData.temps && diskData.temps.length >= 2) {
+              var temps = diskData.temps.map(function(p) { return p.temp; });
+              var maxT = Math.max.apply(null, temps);
+              var color = maxT >= 55 ? "#ef4444" : maxT >= 45 ? "#f59e0b" : "#22c55e";
+              try { NasChart.sparkline("spark-temp-" + i, { data: temps, color: color, width: 70, height: 24 }); } catch(e) {}
+            }
+          }
+        }
+      })
+      .catch(function() {});
   }
 
   window._triggerScan = triggerScan;

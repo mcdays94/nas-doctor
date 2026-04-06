@@ -87,6 +87,7 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/history/system", s.handleSystemHistory)
 	r.Get("/api/v1/notifications/log", s.handleNotificationLog)
 	r.Get("/api/v1/db/stats", s.handleDBStats)
+	r.Get("/api/v1/sparklines", s.handleSparklines)
 
 	// Pages
 	r.Get("/settings", s.handleSettingsPage)
@@ -209,6 +210,29 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, settings)
+}
+
+// handleSparklines returns condensed history data for dashboard sparklines.
+// GET /api/v1/sparklines
+func (s *Server) handleSparklines(w http.ResponseWriter, r *http.Request) {
+	type sparklineResponse struct {
+		System []storage.SystemHistoryPoint `json:"system"`
+		Disks  []storage.DiskSparklines     `json:"disks"`
+	}
+
+	sysHistory, err := s.store.GetSystemSparkline(60)
+	if err != nil {
+		sysHistory = nil
+	}
+	diskHistory, err := s.store.GetAllDiskSparklines(60)
+	if err != nil {
+		diskHistory = nil
+	}
+
+	writeJSON(w, http.StatusOK, sparklineResponse{
+		System: sysHistory,
+		Disks:  diskHistory,
+	})
 }
 
 // handleDBStats returns database size and row count statistics.

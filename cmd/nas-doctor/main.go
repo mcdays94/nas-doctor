@@ -121,6 +121,30 @@ func main() {
 			histSnap.System.LoadAvg5 = demo.Jitter(1.87, 40)
 			for j := range histSnap.SMART {
 				histSnap.SMART[j].Temperature = int(demo.Jitter(float64(histSnap.SMART[j].Temperature), 15))
+				// Jitter SMART attributes to make trend charts interesting
+				if histSnap.SMART[j].UDMACRC > 0 {
+					// CRC errors accumulate over time — simulate gradual increase
+					histSnap.SMART[j].UDMACRC = int64(float64(histSnap.SMART[j].UDMACRC) * float64(30-i) / 30.0)
+				}
+				if histSnap.SMART[j].CommandTimeout > 5 {
+					histSnap.SMART[j].CommandTimeout = int64(demo.Jitter(float64(histSnap.SMART[j].CommandTimeout)*float64(30-i)/30.0, 25))
+					if histSnap.SMART[j].CommandTimeout < 0 {
+						histSnap.SMART[j].CommandTimeout = 0
+					}
+				}
+				if histSnap.SMART[j].Reallocated > 0 {
+					// Reallocated sectors grow over time
+					histSnap.SMART[j].Reallocated = int64(float64(histSnap.SMART[j].Reallocated) * float64(30-i) / 30.0)
+					if histSnap.SMART[j].Reallocated < 0 {
+						histSnap.SMART[j].Reallocated = 0
+					}
+				}
+				if histSnap.SMART[j].Pending > 0 {
+					histSnap.SMART[j].Pending = int64(demo.Jitter(float64(histSnap.SMART[j].Pending)*float64(30-i)/30.0, 30))
+					if histSnap.SMART[j].Pending < 0 {
+						histSnap.SMART[j].Pending = 0
+					}
+				}
 			}
 			histSnap.Findings = analyzer.Analyze(histSnap)
 			if err := store.SaveSnapshot(histSnap); err != nil {

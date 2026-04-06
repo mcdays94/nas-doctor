@@ -962,6 +962,7 @@ td.mono {
   </div>
 </div>
 
+<script src="/js/charts.js"></script>
 <script>
 (function() {
   "use strict";
@@ -1147,9 +1148,9 @@ td.mono {
     /* Inline stats */
     html += "<div class=\"top-bar-stats\">";
     if (sys) {
-      html += "<span class=\"top-bar-stat\"><span class=\"top-bar-stat-label\">CPU</span><span class=\"top-bar-stat-value\" data-counter=\"cpu\" data-target=\"" + (sys.cpu_usage_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</span></span>";
+      html += "<span class=\"top-bar-stat\"><span class=\"top-bar-stat-label\">CPU</span><span class=\"top-bar-stat-value\" data-counter=\"cpu\" data-target=\"" + (sys.cpu_usage_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</span><canvas id=\"spark-cpu\" width=\"44\" height=\"18\" style=\"margin-left:4px;vertical-align:middle\"></canvas></span>";
       html += "<span class=\"top-bar-mid-dot\">&middot;</span>";
-      html += "<span class=\"top-bar-stat\"><span class=\"top-bar-stat-label\">Mem</span><span class=\"top-bar-stat-value\" data-counter=\"mem\" data-target=\"" + (sys.mem_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</span></span>";
+      html += "<span class=\"top-bar-stat\"><span class=\"top-bar-stat-label\">Mem</span><span class=\"top-bar-stat-value\" data-counter=\"mem\" data-target=\"" + (sys.mem_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</span><canvas id=\"spark-mem\" width=\"44\" height=\"18\" style=\"margin-left:4px;vertical-align:middle\"></canvas></span>";
       html += "<span class=\"top-bar-mid-dot\">&middot;</span>";
       html += "<span class=\"top-bar-stat\"><span class=\"top-bar-stat-label\">I/O</span><span class=\"top-bar-stat-value\" data-counter=\"io\" data-target=\"" + (sys.io_wait_percent || 0).toFixed(1) + "\" data-suffix=\"%\">0%</span></span>";
       html += "<span class=\"top-bar-mid-dot\">&middot;</span>";
@@ -1292,7 +1293,7 @@ td.mono {
       html += "<div class=\"table-wrap\">";
       html += "<table>";
       html += "<thead><tr>";
-      html += "<th>Device</th><th>Health</th><th>Temp</th><th>Power-On</th><th>Realloc</th><th>Pending</th>";
+      html += "<th>Device</th><th>Health</th><th>Temp</th><th style=\"width:70px\">Trend</th><th>Power-On</th><th>Realloc</th><th>Pending</th>";
       html += "</tr></thead>";
       html += "<tbody>";
       for (var s = 0; s < snapshot.smart.length; s++) {
@@ -1300,10 +1301,11 @@ td.mono {
         var healthOk = sm.health_passed;
         var hrs = sm.power_on_hours;
         var hrsStr = hrs != null ? (hrs > 8760 ? (hrs / 8760).toFixed(1) + "y" : hrs + "h") : "-";
-        html += "<tr style=\"cursor:pointer\" title=\"" + esc(sm.model || sm.device) + "\">";
+        html += "<tr style=\"cursor:pointer\" onclick=\"window.location='/disk/" + encodeURIComponent(sm.serial || '') + "'\" title=\"" + esc(sm.model || sm.device) + "\">";
         html += "<td class=\"mono\">" + esc(sm.device) + "</td>";
         html += "<td><span class=\"status-dot " + (healthOk ? "s-green" : "s-red") + "\"></span>" + (healthOk ? "OK" : "<strong style=\"color:#FF6363\">FAIL</strong>") + "</td>";
         html += "<td class=\"mono\" style=\"" + tempColor(sm.temperature_c) + "\">" + (sm.temperature_c != null ? sm.temperature_c + "&deg;" : "-") + "</td>";
+        html += "<td><canvas id=\"spark-temp-" + s + "\" width=\"60\" height=\"20\"></canvas></td>";
         html += "<td class=\"mono\" style=\"" + powerColor(hrs) + "\">" + hrsStr + "</td>";
         html += "<td class=\"mono\">" + (sm.reallocated_sectors != null ? sm.reallocated_sectors : "-") + "</td>";
         html += "<td class=\"mono\">" + (sm.pending_sectors != null ? sm.pending_sectors : "-") + "</td>";
@@ -1409,6 +1411,7 @@ td.mono {
       var app = document.getElementById("app");
       if (app) {
         app.innerHTML = renderDashboard(status, snapshot);
+        _renderSparklines(snapshot);
         postRender(snapshot);
       }
     }).catch(function(err) {
@@ -1421,6 +1424,34 @@ td.mono {
         }
       }
     });
+  }
+
+  function _renderSparklines(snapshot) {
+    fetch("/api/v1/sparklines")
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.system && data.system.length >= 2 && window.NasChart) {
+          var cpuD = data.system.map(function(p) { return p.cpu_usage; });
+          var memD = data.system.map(function(p) { return p.mem_percent; });
+          try { NasChart.sparkline("spark-cpu", { data: cpuD, color: "#55b3ff", width: 44, height: 18 }); } catch(e) {}
+          try { NasChart.sparkline("spark-mem", { data: memD, color: "#5fc992", width: 44, height: 18 }); } catch(e) {}
+        }
+        if (data.disks && snapshot && snapshot.smart && window.NasChart) {
+          for (var i = 0; i < snapshot.smart.length; i++) {
+            var serial = snapshot.smart[i].serial || "";
+            var dd = null;
+            for (var d = 0; d < data.disks.length; d++) {
+              if (data.disks[d].serial === serial) { dd = data.disks[d]; break; }
+            }
+            if (dd && dd.temps && dd.temps.length >= 2) {
+              var temps = dd.temps.map(function(p) { return p.temp; });
+              var mx = Math.max.apply(null, temps);
+              var clr = mx >= 55 ? "#FF6363" : mx >= 45 ? "#FACC15" : "#5fc992";
+              try { NasChart.sparkline("spark-temp-" + i, { data: temps, color: clr, width: 60, height: 20 }); } catch(e) {}
+            }
+          }
+        }
+      }).catch(function() {});
   }
 
   window._triggerScan = function() {

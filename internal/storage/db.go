@@ -657,6 +657,91 @@ func (d *DB) PruneToSizeMB(targetMB float64) (int, error) {
 	return totalPruned, nil
 }
 
+// ---------- Bulk sparkline data ----------
+
+// SparklinePoint is a compact data point for sparkline rendering.
+type SparklinePoint struct {
+	Timestamp   time.Time `json:"t"`
+	Temperature int       `json:"temp"`
+}
+
+// DiskSparklines holds condensed history for a single drive.
+type DiskSparklines struct {
+	Serial      string           `json:"serial"`
+	Model       string           `json:"model"`
+	Device      string           `json:"device"`
+	Temps       []SparklinePoint `json:"temps"`
+	Reallocated []int64          `json:"reallocated"`
+	Pending     []int64          `json:"pending"`
+	CRC         []int64          `json:"crc"`
+}
+
+// GetAllDiskSparklines returns condensed SMART history for all drives (last N points each).
+func (d *DB) GetAllDiskSparklines(pointsPerDisk int) ([]DiskSparklines, error) {
+	// Get unique serials
+	serials, err := d.db.Query("SELECT DISTINCT serial, model, device FROM smart_history GROUP BY serial ORDER BY device")
+	if err != nil {
+		return nil, err
+	}
+	defer serials.Close()
+
+	var results []DiskSparklines
+	for serials.Next() {
+		var ds DiskSparklines
+		if err := serials.Scan(&ds.Serial, &ds.Model, &ds.Device); err != nil {
+			continue
+		}
+
+		rows, err := d.db.Query(
+			`SELECT timestamp, temperature, reallocated, pending, udma_crc
+			 FROM smart_history WHERE serial = ?
+			 ORDER BY timestamp DESC LIMIT ?`,
+			ds.Serial, pointsPerDisk,
+		)
+		if err != nil {
+			continue
+		}
+
+		// Collect in reverse (DESC), then flip
+		var temps []SparklinePoint
+		var realloc, pending, crc []int64
+		for rows.Next() {
+			var sp SparklinePoint
+			var r, p, c int64
+			if err := rows.Scan(&sp.Timestamp, &sp.Temperature, &r, &p, &c); err != nil {
+				continue
+			}
+			temps = append(temps, sp)
+			realloc = append(realloc, r)
+			pending = append(pending, p)
+			crc = append(crc, c)
+		}
+		rows.Close()
+
+		// Reverse to ASC order
+		for i, j := 0, len(temps)-1; i < j; i, j = i+1, j-1 {
+			temps[i], temps[j] = temps[j], temps[i]
+			realloc[i], realloc[j] = realloc[j], realloc[i]
+			pending[i], pending[j] = pending[j], pending[i]
+			crc[i], crc[j] = crc[j], crc[i]
+		}
+
+		ds.Temps = temps
+		ds.Reallocated = realloc
+		ds.Pending = pending
+		ds.CRC = crc
+		results = append(results, ds)
+	}
+	return results, nil
+}
+
+// ---------- System history sparkline ----------
+
+// GetSystemSparkline returns condensed system metrics for sparkline rendering.
+func (d *DB) GetSystemSparkline(limit int) ([]SystemHistoryPoint, error) {
+	return d.GetSystemHistory(limit)
+}
+
 // ---------- Notification log ----------
 
 // NotificationLogEntry represents a single notification delivery attempt.

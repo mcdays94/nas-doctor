@@ -651,6 +651,7 @@ body {
   </div>
 </div>
 
+<script src="/js/charts.js"></script>
 <script>
 (function() {
   "use strict";
@@ -750,9 +751,9 @@ body {
     // Right side: system stats inline
     html += '<div class="top-bar-right">';
     if (sys) {
-      html += '<span class="stat-item"><span class="stat-label">CPU</span> <span class="stat-val">' + formatPct(sys.cpu_usage_percent) + '</span></span>';
+      html += '<span class="stat-item"><span class="stat-label">CPU</span> <span class="stat-val">' + formatPct(sys.cpu_usage_percent) + '</span><canvas id="spark-cpu" width="40" height="18" style="margin-left:3px;vertical-align:middle"></canvas></span>';
       html += '<span class="dot-sep">&middot;</span>';
-      html += '<span class="stat-item"><span class="stat-label">Mem</span> <span class="stat-val">' + formatPct(sys.mem_percent) + '</span></span>';
+      html += '<span class="stat-item"><span class="stat-label">Mem</span> <span class="stat-val">' + formatPct(sys.mem_percent) + '</span><canvas id="spark-mem" width="40" height="18" style="margin-left:3px;vertical-align:middle"></canvas></span>';
       html += '<span class="dot-sep">&middot;</span>';
       html += '<span class="stat-item"><span class="stat-label">I/O</span> <span class="stat-val">' + formatPct(sys.io_wait_percent) + '</span></span>';
       html += '<span class="dot-sep">&middot;</span>';
@@ -857,7 +858,7 @@ body {
       html += '<div class="table-container">';
       html += '<table>';
       html += '<thead><tr>';
-      html += '<th>Device</th><th>Model</th><th>Health</th><th>Temp</th><th>Power-On</th><th>Realloc</th><th>Pending</th>';
+      html += '<th>Device</th><th>Model</th><th>Health</th><th>Temp</th><th style="width:70px">Trend</th><th>Power-On</th><th>Realloc</th><th>Pending</th>';
       html += '</tr></thead>';
       html += '<tbody>';
       for (var s = 0; s < snapshot.smart.length; s++) {
@@ -865,11 +866,12 @@ body {
         var healthOk = sm.health_passed;
         var hrs = sm.power_on_hours;
         var hrsStr = hrs != null ? (hrs > 8760 ? (hrs / 8760).toFixed(1) + "y" : hrs + "h") : "-";
-        html += '<tr>';
+        html += '<tr style="cursor:pointer" onclick="window.location=\'/disk/' + encodeURIComponent(sm.serial || '') + '\'">';
         html += '<td>' + escapeHTML(sm.device) + '</td>';
         html += '<td>' + escapeHTML(sm.model) + '</td>';
         html += '<td><span class="status-dot ' + (healthOk ? "green" : "red") + '"></span>' + (healthOk ? "Passed" : "Failed") + '</td>';
         html += '<td>' + (sm.temperature_c != null ? sm.temperature_c + "&deg;C" : "-") + '</td>';
+        html += '<td><canvas id="spark-temp-' + s + '" width="60" height="20"></canvas></td>';
         html += '<td>' + hrsStr + '</td>';
         html += '<td>' + (sm.reallocated_sectors != null ? sm.reallocated_sectors : "-") + '</td>';
         html += '<td>' + (sm.pending_sectors != null ? sm.pending_sectors : "-") + '</td>';
@@ -948,6 +950,7 @@ body {
       var app = document.getElementById("app");
       if (app) {
         app.innerHTML = renderDashboard(status, snapshot);
+        _renderSparklines(snapshot);
       }
     }).catch(function(err) {
       var bar2 = document.getElementById("refreshBar");
@@ -962,6 +965,34 @@ body {
       }
       console.error("Failed to load dashboard data:", err);
     });
+  }
+
+  function _renderSparklines(snapshot) {
+    fetch("/api/v1/sparklines")
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.system && data.system.length >= 2 && window.NasChart) {
+          var cpuD = data.system.map(function(p) { return p.cpu_usage; });
+          var memD = data.system.map(function(p) { return p.mem_percent; });
+          try { NasChart.sparkline("spark-cpu", { data: cpuD, color: "#171717", width: 40, height: 18 }); } catch(e) {}
+          try { NasChart.sparkline("spark-mem", { data: memD, color: "#171717", width: 40, height: 18 }); } catch(e) {}
+        }
+        if (data.disks && snapshot && snapshot.smart && window.NasChart) {
+          for (var i = 0; i < snapshot.smart.length; i++) {
+            var serial = snapshot.smart[i].serial || "";
+            var dd = null;
+            for (var d = 0; d < data.disks.length; d++) {
+              if (data.disks[d].serial === serial) { dd = data.disks[d]; break; }
+            }
+            if (dd && dd.temps && dd.temps.length >= 2) {
+              var temps = dd.temps.map(function(p) { return p.temp; });
+              var mx = Math.max.apply(null, temps);
+              var clr = mx >= 55 ? "#dc2626" : mx >= 45 ? "#d97706" : "#16a34a";
+              try { NasChart.sparkline("spark-temp-" + i, { data: temps, color: clr, width: 60, height: 20 }); } catch(e) {}
+            }
+          }
+        }
+      }).catch(function() {});
   }
 
   window._triggerScan = function() {
