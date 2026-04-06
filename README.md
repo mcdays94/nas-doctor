@@ -10,7 +10,7 @@
   Beautiful dashboards, Prometheus metrics, webhook alerts — no cloud account required.
 </p>
 
-> **Early Access** — NAS Doctor is under active development. Expect bugs, missing features, and breaking changes. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
+> **Alpha** — NAS Doctor is in alpha. Features may be incomplete, bugs are expected, and breaking changes can occur between releases. Only tested on Unraid. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
 ---
 
