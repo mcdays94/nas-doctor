@@ -138,6 +138,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 
 	// Fleet dashboard page
 	r.Get("/fleet", s.handleFleetPage)
+
+	// Stats page
+	r.Get("/stats", s.handleStatsPage)
 	r.Post("/api/v1/backup", s.handleCreateBackup)
 	r.Get("/api/v1/backup", s.handleListBackups)
 	r.Get("/api/v1/db/stats", s.handleDBStats)
