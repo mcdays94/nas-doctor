@@ -141,16 +141,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 type statusResponse struct {
-	Hostname      string             `json:"hostname"`
-	Platform      string             `json:"platform"`
-	Uptime        string             `json:"uptime"`
-	LastScan      string             `json:"last_scan"`
-	ScanRunning   bool               `json:"scan_running"`
-	CriticalCount int                `json:"critical_count"`
-	WarningCount  int                `json:"warning_count"`
-	InfoCount     int                `json:"info_count"`
-	OverallHealth string             `json:"overall_health"`
-	Sections      *DashboardSections `json:"sections,omitempty"`
+	Hostname          string             `json:"hostname"`
+	Platform          string             `json:"platform"`
+	Uptime            string             `json:"uptime"`
+	LastScan          string             `json:"last_scan"`
+	ScanRunning       bool               `json:"scan_running"`
+	CriticalCount     int                `json:"critical_count"`
+	WarningCount      int                `json:"warning_count"`
+	InfoCount         int                `json:"info_count"`
+	OverallHealth     string             `json:"overall_health"`
+	Sections          *DashboardSections `json:"sections,omitempty"`
+	DismissedFindings []string           `json:"dismissed_findings,omitempty"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -192,9 +193,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Include section visibility from settings
+	// Include section visibility and dismissed findings from settings
 	settings := s.getSettings()
 	resp.Sections = &settings.Sections
+	resp.DismissedFindings = settings.DismissedFindings
 
 	writeJSON(w, http.StatusOK, resp)
 }

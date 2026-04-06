@@ -867,7 +867,8 @@ body {
     html += '<div class="section-title">Findings</div>';
     if (snapshot && snapshot.findings && snapshot.findings.length > 0) {
       html += '<div class="findings-list">';
-      var findings = snapshot.findings.slice().sort(function(a, b) {
+      var _dismissed = (_cachedStatus && _cachedStatus.dismissed_findings) ? _cachedStatus.dismissed_findings : [];
+      var findings = snapshot.findings.filter(function(f) { return _dismissed.indexOf(f.title) === -1; }).sort(function(a, b) {
         var order = { critical: 0, warning: 1, info: 2, ok: 3 };
         return (order[a.severity] || 3) - (order[b.severity] || 3);
       });
@@ -894,12 +895,11 @@ body {
         }
         if (f.action) html += '<div class="finding-detail-row"><div class="finding-detail-label">Action</div><div class="finding-detail-value val-accent">' + escapeHTML(f.action) + '</div></div>';
         if (f.impact) html += '<div class="finding-detail-row"><div class="finding-detail-label">Impact</div><div class="finding-detail-value val-italic">' + escapeHTML(f.impact) + '</div></div>';
-        if (f.priority || f.cost) {
-          html += '<div class="finding-meta">';
-          if (f.priority) html += '<div class="finding-meta-item"><strong>Priority:</strong> ' + escapeHTML(f.priority) + '</div>';
-          if (f.cost) html += '<div class="finding-meta-item"><strong>Cost:</strong> ' + escapeHTML(f.cost) + '</div>';
-          html += '</div>';
-        }
+        html += '<div class="finding-meta">';
+        if (f.priority) html += '<div class="finding-meta-item"><strong>Priority:</strong> ' + escapeHTML(f.priority) + '</div>';
+        if (f.cost) html += '<div class="finding-meta-item"><strong>Cost:</strong> ' + escapeHTML(f.cost) + '</div>';
+        html += '<div class="finding-meta-item" style="margin-left:auto"><a href="#" onclick="event.stopPropagation();window._dismissFinding(\'' + escapeHTML(f.title).replace(/\x27/g, "\\\x27") + '\');return false" style="font-size:11px;color:#808080;text-decoration:none">Dismiss</a></div>';
+        html += '</div>';
         html += '</div>';
         html += '</div>';
         html += '</div>';
@@ -1174,6 +1174,12 @@ body {
         }
       }).catch(function() {});
   }
+
+  window._dismissFinding = function(title) {
+    fetch("/api/v1/findings/dismiss", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({title: title}) })
+      .then(function() { location.reload(); })
+      .catch(function() {});
+  };
 
   window._toggleFinding = function(el) {
     var all = document.querySelectorAll(".finding-card");

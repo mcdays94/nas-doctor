@@ -22,15 +22,16 @@ import (
 
 // Settings represents the user-configurable application settings stored in the DB.
 type Settings struct {
-	ScanInterval  string                  `json:"scan_interval"`
-	Theme         string                  `json:"theme"`
-	Icon          string                  `json:"icon"`
-	Notifications SettingsNotifications   `json:"notifications"`
-	LogPush       SettingsLogForward      `json:"log_push"`
-	Retention     RetentionSettings       `json:"retention"`
-	Backup        BackupSettings          `json:"backup"`
-	Sections      DashboardSections       `json:"sections"`
-	Fleet         []internal.RemoteServer `json:"fleet,omitempty"`
+	ScanInterval      string                  `json:"scan_interval"`
+	Theme             string                  `json:"theme"`
+	Icon              string                  `json:"icon"`
+	Notifications     SettingsNotifications   `json:"notifications"`
+	LogPush           SettingsLogForward      `json:"log_push"`
+	Retention         RetentionSettings       `json:"retention"`
+	Backup            BackupSettings          `json:"backup"`
+	Sections          DashboardSections       `json:"sections"`
+	Fleet             []internal.RemoteServer `json:"fleet,omitempty"`
+	DismissedFindings []string                `json:"dismissed_findings,omitempty"`
 }
 
 // DashboardSections controls which sections appear on the dashboard.
@@ -135,6 +136,8 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/fleet/servers", s.handleFleetServers)
 	r.Put("/api/v1/fleet/servers", s.handleFleetUpdateServers)
 	r.Post("/api/v1/fleet/test", s.handleFleetTestServer)
+	r.Post("/api/v1/findings/dismiss", s.handleDismissFinding)
+	r.Post("/api/v1/findings/restore", s.handleRestoreFinding)
 
 	// Fleet dashboard page
 	r.Get("/fleet", s.handleFleetPage)
@@ -388,6 +391,53 @@ func (s *Server) handleFleetTestServer(w http.ResponseWriter, r *http.Request) {
 	}
 	result := s.fleet.TestServer(srv)
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleDismissFinding adds a finding title to the dismissed list.
+func (s *Server) handleDismissFinding(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+	var req struct {
+		Title string `json:"title"`
+	}
+	if json.Unmarshal(body, &req) != nil || req.Title == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title required"})
+		return
+	}
+	settings := s.getSettings()
+	// Check if already dismissed
+	for _, d := range settings.DismissedFindings {
+		if d == req.Title {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "already dismissed"})
+			return
+		}
+	}
+	settings.DismissedFindings = append(settings.DismissedFindings, req.Title)
+	data, _ := json.Marshal(settings)
+	s.store.SetConfig(settingsConfigKey, string(data))
+	writeJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
+}
+
+// handleRestoreFinding removes a finding title from the dismissed list.
+func (s *Server) handleRestoreFinding(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+	var req struct {
+		Title string `json:"title"`
+	}
+	if json.Unmarshal(body, &req) != nil || req.Title == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title required"})
+		return
+	}
+	settings := s.getSettings()
+	var updated []string
+	for _, d := range settings.DismissedFindings {
+		if d != req.Title {
+			updated = append(updated, d)
+		}
+	}
+	settings.DismissedFindings = updated
+	data, _ := json.Marshal(settings)
+	s.store.SetConfig(settingsConfigKey, string(data))
+	writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
 }
 
 // handleCreateBackup triggers an immediate backup.

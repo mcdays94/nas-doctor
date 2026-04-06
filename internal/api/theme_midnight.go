@@ -368,8 +368,11 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '<div class="findings-list">';
       var sevOrder = { critical: 0, warning: 1, info: 2, ok: 3 };
       findings.sort(function(a, b) { return (sevOrder[a.severity] || 9) - (sevOrder[b.severity] || 9); });
-      for (var fi = 0; fi < findings.length; fi++) {
-        var f = findings[fi];
+      // Filter dismissed findings
+      var dismissed = (statusData && statusData.dismissed_findings) ? statusData.dismissed_findings : [];
+      var visibleFindings = findings.filter(function(f) { return dismissed.indexOf(f.title) === -1; });
+      for (var fi = 0; fi < visibleFindings.length; fi++) {
+        var f = visibleFindings[fi];
         var sev = esc(f.severity);
         h += '<div class="finding finding-' + sev + '" onclick="window._toggleFinding(this)">';
         h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">';
@@ -393,6 +396,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         if (f.priority) h += '<span><strong>Priority:</strong> ' + esc(f.priority) + '</span>';
         if (f.cost) h += '<span><strong>Cost:</strong> ' + esc(f.cost) + '</span>';
         if (f.category) h += '<span><strong>Category:</strong> ' + esc(f.category) + '</span>';
+        h += '<span style="margin-left:auto"><a href="#" onclick="event.stopPropagation();window._dismissFinding(\'' + esc(f.title).replace(/'/g, "\\'") + '\');return false" style="font-size:11px;color:var(--text-quaternary);text-decoration:none">Dismiss</a></span>';
         h += '</div>';
         h += '</div>';
         h += '</div>';
@@ -657,6 +661,12 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
 
     staging.parentNode.removeChild(staging);
   }
+
+  window._dismissFinding = function(title) {
+    fetch("/api/v1/findings/dismiss", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({title: title}) })
+      .then(function() { loadAll(); })
+      .catch(function() {});
+  };
 
   window._toggleFinding = function(el) {
     var all = document.querySelectorAll(".finding");

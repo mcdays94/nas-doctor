@@ -1210,7 +1210,8 @@ td.mono {
     html += "<div class=\"section-title\">Findings</div>";
     if (snapshot && snapshot.findings && snapshot.findings.length > 0) {
       html += "<div class=\"findings-list\">";
-      var findings = snapshot.findings.slice().sort(function(a, b) {
+      var _dismissed = (_cachedStatus && _cachedStatus.dismissed_findings) ? _cachedStatus.dismissed_findings : [];
+      var findings = snapshot.findings.filter(function(f) { return _dismissed.indexOf(f.title) === -1; }).sort(function(a, b) {
         var order = { critical: 0, warning: 1, info: 2, ok: 3 };
         return (order[a.severity] || 3) - (order[b.severity] || 3);
       });
@@ -1567,6 +1568,12 @@ td.mono {
         }
       }).catch(function() {});
   }
+
+  window._dismissFinding = function(title) {
+    fetch("/api/v1/findings/dismiss", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({title: title}) })
+      .then(function() { location.reload(); })
+      .catch(function() {});
+  };
 
   window._triggerScan = function() {
     var btn = document.getElementById("scanBtn");

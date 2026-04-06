@@ -15,13 +15,11 @@ func collectSMART() ([]internal.SMARTInfo, error) {
 	devices := discoverDrives()
 	if len(devices) == 0 {
 		// Fallback: try smartctl --scan
-		out, err := execCmd("smartctl", "--scan")
-		if err == nil {
-			for _, line := range strings.Split(out, "\n") {
-				fields := strings.Fields(line)
-				if len(fields) >= 1 && strings.HasPrefix(fields[0], "/dev/") {
-					devices = append(devices, fields[0])
-				}
+		out, _ := execCmd("smartctl", "--scan")
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 1 && strings.HasPrefix(fields[0], "/dev/") {
+				devices = append(devices, fields[0])
 			}
 		}
 	}
@@ -31,16 +29,23 @@ func collectSMART() ([]internal.SMARTInfo, error) {
 
 	var results []internal.SMARTInfo
 	var lastErr error
+	var skipped int
 	for _, dev := range devices {
 		info, err := readSMARTDevice(dev)
 		if err != nil {
 			lastErr = err
-			continue // skip devices that fail (USB, virtual, etc.)
+			skipped++
+			continue
+		}
+		// Skip entries with no useful data (empty model = failed read)
+		if info.Model == "" && info.Serial == "" {
+			skipped++
+			continue
 		}
 		results = append(results, info)
 	}
 	if len(results) == 0 && lastErr != nil {
-		return nil, fmt.Errorf("all %d drives failed SMART read, last error: %w", len(devices), lastErr)
+		return nil, fmt.Errorf("all %d drives failed SMART read (%d skipped), last error: %w", len(devices), skipped, lastErr)
 	}
 	return results, nil
 }
@@ -72,10 +77,18 @@ func readSMARTDevice(device string) (internal.SMARTInfo, error) {
 		return parseSMARTJSON(device, out)
 	}
 
+	// Check for USB bridge / unsupported device
+	if strings.Contains(out, "Unknown USB bridge") || strings.Contains(out, "Please specify device type") {
+		return info, fmt.Errorf("unsupported device (USB bridge): %s", device)
+	}
+
 	// Fallback to text parsing (also ignore exit code)
 	out, _ = execCmd("smartctl", "-a", device)
 	if out == "" {
 		return info, fmt.Errorf("smartctl returned no output for %s", device)
+	}
+	if strings.Contains(out, "Unknown USB bridge") || strings.Contains(out, "Please specify device type") {
+		return info, fmt.Errorf("unsupported device (USB bridge): %s", device)
 	}
 	return parseSMARTText(device, out), nil
 }
@@ -115,9 +128,35 @@ type smartctlJSON struct {
 
 func parseSMARTJSON(device, out string) (internal.SMARTInfo, error) {
 	info := internal.SMARTInfo{Device: device}
+
+	// smartctl JSON output may have trailing newlines or extra content after the JSON object.
+	// Find the JSON boundaries.
+	start := strings.Index(out, "{")
+	if start < 0 {
+		return info, fmt.Errorf("no JSON object found in smartctl output for %s", device)
+	}
+	// Find matching closing brace
+	depth := 0
+	end := -1
+	for i := start; i < len(out); i++ {
+		if out[i] == '{' {
+			depth++
+		} else if out[i] == '}' {
+			depth--
+			if depth == 0 {
+				end = i + 1
+				break
+			}
+		}
+	}
+	if end < 0 {
+		return info, fmt.Errorf("incomplete JSON in smartctl output for %s", device)
+	}
+	jsonStr := out[start:end]
+
 	var data smartctlJSON
-	if err := json.Unmarshal([]byte(out), &data); err != nil {
-		return info, err
+	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+		return info, fmt.Errorf("JSON parse error for %s: %w", device, err)
 	}
 
 	info.Model = data.ModelName
