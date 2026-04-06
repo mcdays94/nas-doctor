@@ -38,19 +38,20 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 	return findings
 }
 
-// ---------- SMART Rules ----------
+// ---------- SMART Rules (Backblaze-informed thresholds) ----------
+// Thresholds from: backblaze_thresholds.go (data version: Q4-2025)
 
 func analyzeSMART(drives []internal.SMARTInfo) []internal.Finding {
 	var findings []internal.Finding
 	for _, d := range drives {
-		// SMART health failed
+		// SMART health self-assessment failed
 		if !d.HealthPassed {
 			findings = append(findings, internal.Finding{
 				Severity:    internal.SeverityCritical,
 				Category:    internal.CategorySMART,
 				Title:       fmt.Sprintf("SMART Health FAILED: %s (%s)", d.Device, d.Model),
 				Description: fmt.Sprintf("Drive %s (S/N: %s) has FAILED its SMART self-assessment. This drive is at imminent risk of failure.", d.Device, d.Serial),
-				Evidence:    []string{fmt.Sprintf("SMART overall-health self-assessment: FAILED")},
+				Evidence:    []string{"SMART overall-health self-assessment: FAILED"},
 				Impact:      "Data loss if the drive fails before data is migrated",
 				Action:      "Replace this drive immediately. Back up any unique data NOW.",
 				Priority:    "immediate",
@@ -59,35 +60,47 @@ func analyzeSMART(drives []internal.SMARTInfo) []internal.Finding {
 			})
 		}
 
-		// Reallocated sectors
-		if d.Reallocated > 0 {
+		// Reallocated sectors — Backblaze tiered thresholds
+		if tier := GetReallocatedTier(d.Reallocated); tier != nil {
 			sev := internal.SeverityWarning
-			if d.Reallocated > 100 {
+			if tier.Severity == "critical" {
 				sev = internal.SeverityCritical
 			}
 			findings = append(findings, internal.Finding{
-				Severity:    sev,
-				Category:    internal.CategorySMART,
-				Title:       fmt.Sprintf("Reallocated Sectors on %s (%s)", d.Device, d.Model),
-				Description: fmt.Sprintf("Drive %s has %d reallocated sectors. The drive firmware has remapped bad sectors to spare area. This indicates media degradation.", d.Device, d.Reallocated),
-				Evidence:    []string{fmt.Sprintf("Reallocated_Sector_Ct: %d", d.Reallocated)},
+				Severity: sev,
+				Category: internal.CategorySMART,
+				Title:    fmt.Sprintf("Reallocated Sectors on %s (%s)", d.Device, d.Model),
+				Description: fmt.Sprintf(
+					"Drive %s has %d reallocated sectors. %s — Backblaze data (%s) shows drives at this level fail at %.1fx the baseline rate.",
+					d.Device, d.Reallocated, tier.Label, BackblazeDataVersion, tier.FailureMult,
+				),
+				Evidence: []string{
+					fmt.Sprintf("Reallocated_Sector_Ct: %d", d.Reallocated),
+					fmt.Sprintf("Backblaze failure multiplier: %.1fx baseline (data: %s)", tier.FailureMult, BackblazeDataVersion),
+				},
 				Impact:      "Progressive drive failure, potential data loss",
-				Action:      "Monitor closely. Plan replacement if count increases.",
+				Action:      "Monitor closely. Plan replacement if count is increasing.",
 				Priority:    priorityFromSeverity(sev),
 				Cost:        estimateDriveCost(d),
 				RelatedDisk: d.ArraySlot,
 			})
 		}
 
-		// Pending sectors
-		if d.Pending > 0 {
+		// Pending sectors — Backblaze tiered thresholds
+		if tier := GetPendingTier(d.Pending); tier != nil {
 			findings = append(findings, internal.Finding{
-				Severity:    internal.SeverityCritical,
-				Category:    internal.CategorySMART,
-				Title:       fmt.Sprintf("Pending Sectors on %s (%s)", d.Device, d.Model),
-				Description: fmt.Sprintf("Drive %s has %d pending sectors awaiting reallocation. These are sectors that couldn't be read and are waiting for a write to determine if they should be remapped.", d.Device, d.Pending),
-				Evidence:    []string{fmt.Sprintf("Current_Pending_Sector: %d", d.Pending)},
-				Impact:      "Active read errors, potential data corruption",
+				Severity: internal.SeverityCritical,
+				Category: internal.CategorySMART,
+				Title:    fmt.Sprintf("Pending Sectors on %s (%s)", d.Device, d.Model),
+				Description: fmt.Sprintf(
+					"Drive %s has %d pending sectors. %s — Backblaze data shows drives with pending sectors fail at %.1fx the baseline rate.",
+					d.Device, d.Pending, tier.Label, tier.FailureMult,
+				),
+				Evidence: []string{
+					fmt.Sprintf("Current_Pending_Sector: %d", d.Pending),
+					fmt.Sprintf("Backblaze failure multiplier: %.1fx baseline", tier.FailureMult),
+				},
+				Impact:      "Active read errors, data corruption risk",
 				Action:      "Run an extended SMART self-test. Plan drive replacement.",
 				Priority:    "immediate",
 				Cost:        estimateDriveCost(d),
@@ -95,50 +108,99 @@ func analyzeSMART(drives []internal.SMARTInfo) []internal.Finding {
 			})
 		}
 
-		// UDMA CRC errors (SATA cable issue)
-		if d.UDMACRC > 0 {
+		// UDMA CRC errors — Backblaze tiered thresholds
+		if tier := GetCRCTier(d.UDMACRC); tier != nil {
+			sev := internal.SeverityInfo
+			if tier.Severity == "warning" {
+				sev = internal.SeverityWarning
+			}
 			findings = append(findings, internal.Finding{
-				Severity:    internal.SeverityWarning,
-				Category:    internal.CategorySMART,
-				Title:       fmt.Sprintf("SATA Cable Issue on %s (%s)", d.Device, d.Model),
-				Description: fmt.Sprintf("Drive %s has %d UDMA CRC errors. This almost always indicates a failing or loose SATA cable, not a drive problem.", d.Device, d.UDMACRC),
-				Evidence:    []string{fmt.Sprintf("UDMA_CRC_Error_Count: %d", d.UDMACRC), fmt.Sprintf("ATA Port: %s", d.ATAPort)},
+				Severity: sev,
+				Category: internal.CategorySMART,
+				Title:    fmt.Sprintf("SATA Cable Issue on %s (%s)", d.Device, d.Model),
+				Description: fmt.Sprintf(
+					"Drive %s has %d UDMA CRC errors. %s. CRC errors indicate data transfer corruption — almost always a cable/connection issue, not the drive itself.",
+					d.Device, d.UDMACRC, tier.Label,
+				),
+				Evidence: []string{
+					fmt.Sprintf("UDMA_CRC_Error_Count: %d", d.UDMACRC),
+					fmt.Sprintf("ATA Port: %s", d.ATAPort),
+				},
 				Impact:      "Slow I/O, transfer errors, parity check slowdowns",
 				Action:      fmt.Sprintf("Replace the SATA cable on port %s. Use a certified SATA III cable.", d.ATAPort),
-				Priority:    "short-term",
+				Priority:    priorityFromSeverity(sev),
 				Cost:        "$5-15 for a new SATA cable",
 				RelatedDisk: d.ArraySlot,
 			})
 		}
 
-		// Command timeouts
-		if d.CommandTimeout > 5 {
+		// Command timeouts — Backblaze tiered thresholds
+		if tier := GetCmdTimeoutTier(d.CommandTimeout); tier != nil {
+			sev := internal.SeverityInfo
+			if tier.Severity == "warning" {
+				sev = internal.SeverityWarning
+			} else if tier.Severity == "critical" {
+				sev = internal.SeverityCritical
+			}
 			findings = append(findings, internal.Finding{
-				Severity:    internal.SeverityWarning,
-				Category:    internal.CategorySMART,
-				Title:       fmt.Sprintf("Command Timeouts on %s (%s)", d.Device, d.Model),
-				Description: fmt.Sprintf("Drive %s has %d command timeouts. The drive is taking too long to respond to controller commands.", d.Device, d.CommandTimeout),
+				Severity: sev,
+				Category: internal.CategorySMART,
+				Title:    fmt.Sprintf("Command Timeouts on %s (%s)", d.Device, d.Model),
+				Description: fmt.Sprintf(
+					"Drive %s has %d command timeouts. %s.",
+					d.Device, d.CommandTimeout, tier.Label,
+				),
 				Evidence:    []string{fmt.Sprintf("Command_Timeout: %d", d.CommandTimeout)},
 				Impact:      "System hangs, slow I/O operations",
 				Action:      "Check SATA cable and power connections. May indicate controller or drive issues.",
-				Priority:    "short-term",
+				Priority:    priorityFromSeverity(sev),
 				Cost:        "$5-15 (cable) or " + estimateDriveCost(d) + " (replacement)",
 				RelatedDisk: d.ArraySlot,
 			})
 		}
 
-		// Aging drive (>40000 hours = ~4.5 years)
-		if d.PowerOnHours > 40000 {
+		// Drive age — Backblaze bathtub curve data
+		if tier := GetAgeTier(d.PowerOnHours); tier != nil && tier.Severity != "ok" {
 			years := float64(d.PowerOnHours) / 8766
+			sev := internal.SeverityInfo
+			if tier.Severity == "warning" {
+				sev = internal.SeverityWarning
+			}
 			findings = append(findings, internal.Finding{
-				Severity:    internal.SeverityInfo,
-				Category:    internal.CategorySMART,
-				Title:       fmt.Sprintf("Aging Drive: %s (%s)", d.Device, d.Model),
-				Description: fmt.Sprintf("Drive %s has %d power-on hours (%.1f years). While not necessarily failing, drives beyond 4-5 years have increased failure rates.", d.Device, d.PowerOnHours, years),
-				Evidence:    []string{fmt.Sprintf("Power_On_Hours: %d (%.1f years)", d.PowerOnHours, years)},
+				Severity: sev,
+				Category: internal.CategorySMART,
+				Title:    fmt.Sprintf("Aging Drive: %s (%s)", d.Device, d.Model),
+				Description: fmt.Sprintf(
+					"Drive %s has %d power-on hours (%.1f years). %s. Backblaze data shows failure rate at %.1fx baseline for drives at this age.",
+					d.Device, d.PowerOnHours, years, tier.Label, tier.Mult,
+				),
+				Evidence: []string{
+					fmt.Sprintf("Power_On_Hours: %d (%.1f years)", d.PowerOnHours, years),
+					fmt.Sprintf("Backblaze age-based failure multiplier: %.1fx", tier.Mult),
+				},
 				Impact:      "Increased probability of failure over time",
 				Action:      "Ensure backups are current. Consider proactive replacement.",
-				Priority:    "medium-term",
+				Priority:    priorityFromSeverity(sev),
+				Cost:        estimateDriveCost(d),
+				RelatedDisk: d.ArraySlot,
+			})
+		}
+
+		// Composite health score for info
+		score := ComputeHealthScore(d.Reallocated, d.Pending, d.UDMACRC, d.CommandTimeout, d.Temperature, d.PowerOnHours, d.HealthPassed)
+		if score < 50 && d.HealthPassed { // Only add if SMART test itself didn't fail (avoid duplicate)
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategorySMART,
+				Title:       fmt.Sprintf("Low Health Score: %s at %d/100", d.Device, score),
+				Description: fmt.Sprintf("Drive %s (%s) has a composite health score of %d/100 based on Backblaze failure rate data. Multiple risk factors are combining to create elevated failure probability.", d.Device, d.Model, score),
+				Evidence: []string{
+					fmt.Sprintf("Health Score: %d/100", score),
+					fmt.Sprintf("Based on: Backblaze Drive Stats %s (337,000+ drives)", BackblazeDataVersion),
+				},
+				Impact:      "High probability of drive failure",
+				Action:      "Plan replacement. Ensure backups are current and verified.",
+				Priority:    "immediate",
 				Cost:        estimateDriveCost(d),
 				RelatedDisk: d.ArraySlot,
 			})
@@ -147,50 +209,53 @@ func analyzeSMART(drives []internal.SMARTInfo) []internal.Finding {
 	return findings
 }
 
-// ---------- Thermal Rules ----------
+// ---------- Thermal Rules (Backblaze + Google research) ----------
 
 func analyzeThermal(drives []internal.SMARTInfo) []internal.Finding {
 	var findings []internal.Finding
 	var hotDrives []string
 
 	for _, d := range drives {
-		if d.Temperature >= 50 {
-			findings = append(findings, internal.Finding{
-				Severity:    internal.SeverityCritical,
-				Category:    internal.CategoryThermal,
-				Title:       fmt.Sprintf("Overheating: %s at %d°C", d.Device, d.Temperature),
-				Description: fmt.Sprintf("Drive %s (%s) is currently at %d°C. Temperatures above 50°C accelerate drive wear and can cause thermal throttling.", d.Device, d.Model, d.Temperature),
-				Evidence:    []string{fmt.Sprintf("Current temperature: %d°C", d.Temperature)},
-				Impact:      "Reduced drive lifespan, performance throttling, increased error rate",
-				Action:      "Improve case airflow. Add/replace fans. Check that existing fans are working.",
-				Priority:    "immediate",
-				Cost:        "$20-50 for case fans",
-				RelatedDisk: d.ArraySlot,
-			})
+		tier := GetTempTier(d.Temperature)
+		if tier == nil || tier.Severity == "ok" {
+			continue
+		}
+
+		sev := internal.SeverityInfo
+		if tier.Severity == "warning" {
+			sev = internal.SeverityWarning
 			hotDrives = append(hotDrives, d.Device)
-		} else if d.Temperature >= 45 {
-			findings = append(findings, internal.Finding{
-				Severity:    internal.SeverityWarning,
-				Category:    internal.CategoryThermal,
-				Title:       fmt.Sprintf("Warm Drive: %s at %d°C", d.Device, d.Temperature),
-				Description: fmt.Sprintf("Drive %s (%s) is at %d°C. Ideally HDDs should stay below 40°C.", d.Device, d.Model, d.Temperature),
-				Evidence:    []string{fmt.Sprintf("Current temperature: %d°C", d.Temperature)},
-				Impact:      "Slightly reduced lifespan if sustained",
-				Action:      "Monitor temperature trends. Improve airflow if temperatures keep rising.",
-				Priority:    "short-term",
-				Cost:        "$20-50 for case fans",
-				RelatedDisk: d.ArraySlot,
-			})
+		} else if tier.Severity == "critical" {
+			sev = internal.SeverityCritical
 			hotDrives = append(hotDrives, d.Device)
 		}
 
-		// Max temperature ever
+		findings = append(findings, internal.Finding{
+			Severity: sev,
+			Category: internal.CategoryThermal,
+			Title:    fmt.Sprintf("Drive Temperature: %s at %d°C", d.Device, d.Temperature),
+			Description: fmt.Sprintf(
+				"Drive %s (%s) is at %d°C. %s — Backblaze + Google research shows failure rate at %.1fx baseline at this temperature.",
+				d.Device, d.Model, d.Temperature, tier.Label, tier.Mult,
+			),
+			Evidence: []string{
+				fmt.Sprintf("Current temperature: %d°C", d.Temperature),
+				fmt.Sprintf("Failure rate multiplier: %.1fx (Backblaze/Google data)", tier.Mult),
+			},
+			Impact:      "Reduced drive lifespan, increased error rate",
+			Action:      "Improve case airflow. Add/replace fans. Check that existing fans are working.",
+			Priority:    priorityFromSeverity(sev),
+			Cost:        "$20-50 for case fans",
+			RelatedDisk: d.ArraySlot,
+		})
+
+		// Max temperature ever — historical damage check
 		if d.TempMax >= 60 {
 			findings = append(findings, internal.Finding{
 				Severity:    internal.SeverityWarning,
 				Category:    internal.CategoryThermal,
 				Title:       fmt.Sprintf("Historical Overheating on %s (max %d°C)", d.Device, d.TempMax),
-				Description: fmt.Sprintf("Drive %s has reached %d°C at some point in its lifetime. This may have caused permanent damage.", d.Device, d.TempMax),
+				Description: fmt.Sprintf("Drive %s has reached %d°C at some point in its lifetime. At this temperature, failure rate is ~%.1fx baseline. Thermal damage may be permanent.", d.Device, d.TempMax, GetTempTier(d.TempMax).Mult),
 				Evidence:    []string{fmt.Sprintf("Airflow_Temperature_Max: %d°C", d.TempMax)},
 				Impact:      "Possible latent damage from thermal stress",
 				Action:      "Monitor SMART attributes closely for degradation.",
@@ -200,7 +265,7 @@ func analyzeThermal(drives []internal.SMARTInfo) []internal.Finding {
 		}
 	}
 
-	// Summary finding if multiple hot drives
+	// Systemic thermal issue
 	if len(hotDrives) >= 3 {
 		findings = append(findings, internal.Finding{
 			Severity:    internal.SeverityCritical,
