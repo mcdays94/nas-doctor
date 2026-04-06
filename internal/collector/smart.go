@@ -1,0 +1,267 @@
+package collector
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/mcdays94/nas-doctor/internal"
+)
+
+func collectSMART() ([]internal.SMARTInfo, error) {
+	devices := discoverDrives()
+	if len(devices) == 0 {
+		return nil, fmt.Errorf("no drives discovered")
+	}
+
+	var results []internal.SMARTInfo
+	for _, dev := range devices {
+		info, err := readSMARTDevice(dev)
+		if err != nil {
+			continue // skip devices that fail (USB, virtual, etc.)
+		}
+		results = append(results, info)
+	}
+	return results, nil
+}
+
+func discoverDrives() []string {
+	var drives []string
+
+	// Discover /dev/sd* drives
+	matches, _ := filepath.Glob("/dev/sd[a-z]")
+	drives = append(drives, matches...)
+
+	// Discover NVMe drives
+	nvmeMatches, _ := filepath.Glob("/dev/nvme[0-9]n1")
+	drives = append(drives, nvmeMatches...)
+
+	return drives
+}
+
+// readSMARTDevice uses `smartctl --json` for reliable parsing.
+func readSMARTDevice(device string) (internal.SMARTInfo, error) {
+	info := internal.SMARTInfo{Device: device}
+
+	// Try JSON output first (smartctl 7.0+)
+	out, err := execCmd("smartctl", "--json=c", "-a", device)
+	if err == nil && strings.Contains(out, "json_format_version") {
+		return parseSMARTJSON(device, out)
+	}
+
+	// Fallback to text parsing
+	out, err = execCmd("smartctl", "-a", device)
+	if err != nil {
+		return info, err
+	}
+	return parseSMARTText(device, out), nil
+}
+
+type smartctlJSON struct {
+	ModelName    string `json:"model_name"`
+	SerialNumber string `json:"serial_number"`
+	FirmwareVer  string `json:"firmware_version"`
+	UserCapacity struct {
+		Bytes int64 `json:"bytes"`
+	} `json:"user_capacity"`
+	SmartStatus struct {
+		Passed bool `json:"passed"`
+	} `json:"smart_status"`
+	Temperature struct {
+		Current int `json:"current"`
+	} `json:"temperature"`
+	PowerOnTime struct {
+		Hours int64 `json:"hours"`
+	} `json:"power_on_time"`
+	ATASmartAttributes struct {
+		Table []struct {
+			ID    int    `json:"id"`
+			Name  string `json:"name"`
+			Value int    `json:"value"`
+			Worst int    `json:"worst"`
+			Raw   struct {
+				Value int64  `json:"value"`
+				Str   string `json:"string"`
+			} `json:"raw"`
+		} `json:"table"`
+	} `json:"ata_smart_attributes"`
+	RotationRate int    `json:"rotation_rate"`
+	DeviceType   string `json:"device_type"`
+	FormFactor   string `json:"form_factor"`
+}
+
+func parseSMARTJSON(device, out string) (internal.SMARTInfo, error) {
+	info := internal.SMARTInfo{Device: device}
+	var data smartctlJSON
+	if err := json.Unmarshal([]byte(out), &data); err != nil {
+		return info, err
+	}
+
+	info.Model = data.ModelName
+	info.Serial = data.SerialNumber
+	info.Firmware = data.FirmwareVer
+	info.HealthPassed = data.SmartStatus.Passed
+	info.Temperature = data.Temperature.Current
+	info.PowerOnHours = data.PowerOnTime.Hours
+	info.SizeGB = float64(data.UserCapacity.Bytes) / (1024 * 1024 * 1024)
+
+	// Determine disk type
+	if strings.Contains(device, "nvme") {
+		info.DiskType = "nvme"
+	} else if data.RotationRate == 0 {
+		info.DiskType = "ssd"
+	} else {
+		info.DiskType = "hdd"
+	}
+
+	// Parse SMART attributes
+	for _, attr := range data.ATASmartAttributes.Table {
+		switch attr.ID {
+		case 5:
+			info.Reallocated = attr.Raw.Value
+		case 187:
+			// Reported Uncorrectable - use as fallback for reallocated
+		case 188:
+			info.CommandTimeout = attr.Raw.Value
+		case 194:
+			info.Temperature = int(attr.Raw.Value & 0xFF) // lower byte is current temp
+		case 196:
+			// Reallocation Event Count
+		case 197:
+			info.Pending = attr.Raw.Value
+		case 198:
+			info.Offline = attr.Raw.Value
+		case 199:
+			info.UDMACRC = attr.Raw.Value
+		case 10:
+			info.SpinRetry = attr.Raw.Value
+		case 1:
+			info.RawReadError = attr.Raw.Value
+		case 7:
+			info.SeekError = attr.Raw.Value
+		}
+	}
+
+	// ATA port mapping
+	info.ATAPort = resolveATAPort(device)
+	info.ArraySlot = resolveArraySlot(device)
+
+	return info, nil
+}
+
+func parseSMARTText(device, out string) internal.SMARTInfo {
+	info := internal.SMARTInfo{Device: device}
+
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+
+		// Device info
+		if strings.HasPrefix(line, "Device Model:") || strings.HasPrefix(line, "Model Number:") {
+			info.Model = extractValue(line)
+		}
+		if strings.HasPrefix(line, "Serial Number:") {
+			info.Serial = extractValue(line)
+		}
+		if strings.HasPrefix(line, "Firmware Version:") {
+			info.Firmware = extractValue(line)
+		}
+		if strings.Contains(line, "PASSED") {
+			info.HealthPassed = true
+		}
+		if strings.Contains(line, "FAILED") {
+			info.HealthPassed = false
+		}
+
+		// Parse attribute lines (ID# ATTRIBUTE_NAME FLAGS VALUE WORST THRESH TYPE UPDATED RAW)
+		fields := strings.Fields(line)
+		if len(fields) >= 10 {
+			id, err := strconv.Atoi(fields[0])
+			if err != nil {
+				continue
+			}
+			rawVal, _ := strconv.ParseInt(fields[9], 10, 64)
+
+			switch id {
+			case 5:
+				info.Reallocated = rawVal
+			case 9:
+				info.PowerOnHours = rawVal
+			case 10:
+				info.SpinRetry = rawVal
+			case 188:
+				info.CommandTimeout = rawVal
+			case 194:
+				info.Temperature = int(rawVal)
+			case 197:
+				info.Pending = rawVal
+			case 198:
+				info.Offline = rawVal
+			case 199:
+				info.UDMACRC = rawVal
+			case 1:
+				info.RawReadError = rawVal
+			case 7:
+				info.SeekError = rawVal
+			}
+		}
+	}
+
+	if strings.Contains(device, "nvme") {
+		info.DiskType = "nvme"
+	} else {
+		info.DiskType = "hdd" // default; hard to detect SSD from text
+	}
+
+	info.ATAPort = resolveATAPort(device)
+	info.ArraySlot = resolveArraySlot(device)
+
+	return info
+}
+
+func extractValue(line string) string {
+	parts := strings.SplitN(line, ":", 2)
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[1])
+	}
+	return ""
+}
+
+// resolveATAPort maps /dev/sdX to its SATA/ATA port via sysfs.
+func resolveATAPort(device string) string {
+	devName := filepath.Base(device)
+	link, err := os.Readlink(fmt.Sprintf("/sys/block/%s/device", devName))
+	if err != nil {
+		return ""
+	}
+	// Link looks like: ../../../0:0:0:0 or points through ataX
+	parts := strings.Split(link, "/")
+	for _, p := range parts {
+		if strings.HasPrefix(p, "ata") {
+			return p
+		}
+	}
+	return ""
+}
+
+// resolveArraySlot maps /dev/sdX to its Unraid array slot via mdstat or emhttp.
+func resolveArraySlot(device string) string {
+	// Check Unraid's emhttp disk assignments
+	data, err := os.ReadFile("/var/local/emhttp/disks.ini")
+	if err != nil {
+		return ""
+	}
+	devName := filepath.Base(device)
+	currentSlot := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			currentSlot = strings.Trim(line, "[]")
+		}
+		if strings.Contains(line, "device=") && strings.Contains(line, devName) {
+			return currentSlot
+		}
+	}
+	return ""
+}

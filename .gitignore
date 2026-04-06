@@ -1,0 +1,43 @@
+# Go
+/nas-doctor
+/cmd/nas-doctor/nas-doctor
+*.exe
+*.test
+*.out
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Data
+/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Environment
+.env
+.dev.vars
+
+# Build
+dist/
+
+# Agent context (session-specific, not for repo)
+AGENT-CONTEXT.md
+
+# Node (playwright dev dependency)
+node_modules/
+package.json
+package-lock.json

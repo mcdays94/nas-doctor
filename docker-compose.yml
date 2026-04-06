@@ -1,0 +1,34 @@
+services:
+  nas-doctor:
+    image: ghcr.io/mcdays94/nas-doctor:latest
+    container_name: nas-doctor
+    build:
+      context: .
+      dockerfile: Dockerfile
+    privileged: true  # Required for smartctl, dmesg, dmidecode
+    network_mode: host  # For accurate network diagnostics
+    volumes:
+      # Persistent data (SQLite database, config)
+      - nas-doctor-data:/data
+      # Host system access (read-only)
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker monitoring
+      - /boot:/host/boot:ro                            # Unraid config, parity logs
+      - /var/log:/host/log:ro                          # System logs (syslog, messages)
+    environment:
+      - TZ=${TZ:-UTC}
+      - NAS_DOCTOR_LISTEN=:8080
+      - NAS_DOCTOR_DATA=/data
+      - NAS_DOCTOR_INTERVAL=${SCAN_INTERVAL:-6h}
+      # Optional: Webhook notifications
+      # - NAS_DOCTOR_WEBHOOK_URL=https://discord.com/api/webhooks/xxx/yyy
+      # - NAS_DOCTOR_WEBHOOK_TYPE=discord
+      # - NAS_DOCTOR_WEBHOOK_MIN_LEVEL=warning
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"  # Auto-update with Watchtower
+
+volumes:
+  nas-doctor-data:
+    driver: local

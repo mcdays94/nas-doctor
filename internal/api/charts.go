@@ -1,0 +1,478 @@
+package api
+
+// ChartJS is a self-contained vanilla JavaScript charting library that renders
+// to HTML5 Canvas elements. It supports line, area, bar, gauge, and sparkline
+// chart types with hover tooltips, smooth curves, animation, and dark-mode
+// auto-detection. Zero external dependencies.
+var ChartJS = `
+(function(){
+"use strict";
+
+/* ── helpers ─────────────────────────────────────────────────────── */
+function isDarkMode(){
+  if(window.matchMedia && window.matchMedia("(prefers-color-scheme:dark)").matches) return true;
+  var bg=getComputedStyle(document.body).backgroundColor;
+  var m=bg.match(/^rgb\((\d+)/);
+  if(m&&parseInt(m[1],10)<50) return true;
+  return false;
+}
+function theme(){
+  var dk=isDarkMode();
+  return {
+    grid:    dk?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.06)",
+    text:    dk?"rgba(255,255,255,0.50)":"rgba(0,0,0,0.45)",
+    tooltip: dk?"rgba(30,30,30,0.92)":"rgba(255,255,255,0.95)",
+    tipText: dk?"#e0e0e0":"#222",
+    tipBord: dk?"rgba(255,255,255,0.12)":"rgba(0,0,0,0.10)"
+  };
+}
+
+function prepCanvas(id,opts){
+  var el=typeof id==="string"?document.getElementById(id):id;
+  if(!el) return null;
+  var parent=el.parentElement||document.body;
+  var w=opts&&opts.width?opts.width:parent.clientWidth||300;
+  var h=opts&&opts.height?opts.height:el.getAttribute("height")?parseInt(el.getAttribute("height"),10):200;
+  var dpr=window.devicePixelRatio||1;
+  el.width=w*dpr; el.height=h*dpr;
+  el.style.width=w+"px"; el.style.height=h+"px";
+  var ctx=el.getContext("2d");
+  ctx.scale(dpr,dpr);
+  return {el:el,ctx:ctx,w:w,h:h,dpr:dpr};
+}
+
+function clamp(v,lo,hi){return v<lo?lo:v>hi?hi:v;}
+
+function lerp(a,b,t){return a+(b-a)*t;}
+
+function drawSmooth(ctx,pts,close){
+  if(pts.length<2) return;
+  ctx.moveTo(pts[0].x,pts[0].y);
+  if(pts.length===2){ctx.lineTo(pts[1].x,pts[1].y);return;}
+  for(var i=0;i<pts.length-1;i++){
+    var cx=(pts[i].x+pts[i+1].x)/2;
+    var cy=(pts[i].y+pts[i+1].y)/2;
+    if(i===0) ctx.lineTo(cx,cy);
+    else ctx.quadraticCurveTo(pts[i].x,pts[i].y,cx,cy);
+  }
+  var last=pts[pts.length-1];
+  ctx.quadraticCurveTo(last.x,last.y,last.x,last.y);
+}
+
+/* ── animation helper ────────────────────────────────────────────── */
+function animate(dur,fn,done){
+  var start=null;
+  function step(ts){
+    if(!start)start=ts;
+    var t=clamp((ts-start)/dur,0,1);
+    fn(t);
+    if(t<1) requestAnimationFrame(step);
+    else if(done) done();
+  }
+  requestAnimationFrame(step);
+}
+
+/* ── tooltip helper ──────────────────────────────────────────────── */
+function attachTooltip(el,hitTest){
+  var tip=document.createElement("div");
+  tip.style.cssText="position:fixed;padding:6px 10px;border-radius:6px;font:11px/1.4 -apple-system,system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .15s;z-index:9999;max-width:220px;white-space:nowrap;";
+  document.body.appendChild(tip);
+  var cross={x:-1,active:false};
+
+  el.addEventListener("mousemove",function(e){
+    var r=el.getBoundingClientRect();
+    var x=e.clientX-r.left, y=e.clientY-r.top;
+    var info=hitTest(x,y,cross);
+    if(!info){tip.style.opacity="0";cross.active=false;return;}
+    var th=theme();
+    tip.style.background=th.tooltip;
+    tip.style.color=th.tipText;
+    tip.style.border="1px solid "+th.tipBord;
+    tip.style.boxShadow="0 4px 12px rgba(0,0,0,0.15)";
+    tip.innerHTML=info.html;
+    cross.x=info.cx!==undefined?info.cx:x;
+    cross.active=true;
+    var tx=e.clientX+12, ty=e.clientY-10;
+    if(tx+220>window.innerWidth) tx=e.clientX-230;
+    tip.style.left=tx+"px";
+    tip.style.top=ty+"px";
+    tip.style.opacity="1";
+    if(info.redraw) info.redraw();
+  });
+
+  el.addEventListener("mouseleave",function(){
+    tip.style.opacity="0";
+    cross.active=false;
+    var info=hitTest(-1,-1,cross);
+    if(info&&info.redraw) info.redraw();
+  });
+  return cross;
+}
+
+/* ── MARGINS ─────────────────────────────────────────────────────── */
+function margins(opts){
+  var l=opts&&opts.yLabel?52:44;
+  var b=opts&&opts.xLabel?42:34;
+  return {t:16,r:16,b:b,l:l};
+}
+
+/* ── computeYTicks ───────────────────────────────────────────────── */
+function computeYTicks(dMin,dMax,yMax,count){
+  var mn=dMin,mx=yMax!==undefined?yMax:dMax;
+  if(mn===mx){mn=mn-1;mx=mx+1;}
+  var range=mx-mn;
+  var step=range/(count-1);
+  var ticks=[];
+  for(var i=0;i<count;i++) ticks.push(mn+step*i);
+  return {min:mn,max:mx,ticks:ticks};
+}
+
+/* ── drawAxes ────────────────────────────────────────────────────── */
+function drawAxes(ctx,m,w,h,yInfo,labels,opts){
+  var th=theme();
+  var cw=w-m.l-m.r, ch=h-m.t-m.b;
+  /* y grid + labels */
+  ctx.font="11px -apple-system,system-ui,sans-serif";
+  ctx.textAlign="right"; ctx.textBaseline="middle";
+  for(var i=0;i<yInfo.ticks.length;i++){
+    var vy=yInfo.ticks[i];
+    var py=m.t+ch-(vy-yInfo.min)/(yInfo.max-yInfo.min)*ch;
+    ctx.strokeStyle=th.grid; ctx.lineWidth=1;
+    ctx.setLineDash([4,4]); ctx.beginPath();
+    ctx.moveTo(m.l,py); ctx.lineTo(w-m.r,py); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle=th.text;
+    var lbl=vy%1===0?vy.toString():vy.toFixed(1);
+    ctx.fillText(lbl,m.l-8,py);
+  }
+  /* x labels */
+  if(labels&&labels.length){
+    ctx.textAlign="center"; ctx.textBaseline="top";
+    var step=Math.max(1,Math.floor(labels.length/(cw/50)));
+    for(var j=0;j<labels.length;j+=step){
+      var px=m.l+j/(labels.length-1||1)*cw;
+      ctx.fillStyle=th.text;
+      ctx.fillText(labels[j],px,h-m.b+8);
+    }
+  }
+  /* axis titles */
+  if(opts&&opts.yLabel){
+    ctx.save(); ctx.translate(12,m.t+ch/2);
+    ctx.rotate(-Math.PI/2); ctx.textAlign="center";
+    ctx.fillStyle=th.text; ctx.fillText(opts.yLabel,0,0);
+    ctx.restore();
+  }
+  if(opts&&opts.xLabel){
+    ctx.textAlign="center"; ctx.fillStyle=th.text;
+    ctx.fillText(opts.xLabel,m.l+cw/2,h-4);
+  }
+}
+
+/* ── crosshair helper ────────────────────────────────────────────── */
+function drawCrosshair(ctx,cross,m,h){
+  if(!cross.active||cross.x<0) return;
+  var th=theme();
+  ctx.strokeStyle=th.text; ctx.lineWidth=0.5;
+  ctx.setLineDash([3,3]); ctx.beginPath();
+  ctx.moveTo(cross.x,m.t); ctx.lineTo(cross.x,h-m.b);
+  ctx.stroke(); ctx.setLineDash([]);
+}
+
+/* ── computePoints ───────────────────────────────────────────────── */
+function computePoints(data,m,cw,ch,yInfo){
+  var pts=[];
+  for(var i=0;i<data.length;i++){
+    var x=m.l+(data.length===1?cw/2:i/(data.length-1)*cw);
+    var y=m.t+ch-(data[i]-yInfo.min)/(yInfo.max-yInfo.min)*ch;
+    pts.push({x:x,y:y,v:data[i]});
+  }
+  return pts;
+}
+
+/* ─── NasChart.line ──────────────────────────────────────────────── */
+function drawLine(id,opts){
+  var c=prepCanvas(id,opts); if(!c) return;
+  var ctx=c.ctx, w=c.w, h=c.h;
+  var m=margins(opts), cw=w-m.l-m.r, ch=h-m.t-m.b;
+  var ds=opts.datasets||[];
+  var allD=[]; ds.forEach(function(d){allD=allD.concat(d.data);});
+  var yInfo=computeYTicks(Math.min.apply(null,allD),Math.max.apply(null,allD),opts.yMax,6);
+  var allPts=ds.map(function(d){return computePoints(d.data,m,cw,ch,yInfo);});
+  var cross={x:-1,active:false};
+
+  function render(progress){
+    ctx.clearRect(0,0,w,h);
+    drawAxes(ctx,m,w,h,yInfo,opts.labels,opts);
+    drawCrosshair(ctx,cross,m,h);
+    var pIdx=progress!==undefined?progress:1;
+    ds.forEach(function(d,di){
+      var pts=allPts[di];
+      var count=Math.max(2,Math.ceil(pts.length*pIdx));
+      var visible=pts.slice(0,count);
+      ctx.strokeStyle=d.color||"#55b3ff";
+      ctx.lineWidth=2; ctx.lineJoin="round";
+      if(d.dashed) ctx.setLineDash([6,4]);
+      else ctx.setLineDash([]);
+      ctx.beginPath(); drawSmooth(ctx,visible); ctx.stroke();
+      ctx.setLineDash([]);
+      /* dots */
+      visible.forEach(function(p){
+        ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2);
+        ctx.fillStyle=d.color||"#55b3ff"; ctx.fill();
+      });
+    });
+  }
+
+  animate(500,function(t){render(t);});
+
+  attachTooltip(c.el,function(mx,my,cr){
+    cross.active=cr.active; cross.x=cr.x;
+    if(mx<m.l||mx>w-m.r) return null;
+    var labels=opts.labels||[];
+    var idx=Math.round((mx-m.l)/cw*(labels.length-1));
+    idx=clamp(idx,0,labels.length-1);
+    var cx=m.l+idx/(labels.length-1||1)*cw;
+    var rows=ds.map(function(d,di){
+      var v=d.data[idx];
+      return "<div style='margin:2px 0'><span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:"+(d.color||"#55b3ff")+";margin-right:6px'></span>"+
+        (d.label||"Series "+(di+1))+": <b>"+v+"</b></div>";
+    }).join("");
+    var html="<div style='font-weight:600;margin-bottom:4px'>"+(labels[idx]||"")+"</div>"+rows;
+    return {html:html,cx:cx,redraw:function(){render(1);}};
+  });
+}
+
+/* ─── NasChart.area ──────────────────────────────────────────────── */
+function drawArea(id,opts){
+  var c=prepCanvas(id,opts); if(!c) return;
+  var ctx=c.ctx, w=c.w, h=c.h;
+  var m=margins(opts), cw=w-m.l-m.r, ch=h-m.t-m.b;
+  var ds=opts.datasets||[];
+  var allD=[]; ds.forEach(function(d){allD=allD.concat(d.data);});
+  var yInfo=computeYTicks(Math.min.apply(null,allD),Math.max.apply(null,allD),opts.yMax,6);
+  var allPts=ds.map(function(d){return computePoints(d.data,m,cw,ch,yInfo);});
+  var cross={x:-1,active:false};
+
+  function render(progress){
+    ctx.clearRect(0,0,w,h);
+    drawAxes(ctx,m,w,h,yInfo,opts.labels,opts);
+    drawCrosshair(ctx,cross,m,h);
+    var pIdx=progress!==undefined?progress:1;
+    ds.forEach(function(d,di){
+      var pts=allPts[di];
+      var count=Math.max(2,Math.ceil(pts.length*pIdx));
+      var visible=pts.slice(0,count);
+      var col=d.color||"#55b3ff";
+      /* fill */
+      var grad=ctx.createLinearGradient(0,m.t,0,m.t+ch);
+      grad.addColorStop(0,col.replace(")",",0.3)").replace("rgb","rgba").replace("##","#"));
+      /* hex to rgba for gradient */
+      var r=parseInt(col.slice(1,3),16),g=parseInt(col.slice(3,5),16),b=parseInt(col.slice(5,7),16);
+      grad.addColorStop(0,"rgba("+r+","+g+","+b+",0.3)");
+      grad.addColorStop(1,"rgba("+r+","+g+","+b+",0.0)");
+      ctx.beginPath(); drawSmooth(ctx,visible);
+      ctx.lineTo(visible[visible.length-1].x,m.t+ch);
+      ctx.lineTo(visible[0].x,m.t+ch); ctx.closePath();
+      ctx.fillStyle=grad; ctx.fill();
+      /* stroke */
+      ctx.strokeStyle=col; ctx.lineWidth=2; ctx.lineJoin="round";
+      ctx.beginPath(); drawSmooth(ctx,visible); ctx.stroke();
+      /* dots */
+      visible.forEach(function(p){
+        ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2);
+        ctx.fillStyle=col; ctx.fill();
+      });
+    });
+  }
+
+  animate(500,function(t){render(t);});
+
+  attachTooltip(c.el,function(mx,my,cr){
+    cross.active=cr.active; cross.x=cr.x;
+    if(mx<m.l||mx>w-m.r) return null;
+    var labels=opts.labels||[];
+    var idx=Math.round((mx-m.l)/cw*(labels.length-1));
+    idx=clamp(idx,0,labels.length-1);
+    var cx=m.l+idx/(labels.length-1||1)*cw;
+    var rows=ds.map(function(d,di){
+      var v=d.data[idx]; var col=d.color||"#55b3ff";
+      return "<div style='margin:2px 0'><span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:"+col+";margin-right:6px'></span>"+
+        (d.label||"Series "+(di+1))+": <b>"+v+"</b></div>";
+    }).join("");
+    var html="<div style='font-weight:600;margin-bottom:4px'>"+(labels[idx]||"")+"</div>"+rows;
+    return {html:html,cx:cx,redraw:function(){render(1);}};
+  });
+}
+
+/* ─── NasChart.bar ───────────────────────────────────────────────── */
+function drawBar(id,opts){
+  var c=prepCanvas(id,opts); if(!c) return;
+  var ctx=c.ctx, w=c.w, h=c.h;
+  var m=margins(opts), cw=w-m.l-m.r, ch=h-m.t-m.b;
+  var data=opts.data||[];
+  var labels=opts.labels||[];
+  var colors=opts.colors||[];
+  var defCol="#55b3ff";
+  var yInfo=computeYTicks(0,Math.max.apply(null,data),opts.yMax,6);
+  var cross={x:-1,active:false,idx:-1};
+
+  function render(progress){
+    ctx.clearRect(0,0,w,h);
+    drawAxes(ctx,m,w,h,yInfo,labels,opts);
+    var p=progress!==undefined?progress:1;
+    var n=data.length; if(!n) return;
+    var gap=Math.max(6,cw*0.15/(n));
+    var bw=(cw-gap*(n+1))/n;
+    bw=Math.min(bw,60);
+    var totalW=n*bw+(n+1)*gap;
+    var startX=m.l+(cw-totalW)/2+gap;
+    for(var i=0;i<n;i++){
+      var bh=((data[i]-yInfo.min)/(yInfo.max-yInfo.min))*ch*p;
+      var x=startX+i*(bw+gap);
+      var y=m.t+ch-bh;
+      var col=colors[i]||defCol;
+      /* bar with rounded top */
+      var rad=Math.min(4,bw/4);
+      ctx.beginPath();
+      ctx.moveTo(x,m.t+ch);
+      ctx.lineTo(x,y+rad);
+      ctx.quadraticCurveTo(x,y,x+rad,y);
+      ctx.lineTo(x+bw-rad,y);
+      ctx.quadraticCurveTo(x+bw,y,x+bw,y+rad);
+      ctx.lineTo(x+bw,m.t+ch);
+      ctx.closePath();
+      ctx.fillStyle=col; ctx.fill();
+      /* hover highlight */
+      if(cross.active&&cross.idx===i){
+        ctx.fillStyle="rgba(255,255,255,0.12)"; ctx.fill();
+      }
+    }
+  }
+
+  animate(500,function(t){render(t);});
+
+  attachTooltip(c.el,function(mx,my,cr){
+    cross.active=cr.active; cross.x=cr.x;
+    var n=data.length; if(!n) return null;
+    var gap=Math.max(6,cw*0.15/(n));
+    var bw=(cw-gap*(n+1))/n;
+    bw=Math.min(bw,60);
+    var totalW=n*bw+(n+1)*gap;
+    var startX=m.l+(cw-totalW)/2+gap;
+    var idx=-1;
+    for(var i=0;i<n;i++){
+      var x=startX+i*(bw+gap);
+      if(mx>=x&&mx<=x+bw){idx=i;break;}
+    }
+    cross.idx=idx;
+    if(idx<0) return null;
+    var col=colors[idx]||defCol;
+    var html="<div style='font-weight:600;margin-bottom:2px'>"+(labels[idx]||"Bar "+(idx+1))+"</div>"+
+      "<div><span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:"+col+";margin-right:6px'></span><b>"+data[idx]+"</b></div>";
+    return {html:html,cx:startX+idx*(bw+gap)+bw/2,redraw:function(){render(1);}};
+  });
+}
+
+/* ─── NasChart.gauge ─────────────────────────────────────────────── */
+function drawGauge(id,opts){
+  var c=prepCanvas(id,opts); if(!c) return;
+  var ctx=c.ctx, w=c.w, h=c.h;
+  var val=opts.value||0, mx=opts.max||100;
+  var label=opts.label||"";
+  var pct=clamp(val/mx,0,1);
+
+  /* auto color from thresholds */
+  var col=opts.color||"#5fc992";
+  if(opts.thresholds){
+    var g=opts.thresholds.good!==undefined?opts.thresholds.good:80;
+    var wa=opts.thresholds.warn!==undefined?opts.thresholds.warn:50;
+    if(val>=g) col="#5fc992";
+    else if(val>=wa) col="#ffbc33";
+    else col="#FF6363";
+  }
+
+  var cx=w/2, cy=h*0.62;
+  var rad=Math.min(w/2-20,h*0.55-10);
+  var lw=rad*0.18;
+  var th=theme();
+
+  function render(progress){
+    var p=progress!==undefined?progress:1;
+    ctx.clearRect(0,0,w,h);
+    /* track */
+    ctx.beginPath();
+    ctx.arc(cx,cy,rad,Math.PI,2*Math.PI);
+    ctx.strokeStyle=th.grid; ctx.lineWidth=lw;
+    ctx.lineCap="round"; ctx.stroke();
+    /* value arc */
+    var endAngle=Math.PI+Math.PI*pct*p;
+    ctx.beginPath();
+    ctx.arc(cx,cy,rad,Math.PI,endAngle);
+    ctx.strokeStyle=col; ctx.lineWidth=lw;
+    ctx.lineCap="round"; ctx.stroke();
+    /* value text */
+    ctx.fillStyle=th.text.replace("0.50","0.9").replace("0.45","0.85");
+    ctx.font="bold "+Math.round(rad*0.48)+"px -apple-system,system-ui,sans-serif";
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(Math.round(val*p),cx,cy-rad*0.08);
+    /* label */
+    ctx.fillStyle=th.text;
+    ctx.font="12px -apple-system,system-ui,sans-serif";
+    ctx.fillText(label,cx,cy+rad*0.38);
+  }
+
+  animate(500,function(t){render(t);});
+}
+
+/* ─── NasChart.sparkline ─────────────────────────────────────────── */
+function drawSparkline(id,opts){
+  var sw=opts.width||120, sh=opts.height||30;
+  opts.width=sw; opts.height=sh;
+  var c=prepCanvas(id,opts); if(!c) return;
+  var ctx=c.ctx;
+  var data=opts.data||[];
+  if(!data.length) return;
+  var col=opts.color||"#55b3ff";
+  var mn=Math.min.apply(null,data), mx=Math.max.apply(null,data);
+  if(mn===mx){mn-=1;mx+=1;}
+  var pad=2;
+
+  function render(progress){
+    var p=progress!==undefined?progress:1;
+    ctx.clearRect(0,0,sw,sh);
+    var pts=[];
+    var count=Math.max(2,Math.ceil(data.length*p));
+    for(var i=0;i<count&&i<data.length;i++){
+      var x=pad+i/(data.length-1)*(sw-2*pad);
+      var y=sh-pad-(data[i]-mn)/(mx-mn)*(sh-2*pad);
+      pts.push({x:x,y:y});
+    }
+    /* gradient fill */
+    var r=parseInt(col.slice(1,3),16),g=parseInt(col.slice(3,5),16),b=parseInt(col.slice(5,7),16);
+    var grad=ctx.createLinearGradient(0,0,0,sh);
+    grad.addColorStop(0,"rgba("+r+","+g+","+b+",0.18)");
+    grad.addColorStop(1,"rgba("+r+","+g+","+b+",0.0)");
+    ctx.beginPath(); drawSmooth(ctx,pts);
+    ctx.lineTo(pts[pts.length-1].x,sh); ctx.lineTo(pts[0].x,sh);
+    ctx.closePath(); ctx.fillStyle=grad; ctx.fill();
+    /* line */
+    ctx.beginPath(); drawSmooth(ctx,pts);
+    ctx.strokeStyle=col; ctx.lineWidth=1.5; ctx.lineJoin="round";
+    ctx.stroke();
+  }
+
+  animate(500,function(t){render(t);});
+}
+
+/* ── public API ──────────────────────────────────────────────────── */
+var NasChart={
+  line:      drawLine,
+  area:      drawArea,
+  bar:       drawBar,
+  gauge:     drawGauge,
+  sparkline: drawSparkline
+};
+
+window.NasChart=NasChart;
+})();
+`
