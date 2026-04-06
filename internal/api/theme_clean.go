@@ -698,6 +698,7 @@ body {
     </div>
     <div class="nav-links">
       <a href="/api/v1/report" class="nav-link" target="_blank">Export Report</a>
+      <a href="https://github.com/mcdays94/nas-doctor" class="nav-link" target="_blank" title="GitHub"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.02 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.82.58C20.56 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
       <a href="/settings" class="nav-link" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
     </div>
   </div>
@@ -842,13 +843,18 @@ body {
     html += '</div>';
 
     // ---- Two-column grid ----
-    // Update banner
-    if (snapshot && snapshot.update && snapshot.update.update_available) {
-      var upd = snapshot.update;
+    // OS version banner
+    var sysP = (snapshot && snapshot.system) ? snapshot.system.platform : null;
+    var sysV = (snapshot && snapshot.system) ? snapshot.system.platform_version : null;
+    if (sysP && sysV) {
+      var hasUpd = snapshot.update && snapshot.update.update_available;
       html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#f5f5f5;border:1px solid rgba(0,0,0,0.08);border-radius:8px;margin-bottom:12px;font-size:13px">';
-      html += '<span style="color:#171717;font-weight:600">Update Available</span>';
-      html += '<span style="color:#808080">' + escapeHTML(upd.platform) + ' ' + escapeHTML(upd.installed_version) + ' → ' + escapeHTML(upd.latest_version) + '</span>';
-      if (upd.release_url) html += '<a href="' + escapeHTML(upd.release_url) + '" target="_blank" style="color:#171717;text-decoration:underline;margin-left:auto">Release notes</a>';
+      html += '<span style="color:#171717;font-weight:600">' + escapeHTML(sysP) + '</span>';
+      html += '<span style="color:#808080">v' + escapeHTML(sysV) + '</span>';
+      if (hasUpd) {
+        html += '<span style="color:#171717;font-weight:600;margin-left:8px">Update → ' + escapeHTML(snapshot.update.latest_version) + '</span>';
+        if (snapshot.update.release_url) html += '<a href="' + escapeHTML(snapshot.update.release_url) + '" target="_blank" style="color:#171717;text-decoration:underline;margin-left:auto">Release notes</a>';
+      }
       html += '</div>';
     }
 
