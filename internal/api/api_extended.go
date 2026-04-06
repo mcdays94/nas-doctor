@@ -871,13 +871,33 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
     <div class="form-row" style="margin-top:12px">
       <div>
-        <label for="backup-interval">Backup every (hours)</label>
-        <input type="number" id="backup-interval" min="1" max="8760" value="168" style="text-align:center">
-        <p style="font-size:11px;color:var(--text2);margin-top:4px">168 = weekly, 24 = daily</p>
+        <label for="backup-preset">Backup frequency</label>
+        <select id="backup-preset" onchange="onBackupPresetChange()">
+          <option value="12">Every 12 hours</option>
+          <option value="24">Daily</option>
+          <option value="72">Every 3 days</option>
+          <option value="168" selected>Weekly</option>
+          <option value="336">Every 2 weeks</option>
+          <option value="720">Monthly</option>
+          <option value="custom">Custom...</option>
+        </select>
       </div>
       <div>
         <div id="backup-info" style="font-size:12px;color:var(--text2);line-height:1.8;padding-top:20px">Loading backup info...</div>
       </div>
+    </div>
+    <div id="backup-custom-panel" style="display:none;margin-top:12px;padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:80px">
+          <label for="backup-days" style="font-size:11px;margin-bottom:4px">Days</label>
+          <input type="number" id="backup-days" min="0" max="365" value="7" style="text-align:center">
+        </div>
+        <div style="flex:1;min-width:80px">
+          <label for="backup-hours" style="font-size:11px;margin-bottom:4px">Hours</label>
+          <input type="number" id="backup-hours" min="0" max="23" value="0" style="text-align:center">
+        </div>
+      </div>
+      <div id="backup-custom-preview" style="font-size:12px;color:var(--text2);margin-top:8px">Backup every 7 days</div>
     </div>
     <div style="margin-top:12px">
       <button class="btn-secondary" onclick="triggerBackup()">Backup Now</button>
@@ -1087,7 +1107,7 @@ function loadSettings() {
       if (bk.enabled === false) { bkToggle.classList.remove("on"); } else { bkToggle.classList.add("on"); }
       document.getElementById("backup-path").value = bk.path || "";
       document.getElementById("backup-keep").value = bk.keep_count || 4;
-      document.getElementById("backup-interval").value = bk.interval_hours || 168;
+      setBackupIntervalUI(bk.interval_hours || 168);
     })
     .catch(function(e) { showToast("Failed to load settings: " + e, "error"); });
 }
@@ -1108,7 +1128,7 @@ function buildSettingsPayload() {
       enabled: document.getElementById("backup-toggle").classList.contains("on"),
       path: document.getElementById("backup-path").value.trim(),
       keep_count: parseInt(document.getElementById("backup-keep").value, 10) || 4,
-      interval_hours: parseInt(document.getElementById("backup-interval").value, 10) || 168
+      interval_hours: getBackupIntervalH()
     }
   };
 }
@@ -1355,10 +1375,65 @@ function loadDBStats() {
 }
 
 /* ---------- Backup ---------- */
+var backupPresets = ["12", "24", "72", "168", "336", "720"];
+
 function toggleBackup() {
   var el = document.getElementById("backup-toggle");
   el.classList.toggle("on");
 }
+
+function onBackupPresetChange() {
+  var v = document.getElementById("backup-preset").value;
+  var panel = document.getElementById("backup-custom-panel");
+  if (v === "custom") {
+    panel.style.display = "block";
+    updateBackupCustomPreview();
+  } else {
+    panel.style.display = "none";
+  }
+}
+
+function getBackupIntervalH() {
+  var v = document.getElementById("backup-preset").value;
+  if (v !== "custom") return parseInt(v, 10);
+  var d = parseInt(document.getElementById("backup-days").value, 10) || 0;
+  var h = parseInt(document.getElementById("backup-hours").value, 10) || 0;
+  var total = d * 24 + h;
+  return total > 0 ? total : 168;
+}
+
+function updateBackupCustomPreview() {
+  var d = parseInt(document.getElementById("backup-days").value, 10) || 0;
+  var h = parseInt(document.getElementById("backup-hours").value, 10) || 0;
+  var parts = [];
+  if (d > 0) parts.push(d + (d === 1 ? " day" : " days"));
+  if (h > 0) parts.push(h + (h === 1 ? " hour" : " hours"));
+  var el = document.getElementById("backup-custom-preview");
+  el.textContent = parts.length > 0 ? "Backup every " + parts.join(", ") : "Set at least 1 hour";
+}
+
+function setBackupIntervalUI(hours) {
+  var sel = document.getElementById("backup-preset");
+  var h = String(hours);
+  if (backupPresets.indexOf(h) >= 0) {
+    sel.value = h;
+    document.getElementById("backup-custom-panel").style.display = "none";
+  } else {
+    sel.value = "custom";
+    document.getElementById("backup-custom-panel").style.display = "block";
+    document.getElementById("backup-days").value = Math.floor(hours / 24);
+    document.getElementById("backup-hours").value = hours % 24;
+    updateBackupCustomPreview();
+  }
+}
+
+/* Attach listeners for custom backup fields */
+(function() {
+  var bd = document.getElementById("backup-days");
+  var bh = document.getElementById("backup-hours");
+  if (bd) bd.addEventListener("input", updateBackupCustomPreview);
+  if (bh) bh.addEventListener("input", updateBackupCustomPreview);
+})();
 
 function loadBackupInfo() {
   fetch("/api/v1/backup")
