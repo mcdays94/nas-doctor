@@ -1346,6 +1346,46 @@ td.mono {
     }
     html += "</div>";
 
+    /* ---- ZFS Pools ---- */
+    if (snapshot && snapshot.zfs && snapshot.zfs.available && snapshot.zfs.pools && snapshot.zfs.pools.length > 0) {
+      html += "<div class=\"section\" style=\"margin-top:0\">";
+      html += "<div class=\"section-title\">ZFS Pools</div>";
+      for (var zi = 0; zi < snapshot.zfs.pools.length; zi++) {
+        var zp = snapshot.zfs.pools[zi];
+        var sDot = zp.state === "ONLINE" ? "s-green" : zp.state === "DEGRADED" ? "s-amber" : "s-red";
+        html += "<div class=\"card-static\" style=\"margin-bottom:8px;padding:12px\">";
+        html += "<div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:6px\">";
+        html += "<span style=\"font-family:var(--font-mono);font-weight:500;font-size:14px\">" + esc(zp.name) + "</span>";
+        html += "<span class=\"status-dot " + sDot + "\"></span><span class=\"mono\" style=\"font-size:11px\">" + esc(zp.state) + "</span>";
+        html += "</div>";
+        html += "<div style=\"font-size:12px;color:var(--text-tertiary)\">" + (zp.used_gb || 0).toFixed(0) + " / " + (zp.total_gb || 0).toFixed(0) + " GB (" + (zp.used_percent || 0).toFixed(0) + "%)</div>";
+        if (zp.scan_type && zp.scan_type !== "none") {
+          html += "<div style=\"font-size:11px;color:var(--text-dim);margin-top:4px\">Last " + esc(zp.scan_type) + ": " + (zp.scan_errors || 0) + " errors</div>";
+        }
+        if (zp.vdevs && zp.vdevs.length > 0) {
+          html += "<div style=\"margin-top:6px;font-size:11px;font-family:var(--font-mono);color:var(--text-dim)\">";
+          for (var vi = 0; vi < zp.vdevs.length; vi++) {
+            var vd = zp.vdevs[vi];
+            var vClr = vd.state === "ONLINE" ? "var(--green)" : vd.state === "DEGRADED" ? "#FACC15" : "var(--red)";
+            html += "<div>" + esc(vd.name) + " <span style=\"color:" + vClr + "\">" + esc(vd.state) + "</span></div>";
+            if (vd.children) {
+              for (var ci = 0; ci < vd.children.length; ci++) {
+                var ch = vd.children[ci];
+                var cClr = ch.state === "ONLINE" ? "var(--green)" : ch.state === "DEGRADED" ? "#FACC15" : "var(--red)";
+                html += "<div style=\"padding-left:14px\">" + esc(ch.name) + " <span style=\"color:" + cClr + "\">" + esc(ch.state) + "</span></div>";
+              }
+            }
+          }
+          html += "</div>";
+        }
+        html += "</div>";
+      }
+      if (snapshot.zfs.arc) {
+        html += "<div style=\"font-size:11px;color:var(--text-dim);margin-top:4px\">ARC: " + (snapshot.zfs.arc.size_mb / 1024).toFixed(1) + " GB / " + (snapshot.zfs.arc.max_size_mb / 1024).toFixed(1) + " GB &middot; Hit rate: " + (snapshot.zfs.arc.hit_rate_percent || 0).toFixed(1) + "%</div>";
+      }
+      html += "</div>";
+    }
+
     html += "</div>"; /* .col-right */
     html += "</div>"; /* .two-col */
 

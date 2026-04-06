@@ -465,6 +465,51 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '</div>';
     }
 
+    // ZFS Pools
+    var zfs = sn ? sn.zfs : null;
+    if (zfs && zfs.available && zfs.pools && zfs.pools.length > 0) {
+      h += '<div>';
+      h += '<div class="section-title">ZFS Pools</div>';
+      for (var zi = 0; zi < zfs.pools.length; zi++) {
+        var zp = zfs.pools[zi];
+        var poolStateClass = zp.state === "ONLINE" ? "td-healthy" : zp.state === "DEGRADED" ? "td-warn" : "td-crit";
+        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px;margin-bottom:8px">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+        h += '<span style="font-weight:600;font-size:13px;color:var(--text-primary)">' + esc(zp.name) + '</span>';
+        h += '<span class="' + poolStateClass + '" style="font-weight:600;font-size:11px;text-transform:uppercase">' + esc(zp.state) + '</span>';
+        h += '</div>';
+        h += '<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:6px">';
+        h += esc((zp.used_gb || 0).toFixed(0)) + ' / ' + esc((zp.total_gb || 0).toFixed(0)) + ' GB (' + (zp.used_percent || 0).toFixed(0) + '%) &middot; Frag: ' + (zp.fragmentation_percent || 0) + '%';
+        h += '</div>';
+        if (zp.scan_type && zp.scan_type !== "none") {
+          h += '<div style="font-size:11px;color:var(--text-quaternary)">Last ' + esc(zp.scan_type) + ': ' + (zp.scan_errors || 0) + ' errors</div>';
+        }
+        // VDev tree
+        if (zp.vdevs && zp.vdevs.length > 0) {
+          h += '<div style="margin-top:8px;font-size:11px;font-family:monospace;color:var(--text-tertiary)">';
+          for (var vi = 0; vi < zp.vdevs.length; vi++) {
+            var vd = zp.vdevs[vi];
+            var vdClass = vd.state === "ONLINE" ? "td-healthy" : vd.state === "DEGRADED" ? "td-warn" : "td-crit";
+            h += '<div>' + esc(vd.name) + ' <span class="' + vdClass + '">' + esc(vd.state) + '</span></div>';
+            if (vd.children) {
+              for (var ci = 0; ci < vd.children.length; ci++) {
+                var ch = vd.children[ci];
+                var chClass = ch.state === "ONLINE" ? "td-healthy" : ch.state === "DEGRADED" ? "td-warn" : "td-crit";
+                h += '<div style="padding-left:16px">' + esc(ch.name) + ' <span class="' + chClass + '">' + esc(ch.state) + '</span></div>';
+              }
+            }
+          }
+          h += '</div>';
+        }
+        h += '</div>';
+      }
+      // ARC stats
+      if (zfs.arc) {
+        h += '<div style="font-size:11px;color:var(--text-quaternary);margin-top:6px">ARC: ' + (zfs.arc.size_mb / 1024).toFixed(1) + ' GB / ' + (zfs.arc.max_size_mb / 1024).toFixed(1) + ' GB &middot; Hit rate: ' + (zfs.arc.hit_rate_percent || 0).toFixed(1) + '%</div>';
+      }
+      h += '</div>';
+    }
+
     h += '</div>'; // end col-right
     h += '</div>'; // end two-col
 

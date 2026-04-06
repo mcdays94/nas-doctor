@@ -984,6 +984,44 @@ body {
     }
     html += '</div>';
 
+    // ---- ZFS Pools ----
+    if (snapshot && snapshot.zfs && snapshot.zfs.available && snapshot.zfs.pools && snapshot.zfs.pools.length > 0) {
+      html += '<div class="section">';
+      html += '<div class="section-title">ZFS Pools</div>';
+      for (var zi = 0; zi < snapshot.zfs.pools.length; zi++) {
+        var zp = snapshot.zfs.pools[zi];
+        var stDot = zp.state === 'ONLINE' ? 'green' : zp.state === 'DEGRADED' ? 'amber' : 'red';
+        html += '<div class="card" style="margin-bottom:8px">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+        html += '<span style="font-weight:600;font-size:14px;color:#171717">' + escapeHTML(zp.name) + '</span>';
+        html += '<span class="status-dot ' + stDot + '"></span> <span style="font-size:12px;font-weight:500">' + escapeHTML(zp.state) + '</span>';
+        html += '</div>';
+        html += '<div style="font-size:13px;color:#4d4d4d">' + (zp.used_gb || 0).toFixed(0) + ' / ' + (zp.total_gb || 0).toFixed(0) + ' GB (' + (zp.used_percent || 0).toFixed(0) + '%)</div>';
+        if (zp.scan_type && zp.scan_type !== 'none') {
+          html += '<div style="font-size:12px;color:#808080;margin-top:4px">Last ' + escapeHTML(zp.scan_type) + ': ' + (zp.scan_errors || 0) + ' errors</div>';
+        }
+        if (zp.vdevs && zp.vdevs.length > 0) {
+          html += '<div style="margin-top:6px;font-size:11px;font-family:monospace;color:#808080">';
+          for (var vi = 0; vi < zp.vdevs.length; vi++) {
+            var vd = zp.vdevs[vi];
+            html += '<div>' + escapeHTML(vd.name) + ' <span style="color:' + (vd.state === 'ONLINE' ? '#16a34a' : vd.state === 'DEGRADED' ? '#d97706' : '#dc2626') + '">' + escapeHTML(vd.state) + '</span></div>';
+            if (vd.children) {
+              for (var ci = 0; ci < vd.children.length; ci++) {
+                var ch = vd.children[ci];
+                html += '<div style="padding-left:14px">' + escapeHTML(ch.name) + ' <span style="color:' + (ch.state === 'ONLINE' ? '#16a34a' : ch.state === 'DEGRADED' ? '#d97706' : '#dc2626') + '">' + escapeHTML(ch.state) + '</span></div>';
+              }
+            }
+          }
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+      if (snapshot.zfs.arc) {
+        html += '<div style="font-size:11px;color:#808080;margin-top:4px">ARC: ' + (snapshot.zfs.arc.size_mb / 1024).toFixed(1) + ' GB / ' + (snapshot.zfs.arc.max_size_mb / 1024).toFixed(1) + ' GB · Hit rate: ' + (snapshot.zfs.arc.hit_rate_percent || 0).toFixed(1) + '%</div>';
+      }
+      html += '</div>';
+    }
+
     html += '</div>'; // end col-right
 
     html += '</div>'; // end two-col

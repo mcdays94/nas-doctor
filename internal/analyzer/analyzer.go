@@ -27,6 +27,10 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 		findings = append(findings, analyzeParity(snap.Parity)...)
 	}
 
+	if snap.ZFS != nil && snap.ZFS.Available {
+		findings = append(findings, analyzeZFS(snap.ZFS)...)
+	}
+
 	// Cross-correlation: combine related findings
 	findings = correlate(findings, snap)
 
@@ -725,4 +729,234 @@ func priorityFromSeverity(s internal.Severity) string {
 	default:
 		return "medium-term"
 	}
+}
+
+// ---------- ZFS Rules ----------
+
+func analyzeZFS(zfs *internal.ZFSInfo) []internal.Finding {
+	var findings []internal.Finding
+	for _, pool := range zfs.Pools {
+		findings = append(findings, analyzeZPool(pool)...)
+	}
+	if zfs.ARC != nil {
+		findings = append(findings, analyzeARC(zfs.ARC)...)
+	}
+	return findings
+}
+
+func analyzeZPool(pool internal.ZPool) []internal.Finding {
+	var findings []internal.Finding
+
+	// Pool state
+	switch pool.State {
+	case "DEGRADED":
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityCritical,
+			Category:    internal.CategoryZFS,
+			Title:       fmt.Sprintf("ZFS Pool '%s' is DEGRADED", pool.Name),
+			Description: fmt.Sprintf("Pool '%s' is operating in degraded mode — one or more devices has failed or been removed. The pool has reduced redundancy and cannot survive another device failure.", pool.Name),
+			Evidence:    buildPoolEvidence(pool),
+			Impact:      "No redundancy. Another device failure will cause data loss.",
+			Action:      "Replace the failed device immediately with 'zpool replace'. " + pool.Action,
+			Priority:    "immediate",
+		})
+	case "FAULTED":
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityCritical,
+			Category:    internal.CategoryZFS,
+			Title:       fmt.Sprintf("ZFS Pool '%s' is FAULTED", pool.Name),
+			Description: fmt.Sprintf("Pool '%s' is in a FAULTED state and cannot be accessed. Too many devices have failed for the pool to continue operating.", pool.Name),
+			Evidence:    buildPoolEvidence(pool),
+			Impact:      "Pool is offline. Data is inaccessible until repaired.",
+			Action:      "Investigate failed devices. Restore from backup if necessary.",
+			Priority:    "immediate",
+		})
+	case "UNAVAIL":
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityCritical,
+			Category:    internal.CategoryZFS,
+			Title:       fmt.Sprintf("ZFS Pool '%s' is UNAVAILABLE", pool.Name),
+			Description: fmt.Sprintf("Pool '%s' cannot be opened. The required devices are missing or corrupted.", pool.Name),
+			Evidence:    buildPoolEvidence(pool),
+			Impact:      "Complete data unavailability.",
+			Action:      "Check physical connections. Import with 'zpool import -f' if needed.",
+			Priority:    "immediate",
+		})
+	}
+
+	// Scrub errors
+	if pool.ScanErrors > 0 {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityCritical,
+			Category:    internal.CategoryZFS,
+			Title:       fmt.Sprintf("ZFS Scrub Errors on '%s' (%d errors)", pool.Name, pool.ScanErrors),
+			Description: fmt.Sprintf("The last scrub of pool '%s' found %d errors. This means data corruption has been detected.", pool.Name, pool.ScanErrors),
+			Evidence:    []string{pool.ScanStatus},
+			Impact:      "Data integrity compromised. Affected files may be corrupted.",
+			Action:      "Run 'zpool scrub " + pool.Name + "' to repair. Check drive health with SMART.",
+			Priority:    "immediate",
+		})
+	}
+
+	// No scrub ever run
+	if pool.ScanType == "none" {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityWarning,
+			Category:    internal.CategoryZFS,
+			Title:       fmt.Sprintf("No Scrub History for Pool '%s'", pool.Name),
+			Description: fmt.Sprintf("Pool '%s' has never been scrubbed. Regular scrubs detect silent data corruption (bit rot) before it becomes unrecoverable.", pool.Name),
+			Evidence:    []string{"scan: none requested"},
+			Impact:      "Silent data corruption may go undetected.",
+			Action:      "Schedule weekly or monthly scrubs: 'zpool scrub " + pool.Name + "'",
+			Priority:    "short-term",
+		})
+	}
+
+	// Resilver in progress
+	if pool.ScanType == "resilver" && pool.ScanPct > 0 && pool.ScanPct < 100 {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityWarning,
+			Category:    internal.CategoryZFS,
+			Title:       fmt.Sprintf("Resilver in Progress on '%s' (%.1f%%)", pool.Name, pool.ScanPct),
+			Description: fmt.Sprintf("Pool '%s' is currently resilvering (rebuilding) a replaced device. The pool has reduced redundancy until complete.", pool.Name),
+			Evidence:    []string{pool.ScanStatus},
+			Impact:      "Pool is vulnerable during resilver. Avoid heavy I/O.",
+			Action:      "Wait for resilver to complete. Do not remove any other drives.",
+			Priority:    "immediate",
+		})
+	}
+
+	// Pool capacity
+	if pool.UsedPct >= 90 {
+		sev := internal.SeverityWarning
+		if pool.UsedPct >= 95 {
+			sev = internal.SeverityCritical
+		}
+		findings = append(findings, internal.Finding{
+			Severity:    sev,
+			Category:    internal.CategoryZFS,
+			Title:       fmt.Sprintf("ZFS Pool '%s' at %.0f%% Capacity", pool.Name, pool.UsedPct),
+			Description: fmt.Sprintf("Pool '%s' is %.0f%% full (%.1f GB used of %.1f GB). ZFS performance degrades significantly above 80%% capacity due to fragmentation.", pool.Name, pool.UsedPct, pool.UsedGB, pool.TotalGB),
+			Evidence:    []string{fmt.Sprintf("Used: %.1f/%.1f GB (%.0f%%)", pool.UsedGB, pool.TotalGB, pool.UsedPct), fmt.Sprintf("Fragmentation: %d%%", pool.Fragmentation)},
+			Impact:      "Write performance degradation, potential inability to write.",
+			Action:      "Free space or expand the pool. ZFS recommends keeping usage below 80%.",
+			Priority:    priorityFromSeverity(sev),
+		})
+	}
+
+	// High fragmentation
+	if pool.Fragmentation > 50 {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityInfo,
+			Category:    internal.CategoryZFS,
+			Title:       fmt.Sprintf("High Fragmentation on Pool '%s' (%d%%)", pool.Name, pool.Fragmentation),
+			Description: fmt.Sprintf("Pool '%s' has %d%% fragmentation. High fragmentation reduces write performance, especially for large sequential writes.", pool.Name, pool.Fragmentation),
+			Evidence:    []string{fmt.Sprintf("Fragmentation: %d%%", pool.Fragmentation), fmt.Sprintf("Used: %.0f%%", pool.UsedPct)},
+			Impact:      "Reduced write performance.",
+			Action:      "Fragmentation is often caused by high pool usage. Free space to reduce fragmentation.",
+			Priority:    "medium-term",
+		})
+	}
+
+	// VDev errors (read/write/checksum)
+	for _, vdev := range pool.VDevs {
+		checkVDevErrors(&findings, pool.Name, vdev)
+		for _, child := range vdev.Children {
+			checkVDevErrors(&findings, pool.Name, child)
+		}
+	}
+
+	// Data errors
+	if pool.Errors.Data != "" && pool.Errors.Data != "No known data errors" {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityCritical,
+			Category:    internal.CategoryZFS,
+			Title:       fmt.Sprintf("Data Errors on Pool '%s'", pool.Name),
+			Description: fmt.Sprintf("Pool '%s' reports data errors: %s", pool.Name, pool.Errors.Data),
+			Evidence:    []string{pool.Errors.Data},
+			Impact:      "Data corruption detected. Affected files may be unreadable.",
+			Action:      "Run 'zpool scrub' to repair. Restore affected files from backup if needed.",
+			Priority:    "immediate",
+		})
+	}
+
+	return findings
+}
+
+func checkVDevErrors(findings *[]internal.Finding, poolName string, vdev internal.ZVDev) {
+	totalErr := vdev.ReadErr + vdev.WriteErr + vdev.CksumErr
+	if totalErr == 0 {
+		return
+	}
+
+	sev := internal.SeverityWarning
+	if vdev.CksumErr > 10 || totalErr > 50 {
+		sev = internal.SeverityCritical
+	}
+
+	var evidence []string
+	if vdev.ReadErr > 0 {
+		evidence = append(evidence, fmt.Sprintf("Read errors: %d", vdev.ReadErr))
+	}
+	if vdev.WriteErr > 0 {
+		evidence = append(evidence, fmt.Sprintf("Write errors: %d", vdev.WriteErr))
+	}
+	if vdev.CksumErr > 0 {
+		evidence = append(evidence, fmt.Sprintf("Checksum errors: %d", vdev.CksumErr))
+	}
+
+	*findings = append(*findings, internal.Finding{
+		Severity:    sev,
+		Category:    internal.CategoryZFS,
+		Title:       fmt.Sprintf("ZFS Device Errors: %s in '%s'", vdev.Name, poolName),
+		Description: fmt.Sprintf("Device %s in pool '%s' has %d total errors. Checksum errors indicate data corruption. Read/write errors indicate hardware issues.", vdev.Name, poolName, totalErr),
+		Evidence:    evidence,
+		Impact:      "Data integrity risk. Drive may be failing.",
+		Action:      "Check SMART health of the underlying drive. Replace if errors are increasing.",
+		Priority:    priorityFromSeverity(sev),
+		RelatedDisk: vdev.Name,
+	})
+}
+
+func analyzeARC(arc *internal.ZFSARCStats) []internal.Finding {
+	var findings []internal.Finding
+
+	// Low ARC hit rate
+	if arc.Hits+arc.Misses > 1000 && arc.HitRate < 80 {
+		findings = append(findings, internal.Finding{
+			Severity:    internal.SeverityInfo,
+			Category:    internal.CategoryZFS,
+			Title:       fmt.Sprintf("Low ZFS ARC Hit Rate (%.1f%%)", arc.HitRate),
+			Description: fmt.Sprintf("The ZFS ARC (Adaptive Replacement Cache) has a hit rate of %.1f%%. Ideally this should be above 90%%. Low hit rates mean more disk reads.", arc.HitRate),
+			Evidence:    []string{fmt.Sprintf("ARC Size: %.0f MB / %.0f MB max", arc.SizeMB, arc.MaxSizeMB), fmt.Sprintf("Hits: %d, Misses: %d", arc.Hits, arc.Misses)},
+			Impact:      "Increased disk I/O, slower file access.",
+			Action:      "Add more RAM to increase ARC size, or add an L2ARC (SSD cache).",
+			Priority:    "medium-term",
+		})
+	}
+
+	return findings
+}
+
+func buildPoolEvidence(pool internal.ZPool) []string {
+	var ev []string
+	ev = append(ev, fmt.Sprintf("State: %s", pool.State))
+	if pool.Status != "" {
+		ev = append(ev, fmt.Sprintf("Status: %s", pool.Status))
+	}
+	if pool.ScanStatus != "" {
+		ev = append(ev, fmt.Sprintf("Scan: %s", pool.ScanStatus))
+	}
+	// Count degraded/faulted vdevs
+	for _, v := range pool.VDevs {
+		if v.State != "ONLINE" {
+			ev = append(ev, fmt.Sprintf("VDev %s: %s", v.Name, v.State))
+		}
+		for _, c := range v.Children {
+			if c.State != "ONLINE" {
+				ev = append(ev, fmt.Sprintf("  %s: %s", c.Name, c.State))
+			}
+		}
+	}
+	return ev
 }

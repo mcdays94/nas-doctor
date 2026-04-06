@@ -25,6 +25,7 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.Network = demoNetwork()
 	snap.Logs = demoLogs()
 	snap.Parity = demoParity()
+	snap.ZFS = demoZFS()
 
 	return snap
 }
@@ -195,6 +196,70 @@ func demoParity() *internal.ParityInfo {
 			{Date: "2025-10-18", Duration: 126000, SpeedMBs: 60.2, Errors: 0, ExitCode: 0, Action: "check", SizeGB: 28000},
 			{Date: "2026-01-22", Duration: 151200, SpeedMBs: 50.5, Errors: 5, ExitCode: 0, Action: "check", SizeGB: 28000},
 			{Date: "2026-03-30", Duration: 172800, SpeedMBs: 44.1, Errors: 12, ExitCode: 0, Action: "check", SizeGB: 28000},
+		},
+	}
+}
+
+func demoZFS() *internal.ZFSInfo {
+	return &internal.ZFSInfo{
+		Available: true,
+		Pools: []internal.ZPool{
+			{
+				Name: "tank", State: "ONLINE",
+				TotalGB: 28000, UsedGB: 21280, FreeGB: 6720, UsedPct: 76,
+				Fragmentation: 18,
+				ScanType:      "scrub", ScanErrors: 0,
+				ScanStatus: "scrub repaired 0B in 14:22:08 with 0 errors on Sun Apr 6 02:00:00 2026",
+				ScanDate:   "Sun Apr 6 02:00:00 2026",
+				Errors:     internal.ZPoolErrors{Data: "No known data errors"},
+				VDevs: []internal.ZVDev{
+					{Name: "mirror-0", Type: "mirror", State: "ONLINE", Children: []internal.ZVDev{
+						{Name: "/dev/sdb", Type: "disk", State: "ONLINE"},
+						{Name: "/dev/sdc", Type: "disk", State: "ONLINE"},
+					}},
+					{Name: "mirror-1", Type: "mirror", State: "ONLINE", Children: []internal.ZVDev{
+						{Name: "/dev/sdd", Type: "disk", State: "ONLINE"},
+						{Name: "/dev/sde", Type: "disk", State: "ONLINE"},
+					}},
+				},
+			},
+			{
+				Name: "backup", State: "DEGRADED",
+				Status:  "One or more devices has been removed by the administrator.",
+				Action:  "Online the device using 'zpool online' or replace the device with 'zpool replace'.",
+				TotalGB: 8000, UsedGB: 5440, FreeGB: 2560, UsedPct: 68,
+				Fragmentation: 8,
+				ScanType:      "scrub", ScanErrors: 0,
+				ScanStatus: "scrub repaired 0B in 06:18:44 with 0 errors on Sat Apr 5 04:00:00 2026",
+				ScanDate:   "Sat Apr 5 04:00:00 2026",
+				Errors:     internal.ZPoolErrors{Data: "No known data errors"},
+				VDevs: []internal.ZVDev{
+					{Name: "raidz1-0", Type: "raidz1", State: "DEGRADED", Children: []internal.ZVDev{
+						{Name: "/dev/sdf", Type: "disk", State: "ONLINE"},
+						{Name: "/dev/sdg", Type: "disk", State: "REMOVED"},
+						{Name: "/dev/sdh", Type: "disk", State: "ONLINE"},
+					}},
+				},
+			},
+		},
+		Datasets: []internal.ZDataset{
+			{Name: "tank", Pool: "tank", Type: "filesystem", UsedGB: 21280, AvailGB: 6720, ReferGB: 256, MountPoint: "/tank", Compression: "lz4", CompRatio: 1.42},
+			{Name: "tank/data", Pool: "tank", Type: "filesystem", UsedGB: 16800, AvailGB: 6720, ReferGB: 16800, MountPoint: "/tank/data", Compression: "lz4", CompRatio: 1.38},
+			{Name: "tank/media", Pool: "tank", Type: "filesystem", UsedGB: 3200, AvailGB: 6720, ReferGB: 3200, MountPoint: "/tank/media", Compression: "lz4", CompRatio: 1.02},
+			{Name: "tank/docker", Pool: "tank", Type: "filesystem", UsedGB: 680, AvailGB: 6720, ReferGB: 680, MountPoint: "/tank/docker", Compression: "lz4", CompRatio: 2.15},
+			{Name: "tank/vms", Pool: "tank", Type: "filesystem", UsedGB: 600, AvailGB: 6720, ReferGB: 600, MountPoint: "/tank/vms", Compression: "off", CompRatio: 1.0},
+			{Name: "backup", Pool: "backup", Type: "filesystem", UsedGB: 5440, AvailGB: 2560, ReferGB: 128, MountPoint: "/backup", Compression: "zstd", CompRatio: 1.85},
+			{Name: "backup/snapshots", Pool: "backup", Type: "filesystem", UsedGB: 5312, AvailGB: 2560, ReferGB: 5312, MountPoint: "/backup/snapshots", Compression: "zstd", CompRatio: 1.92},
+		},
+		ARC: &internal.ZFSARCStats{
+			SizeMB:    12288,
+			MaxSizeMB: 16384,
+			HitRate:   94.2,
+			MissRate:  5.8,
+			Hits:      847293156,
+			Misses:    51482304,
+			L2SizeMB:  245760,
+			L2HitRate: 78.5,
 		},
 	}
 }
