@@ -106,10 +106,19 @@ a:hover{color:var(--hover)}
 .sev-dot-warning{background:#d97706}
 .sev-dot-info{background:#5e6ad2}
 .sev-dot-ok{background:#10b981}
+.finding{cursor:pointer;transition:background 0.15s ease}
 .finding-title{font-size:13px;font-weight:600;color:var(--text-primary)}
-.finding-desc{font-size:12px;color:var(--text-secondary);margin-bottom:6px;line-height:1.45}
-.finding-action{font-size:12px;color:var(--accent);margin-bottom:6px}
-.finding-meta{display:flex;flex-wrap:wrap;gap:calc(var(--sp)*1.5);font-size:11px;color:var(--text-quaternary)}
+.finding-desc{font-size:12px;color:var(--text-secondary);line-height:1.45}
+.finding-expandable{overflow:hidden;max-height:0;opacity:0;transition:max-height 0.3s ease,opacity 0.3s ease}
+.finding.active .finding-expandable{max-height:500px;opacity:1}
+.finding-details{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px}
+.finding-detail-row{display:flex;gap:8px;font-size:12px}
+.finding-detail-label{font-weight:600;color:var(--text-tertiary);min-width:60px;font-size:11px;text-transform:uppercase;letter-spacing:0.3px;padding-top:1px}
+.finding-detail-value{color:var(--text-secondary);line-height:1.45}
+.finding-detail-value.val-accent{color:var(--accent)}
+.finding-detail-value.val-italic{font-style:italic}
+.finding-evidence-list{list-style:none;display:flex;flex-direction:column;gap:2px;font-family:'SF Mono',monospace;font-size:11px;color:var(--text-tertiary)}
+.finding-meta{display:flex;flex-wrap:wrap;gap:calc(var(--sp)*1.5);font-size:11px;color:var(--text-quaternary);margin-top:6px}
 .finding-meta span{display:flex;align-items:center;gap:3px}
 .finding-meta strong{color:var(--text-tertiary);font-weight:500}
 .finding-tag{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:2px 7px;border-radius:4px}
@@ -342,18 +351,30 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       for (var fi = 0; fi < findings.length; fi++) {
         var f = findings[fi];
         var sev = esc(f.severity);
-        h += '<div class="finding finding-' + sev + '">';
-        h += '<div style="display:flex;align-items:center;margin-bottom:5px">';
+        h += '<div class="finding finding-' + sev + '" onclick="window._toggleFinding(this)">';
+        h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">';
         h += '<span class="sev-dot sev-dot-' + sev + '"></span>';
+        h += '<span class="finding-tag sev-' + sev + '">' + sev + '</span>';
         h += '<span class="finding-title">' + esc(f.title) + '</span>';
         h += '</div>';
+        h += '<div class="finding-expandable">';
+        h += '<div class="finding-details">';
         h += '<div class="finding-desc">' + esc(f.description) + '</div>';
-        if (f.action) h += '<div class="finding-action">' + esc(f.action) + '</div>';
+        if (f.evidence && f.evidence.length > 0) {
+          h += '<div class="finding-detail-row"><div class="finding-detail-label">Evidence</div><div class="finding-detail-value"><ul class="finding-evidence-list">';
+          for (var ei = 0; ei < f.evidence.length; ei++) {
+            h += '<li>' + esc(f.evidence[ei]) + '</li>';
+          }
+          h += '</ul></div></div>';
+        }
+        if (f.action) h += '<div class="finding-detail-row"><div class="finding-detail-label">Action</div><div class="finding-detail-value val-accent">' + esc(f.action) + '</div></div>';
+        if (f.impact) h += '<div class="finding-detail-row"><div class="finding-detail-label">Impact</div><div class="finding-detail-value val-italic">' + esc(f.impact) + '</div></div>';
         h += '<div class="finding-meta">';
-        h += '<span class="finding-tag sev-' + sev + '">' + sev + '</span>';
         if (f.priority) h += '<span><strong>Priority:</strong> ' + esc(f.priority) + '</span>';
         if (f.cost) h += '<span><strong>Cost:</strong> ' + esc(f.cost) + '</span>';
         if (f.category) h += '<span><strong>Category:</strong> ' + esc(f.category) + '</span>';
+        h += '</div>';
+        h += '</div>';
         h += '</div>';
         h += '</div>';
       }
@@ -491,6 +512,14 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       })
       .catch(function() {});
   }
+
+  window._toggleFinding = function(el) {
+    var all = document.querySelectorAll(".finding");
+    for (var i = 0; i < all.length; i++) {
+      if (all[i] !== el) all[i].classList.remove("active");
+    }
+    el.classList.toggle("active");
+  };
 
   window._triggerScan = triggerScan;
 

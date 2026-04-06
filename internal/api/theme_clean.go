@@ -435,12 +435,70 @@ body {
   letter-spacing: -0.2px;
 }
 
+.finding-card { cursor: pointer; }
+
 .finding-desc {
   font-size: 13px;
   font-weight: 400;
   color: #4d4d4d;
   line-height: 1.5;
   margin-top: 2px;
+}
+
+.finding-expandable {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.finding-card.active .finding-expandable {
+  max-height: 500px;
+  opacity: 1;
+}
+
+.finding-detail-row {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.finding-detail-label {
+  font-weight: 600;
+  color: #808080;
+  min-width: 60px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding-top: 2px;
+}
+
+.finding-detail-value {
+  color: #4d4d4d;
+  line-height: 1.5;
+}
+
+.finding-detail-value.val-accent { color: #171717; font-weight: 500; }
+.finding-detail-value.val-italic { font-style: italic; }
+
+.finding-evidence-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: 'SF Mono', monospace;
+  font-size: 11px;
+  color: #808080;
+}
+
+.finding-details {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .finding-meta {
@@ -798,22 +856,34 @@ body {
       for (var i = 0; i < findings.length; i++) {
         var f = findings[i];
         var sevKey = f.severity === "critical" ? "critical" : f.severity === "warning" ? "warning" : f.severity === "info" ? "info" : "ok";
-        html += '<div class="finding-card ' + severityClass(f.severity) + '">';
+        html += '<div class="finding-card ' + severityClass(f.severity) + '" onclick="window._toggleFinding(this)">';
         html += '<div class="corner-bl"></div>';
         html += '<div class="corner-br"></div>';
-        html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">';
+        html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">';
         html += '<span class="sev-pill sev-' + sevKey + '">' + escapeHTML(f.severity) + '</span>';
         html += '<span class="cat-tag">' + escapeHTML(f.category) + '</span>';
         html += '</div>';
         html += '<div class="finding-title">' + escapeHTML(f.title) + '</div>';
+        html += '<div class="finding-expandable">';
+        html += '<div class="finding-details">';
         html += '<div class="finding-desc">' + escapeHTML(f.description) + '</div>';
-        if (f.action || f.impact || f.priority) {
+        if (f.evidence && f.evidence.length > 0) {
+          html += '<div class="finding-detail-row"><div class="finding-detail-label">Evidence</div><div class="finding-detail-value"><ul class="finding-evidence-list">';
+          for (var ei = 0; ei < f.evidence.length; ei++) {
+            html += '<li>' + escapeHTML(f.evidence[ei]) + '</li>';
+          }
+          html += '</ul></div></div>';
+        }
+        if (f.action) html += '<div class="finding-detail-row"><div class="finding-detail-label">Action</div><div class="finding-detail-value val-accent">' + escapeHTML(f.action) + '</div></div>';
+        if (f.impact) html += '<div class="finding-detail-row"><div class="finding-detail-label">Impact</div><div class="finding-detail-value val-italic">' + escapeHTML(f.impact) + '</div></div>';
+        if (f.priority || f.cost) {
           html += '<div class="finding-meta">';
-          if (f.action) html += '<div class="finding-meta-item"><strong>Action:</strong> ' + escapeHTML(f.action) + '</div>';
-          if (f.impact) html += '<div class="finding-meta-item"><strong>Impact:</strong> ' + escapeHTML(f.impact) + '</div>';
           if (f.priority) html += '<div class="finding-meta-item"><strong>Priority:</strong> ' + escapeHTML(f.priority) + '</div>';
+          if (f.cost) html += '<div class="finding-meta-item"><strong>Cost:</strong> ' + escapeHTML(f.cost) + '</div>';
           html += '</div>';
         }
+        html += '</div>';
+        html += '</div>';
         html += '</div>';
       }
       html += '</div>';
@@ -994,6 +1064,14 @@ body {
         }
       }).catch(function() {});
   }
+
+  window._toggleFinding = function(el) {
+    var all = document.querySelectorAll(".finding-card");
+    for (var i = 0; i < all.length; i++) {
+      if (all[i] !== el) all[i].classList.remove("active");
+    }
+    el.classList.toggle("active");
+  };
 
   window._triggerScan = function() {
     var btn = document.getElementById("scanBtn");
