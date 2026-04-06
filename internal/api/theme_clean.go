@@ -912,67 +912,59 @@ body {
     html += '</div>'; // end section-block findings
 
     // ==== Section: Disk Space ====
-    html += '<div class="section-block" data-section="disk-space">';
+    // ==== Section: Drives (unified SMART + Disk Space) ====
+    html += '<div class="section-block" data-section="drives">';
     html += '<div class="section">';
-    html += '<div class="section-title">Disk Space</div>';
-    if (snapshot && snapshot.disks && snapshot.disks.length > 0) {
-      html += '<div class="card">';
-      html += '<div class="disk-list">';
-      for (var d = 0; d < snapshot.disks.length; d++) {
-        var disk = snapshot.disks[d];
-        var pct = disk.used_percent || 0;
-        var col = diskBarColor(pct);
-        html += '<div class="disk-item">';
-        html += '<div class="disk-info">';
-        html += '<span class="disk-label">' + escapeHTML(disk.label || disk.mount_point || disk.device) + '</span>';
-        html += '<span class="disk-detail">' + formatGB(disk.used_gb) + ' / ' + formatGB(disk.total_gb) + ' (' + formatPct(pct) + ')</span>';
+    html += '<div class="section-title">Drives</div>';
+    var _smart = (snapshot && snapshot.smart) ? snapshot.smart : [];
+    var _disks = (snapshot && snapshot.disks) ? snapshot.disks : [];
+    if (_smart.length > 0) {
+      var _diskMap = {};
+      for (var dm = 0; dm < _disks.length; dm++) { _diskMap[_disks[dm].mount_point] = _disks[dm]; if (_disks[dm].label) _diskMap[_disks[dm].label] = _disks[dm]; }
+      for (var si = 0; si < _smart.length; si++) {
+        var sm = _smart[si];
+        var hlOk = sm.health_passed;
+        var sizeStr = sm.size_gb >= 1000 ? (sm.size_gb/1000).toFixed(1)+' TB' : (sm.size_gb||0).toFixed(0)+' GB';
+        var slot = sm.array_slot || '';
+        var matched = null;
+        if (slot) { var num = slot.replace(/[^0-9]/g,''); matched = _diskMap['/mnt/disk'+num] || _diskMap['Disk '+num]; }
+        html += '<div class="card" style="margin-bottom:6px;padding:10px 14px;cursor:pointer" onclick="window.location=\'/disk/'+encodeURIComponent(sm.serial||'')+'\'">';
+        html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+        html += '<span class="status-dot '+(hlOk?'green':'red')+'"></span>';
+        html += '<span style="font-weight:600;font-size:13px">'+escapeHTML(sm.device)+'</span>';
+        if (slot) html += '<span style="font-size:11px;color:#808080;background:#f5f5f5;padding:1px 6px;border-radius:4px">'+escapeHTML(slot)+'</span>';
+        html += '<span style="font-size:12px;color:#4d4d4d;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHTML(sm.model)+'</span>';
+        html += '<span style="font-size:12px;color:#808080">'+sizeStr+'</span>';
+        html += '<span style="font-size:12px;font-weight:600;color:'+(sm.temperature_c>=55?'#dc2626':sm.temperature_c>=45?'#d97706':'#16a34a')+'">'+(sm.temperature_c||0)+'&deg;C</span>';
+        html += '<canvas id="spark-temp-'+si+'" width="50" height="18" style="flex-shrink:0"></canvas>';
+        if (!hlOk) html += '<span style="font-size:10px;font-weight:600;color:#dc2626;background:rgba(220,38,38,0.06);padding:1px 6px;border-radius:9999px">FAILED</span>';
+        if (sm.reallocated_sectors>0) html += '<span style="font-size:10px;color:#d97706;background:rgba(217,119,6,0.06);padding:1px 6px;border-radius:9999px">'+sm.reallocated_sectors+' realloc</span>';
+        if (sm.pending_sectors>0) html += '<span style="font-size:10px;color:#dc2626;background:rgba(220,38,38,0.06);padding:1px 6px;border-radius:9999px">'+sm.pending_sectors+' pending</span>';
         html += '</div>';
-        html += '<div class="disk-bar-track"><div class="disk-bar-fill color-' + col + '" style="width:' + pct.toFixed(1) + '%"></div></div>';
+        if (matched) {
+          var mp = matched.used_percent||0;
+          html += '<div style="margin-top:6px"><div style="display:flex;justify-content:space-between;font-size:11px;color:#808080;margin-bottom:2px"><span>'+escapeHTML(matched.label||matched.mount_point)+'</span><span>'+(matched.used_gb||0).toFixed(0)+' / '+(matched.total_gb||0).toFixed(0)+' GB ('+mp.toFixed(0)+'%)</span></div>';
+          html += '<div class="disk-bar-track" style="height:4px"><div class="disk-bar-fill color-'+diskBarColor(mp)+'" style="width:'+mp.toFixed(1)+'%;height:4px"></div></div></div>';
+        }
         html += '</div>';
       }
-      html += '</div>';
-      html += '</div>';
-    } else {
-      html += '<div class="card"><div class="empty-state">No disk data available.</div></div>';
-    }
-    html += '</div>'; // end section
-    html += '</div>'; // end section-block disk-space
-
-    // ==== Section: SMART Health ====
-    html += '<div class="section-block" data-section="smart">';
-    html += '<div class="section">';
-    html += '<div class="section-title">SMART Health</div>';
-    if (snapshot && snapshot.smart && snapshot.smart.length > 0) {
-      html += '<div class="table-container">';
-      html += '<table>';
-      html += '<thead><tr>';
-      html += '<th>Device</th><th>Model</th><th>Health</th><th>Temp</th><th style="width:70px">Trend</th><th>Power-On</th><th>Realloc</th><th>Pending</th>';
-      html += '</tr></thead>';
-      html += '<tbody>';
-      for (var s = 0; s < snapshot.smart.length; s++) {
-        var sm = snapshot.smart[s];
-        var healthOk = sm.health_passed;
-        var hrs = sm.power_on_hours;
-        var hrsStr = hrs != null ? (hrs > 8760 ? (hrs / 8760).toFixed(1) + "y" : hrs + "h") : "-";
-        html += '<tr style="cursor:pointer" onclick="window.location=\'/disk/' + encodeURIComponent(sm.serial || '') + '\'">';
-        html += '<td>' + escapeHTML(sm.device) + '</td>';
-        html += '<td>' + escapeHTML(sm.model) + '</td>';
-        html += '<td><span class="status-dot ' + (healthOk ? "green" : "red") + '"></span>' + (healthOk ? "Passed" : "Failed") + '</td>';
-        html += '<td>' + (sm.temperature_c != null ? sm.temperature_c + "&deg;C" : "-") + '</td>';
-        html += '<td><canvas id="spark-temp-' + s + '" width="60" height="20"></canvas></td>';
-        html += '<td>' + hrsStr + '</td>';
-        html += '<td>' + (sm.reallocated_sectors != null ? sm.reallocated_sectors : "-") + '</td>';
-        html += '<td>' + (sm.pending_sectors != null ? sm.pending_sectors : "-") + '</td>';
-        html += '</tr>';
+      // Unmatched volumes
+      var unmatched = _disks.filter(function(dk){ for(var x=0;x<_smart.length;x++){var n=((_smart[x].array_slot||'').replace(/[^0-9]/g,''));if(n&&(dk.mount_point==='/mnt/disk'+n||dk.label==='Disk '+n))return false;} return true; });
+      if (unmatched.length > 0) {
+        html += '<div style="margin-top:8px;font-size:11px;color:#808080;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Other Volumes</div>';
+        for (var ui=0;ui<unmatched.length;ui++){var ud=unmatched[ui];var up=ud.used_percent||0;
+          html+='<div class="card" style="margin-bottom:4px;padding:8px 14px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px"><span style="font-weight:500">'+escapeHTML(ud.label||ud.mount_point)+'</span><span style="color:#808080">'+(ud.used_gb||0).toFixed(0)+' / '+(ud.total_gb||0).toFixed(0)+' GB ('+up.toFixed(0)+'%)</span></div>';
+          html+='<div class="disk-bar-track" style="height:4px"><div class="disk-bar-fill color-'+diskBarColor(up)+'" style="width:'+up.toFixed(1)+'%;height:4px"></div></div></div>';
+        }
       }
-      html += '</tbody>';
-      html += '</table>';
-      html += '</div>';
-    } else {
-      html += '<div class="card"><div class="empty-state">No SMART data available.</div></div>';
+    } else if (_disks.length > 0) {
+      for (var dd=0;dd<_disks.length;dd++){var d=_disks[dd];var p=d.used_percent||0;
+        html+='<div class="disk-item"><div class="disk-info"><span class="disk-label">'+escapeHTML(d.label||d.mount_point)+'</span><span class="disk-detail">'+formatGB(d.used_gb)+' / '+formatGB(d.total_gb)+' ('+formatPct(p)+')</span></div>';
+        html+='<div class="disk-bar-track"><div class="disk-bar-fill color-'+diskBarColor(p)+'" style="width:'+p.toFixed(1)+'%"></div></div></div>';
+      }
     }
-    html += '</div>'; // end section
-    html += '</div>'; // end section-block smart
+    html += '</div>'; // section
+    html += '</div>'; // section-block drives
 
     // ==== Section: Docker ====
     html += '<div class="section-block" data-section="docker">';
@@ -1170,7 +1162,7 @@ body {
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
     var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
-    var sectionMap = { "findings": sec.findings !== false, "disk-space": sec.disk_space !== false, "smart": sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false };
+    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "network": sec.network !== false, "parity": sec.parity !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var items = [];

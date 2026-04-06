@@ -407,66 +407,117 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     h += '</div>'; // end section-block findings
 
     // ======= Section: Disk Space =======
-    h += '<div class="section-block" data-section="disk-space">';
-
-    // Disk Space
-    var disks = sn ? (sn.disks || []) : [];
-    if (disks.length > 0) {
-      h += '<div>';
-      h += '<div class="section-title">Disk Space</div>';
-      h += '<div class="disk-list">';
-      for (var di = 0; di < disks.length; di++) {
-        var d = disks[di];
-        var pct = d.used_percent || 0;
-        h += '<div class="disk-item">';
-        h += '<div class="disk-header">';
-        h += '<span class="disk-name">' + esc(d.label || d.mount_point || d.device) + '</span>';
-        h += '<span class="disk-info">' + (d.used_gb || 0).toFixed(1) + ' / ' + (d.total_gb || 0).toFixed(1) + ' GB (' + pct.toFixed(1) + '%)</span>';
-        h += '</div>';
-        h += '<div class="disk-bar-bg"><div class="disk-bar-fill" style="width:' + pct.toFixed(1) + '%;background:' + colorForPct(pct) + '"></div></div>';
-        h += '</div>';
-      }
-      h += '</div>';
-      h += '</div>';
-    }
-
-    h += '</div>'; // end section-block disk-space
-
-    // ======= Section: SMART Health =======
-    h += '<div class="section-block" data-section="smart">';
+    // ======= Section: Drives (unified SMART + Disk Space) =======
+    h += '<div class="section-block" data-section="drives">';
     var smart = sn ? (sn.smart || []) : [];
-    if (smart.length > 0) {
+    var disks = sn ? (sn.disks || []) : [];
+    if (smart.length > 0 || disks.length > 0) {
       h += '<div>';
-      h += '<div class="section-title">SMART Health</div>';
-      h += '<div class="table-wrap">';
-      h += '<table><thead><tr>';
-      h += '<th>Device</th><th>Model</th><th>Health</th><th>Temp</th><th style="width:80px">Trend</th><th>Reallocated</th><th>Pending</th><th>UDMA CRC</th><th>Power Hours</th>';
-      h += '</tr></thead><tbody>';
-      for (var si = 0; si < smart.length; si++) {
-        var s = smart[si];
-        var healthClass = s.health_passed ? "td-healthy" : "td-crit";
-        var healthText = s.health_passed ? "PASSED" : "FAILED";
-        var tempClass = (s.temperature_c || 0) >= 55 ? "td-crit" : (s.temperature_c || 0) >= 45 ? "td-warn" : "td-healthy";
-        var reallocClass = (s.reallocated_sectors || 0) > 0 ? "td-crit" : "td-healthy";
-        var pendClass = (s.pending_sectors || 0) > 0 ? "td-warn" : "td-healthy";
-        var crcClass = (s.udma_crc_errors || 0) > 0 ? "td-warn" : "td-healthy";
-        h += '<tr style="cursor:pointer" onclick="window.location=\'/disk/' + encodeURIComponent(s.serial || '') + '\'">';
-        h += '<td>' + esc(s.device) + '</td>';
-        h += '<td>' + esc(s.model) + '</td>';
-        h += '<td class="' + healthClass + '">' + healthText + '</td>';
-        h += '<td class="' + tempClass + '">' + (s.temperature_c || 0) + '&deg;C</td>';
-        h += '<td><canvas id="spark-temp-' + si + '" width="70" height="24"></canvas></td>';
-        h += '<td class="' + reallocClass + '">' + (s.reallocated_sectors || 0) + '</td>';
-        h += '<td class="' + pendClass + '">' + (s.pending_sectors || 0) + '</td>';
-        h += '<td class="' + crcClass + '">' + (s.udma_crc_errors || 0) + '</td>';
-        h += '<td>' + (s.power_on_hours || 0).toLocaleString() + 'h</td>';
-        h += '</tr>';
+      h += '<div class="section-title">Drives (' + (smart.length || disks.length) + ')</div>';
+
+      // Build a lookup of disk space by device prefix (e.g. "sdb" -> disk info)
+      var diskByDev = {};
+      for (var di = 0; di < disks.length; di++) {
+        var dk = disks[di];
+        diskByDev[dk.mount_point] = dk;
+        diskByDev[dk.device] = dk;
+        // Also map by label for Unraid (e.g. "Disk 1")
+        if (dk.label) diskByDev[dk.label] = dk;
       }
-      h += '</tbody></table></div>';
+
+      if (smart.length > 0) {
+        // SMART drives — primary view
+        for (var si = 0; si < smart.length; si++) {
+          var s = smart[si];
+          var healthClass = s.health_passed ? "td-healthy" : "td-crit";
+          var healthDot = s.health_passed ? "running" : "exited";
+          var tempClass = (s.temperature_c || 0) >= 55 ? "td-crit" : (s.temperature_c || 0) >= 45 ? "td-warn" : "td-healthy";
+          var sizeStr = s.size_gb >= 1000 ? (s.size_gb / 1000).toFixed(1) + ' TB' : (s.size_gb || 0).toFixed(0) + ' GB';
+
+          // Try to find matching disk space data
+          var slotLabel = s.array_slot || '';
+          var matchedDisk = null;
+          // Match by Unraid slot label ("Disk 1" → /mnt/disk1)
+          if (slotLabel) {
+            var slotNum = slotLabel.replace(/[^0-9]/g, '');
+            matchedDisk = diskByDev['/mnt/disk' + slotNum] || diskByDev['Disk ' + slotNum];
+          }
+
+          h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px;margin-bottom:6px;cursor:pointer" onclick="window.location=\'/disk/' + encodeURIComponent(s.serial || '') + '\'">';
+
+          // Top row: device, model, health, temp, sparkline
+          h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
+          h += '<span class="status-dot ' + healthDot + '"></span>';
+          h += '<span style="font-weight:600;font-size:13px;min-width:60px">' + esc(s.device) + '</span>';
+          if (slotLabel) h += '<span style="font-size:11px;color:var(--text-quaternary);background:var(--bg-elevated);padding:1px 6px;border-radius:4px">' + esc(slotLabel) + '</span>';
+          h += '<span style="font-size:12px;color:var(--text-tertiary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.model) + '</span>';
+          h += '<span style="font-size:12px;color:var(--text-tertiary)">' + sizeStr + '</span>';
+          h += '<span class="' + tempClass + '" style="font-size:12px;font-weight:600">' + (s.temperature_c || 0) + '&deg;C</span>';
+          h += '<canvas id="spark-temp-' + si + '" width="60" height="20" style="flex-shrink:0"></canvas>';
+
+          // SMART badges
+          if (!s.health_passed) h += '<span style="font-size:10px;font-weight:600;color:var(--red);background:rgba(220,38,38,0.1);padding:1px 6px;border-radius:9999px">FAILED</span>';
+          if (s.reallocated_sectors > 0) h += '<span style="font-size:10px;color:var(--amber);background:rgba(217,119,6,0.1);padding:1px 6px;border-radius:9999px">' + s.reallocated_sectors + ' realloc</span>';
+          if (s.pending_sectors > 0) h += '<span style="font-size:10px;color:var(--red);background:rgba(220,38,38,0.1);padding:1px 6px;border-radius:9999px">' + s.pending_sectors + ' pending</span>';
+          if (s.udma_crc_errors > 0) h += '<span style="font-size:10px;color:var(--amber);background:rgba(217,119,6,0.1);padding:1px 6px;border-radius:9999px">' + s.udma_crc_errors + ' CRC</span>';
+          h += '</div>';
+
+          // Usage bar (if matched to a disk mount)
+          if (matchedDisk) {
+            var pct = matchedDisk.used_percent || 0;
+            h += '<div style="margin-top:6px">';
+            h += '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-quaternary);margin-bottom:2px">';
+            h += '<span>' + esc(matchedDisk.label || matchedDisk.mount_point) + '</span>';
+            h += '<span>' + (matchedDisk.used_gb || 0).toFixed(0) + ' / ' + (matchedDisk.total_gb || 0).toFixed(0) + ' GB (' + pct.toFixed(0) + '%)</span>';
+            h += '</div>';
+            h += '<div class="disk-bar-bg" style="height:4px"><div class="disk-bar-fill" style="height:4px;width:' + pct.toFixed(1) + '%;background:' + colorForPct(pct) + '"></div></div>';
+            h += '</div>';
+          }
+
+          h += '</div>';
+        }
+
+        // Show any disk space entries that weren't matched to SMART drives
+        var unmatchedDisks = disks.filter(function(dk) {
+          // Skip if any SMART drive's slot matches this disk
+          for (var x = 0; x < smart.length; x++) {
+            var slot = smart[x].array_slot || '';
+            var num = slot.replace(/[^0-9]/g, '');
+            if (num && (dk.mount_point === '/mnt/disk' + num || dk.label === 'Disk ' + num)) return false;
+          }
+          return true;
+        });
+        if (unmatchedDisks.length > 0) {
+          h += '<div style="margin-top:8px;font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Other Volumes</div>';
+          for (var ui = 0; ui < unmatchedDisks.length; ui++) {
+            var ud = unmatchedDisks[ui];
+            var upct = ud.used_percent || 0;
+            h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:8px 12px;margin-bottom:4px">';
+            h += '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">';
+            h += '<span style="font-weight:500">' + esc(ud.label || ud.mount_point) + '</span>';
+            h += '<span style="color:var(--text-tertiary)">' + (ud.used_gb || 0).toFixed(0) + ' / ' + (ud.total_gb || 0).toFixed(0) + ' GB (' + upct.toFixed(0) + '%)</span>';
+            h += '</div>';
+            h += '<div class="disk-bar-bg" style="height:4px"><div class="disk-bar-fill" style="height:4px;width:' + upct.toFixed(1) + '%;background:' + colorForPct(upct) + '"></div></div>';
+            h += '</div>';
+          }
+        }
+      } else {
+        // No SMART data — show disk space only
+        for (var dd = 0; dd < disks.length; dd++) {
+          var d = disks[dd];
+          var pct = d.used_percent || 0;
+          h += '<div class="disk-item">';
+          h += '<div class="disk-header">';
+          h += '<span class="disk-name">' + esc(d.label || d.mount_point || d.device) + '</span>';
+          h += '<span class="disk-info">' + (d.used_gb || 0).toFixed(1) + ' / ' + (d.total_gb || 0).toFixed(1) + ' GB (' + pct.toFixed(1) + '%)</span>';
+          h += '</div>';
+          h += '<div class="disk-bar-bg"><div class="disk-bar-fill" style="width:' + pct.toFixed(1) + '%;background:' + colorForPct(pct) + '"></div></div>';
+          h += '</div>';
+        }
+      }
       h += '</div>';
     }
-
-    h += '</div>'; // end section-block smart
+    h += '</div>'; // end section-block drives
 
     // ======= Section: Docker =======
     h += '<div class="section-block" data-section="docker">';
@@ -690,11 +741,12 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     var sec = (statusData && statusData.sections) ? statusData.sections : {};
     var sectionMap = {
       "findings": sec.findings !== false,
-      "disk-space": sec.disk_space !== false,
-      "smart": sec.smart !== false,
+      "drives": sec.disk_space !== false || sec.smart !== false,
       "docker": sec.docker !== false,
       "zfs": sec.zfs !== false,
-      "ups": sec.ups !== false
+      "ups": sec.ups !== false,
+      "network": sec.network !== false,
+      "parity": sec.parity !== false
     };
 
     var blocks = staging.querySelectorAll(".section-block");
