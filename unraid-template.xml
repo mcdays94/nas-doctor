@@ -8,16 +8,25 @@
   <Support>https://github.com/mcdays94/nas-doctor/issues</Support>
   <Project>https://github.com/mcdays94/nas-doctor</Project>
   <Overview>
-NAS Doctor is a local diagnostic and monitoring tool for your NAS. It runs periodic health checks, analyzes SMART data, disk usage, Docker containers, kernel logs, and Unraid parity — then presents findings in a beautiful web dashboard with Prometheus metrics and webhook notifications.
+NAS Doctor is a local diagnostic and monitoring tool for your NAS. It runs periodic health checks — analyzing SMART data, disk usage, Docker containers, kernel logs, temperatures, ZFS pools, UPS power, and Unraid parity — then presents findings in a beautiful web dashboard with actionable recommendations backed by Backblaze failure rate data.
 
 Features:
-- 15+ diagnostic rules with automatic root-cause correlation
-- SMART health monitoring with per-drive analysis
+- 20+ diagnostic rules with automatic root-cause correlation
+- SMART health with Backblaze failure-rate thresholds (337k+ drives)
+- Historical trend sparklines (CPU, memory, I/O, drive temps)
+- Full stats page with trend charts
+- ZFS pool health (vdev tree, scrub/resilver, ARC stats)
+- UPS / power monitoring (NUT and apcupsd)
+- NAS OS update check (notifies when behind latest stable)
 - Parity check speed trend analysis (Unraid)
 - 3 dashboard themes (Midnight, Clean, Ember)
 - Export professional PDF diagnostic reports
+- Multi-server fleet monitoring (monitor all your NAS instances)
 - Prometheus /metrics endpoint (30+ gauges)
 - Webhook alerts: Discord, Slack, Gotify, Ntfy, generic HTTP
+- Automatic backups with configurable schedule and location
+- Data lifecycle management (retention policies, DB size cap)
+- Dashboard section visibility toggles
   </Overview>
   <Category>Tools: Monitoring Status:Stable</Category>
   <WebUI>http://[IP]:[PORT:8080]</WebUI>
@@ -29,12 +38,10 @@ Features:
   <DonateLink>https://buymeacoffee.com/miguelcaetanodias</DonateLink>
   <Requires/>
   <Config Name="Web UI Port" Target="8080" Default="8080" Mode="tcp" Description="Web dashboard and API port" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
-  <Config Name="Data Directory" Target="/data" Default="/mnt/user/appdata/nas-doctor" Mode="rw" Description="Persistent data (SQLite database, config)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/nas-doctor</Config>
+  <Config Name="Data Directory" Target="/data" Default="/mnt/user/appdata/nas-doctor" Mode="rw" Description="Persistent data (SQLite database, config, backups)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/nas-doctor</Config>
   <Config Name="Boot Config" Target="/host/boot" Default="/boot" Mode="ro" Description="Unraid boot config (parity logs, ident)" Type="Path" Display="always" Required="false" Mask="false">/boot</Config>
   <Config Name="System Logs" Target="/host/log" Default="/var/log" Mode="ro" Description="System log files (syslog, messages)" Type="Path" Display="always" Required="false" Mask="false">/var/log</Config>
   <Config Name="Docker Socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Docker socket for container monitoring" Type="Path" Display="always" Required="false" Mask="false">/var/run/docker.sock</Config>
-  <Config Name="Scan Interval" Target="NAS_DOCTOR_INTERVAL" Default="6h" Mode="" Description="How often to run diagnostic scans (e.g. 1h, 6h, 24h)" Type="Variable" Display="always" Required="false" Mask="false">6h</Config>
-  <Config Name="Webhook URL" Target="NAS_DOCTOR_WEBHOOK_URL" Default="" Mode="" Description="Webhook URL for notifications (Discord, Slack, etc.)" Type="Variable" Display="always" Required="false" Mask="false"/>
-  <Config Name="Webhook Type" Target="NAS_DOCTOR_WEBHOOK_TYPE" Default="generic" Mode="" Description="Webhook type: discord, slack, gotify, ntfy, generic" Type="Variable" Display="always" Required="false" Mask="false">generic</Config>
-  <Config Name="Timezone" Target="TZ" Default="UTC" Mode="" Description="Container timezone" Type="Variable" Display="always" Required="false" Mask="false">UTC</Config>
+  <Config Name="Scan Interval" Target="NAS_DOCTOR_INTERVAL" Default="6h" Mode="" Description="How often to run diagnostic scans (e.g. 30m, 1h, 6h, 24h)" Type="Variable" Display="always" Required="false" Mask="false">6h</Config>
+  <Config Name="Timezone" Target="TZ" Default="UTC" Mode="" Description="Container timezone (e.g. Europe/London, America/New_York)" Type="Variable" Display="always" Required="false" Mask="false">UTC</Config>
 </Container>
