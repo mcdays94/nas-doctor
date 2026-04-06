@@ -8,22 +8,17 @@ LABEL org.opencontainers.image.title="NAS Doctor" \
       org.opencontainers.image.vendor="mcdays94" \
       org.opencontainers.image.licenses="MIT" \
       net.unraid.docker.icon="https://raw.githubusercontent.com/mcdays94/nas-doctor/main/icons/icon3.png" \
-      net.unraid.docker.webui="http://[IP]:[PORT:8080]/" \
+      net.unraid.docker.webui="http://[IP]:[PORT:8060]/" \
       net.unraid.docker.managed="dockerman"
 
 COPY nas-doctor-linux-amd64 /app/nas-doctor
 RUN chmod +x /app/nas-doctor
 
-RUN apk add --no-cache \
-    smartmontools \
-    hdparm \
-    iproute2 \
-    docker-cli \
-    util-linux \
-    procps \
-    ca-certificates \
-    tzdata \
-    && apk add --no-cache dmidecode ethtool 2>/dev/null || true
+# Critical packages (must succeed)
+RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata
+# Optional packages (may not be available on all architectures)
+RUN apk add --no-cache hdparm iproute2 || true
+RUN apk add --no-cache dmidecode ethtool || true
 
 WORKDIR /app
 VOLUME /data

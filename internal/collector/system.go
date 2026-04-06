@@ -147,21 +147,40 @@ func readIOWait() float64 {
 }
 
 func detectPlatform(hp internal.HostPaths) (platform, version string) {
-	// Check Unraid
-	unraidVer := hp.Boot + "/config/ident.cfg"
-	if _, err := os.Stat(unraidVer); err == nil {
+	// Check Unraid — multiple detection methods
+	unraidIdent := hp.Boot + "/config/ident.cfg"
+	if _, err := os.Stat(unraidIdent); err == nil {
 		platform = "unraid"
 	}
-	// Also check /etc/unraid-version (format: version="7.1.4")
-	if data, err := os.ReadFile("/etc/unraid-version"); err == nil {
-		platform = "unraid"
-		raw := strings.TrimSpace(string(data))
-		// Parse version="X.Y.Z" format
-		if strings.Contains(raw, "=") {
-			parts := strings.SplitN(raw, "=", 2)
-			raw = parts[len(parts)-1]
+	// Try /etc/unraid-version (host or bind-mounted)
+	for _, path := range []string{"/etc/unraid-version", "/host/etc/unraid-version"} {
+		if data, err := os.ReadFile(path); err == nil {
+			platform = "unraid"
+			raw := strings.TrimSpace(string(data))
+			if strings.Contains(raw, "=") {
+				parts := strings.SplitN(raw, "=", 2)
+				raw = parts[len(parts)-1]
+			}
+			version = strings.Trim(raw, "\"'")
+			break
 		}
-		version = strings.Trim(raw, "\"'")
+	}
+	// Fallback: extract version from kernel string (e.g. "6.6.78-Unraid" or "6.12.10-Unraid")
+	if platform == "unraid" && version == "" {
+		if data, err := os.ReadFile("/proc/version"); err == nil {
+			vs := string(data)
+			// Look for pattern like "X.Y.Z-Unraid"
+			if idx := strings.Index(vs, "-Unraid"); idx > 0 {
+				// Walk backwards to find the version start
+				start := idx
+				for start > 0 && (vs[start-1] == '.' || (vs[start-1] >= '0' && vs[start-1] <= '9')) {
+					start--
+				}
+				if start < idx {
+					version = vs[start:idx]
+				}
+			}
+		}
 	}
 	if platform != "" {
 		return
