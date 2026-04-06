@@ -131,6 +131,43 @@ docker run -d \
   ghcr.io/mcdays94/nas-doctor:latest
 ```
 
+### Unraid — Docker UI Setup
+
+1. Go to **Docker** tab → scroll down → **Add Container**
+2. Fill in the fields:
+
+| Field | Value |
+|---|---|
+| **Name** | `nas-doctor` |
+| **Repository** | `ghcr.io/mcdays94/nas-doctor:latest` |
+| **Icon URL** | `https://raw.githubusercontent.com/mcdays94/nas-doctor/main/icons/icon3.png` |
+| **WebUI** | `http://[IP]:[PORT:8060]/` |
+| **Network Type** | `Host` |
+| **Privileged** | `On` (**required** — SMART access needs raw device access) |
+
+3. Add these **path mappings** (click "Add another Path, Port, Variable..." for each):
+
+| Name | Container Path | Host Path | Mode | Why |
+|---|---|---|---|---|
+| Data | `/data` | `/mnt/user/appdata/nas-doctor` | RW | Database, config, backups |
+| Docker Socket | `/var/run/docker.sock` | `/var/run/docker.sock` | RO | Container monitoring |
+| Boot Config | `/host/boot` | `/boot` | RO | Parity logs, Unraid ident |
+| System Logs | `/host/log` | `/var/log` | RO | dmesg, syslog analysis |
+| Host Mounts | `/host/mnt` | `/mnt` | RO | Per-disk space monitoring |
+| Unraid Version | `/etc/unraid-version` | `/etc/unraid-version` | RO | OS update detection |
+
+4. Add this **variable**:
+
+| Key | Value |
+|---|---|
+| `TZ` | Your timezone (e.g. `Europe/Lisbon`, `America/New_York`) |
+
+5. Click **Apply**
+
+Then open `http://your-unraid-ip:8060`.
+
+> **Important**: Privileged mode and the Host Mounts volume (`/mnt:/host/mnt:ro`) are required. Without privileged, SMART data won't work. Without `/mnt`, per-disk space won't show.
+
 ### Build from Source
 
 ```bash
