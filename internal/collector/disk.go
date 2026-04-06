@@ -33,12 +33,14 @@ func parseDFOutput(out string) []internal.DiskInfo {
 			continue
 		}
 		device := fields[0]
-		// Skip virtual filesystems
 		if isVirtualFS(device) {
 			continue
 		}
 		mount := fields[6]
 		if isVirtualMount(mount) {
+			continue
+		}
+		if isContainerRootOrBind(device, mount) {
 			continue
 		}
 
@@ -48,10 +50,16 @@ func parseDFOutput(out string) []internal.DiskInfo {
 		pctStr := strings.TrimSuffix(fields[5], "%")
 		pct, _ := strconv.ParseFloat(pctStr, 64)
 
+		// Relabel host bind mounts for clarity
+		displayMount := mount
+		if strings.HasPrefix(mount, "/host/") {
+			displayMount = "/" + strings.TrimPrefix(mount, "/host/")
+		}
+
 		disks = append(disks, internal.DiskInfo{
 			Device:     device,
-			MountPoint: mount,
-			Label:      guessLabel(mount, device),
+			MountPoint: displayMount,
+			Label:      guessLabel(displayMount, device),
 			FSType:     fields[1],
 			TotalGB:    total,
 			UsedGB:     used,
@@ -81,6 +89,9 @@ func parseDFSimple(out string) []internal.DiskInfo {
 		if isVirtualMount(mount) {
 			continue
 		}
+		if isContainerRootOrBind(device, mount) {
+			continue
+		}
 
 		total := parseSize(fields[1])
 		used := parseSize(fields[2])
@@ -88,10 +99,15 @@ func parseDFSimple(out string) []internal.DiskInfo {
 		pctStr := strings.TrimSuffix(fields[4], "%")
 		pct, _ := strconv.ParseFloat(pctStr, 64)
 
+		displayMount := mount
+		if strings.HasPrefix(mount, "/host/") {
+			displayMount = "/" + strings.TrimPrefix(mount, "/host/")
+		}
+
 		disks = append(disks, internal.DiskInfo{
 			Device:     device,
-			MountPoint: mount,
-			Label:      guessLabel(mount, device),
+			MountPoint: displayMount,
+			Label:      guessLabel(displayMount, device),
 			TotalGB:    total,
 			UsedGB:     used,
 			FreeGB:     free,
@@ -112,11 +128,37 @@ func isVirtualFS(device string) bool {
 }
 
 func isVirtualMount(mount string) bool {
-	prefixes := []string{"/sys", "/proc", "/dev/", "/run", "/snap"}
-	for _, p := range prefixes {
+	virtual := []string{"/sys", "/proc", "/dev/", "/run", "/snap"}
+	for _, p := range virtual {
 		if strings.HasPrefix(mount, p) {
 			return true
 		}
+	}
+	// Docker container bind mounts to filter out
+	containerMounts := []string{"/etc/resolv.conf", "/etc/hostname", "/etc/hosts", "/etc/unraid-version"}
+	for _, cm := range containerMounts {
+		if mount == cm {
+			return true
+		}
+	}
+	return false
+}
+
+// isContainerRootOrBind detects mounts that are Docker overlay or bind mounts
+// that don't represent real host disks.
+func isContainerRootOrBind(device, mount string) bool {
+	// Loop devices are container overlays (e.g. /dev/loop2 mounted at /)
+	if strings.HasPrefix(device, "/dev/loop") {
+		return true
+	}
+	// "shfs" is Unraid's share filesystem — this is good, keep it
+	if device == "shfs" {
+		return false
+	}
+	// Mounts at /host/* are bind mounts from the host — show them but relabel
+	// Mounts at /data are the container's data volume
+	if mount == "/data" {
+		return true
 	}
 	return false
 }

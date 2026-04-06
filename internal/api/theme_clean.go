@@ -1093,6 +1093,7 @@ body {
       var par = snapshot.parity;
       html += '<div class="section"><div class="section-title">Parity</div>';
       if (par.history && par.history.length > 0) {
+        html += '<div style="max-height:200px;overflow-y:auto;scrollbar-width:thin">';
         html += '<table style="width:100%;font-size:13px;border-collapse:collapse">';
         html += '<tr style="color:#808080;font-size:11px"><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Date</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Duration</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Speed</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Errors</th></tr>';
         for (var pi = 0; pi < par.history.length; pi++) {
@@ -1102,7 +1103,7 @@ body {
           html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + (pc.speed_mb_s || 0).toFixed(1) + ' MB/s</td>';
           html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04);color:' + (pc.errors > 0 ? "#dc2626" : "#16a34a") + '">' + (pc.errors || 0) + '</td></tr>';
         }
-        html += '</table>';
+        html += '</table></div>';
       } else {
         html += '<div style="font-size:13px;color:#808080">Status: ' + escapeHTML(par.status || "idle") + '</div>';
       }

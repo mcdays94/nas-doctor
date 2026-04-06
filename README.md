@@ -250,12 +250,14 @@ nasdoctor_last_collection_timestamp
 
 | Platform | Status | Notes |
 |---|---|---|
-| **Unraid** | ✅ Full support | Parity analysis, array status, disk labels, OS update check |
-| **TrueNAS SCALE** | ✅ Full support | ZFS pool health, OS update check |
-| **Synology DSM** | ✅ Supported | Via Docker / Container Manager |
-| **QNAP QTS** | ✅ Supported | Via Container Station |
-| **Proxmox** | ✅ Supported | ZFS pool health |
-| **Generic Linux** | ✅ Supported | Any distro with Docker |
+| **Unraid** | ✅ Tested | Parity analysis, array status, disk labels, OS update check |
+| **TrueNAS SCALE** | ⚠️ Untested | ZFS pool health support built-in, but not yet validated on real hardware |
+| **Synology DSM** | ⚠️ Untested | Should work via Docker / Container Manager |
+| **QNAP QTS** | ⚠️ Untested | Should work via Container Station |
+| **Proxmox** | ⚠️ Untested | ZFS pool health support built-in |
+| **Generic Linux** | ⚠️ Untested | Any distro with Docker |
+
+> NAS Doctor has only been tested on **Unraid** so far. Other platforms should work but may have issues with disk detection, SMART access, or platform-specific features. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
 ---
 

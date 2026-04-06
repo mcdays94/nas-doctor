@@ -604,6 +604,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '<div>';
       h += '<div class="section-title">Parity History</div>';
       h += '<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px">Status: ' + esc(parity.status || "idle") + '</div>';
+      h += '<div style="max-height:200px;overflow-y:auto;scrollbar-width:thin">';
       h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
       h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
       h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Date</th>';
@@ -619,6 +620,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)" class="' + errClass + '">' + (pc.errors || 0) + '</td></tr>';
       }
       h += '</table>';
+      h += '</div>'; // scroll container
       h += '</div>';
     } else if (parity && parity.status) {
       h += '<div>';

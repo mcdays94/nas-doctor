@@ -293,7 +293,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
     var sys = (sparklines && sparklines.system) ? sparklines.system : [];
     // Limit to last 7 days worth (max 168 points)
     if (sys.length > 168) sys = sys.slice(sys.length - 168);
-    if (sys.length >= 2) {
+    if (sys.length >= 1) {
       h += '<div class="system-section"><div class="system-section-title">System Metrics (last '+sys.length+' data points)</div>';
       h += '<div class="chart-row">';
       h += '<div class="chart-card"><div class="chart-label">CPU Usage (%)</div><canvas id="chart-cpu" width="600" height="140" style="width:100%;height:140px"></canvas></div>';
@@ -313,7 +313,9 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
     if (sys.length > 168) sys = sys.slice(sys.length - 168);
     var disks = (sparklines && sparklines.disks) ? sparklines.disks : [];
     var smart = (snapshot && snapshot.smart) ? snapshot.smart.slice().sort(function(a,b){return healthScore(a)-healthScore(b)}) : [];
-    if (sys.length >= 2) {
+    if (sys.length >= 1) {
+      // Duplicate single point so charts can draw a line
+      if (sys.length === 1) sys = [sys[0], sys[0]];
       var lb = sys.map(function(p,i){return i});
       try { NasChart.area("chart-cpu",{data:sys.map(function(p){return p.cpu_usage}),labels:lb,color:"#5e6ad2",fillAlpha:0.12,yMin:0}); } catch(e){}
       try { NasChart.area("chart-mem",{data:sys.map(function(p){return p.mem_percent}),labels:lb,color:"#7170ff",fillAlpha:0.12,yMin:0}); } catch(e){}
