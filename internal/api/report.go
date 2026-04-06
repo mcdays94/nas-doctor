@@ -221,6 +221,16 @@ func GenerateReport(snap *internal.Snapshot) string {
 	b.WriteString("</style>\n")
 	b.WriteString("</head>\n<body>\n")
 
+	// Toolbar
+	b.WriteString("<div class=\"report-toolbar\">\n")
+	b.WriteString("  <div class=\"report-toolbar-left\">\n")
+	b.WriteString("    <a href=\"/\" class=\"btn-back\">&larr; Dashboard</a>\n")
+	b.WriteString("    <span class=\"report-toolbar-title\">Diagnostic Report</span>\n")
+	b.WriteString(fmt.Sprintf("    <span class=\"report-toolbar-sub\">%s &mdash; %s</span>\n", escHTML(snap.System.Hostname), escHTML(snap.Timestamp.Format("2 Jan 2006 15:04"))))
+	b.WriteString("  </div>\n")
+	b.WriteString("  <button class=\"btn-print\" onclick=\"window.print()\">&#x1F5B6; Print / Save PDF</button>\n")
+	b.WriteString("</div>\n")
+
 	// A4 page wrapper for screen preview
 	b.WriteString("<div class=\"page-container\">\n")
 
@@ -356,15 +366,15 @@ func writeCSS(b *strings.Builder) {
 	// Sub-headings
 	b.WriteString("h3.sub-heading { font-size: 12pt; font-weight: 500; color: var(--cf-text); margin: 24px 0 14px; }\n")
 
-	// ── Tables — CF Workers: border, light warm header, rounded ──
+	// ── Tables — CF Workers: border, light warm header, rounded, fit to page ──
 	b.WriteString(".table-wrap { margin-bottom: 24px; border-radius: 8px; overflow: hidden; border: 1px solid var(--cf-border); }\n")
-	b.WriteString("table { width: 100%; border-collapse: collapse; font-size: 9pt; table-layout: auto; }\n")
-	b.WriteString("thead th { background: var(--cf-bg-hover); color: var(--cf-text-muted); font-size: 7.5pt; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 14px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--cf-border); }\n")
+	b.WriteString("table { width: 100%; border-collapse: collapse; font-size: 8.5pt; table-layout: fixed; word-wrap: break-word; }\n")
+	b.WriteString("thead th { background: var(--cf-bg-hover); color: var(--cf-text-muted); font-size: 7pt; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--cf-border); overflow: hidden; text-overflow: ellipsis; }\n")
 	b.WriteString("thead th:not(:last-child) { border-right: 1px solid var(--cf-border-light); }\n")
-	b.WriteString("tbody td { padding: 10px 14px; border-bottom: 1px solid var(--cf-border-light); font-size: 9pt; color: var(--cf-text-muted); }\n")
+	b.WriteString("tbody td { padding: 8px 10px; border-bottom: 1px solid var(--cf-border-light); font-size: 8.5pt; color: var(--cf-text-muted); overflow: hidden; text-overflow: ellipsis; }\n")
 	b.WriteString("tbody td:not(:last-child) { border-right: 1px solid var(--cf-border-light); }\n")
 	b.WriteString("tbody tr:last-child td { border-bottom: none; }\n")
-	b.WriteString(".td-truncate { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n")
+	b.WriteString(".td-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n")
 
 	// ── Finding cards — CF Workers card: warm bg, full border, corner brackets, NO left-border slit ──
 	b.WriteString(".finding-card { border-radius: 8px; padding: 18px 22px; margin-bottom: 16px; page-break-inside: avoid; background: var(--cf-bg-card); border: 1px solid var(--cf-border); position: relative; }\n")
@@ -425,15 +435,36 @@ func writeCSS(b *strings.Builder) {
 	// Callout box (CF Workers blockquote style)
 	b.WriteString(".callout { background: rgba(255,72,1,0.04); border-left: 3px solid var(--cf-orange); border-radius: 0 8px 8px 0; padding: 14px 18px; margin: 16px 0; font-size: 9pt; color: var(--cf-text); line-height: 1.6; }\n")
 
-	// ── Print rules ──
+	// ── Toolbar (screen only) ──
+	b.WriteString(".report-toolbar { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: var(--cf-bg); border-bottom: 1px solid var(--cf-border); padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; }\n")
+	b.WriteString(".report-toolbar-left { display: flex; align-items: center; gap: 12px; }\n")
+	b.WriteString(".report-toolbar-title { font-size: 14px; font-weight: 500; color: var(--cf-text); }\n")
+	b.WriteString(".report-toolbar-sub { font-size: 12px; color: var(--cf-text-subtle); }\n")
+	b.WriteString(".report-toolbar .btn-print { display: inline-flex; align-items: center; gap: 6px; padding: 8px 20px; background: var(--cf-orange); color: #fff; border: none; border-radius: 9999px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.15s; }\n")
+	b.WriteString(".report-toolbar .btn-print:hover { background: var(--cf-orange-hover); }\n")
+	b.WriteString(".report-toolbar .btn-back { display: inline-flex; align-items: center; gap: 4px; padding: 8px 16px; background: transparent; color: var(--cf-text-muted); border: 1px solid var(--cf-border); border-radius: 9999px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; text-decoration: none; transition: all 0.15s; }\n")
+	b.WriteString(".report-toolbar .btn-back:hover { border-style: dashed; color: var(--cf-text); background: var(--cf-bg-hover); }\n")
+	b.WriteString(".page-container { padding-top: 70px; }\n") // offset for fixed toolbar
+
+	// ── Print rules — match the on-screen preview exactly ──
 	b.WriteString("@media print {\n")
-	b.WriteString("  body { background: var(--cf-bg); }\n")
-	b.WriteString("  .page-container { padding: 0; gap: 0; }\n")
-	b.WriteString("  .page { width: auto; min-height: auto; box-shadow: none; padding: 0; border-radius: 0; }\n")
-	b.WriteString("  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }\n")
-	b.WriteString("  .finding-card { break-inside: avoid; }\n")
+	b.WriteString("  body { background: var(--cf-bg) !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: var(--cf-text) !important; }\n")
+	b.WriteString("  .report-toolbar { display: none !important; }\n")
+	b.WriteString("  .page-container { padding: 0; gap: 0; display: block; }\n")
+	b.WriteString("  .page { width: auto; min-height: auto; box-shadow: none; border-radius: 0; background: var(--cf-bg) !important; padding: 0; page-break-after: always; }\n")
+	b.WriteString("  .page:last-child { page-break-after: auto; }\n")
+	b.WriteString("  .finding-card { break-inside: avoid; background: var(--cf-bg-card) !important; }\n")
 	b.WriteString("  .table-wrap { break-inside: avoid; }\n")
 	b.WriteString("  .stats-grid { break-inside: avoid; }\n")
+	b.WriteString("  .stat-card { background: var(--cf-bg-card) !important; }\n")
+	b.WriteString("  .cover-summary { background: var(--cf-bg-card) !important; }\n")
+	b.WriteString("  .cover-badge { background: var(--cf-orange) !important; color: #fff !important; }\n")
+	b.WriteString("  thead th { background: var(--cf-bg-hover) !important; }\n")
+	b.WriteString("  .sev-badge { border: 1px solid !important; }\n")
+	b.WriteString("  .sev-badge.sev-critical { background: rgba(220,38,38,0.08) !important; }\n")
+	b.WriteString("  .sev-badge.sev-warning { background: rgba(217,119,6,0.08) !important; }\n")
+	b.WriteString("  .sev-badge.sev-info { background: rgba(0,114,245,0.08) !important; }\n")
+	b.WriteString("  .sev-badge.sev-ok { background: rgba(22,163,74,0.08) !important; }\n")
 	b.WriteString("}\n")
 }
 

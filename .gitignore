@@ -41,3 +41,4 @@ AGENT-CONTEXT.md
 node_modules/
 package.json
 package-lock.json
+unraid-diagnostic-report.pdf
