@@ -26,6 +26,7 @@ const (
 	CategoryThermal Category = "thermal"
 	CategoryLogs    Category = "logs"
 	CategoryParity  Category = "parity"
+	CategoryZFS     Category = "zfs"
 )
 
 // ---------- Snapshot (one complete diagnostic run) ----------
@@ -42,6 +43,7 @@ type Snapshot struct {
 	Network   NetworkInfo `json:"network"`
 	Logs      LogInfo     `json:"logs"`
 	Parity    *ParityInfo `json:"parity,omitempty"`
+	ZFS       *ZFSInfo    `json:"zfs,omitempty"`
 	Findings  []Finding   `json:"findings"`
 }
 
@@ -180,6 +182,75 @@ type ParityCheck struct {
 	ExitCode int     `json:"exit_code"`
 	Action   string  `json:"action"` // check, correct, recon
 	SizeGB   float64 `json:"size_gb"`
+}
+
+// ---------- ZFS ----------
+
+type ZFSInfo struct {
+	Available bool         `json:"available"`
+	Pools     []ZPool      `json:"pools"`
+	Datasets  []ZDataset   `json:"datasets,omitempty"`
+	ARC       *ZFSARCStats `json:"arc,omitempty"`
+}
+
+type ZPool struct {
+	Name          string      `json:"name"`         // "tank", "rpool"
+	State         string      `json:"state"`        // ONLINE, DEGRADED, FAULTED, OFFLINE, REMOVED, UNAVAIL
+	Status        string      `json:"status"`       // human-readable status message
+	Action        string      `json:"action"`       // recommended action from zpool status
+	ScanStatus    string      `json:"scan_status"`  // "scrub repaired 0B ... with 0 errors", "resilver in progress", "none requested"
+	ScanType      string      `json:"scan_type"`    // "scrub", "resilver", "none"
+	ScanPct       float64     `json:"scan_percent"` // 0-100 if in progress
+	ScanErrors    int         `json:"scan_errors"`
+	ScanDate      string      `json:"scan_date"` // last scrub/resilver completion date
+	TotalGB       float64     `json:"total_gb"`
+	UsedGB        float64     `json:"used_gb"`
+	FreeGB        float64     `json:"free_gb"`
+	UsedPct       float64     `json:"used_percent"`
+	Fragmentation int         `json:"fragmentation_percent"`
+	VDevs         []ZVDev     `json:"vdevs"`
+	Errors        ZPoolErrors `json:"errors"`
+}
+
+type ZVDev struct {
+	Name     string  `json:"name"`  // "mirror-0", "raidz1-0", "/dev/sda"
+	Type     string  `json:"type"`  // "mirror", "raidz1", "raidz2", "raidz3", "disk", "spare", "log", "cache", "special"
+	State    string  `json:"state"` // ONLINE, DEGRADED, FAULTED, OFFLINE, REMOVED, UNAVAIL
+	Children []ZVDev `json:"children,omitempty"`
+	ReadErr  int64   `json:"read_errors"`
+	WriteErr int64   `json:"write_errors"`
+	CksumErr int64   `json:"checksum_errors"`
+}
+
+type ZPoolErrors struct {
+	Data     string `json:"data"` // "No known data errors" or description
+	Read     int64  `json:"read"`
+	Write    int64  `json:"write"`
+	Checksum int64  `json:"checksum"`
+}
+
+type ZDataset struct {
+	Name        string  `json:"name"` // "tank/data", "rpool/ROOT"
+	Pool        string  `json:"pool"`
+	Type        string  `json:"type"` // "filesystem", "volume", "snapshot"
+	UsedGB      float64 `json:"used_gb"`
+	AvailGB     float64 `json:"avail_gb"`
+	ReferGB     float64 `json:"refer_gb"`
+	MountPoint  string  `json:"mount_point"`
+	Compression string  `json:"compression"`
+	CompRatio   float64 `json:"compression_ratio"`
+	Snapshots   int     `json:"snapshot_count"`
+}
+
+type ZFSARCStats struct {
+	SizeMB    float64 `json:"size_mb"`
+	MaxSizeMB float64 `json:"max_size_mb"`
+	HitRate   float64 `json:"hit_rate_percent"`
+	MissRate  float64 `json:"miss_rate_percent"`
+	Hits      int64   `json:"hits"`
+	Misses    int64   `json:"misses"`
+	L2SizeMB  float64 `json:"l2_size_mb"`
+	L2HitRate float64 `json:"l2_hit_rate_percent"`
 }
 
 // ---------- Findings (analysis output) ----------

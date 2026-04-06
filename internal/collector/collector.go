@@ -90,6 +90,16 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 		snap.Parity = parity
 	}
 
+	// ZFS (if available)
+	c.logger.Info("collecting ZFS info")
+	zfsInfo, err := collectZFS()
+	if err != nil {
+		c.logger.Warn("ZFS collection partial failure", "error", err)
+	}
+	if zfsInfo != nil && zfsInfo.Available {
+		snap.ZFS = zfsInfo
+	}
+
 	snap.Duration = time.Since(start).Seconds()
 	c.logger.Info("collection complete", "duration", fmt.Sprintf("%.1fs", snap.Duration))
 	return snap, nil
