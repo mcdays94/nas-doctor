@@ -944,11 +944,6 @@ td.mono {
     NAS Doctor
   </a>
   <div class="header-right">
-    <div class="theme-switcher">
-      <a href="/">Midnight</a>
-      <a href="/theme/clean">Clean</a>
-      <a href="/theme/ember" class="active">Ember</a>
-    </div>
     <div class="nav-links">
       <a href="/api/v1/report" class="nav-link" target="_blank">Export Report</a>
       <a href="/stats" class="nav-link">Stats</a>

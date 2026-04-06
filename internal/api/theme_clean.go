@@ -691,11 +691,6 @@ body {
 <header class="header">
   <a href="/" class="header-brand"><img src="/icon.png" alt="" style="width:22px;height:22px;border-radius:4px;vertical-align:middle;margin-right:6px;">NAS Doctor</a>
   <div class="header-right">
-    <div class="theme-switcher">
-      <a href="/">Midnight</a>
-      <a href="/theme/clean" class="active">Clean</a>
-      <a href="/theme/ember">Ember</a>
-    </div>
     <div class="nav-links">
       <a href="/api/v1/report" class="nav-link" target="_blank">Export Report</a>
       <a href="/stats" class="nav-link">Stats</a>

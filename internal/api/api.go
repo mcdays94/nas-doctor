@@ -269,12 +269,14 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	s.serveDashboard(w, DefaultTheme)
+	// Serve the theme saved in settings (not hardcoded)
+	settings := s.getSettings()
+	s.serveDashboard(w, settings.Theme)
 }
 
 func (s *Server) handleDashboardTheme(w http.ResponseWriter, r *http.Request) {
-	theme := chi.URLParam(r, "theme")
-	s.serveDashboard(w, theme)
+	// Redirect to / — theme is now controlled by settings only
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func (s *Server) serveDashboard(w http.ResponseWriter, theme string) {

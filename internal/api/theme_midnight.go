@@ -286,11 +286,6 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     h += '<span class="hostname">' + esc(hostname) + '</span>';
     h += '</div>';
     h += '<div class="header-right">';
-    h += '<div class="theme-switcher">';
-    h += '<a href="/" class="active">Midnight</a>';
-    h += '<a href="/theme/clean">Clean</a>';
-    h += '<a href="/theme/ember">Ember</a>';
-    h += '</div>';
     h += '<div class="nav-links">';
     h += '<a href="/api/v1/report" class="nav-link" target="_blank">Export Report</a>';
     h += '<a href="/stats" class="nav-link">Stats</a>';
