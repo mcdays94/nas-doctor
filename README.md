@@ -328,30 +328,6 @@ Demo includes: 7 SMART drives (with Backblaze-informed findings), 14 Docker cont
 
 ---
 
-## Roadmap
-
-- [x] Config UI in dashboard (manage webhooks, scan interval, theme, icon selection)
-- [x] Unraid Community Apps template
-- [x] PDF report export (CF Workers Design System styled, print-ready)
-- [x] Custom scan frequency with full granularity + cron preview
-- [x] Dynamic scheduler interval updates (no restart required)
-- [x] Settings page inherits active theme
-- [x] Historical trend sparklines (CPU, memory, I/O, SMART temperature)
-- [x] Backblaze failure-rate thresholds (Q4-2025, 337k+ drives)
-- [x] Data lifecycle management (retention policies, DB size cap, auto-pruning)
-- [x] Automatic backup with configurable schedule and location
-- [x] ZFS pool health detection (vdev tree, scrub/resilver, ARC stats)
-- [x] UPS / Power monitoring (NUT + apcupsd)
-- [x] NAS OS update check (Unraid, TrueNAS via GitHub API)
-- [x] Multi-server fleet monitoring (hub/spoke)
-- [x] Dashboard section visibility toggles
-- [x] Click-to-expand findings with evidence detail (all themes)
-- [ ] GitHub Actions CI for multi-arch Docker builds (amd64/arm64)
-- [ ] Log Forwarding (export to external endpoints)
-- [ ] Optional cloud AI integration for deep root-cause analysis
-
----
-
 ## License
 
 MIT
