@@ -136,11 +136,9 @@ func main() {
 		}
 		metrics.Update(snap)
 
-		// Manually inject the snapshot into the scheduler's cache
-		// We do this via a quick RunOnce-like pattern, but since
-		// we can't easily access the private field, we start the
-		// scheduler and let it try (it will fail on macOS collectors
-		// but the demo data is already in the DB).
+		// Inject the demo snapshot into the scheduler's in-memory cache
+		// so that Latest() returns it for the report and status endpoints.
+		sched.SetLatest(snap)
 		logger.Info("demo data loaded",
 			"findings", len(snap.Findings),
 			"critical", countSev(snap.Findings, internal.SeverityCritical),

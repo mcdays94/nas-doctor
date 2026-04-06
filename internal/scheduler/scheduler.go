@@ -170,6 +170,13 @@ func (s *Scheduler) Latest() *internal.Snapshot {
 	return s.latest
 }
 
+// SetLatest injects a snapshot into the scheduler's cache (used by demo mode).
+func (s *Scheduler) SetLatest(snap *internal.Snapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.latest = snap
+}
+
 // IsRunning returns true if a collection is currently in progress.
 func (s *Scheduler) IsRunning() bool {
 	s.mu.RLock()

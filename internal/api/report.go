@@ -290,7 +290,7 @@ func GenerateReport(snap *internal.Snapshot) string {
 
 func writeCSS(b *strings.Builder) {
 	b.WriteString("@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');\n")
-	b.WriteString("@page { size: A4; margin: 20mm; }\n")
+	b.WriteString("@page { size: A4; margin: 0; }\n")
 	b.WriteString("*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }\n")
 
 	// CF Workers Design System palette
@@ -446,25 +446,34 @@ func writeCSS(b *strings.Builder) {
 	b.WriteString(".report-toolbar .btn-back:hover { border-style: dashed; color: var(--cf-text); background: var(--cf-bg-hover); }\n")
 	b.WriteString(".page-container { padding-top: 70px; }\n") // offset for fixed toolbar
 
-	// ── Print rules — match the on-screen preview exactly ──
+	// ── Print rules — reproduce the on-screen A4 preview exactly ──
+	// @page margin is 0 — the .page div handles all spacing.
+	// Every background forced with !important so the PDF looks identical.
 	b.WriteString("@media print {\n")
-	b.WriteString("  body { background: var(--cf-bg) !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: var(--cf-text) !important; }\n")
+	b.WriteString("  html, body { background: var(--cf-bg) !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: var(--cf-text) !important; margin: 0; padding: 0; }\n")
 	b.WriteString("  .report-toolbar { display: none !important; }\n")
-	b.WriteString("  .page-container { padding: 0; gap: 0; display: block; }\n")
-	b.WriteString("  .page { width: auto; min-height: auto; box-shadow: none; border-radius: 0; background: var(--cf-bg) !important; padding: 0; page-break-after: always; }\n")
+	b.WriteString("  .page-container { padding: 0; gap: 0; display: block; background: transparent !important; }\n")
+	// .page keeps its padding so content has proper margins on paper
+	b.WriteString("  .page { width: auto; min-height: auto; box-shadow: none !important; border-radius: 0; background: var(--cf-bg) !important; padding: 20mm 22mm; page-break-after: always; }\n")
 	b.WriteString("  .page:last-child { page-break-after: auto; }\n")
-	b.WriteString("  .finding-card { break-inside: avoid; background: var(--cf-bg-card) !important; }\n")
-	b.WriteString("  .table-wrap { break-inside: avoid; }\n")
+	// Force all component backgrounds
+	b.WriteString("  .finding-card { break-inside: avoid; background: var(--cf-bg-card) !important; border: 1px solid var(--cf-border) !important; }\n")
+	b.WriteString("  .table-wrap { break-inside: avoid; border: 1px solid var(--cf-border) !important; }\n")
 	b.WriteString("  .stats-grid { break-inside: avoid; }\n")
-	b.WriteString("  .stat-card { background: var(--cf-bg-card) !important; }\n")
-	b.WriteString("  .cover-summary { background: var(--cf-bg-card) !important; }\n")
+	b.WriteString("  .stat-card { background: var(--cf-bg-card) !important; border: 1px solid var(--cf-border) !important; }\n")
+	b.WriteString("  .cover-summary { background: var(--cf-bg-card) !important; border: 1px solid var(--cf-border) !important; }\n")
 	b.WriteString("  .cover-badge { background: var(--cf-orange) !important; color: #fff !important; }\n")
-	b.WriteString("  thead th { background: var(--cf-bg-hover) !important; }\n")
+	b.WriteString("  thead th { background: var(--cf-bg-hover) !important; color: var(--cf-text-muted) !important; }\n")
+	b.WriteString("  .bar-track { background: var(--cf-border-light) !important; }\n")
 	b.WriteString("  .sev-badge { border: 1px solid !important; }\n")
-	b.WriteString("  .sev-badge.sev-critical { background: rgba(220,38,38,0.08) !important; }\n")
-	b.WriteString("  .sev-badge.sev-warning { background: rgba(217,119,6,0.08) !important; }\n")
-	b.WriteString("  .sev-badge.sev-info { background: rgba(0,114,245,0.08) !important; }\n")
-	b.WriteString("  .sev-badge.sev-ok { background: rgba(22,163,74,0.08) !important; }\n")
+	b.WriteString("  .sev-badge.sev-critical { background: rgba(220,38,38,0.08) !important; color: var(--red) !important; }\n")
+	b.WriteString("  .sev-badge.sev-warning { background: rgba(217,119,6,0.08) !important; color: var(--amber) !important; }\n")
+	b.WriteString("  .sev-badge.sev-info { background: rgba(0,114,245,0.08) !important; color: var(--blue) !important; }\n")
+	b.WriteString("  .sev-badge.sev-ok { background: rgba(22,163,74,0.08) !important; color: var(--green) !important; }\n")
+	// Dashed separators must be visible in print
+	b.WriteString("  h2.section-heading::after, .cover-meta::before, .toc h2::after, .toc-item + .toc-item::before, .finding-action::before { background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%) !important; }\n")
+	// Corner brackets visible
+	b.WriteString("  .finding-card::before, .finding-card::after, .cover-summary::before, .cover-summary::after { background: var(--cf-bg) !important; border: 1px solid var(--cf-border) !important; }\n")
 	b.WriteString("}\n")
 }
 
