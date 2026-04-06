@@ -570,6 +570,64 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     }
     h += '</div>'; // end section-block ups
 
+    // ======= Section: Network =======
+    h += '<div class="section-block" data-section="network">';
+    var net = sn ? sn.network : null;
+    if (net && net.interfaces && net.interfaces.length > 0) {
+      h += '<div>';
+      h += '<div class="section-title">Network</div>';
+      h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+      h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Interface</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">State</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Speed</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">MTU</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">IP</th></tr>';
+      for (var ni = 0; ni < net.interfaces.length; ni++) {
+        var iface = net.interfaces[ni];
+        var stateColor = iface.state === "UP" ? "td-healthy" : "td-warn";
+        h += '<tr><td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(iface.name) + '</td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)" class="' + stateColor + '">' + esc(iface.state) + '</td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(iface.speed || "—") + '</td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + (iface.mtu || 0) + '</td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(iface.ipv4 || "—") + '</td></tr>';
+      }
+      h += '</table>';
+      h += '</div>';
+    }
+    h += '</div>'; // end section-block network
+
+    // ======= Section: Parity =======
+    h += '<div class="section-block" data-section="parity">';
+    var parity = sn ? sn.parity : null;
+    if (parity && parity.history && parity.history.length > 0) {
+      h += '<div>';
+      h += '<div class="section-title">Parity History</div>';
+      h += '<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px">Status: ' + esc(parity.status || "idle") + '</div>';
+      h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+      h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Date</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Duration</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Speed</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Errors</th></tr>';
+      for (var pi = 0; pi < parity.history.length; pi++) {
+        var pc = parity.history[pi];
+        var errClass = pc.errors > 0 ? "td-crit" : "td-healthy";
+        h += '<tr><td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(pc.date) + '</td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(pc.duration_human || "—") + '</td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + (pc.speed_mb_s || 0).toFixed(1) + ' MB/s</td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)" class="' + errClass + '">' + (pc.errors || 0) + '</td></tr>';
+      }
+      h += '</table>';
+      h += '</div>';
+    } else if (parity && parity.status) {
+      h += '<div>';
+      h += '<div class="section-title">Parity</div>';
+      h += '<div style="font-size:12px;color:var(--text-tertiary)">Status: ' + esc(parity.status) + ' &middot; No parity check history found</div>';
+      h += '</div>';
+    }
+    h += '</div>'; // end section-block parity
+
     h += '</div>'; // end section-staging
 
     // Footer

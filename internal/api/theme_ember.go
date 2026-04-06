@@ -1436,6 +1436,47 @@ td.mono {
     }
     html += "</div>"; /* section-block ups */
 
+    /* ==== Section: Network ==== */
+    html += "<div class=\"section-block\" data-section=\"network\">";
+    if (snapshot && snapshot.network && snapshot.network.interfaces && snapshot.network.interfaces.length > 0) {
+      html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Network</div>";
+      html += "<table style=\"width:100%;font-size:12px;border-collapse:collapse\">";
+      html += "<tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Interface</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">State</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Speed</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">IP</th></tr>";
+      for (var ni = 0; ni < snapshot.network.interfaces.length; ni++) {
+        var iface = snapshot.network.interfaces[ni];
+        var stClr = iface.state === "UP" ? "var(--green)" : "#FACC15";
+        html += "<tr><td style=\"padding:5px 8px;border-bottom:1px solid var(--border);font-family:var(--font-mono)\">" + esc(iface.name) + "</td>";
+        html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border);color:" + stClr + "\">" + esc(iface.state) + "</td>";
+        html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc(iface.speed || "\u2014") + "</td>";
+        html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc(iface.ipv4 || "\u2014") + "</td></tr>";
+      }
+      html += "</table></div>";
+    }
+    html += "</div>"; /* section-block network */
+
+    /* ==== Section: Parity ==== */
+    html += "<div class=\"section-block\" data-section=\"parity\">";
+    if (snapshot && snapshot.parity) {
+      var par = snapshot.parity;
+      html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Parity</div>";
+      if (par.history && par.history.length > 0) {
+        html += "<table style=\"width:100%;font-size:12px;border-collapse:collapse\">";
+        html += "<tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Date</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Duration</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Speed</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Errors</th></tr>";
+        for (var pi = 0; pi < par.history.length; pi++) {
+          var pc = par.history[pi];
+          html += "<tr><td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc(pc.date) + "</td>";
+          html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc(pc.duration_human || "\u2014") + "</td>";
+          html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + (pc.speed_mb_s || 0).toFixed(1) + " MB/s</td>";
+          html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border);color:" + (pc.errors > 0 ? "var(--red)" : "var(--green)") + "\">" + (pc.errors || 0) + "</td></tr>";
+        }
+        html += "</table>";
+      } else {
+        html += "<div style=\"font-size:12px;color:var(--text-dim)\">Status: " + esc(par.status || "idle") + "</div>";
+      }
+      html += "</div>";
+    }
+    html += "</div>"; /* section-block parity */
+
     html += "</div>"; /* section-staging */
 
     /* ---- Footer ---- */
