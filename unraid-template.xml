@@ -42,6 +42,7 @@ Features:
   <Config Name="Boot Config" Target="/host/boot" Default="/boot" Mode="ro" Description="Unraid boot config (parity logs, ident)" Type="Path" Display="always" Required="false" Mask="false">/boot</Config>
   <Config Name="System Logs" Target="/host/log" Default="/var/log" Mode="ro" Description="System log files (syslog, messages)" Type="Path" Display="always" Required="false" Mask="false">/var/log</Config>
   <Config Name="Unraid Version" Target="/etc/unraid-version" Default="/etc/unraid-version" Mode="ro" Description="Unraid version file (for OS update detection)" Type="Path" Display="always" Required="false" Mask="false">/etc/unraid-version</Config>
+  <Config Name="Host Mounts" Target="/host/mnt" Default="/mnt" Mode="ro" Description="Host disk mounts (for per-disk space monitoring)" Type="Path" Display="always" Required="false" Mask="false">/mnt</Config>
   <Config Name="Docker Socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Docker socket for container monitoring" Type="Path" Display="always" Required="false" Mask="false">/var/run/docker.sock</Config>
   <Config Name="Scan Interval" Target="NAS_DOCTOR_INTERVAL" Default="6h" Mode="" Description="How often to run diagnostic scans (e.g. 30m, 1h, 6h, 24h)" Type="Variable" Display="always" Required="false" Mask="false">6h</Config>
   <Config Name="Timezone" Target="TZ" Default="UTC" Mode="" Description="Container timezone (e.g. Europe/London, America/New_York)" Type="Variable" Display="always" Required="false" Mask="false">UTC</Config>

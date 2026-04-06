@@ -93,6 +93,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /boot:/host/boot:ro
       - /var/log:/host/log:ro
+      - /mnt:/host/mnt:ro
+      - /etc/unraid-version:/etc/unraid-version:ro
     environment:
       - TZ=Europe/Lisbon
       - NAS_DOCTOR_INTERVAL=6h
@@ -121,6 +123,8 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -v /boot:/host/boot:ro \
   -v /var/log:/host/log:ro \
+  -v /mnt:/host/mnt:ro \
+  -v /etc/unraid-version:/etc/unraid-version:ro \
   -e TZ=Europe/Lisbon \
   -p 8080:8060 \
   --restart unless-stopped \

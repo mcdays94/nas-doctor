@@ -11,14 +11,70 @@ import (
 func collectDisks() ([]internal.DiskInfo, error) {
 	out, err := execCmd("df", "-h", "--output=source,fstype,size,used,avail,pcent,target")
 	if err != nil {
-		// Fallback to simpler df
 		out, err = execCmd("df", "-h")
 		if err != nil {
 			return nil, err
 		}
 		return parseDFSimple(out), nil
 	}
-	return parseDFOutput(out), nil
+	disks := parseDFOutput(out)
+
+	// If running inside Docker, also read host mounts via /host/mnt
+	if hostDisks := collectHostMountDisks(); len(hostDisks) > 0 {
+		disks = hostDisks // prefer host disks over container view
+	}
+
+	return disks, nil
+}
+
+// collectHostMountDisks reads disk info from the host's /mnt via the bind mount at /host/mnt.
+// This is the primary method for Unraid where disks are at /mnt/disk1, /mnt/disk2, etc.
+func collectHostMountDisks() []internal.DiskInfo {
+	// Check if /host/mnt exists (bind-mounted from host)
+	out, err := execCmd("df", "-h", "--output=source,fstype,size,used,avail,pcent,target")
+	if err != nil {
+		return nil
+	}
+
+	var disks []internal.DiskInfo
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if i == 0 || strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 7 {
+			continue
+		}
+		mount := fields[6]
+
+		// Only include /host/mnt/disk*, /host/mnt/cache*, /host/mnt/user
+		if !strings.HasPrefix(mount, "/host/mnt/") {
+			continue
+		}
+
+		device := fields[0]
+		total := parseSize(fields[2])
+		used := parseSize(fields[3])
+		free := parseSize(fields[4])
+		pctStr := strings.TrimSuffix(fields[5], "%")
+		pct, _ := strconv.ParseFloat(pctStr, 64)
+
+		// Clean up mount path: /host/mnt/disk1 → /mnt/disk1
+		displayMount := strings.Replace(mount, "/host/mnt", "/mnt", 1)
+
+		disks = append(disks, internal.DiskInfo{
+			Device:     device,
+			MountPoint: displayMount,
+			Label:      guessLabel(displayMount, device),
+			FSType:     fields[1],
+			TotalGB:    total,
+			UsedGB:     used,
+			FreeGB:     free,
+			UsedPct:    pct,
+		})
+	}
+	return disks
 }
 
 func parseDFOutput(out string) []internal.DiskInfo {
