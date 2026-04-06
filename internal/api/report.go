@@ -221,33 +221,55 @@ func GenerateReport(snap *internal.Snapshot) string {
 	b.WriteString("</style>\n")
 	b.WriteString("</head>\n<body>\n")
 
+	// A4 page wrapper for screen preview
+	b.WriteString("<div class=\"page-container\">\n")
+
 	// ── Cover Page ───────────────────────────────────────────────────
+	b.WriteString("<div class=\"page\">\n")
 	writeCoverPage(&b, snap)
+	b.WriteString("</div>\n")
 
 	// ── Table of Contents ────────────────────────────────────────────
+	b.WriteString("<div class=\"page\">\n")
 	writeTOC(&b, snap)
+	b.WriteString("</div>\n")
 
 	// ── System Overview ──────────────────────────────────────────────
+	b.WriteString("<div class=\"page\">\n")
 	writeSystemOverview(&b, snap)
+	b.WriteString("</div>\n")
 
 	// ── Findings ─────────────────────────────────────────────────────
+	b.WriteString("<div class=\"page\">\n")
 	writeFindings(&b, snap)
+	b.WriteString("</div>\n")
 
 	// ── Drive Health & SMART ─────────────────────────────────────────
+	b.WriteString("<div class=\"page\">\n")
 	writeSMART(&b, snap)
+	b.WriteString("</div>\n")
 
 	// ── Docker & Application Analysis ────────────────────────────────
+	b.WriteString("<div class=\"page\">\n")
 	writeDocker(&b, snap)
+	b.WriteString("</div>\n")
 
 	// ── Parity Analysis ──────────────────────────────────────────────
+	b.WriteString("<div class=\"page\">\n")
 	writeParity(&b, snap)
+	b.WriteString("</div>\n")
 
 	// ── Recommended Actions ──────────────────────────────────────────
+	b.WriteString("<div class=\"page\">\n")
 	writeActions(&b, snap)
+	b.WriteString("</div>\n")
 
 	// ── Footer ───────────────────────────────────────────────────────
+	b.WriteString("<div class=\"page\">\n")
 	writeFooter(&b, snap)
+	b.WriteString("</div>\n")
 
+	b.WriteString("</div>\n") // close .page-container
 	b.WriteString("</body>\n</html>")
 	return b.String()
 }
@@ -258,151 +280,160 @@ func GenerateReport(snap *internal.Snapshot) string {
 
 func writeCSS(b *strings.Builder) {
 	b.WriteString("@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');\n")
-	b.WriteString("@page { size: A4; margin: 22mm 20mm 28mm 20mm; }\n")
+	b.WriteString("@page { size: A4; margin: 20mm; }\n")
 	b.WriteString("*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }\n")
 
-	// Clean theme palette — matching app's Clean theme + CF Workers design system
+	// CF Workers Design System palette
 	b.WriteString(":root {\n")
-	b.WriteString("  --text: #171717; --text-muted: #4d4d4d; --text-subtle: #808080; --text-faint: #b3b3b3;\n")
-	b.WriteString("  --bg: #ffffff; --bg-card: #ffffff; --bg-hover: #fafafa;\n")
-	b.WriteString("  --border: rgba(0,0,0,0.08); --border-solid: #e5e5e5;\n")
-	b.WriteString("  --red: #dc2626; --red-bg: rgba(220,38,38,0.06); --red-border: rgba(220,38,38,0.15);\n")
-	b.WriteString("  --amber: #d97706; --amber-bg: rgba(217,119,6,0.06); --amber-border: rgba(217,119,6,0.15);\n")
-	b.WriteString("  --green: #16a34a; --green-bg: rgba(22,163,74,0.06); --green-border: rgba(22,163,74,0.15);\n")
-	b.WriteString("  --blue: #0072f5; --blue-bg: rgba(0,114,245,0.06); --blue-border: rgba(0,114,245,0.15);\n")
+	b.WriteString("  --cf-orange: #FF4801;\n")
+	b.WriteString("  --cf-orange-hover: #FF7038;\n")
+	b.WriteString("  --cf-orange-light: rgba(255, 72, 1, 0.08);\n")
+	b.WriteString("  --cf-text: #521000;\n")
+	b.WriteString("  --cf-text-muted: rgba(82, 16, 0, 0.7);\n")
+	b.WriteString("  --cf-text-subtle: rgba(82, 16, 0, 0.4);\n")
+	b.WriteString("  --cf-bg: #FFFBF5;\n")
+	b.WriteString("  --cf-bg-card: #FFFDFB;\n")
+	b.WriteString("  --cf-bg-hover: #FEF7ED;\n")
+	b.WriteString("  --cf-border: #EBD5C1;\n")
+	b.WriteString("  --cf-border-light: rgba(235, 213, 193, 0.5);\n")
+	b.WriteString("  --red: #dc2626; --amber: #d97706; --green: #16a34a; --blue: #0072f5;\n")
 	b.WriteString("}\n")
 
-	// Body — Clean theme
-	b.WriteString("body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 9.5pt; color: var(--text); background: var(--bg); line-height: 1.65; -webkit-font-smoothing: antialiased; }\n")
+	// Body — CF Workers warm background
+	b.WriteString("body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 9.5pt; color: var(--cf-text); background: #e8e0d8; line-height: 1.6; -webkit-font-smoothing: antialiased; }\n")
+
+	// ── A4 page preview (screen only) ──
+	b.WriteString(".page-container { display: flex; flex-direction: column; align-items: center; padding: 40px 0; gap: 40px; }\n")
+	b.WriteString(".page { background: var(--cf-bg); width: 210mm; min-height: 297mm; padding: 28mm 24mm; box-shadow: 0 2px 20px rgba(82,16,0,0.12), 0 0 0 1px rgba(82,16,0,0.06); border-radius: 2px; position: relative; }\n")
 
 	// Page numbers (print)
-	b.WriteString("@page { @bottom-center { font-family: 'Inter', sans-serif; font-size: 7.5pt; color: var(--text-subtle); content: 'Page ' counter(page) ' of ' counter(pages); } }\n")
+	b.WriteString("@page { @bottom-center { font-family: 'Inter', sans-serif; font-size: 7.5pt; color: var(--cf-text-subtle); content: 'Page ' counter(page) ' of ' counter(pages); } }\n")
 
-	// Dashed separator utility (CF Workers style)
-	b.WriteString(".dashed-sep { height: 1px; background-image: linear-gradient(to right, var(--border-solid) 50%, transparent 50%); background-size: 10px 1px; background-repeat: repeat-x; }\n")
+	// Dashed separator utility (CF Workers signature)
+	b.WriteString(".dashed-sep { height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x; }\n")
 
 	// ── Cover page ──
-	b.WriteString(".cover { page-break-after: always; padding: 80px 0 40px; }\n")
-	b.WriteString(".cover-badge { display: inline-block; font-size: 8pt; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; background: var(--text); color: #fff; padding: 5px 16px; border-radius: 6px; margin-bottom: 28px; }\n")
-	b.WriteString(".cover h1 { font-size: 34pt; font-weight: 500; line-height: 1.15; color: var(--text); margin-bottom: 12px; white-space: pre-line; letter-spacing: -0.5px; }\n")
-	b.WriteString(".cover-subtitle { font-size: 12pt; font-weight: 400; color: var(--text-muted); margin-bottom: 40px; line-height: 1.5; }\n")
-	// Dashed top border on meta grid (CF Workers style)
+	b.WriteString(".cover { padding: 0; }\n")
+	b.WriteString(".cover-badge { display: inline-block; font-size: 8pt; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; background: var(--cf-orange); color: #fff; padding: 5px 16px; border-radius: 9999px; margin-bottom: 28px; }\n")
+	b.WriteString(".cover h1 { font-size: 32pt; font-weight: 500; line-height: 1.15; color: var(--cf-text); margin-bottom: 12px; white-space: pre-line; letter-spacing: -0.02em; }\n")
+	b.WriteString(".cover-subtitle { font-size: 11pt; font-weight: 400; color: var(--cf-text-muted); margin-bottom: 40px; line-height: 1.6; }\n")
+	// Dashed top border on meta grid
 	b.WriteString(".cover-meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px 40px; padding-top: 28px; margin-bottom: 48px; position: relative; }\n")
-	b.WriteString(".cover-meta::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--border-solid) 50%, transparent 50%); background-size: 10px 1px; background-repeat: repeat-x; }\n")
-	b.WriteString(".cover-meta-item { }\n")
-	b.WriteString(".cover-meta-label { font-size: 7pt; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--text-subtle); margin-bottom: 4px; }\n")
-	b.WriteString(".cover-meta-value { font-size: 10.5pt; font-weight: 500; color: var(--text); }\n")
+	b.WriteString(".cover-meta::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x; }\n")
+	b.WriteString(".cover-meta-label { font-size: 7pt; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cf-text-subtle); margin-bottom: 4px; }\n")
+	b.WriteString(".cover-meta-value { font-size: 10.5pt; font-weight: 500; color: var(--cf-text); }\n")
 
-	// Cover summary box — Clean theme card style with severity left border
-	b.WriteString(".cover-summary { padding: 20px 24px; border-radius: 8px; margin-top: 24px; position: relative; }\n")
-	b.WriteString(".cover-summary-critical { background: var(--bg); box-shadow: 0 0 0 1px var(--red-border); border-left: 4px solid var(--red); }\n")
-	b.WriteString(".cover-summary-warning { background: var(--bg); box-shadow: 0 0 0 1px var(--amber-border); border-left: 4px solid var(--amber); }\n")
-	b.WriteString(".cover-summary-healthy { background: var(--bg); box-shadow: 0 0 0 1px var(--green-border); border-left: 4px solid var(--green); }\n")
+	// Cover summary box — CF Workers card with border + corner brackets
+	b.WriteString(".cover-summary { padding: 20px 24px; border-radius: 8px; margin-top: 24px; border: 1px solid var(--cf-border); background: var(--cf-bg-card); position: relative; }\n")
+	// Corner brackets on summary box
+	b.WriteString(".cover-summary::before, .cover-summary::after { content: ''; position: absolute; width: 8px; height: 8px; border-radius: 1.5px; background: var(--cf-bg); border: 1px solid var(--cf-border); }\n")
+	b.WriteString(".cover-summary::before { top: -4px; right: -4px; }\n")
+	b.WriteString(".cover-summary::after { bottom: -4px; right: -4px; }\n")
+	b.WriteString(".cover-summary-critical { border-left: 3px solid var(--red); }\n")
+	b.WriteString(".cover-summary-warning { border-left: 3px solid var(--amber); }\n")
+	b.WriteString(".cover-summary-healthy { border-left: 3px solid var(--green); }\n")
 	b.WriteString(".cover-summary-critical h3 { color: var(--red); }\n")
 	b.WriteString(".cover-summary-warning h3 { color: var(--amber); }\n")
 	b.WriteString(".cover-summary-healthy h3 { color: var(--green); }\n")
-	b.WriteString(".cover-summary h3 { font-size: 11pt; font-weight: 600; margin-bottom: 10px; }\n")
+	b.WriteString(".cover-summary h3 { font-size: 11pt; font-weight: 500; margin-bottom: 10px; }\n")
 	b.WriteString(".cover-summary ul { list-style: none; padding-left: 0; font-size: 9.5pt; line-height: 1.7; }\n")
-	b.WriteString(".cover-summary li { margin-bottom: 4px; padding-left: 16px; position: relative; color: var(--text-muted); }\n")
+	b.WriteString(".cover-summary li { margin-bottom: 4px; padding-left: 16px; position: relative; color: var(--cf-text-muted); }\n")
 	b.WriteString(".cover-summary-critical li::before { content: ''; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }\n")
 	b.WriteString(".cover-summary-warning li::before { content: ''; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }\n")
 	b.WriteString(".cover-summary-healthy li::before { content: ''; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }\n")
 
-	// ── Section headings — Clean theme: lighter weight, dashed bottom border ──
-	b.WriteString("h2.section-heading { font-size: 18pt; font-weight: 500; color: var(--text); padding-bottom: 14px; margin: 44px 0 24px; page-break-after: avoid; letter-spacing: -0.3px; position: relative; }\n")
-	b.WriteString("h2.section-heading::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--border-solid) 50%, transparent 50%); background-size: 10px 1px; background-repeat: repeat-x; }\n")
-	b.WriteString("h2.section-heading .section-num { color: var(--text); margin-right: 6px; font-weight: 600; }\n")
-	// Severity badges — pill style matching Clean theme
-	b.WriteString("h2.section-heading .sev-badge { font-size: 7.5pt; font-weight: 600; text-transform: uppercase; padding: 2px 10px; border-radius: 9999px; margin-left: 14px; vertical-align: middle; letter-spacing: 0.4px; }\n")
-	b.WriteString(".sev-badge.sev-critical { background: var(--red-bg); color: var(--red); }\n")
-	b.WriteString(".sev-badge.sev-warning { background: var(--amber-bg); color: var(--amber); }\n")
-	b.WriteString(".sev-badge.sev-info { background: var(--blue-bg); color: var(--blue); }\n")
-	b.WriteString(".sev-badge.sev-ok { background: var(--green-bg); color: var(--green); }\n")
+	// ── Section headings — dashed bottom border ──
+	b.WriteString("h2.section-heading { font-size: 18pt; font-weight: 500; color: var(--cf-text); padding-bottom: 14px; margin: 0 0 24px; page-break-after: avoid; letter-spacing: -0.02em; position: relative; }\n")
+	b.WriteString("h2.section-heading::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x; }\n")
+	b.WriteString("h2.section-heading .section-num { color: var(--cf-text); margin-right: 6px; font-weight: 500; }\n")
+	// Severity badges — CF Workers rounded pill, no left-border slit
+	b.WriteString("h2.section-heading .sev-badge { font-size: 7.5pt; font-weight: 600; text-transform: uppercase; padding: 3px 12px; border-radius: 9999px; margin-left: 14px; vertical-align: middle; letter-spacing: 0.04em; border: 1px solid; }\n")
+	b.WriteString(".sev-badge.sev-critical { background: rgba(220,38,38,0.08); color: var(--red); border-color: rgba(220,38,38,0.2); }\n")
+	b.WriteString(".sev-badge.sev-warning { background: rgba(217,119,6,0.08); color: var(--amber); border-color: rgba(217,119,6,0.2); }\n")
+	b.WriteString(".sev-badge.sev-info { background: rgba(0,114,245,0.08); color: var(--blue); border-color: rgba(0,114,245,0.2); }\n")
+	b.WriteString(".sev-badge.sev-ok { background: rgba(22,163,74,0.08); color: var(--green); border-color: rgba(22,163,74,0.2); }\n")
 
 	// Sub-headings
-	b.WriteString("h3.sub-heading { font-size: 12pt; font-weight: 600; color: var(--text); margin: 24px 0 14px; }\n")
+	b.WriteString("h3.sub-heading { font-size: 12pt; font-weight: 500; color: var(--cf-text); margin: 24px 0 14px; }\n")
 
-	// ── Tables — Clean theme style: light header, box-shadow border, rounded ──
-	b.WriteString(".table-wrap { margin-bottom: 24px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--border); }\n")
+	// ── Tables — CF Workers: border, light warm header, rounded ──
+	b.WriteString(".table-wrap { margin-bottom: 24px; border-radius: 8px; overflow: hidden; border: 1px solid var(--cf-border); }\n")
 	b.WriteString("table { width: 100%; border-collapse: collapse; font-size: 9pt; table-layout: auto; }\n")
-	b.WriteString("thead th { background: var(--bg-hover); color: var(--text-subtle); font-size: 7.5pt; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }\n")
-	b.WriteString("tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(0,0,0,0.04); font-size: 9pt; color: var(--text); }\n")
+	b.WriteString("thead th { background: var(--cf-bg-hover); color: var(--cf-text-muted); font-size: 7.5pt; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 14px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--cf-border); }\n")
+	b.WriteString("thead th:not(:last-child) { border-right: 1px solid var(--cf-border-light); }\n")
+	b.WriteString("tbody td { padding: 10px 14px; border-bottom: 1px solid var(--cf-border-light); font-size: 9pt; color: var(--cf-text-muted); }\n")
+	b.WriteString("tbody td:not(:last-child) { border-right: 1px solid var(--cf-border-light); }\n")
 	b.WriteString("tbody tr:last-child td { border-bottom: none; }\n")
-	b.WriteString(".table-dense { font-size: 8pt; }\n")
-	b.WriteString(".table-dense td, .table-dense th { padding: 8px 10px; }\n")
 	b.WriteString(".td-truncate { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n")
 
-	// ── Finding cards — Clean theme: white bg, box-shadow outline, corner brackets, severity left border ──
-	b.WriteString(".finding-card { border-radius: 8px; padding: 18px 22px; margin-bottom: 16px; page-break-inside: avoid; background: var(--bg); box-shadow: 0 0 0 1px var(--border); position: relative; }\n")
-	b.WriteString(".finding-card.sev-critical { border-left: 4px solid var(--red); }\n")
-	b.WriteString(".finding-card.sev-warning { border-left: 4px solid var(--amber); }\n")
-	b.WriteString(".finding-card.sev-info { border-left: 4px solid var(--blue); }\n")
-	b.WriteString(".finding-card.sev-ok { border-left: 4px solid var(--green); }\n")
-	// Corner brackets (CF Workers / Clean theme decorative element)
-	b.WriteString(".finding-card::before, .finding-card::after { content: ''; position: absolute; width: 7px; height: 7px; border-radius: 1.5px; background: var(--bg-hover); border: 1px solid var(--border-solid); }\n")
-	b.WriteString(".finding-card::before { top: -3px; right: -3px; }\n")
-	b.WriteString(".finding-card::after { bottom: -3px; right: -3px; }\n")
-	b.WriteString(".finding-title { font-size: 11pt; font-weight: 600; margin-bottom: 6px; color: var(--text); }\n")
-	b.WriteString(".finding-desc { font-size: 9.5pt; color: var(--text-muted); margin-bottom: 12px; line-height: 1.6; }\n")
-	b.WriteString(".finding-evidence { font-size: 8.5pt; color: var(--text-subtle); margin-bottom: 10px; }\n")
+	// ── Finding cards — CF Workers card: warm bg, full border, corner brackets, NO left-border slit ──
+	b.WriteString(".finding-card { border-radius: 8px; padding: 18px 22px; margin-bottom: 16px; page-break-inside: avoid; background: var(--cf-bg-card); border: 1px solid var(--cf-border); position: relative; }\n")
+	// Corner brackets (CF Workers signature)
+	b.WriteString(".finding-card::before, .finding-card::after { content: ''; position: absolute; width: 8px; height: 8px; border-radius: 1.5px; background: var(--cf-bg); border: 1px solid var(--cf-border); }\n")
+	b.WriteString(".finding-card::before { top: -4px; right: -4px; }\n")
+	b.WriteString(".finding-card::after { bottom: -4px; right: -4px; }\n")
+	b.WriteString(".finding-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }\n")
+	b.WriteString(".finding-title { font-size: 11pt; font-weight: 500; color: var(--cf-text); flex: 1; }\n")
+	b.WriteString(".finding-desc { font-size: 9.5pt; color: var(--cf-text-muted); margin-bottom: 12px; line-height: 1.6; }\n")
+	b.WriteString(".finding-evidence { font-size: 8.5pt; color: var(--cf-text-subtle); margin-bottom: 10px; }\n")
 	b.WriteString(".finding-evidence ul { padding-left: 18px; }\n")
 	b.WriteString(".finding-evidence li { margin-bottom: 3px; }\n")
-	b.WriteString(".finding-action { font-size: 9pt; font-weight: 500; color: var(--text-muted); padding-top: 10px; border-top: 1px solid rgba(0,0,0,0.06); }\n")
+	b.WriteString(".finding-action { font-size: 9pt; font-weight: 500; color: var(--cf-text-muted); padding-top: 10px; position: relative; }\n")
+	b.WriteString(".finding-action::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 10px 1px; background-repeat: repeat-x; }\n")
 
-	// ── Stats grid — Clean theme card style ──
+	// ── Stats grid — CF Workers card style ──
 	b.WriteString(".stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 28px; }\n")
-	b.WriteString(".stat-card { background: var(--bg); border-radius: 10px; padding: 18px 16px; text-align: center; box-shadow: 0 0 0 1px var(--border); }\n")
-	b.WriteString(".stat-value { font-size: 20pt; font-weight: 600; line-height: 1.2; color: var(--text); }\n")
-	b.WriteString(".stat-label { font-size: 7pt; font-weight: 500; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-subtle); margin-top: 6px; }\n")
+	b.WriteString(".stat-card { background: var(--cf-bg-card); border-radius: 10px; padding: 18px 16px; text-align: center; border: 1px solid var(--cf-border); }\n")
+	b.WriteString(".stat-value { font-size: 20pt; font-weight: 500; line-height: 1.2; color: var(--cf-text); }\n")
+	b.WriteString(".stat-label { font-size: 7pt; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cf-text-subtle); margin-top: 6px; }\n")
 
-	// Log blocks
-	b.WriteString(".log-block { background: #1a1a1a; color: #e0e0e0; border-radius: 8px; padding: 14px 16px; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; font-size: 7.5pt; line-height: 1.8; overflow-x: auto; margin-bottom: 18px; }\n")
+	// Log blocks (dark code blocks like CF Workers)
+	b.WriteString(".log-block { background: #1a1209; color: #e0d4c8; border-radius: 12px; padding: 14px 16px; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; font-size: 7.5pt; line-height: 1.8; overflow-x: auto; margin-bottom: 18px; border: 1px solid rgba(235,213,193,0.15); }\n")
 	b.WriteString(".log-block .log-error { color: #fca5a5; }\n")
 	b.WriteString(".log-block .log-warning { color: #fde68a; }\n")
 
-	// ── Bar charts — Clean style with rounded pill bars ──
+	// ── Bar charts — rounded pill bars ──
 	b.WriteString(".bar-chart { margin-bottom: 24px; }\n")
 	b.WriteString(".bar-row { display: flex; align-items: center; margin-bottom: 8px; }\n")
-	b.WriteString(".bar-label { width: 100px; font-size: 8.5pt; font-weight: 500; color: var(--text); flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n")
-	b.WriteString(".bar-track { flex: 1; height: 8px; background: #ebebeb; border-radius: 9999px; overflow: hidden; }\n")
+	b.WriteString(".bar-label { width: 100px; font-size: 8.5pt; font-weight: 500; color: var(--cf-text); flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n")
+	b.WriteString(".bar-track { flex: 1; height: 8px; background: var(--cf-border-light); border-radius: 9999px; overflow: hidden; }\n")
 	b.WriteString(".bar-fill { height: 100%; border-radius: 9999px; }\n")
-	b.WriteString(".bar-value { width: 50px; font-size: 8.5pt; font-weight: 600; text-align: right; color: var(--text-muted); flex-shrink: 0; margin-left: 10px; }\n")
+	b.WriteString(".bar-value { width: 50px; font-size: 8.5pt; font-weight: 500; text-align: right; color: var(--cf-text-muted); flex-shrink: 0; margin-left: 10px; }\n")
 
 	// Value color classes
 	b.WriteString(".val-bad { color: var(--red); font-weight: 600; }\n")
 	b.WriteString(".val-warn { color: var(--amber); font-weight: 500; }\n")
 	b.WriteString(".val-good { color: var(--green); font-weight: 500; }\n")
 
-	// ── TOC — dashed separators (CF Workers style) ──
-	b.WriteString(".toc { page-break-after: always; padding-top: 48px; }\n")
-	b.WriteString(".toc h2 { font-size: 22pt; font-weight: 500; color: var(--text); margin-bottom: 28px; padding-bottom: 14px; position: relative; }\n")
-	b.WriteString(".toc h2::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--border-solid) 50%, transparent 50%); background-size: 10px 1px; background-repeat: repeat-x; }\n")
+	// ── TOC — dashed separators ──
+	b.WriteString(".toc { padding: 0; }\n")
+	b.WriteString(".toc h2 { font-size: 22pt; font-weight: 500; color: var(--cf-text); margin-bottom: 28px; padding-bottom: 14px; position: relative; }\n")
+	b.WriteString(".toc h2::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x; }\n")
 	b.WriteString(".toc-list { list-style: none; padding: 0; }\n")
 	b.WriteString(".toc-item { display: flex; align-items: center; padding: 14px 0; font-size: 10.5pt; position: relative; }\n")
-	b.WriteString(".toc-item + .toc-item::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--border-solid) 50%, transparent 50%); background-size: 10px 1px; background-repeat: repeat-x; }\n")
-	b.WriteString(".toc-num { font-weight: 500; color: var(--text); width: 30px; flex-shrink: 0; }\n")
-	b.WriteString(".toc-title { flex: 1; font-weight: 500; color: var(--text-muted); }\n")
+	b.WriteString(".toc-item + .toc-item::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x; }\n")
+	b.WriteString(".toc-num { font-weight: 500; color: var(--cf-text); width: 30px; flex-shrink: 0; }\n")
+	b.WriteString(".toc-title { flex: 1; font-weight: 500; color: var(--cf-text-muted); }\n")
 	b.WriteString(".toc-badge { margin-left: 10px; }\n")
 
-	// Section page break
-	b.WriteString(".section { page-break-before: auto; }\n")
-	b.WriteString(".section-break { page-break-before: always; }\n")
+	// Section
+	b.WriteString(".section { }\n")
 
 	// Action table priority
-	b.WriteString(".priority-cell { font-weight: 600; }\n")
+	b.WriteString(".priority-cell { font-weight: 500; }\n")
 
 	// Callout box (CF Workers blockquote style)
-	b.WriteString(".callout { background: var(--bg); border-left: 3px solid var(--text); border-radius: 0 8px 8px 0; padding: 14px 18px; margin: 16px 0; font-size: 9pt; color: var(--text-muted); line-height: 1.6; box-shadow: 0 0 0 1px var(--border); }\n")
-	b.WriteString(".callout-warn { border-left-color: var(--amber); }\n")
-	b.WriteString(".callout-danger { border-left-color: var(--red); }\n")
+	b.WriteString(".callout { background: rgba(255,72,1,0.04); border-left: 3px solid var(--cf-orange); border-radius: 0 8px 8px 0; padding: 14px 18px; margin: 16px 0; font-size: 9pt; color: var(--cf-text); line-height: 1.6; }\n")
 
-	// Print rules
+	// ── Print rules ──
 	b.WriteString("@media print {\n")
+	b.WriteString("  body { background: var(--cf-bg); }\n")
+	b.WriteString("  .page-container { padding: 0; gap: 0; }\n")
+	b.WriteString("  .page { width: auto; min-height: auto; box-shadow: none; padding: 0; border-radius: 0; }\n")
 	b.WriteString("  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }\n")
 	b.WriteString("  .finding-card { break-inside: avoid; }\n")
 	b.WriteString("  .table-wrap { break-inside: avoid; }\n")
 	b.WriteString("  .stats-grid { break-inside: avoid; }\n")
-	b.WriteString("  .section-break { break-before: page; }\n")
 	b.WriteString("}\n")
 }
 
@@ -714,7 +745,7 @@ func writeFindings(b *strings.Builder, snap *internal.Snapshot) {
 	sorted := groupFindings(snap.Findings)
 
 	sectionNum := 2
-	b.WriteString("<div class=\"section section-break\">\n")
+	b.WriteString("<div class=\"section\">\n")
 
 	// Determine highest severity badge
 	highestSev := internal.SeverityOK
@@ -740,9 +771,11 @@ func writeFindings(b *strings.Builder, snap *internal.Snapshot) {
 
 	for _, f := range sorted {
 		cls := severityClass(f.Severity)
-		b.WriteString(fmt.Sprintf("  <div class=\"finding-card %s\">\n", cls))
-		b.WriteString(fmt.Sprintf("    <div class=\"finding-title\">%s <span class=\"sev-badge %s\">%s</span></div>\n",
-			escHTML(f.Title), cls, escHTML(severityLabel(f.Severity))))
+		b.WriteString("  <div class=\"finding-card\">\n")
+		b.WriteString("    <div class=\"finding-header\">\n")
+		b.WriteString(fmt.Sprintf("      <span class=\"sev-badge %s\">%s</span>\n", cls, escHTML(severityLabel(f.Severity))))
+		b.WriteString(fmt.Sprintf("      <span class=\"finding-title\">%s</span>\n", escHTML(f.Title)))
+		b.WriteString("    </div>\n")
 		b.WriteString(fmt.Sprintf("    <div class=\"finding-desc\">%s</div>\n", escHTML(f.Description)))
 
 		if len(f.Evidence) > 0 {
@@ -771,7 +804,7 @@ func writeSMART(b *strings.Builder, snap *internal.Snapshot) {
 		return
 	}
 
-	b.WriteString("<div class=\"section section-break\">\n")
+	b.WriteString("<div class=\"section\">\n")
 	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">3</span>Drive Health &amp; SMART Analysis</h2>\n")
 
 	b.WriteString("  <div class=\"table-wrap\"><table>\n")
@@ -873,7 +906,7 @@ func writeDocker(b *strings.Builder, snap *internal.Snapshot) {
 		return
 	}
 
-	b.WriteString("<div class=\"section section-break\">\n")
+	b.WriteString("<div class=\"section\">\n")
 	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">4</span>Docker &amp; Application Analysis</h2>\n")
 
 	// Container table
@@ -934,7 +967,7 @@ func writeParity(b *strings.Builder, snap *internal.Snapshot) {
 		return
 	}
 
-	b.WriteString("<div class=\"section section-break\">\n")
+	b.WriteString("<div class=\"section\">\n")
 	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">5</span>Parity Analysis</h2>\n")
 
 	b.WriteString("  <div class=\"table-wrap\"><table>\n")
@@ -984,7 +1017,7 @@ func writeActions(b *strings.Builder, snap *internal.Snapshot) {
 	// Sort by severity (critical first)
 	actionFindings = groupFindings(actionFindings)
 
-	b.WriteString("<div class=\"section section-break\">\n")
+	b.WriteString("<div class=\"section\">\n")
 	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">6</span>Recommended Actions</h2>\n")
 
 	b.WriteString("  <div class=\"table-wrap\"><table>\n")
@@ -1030,11 +1063,11 @@ func writeActions(b *strings.Builder, snap *internal.Snapshot) {
 // ─────────────────────────────────────────────────────────────────────
 
 func writeFooter(b *strings.Builder, snap *internal.Snapshot) {
-	b.WriteString("<div class=\"section\" style=\"margin-top: 48px; padding-top: 24px; border-top: 3px solid var(--slate-200);\">\n")
-	b.WriteString("  <p style=\"font-size: 8.5pt; color: var(--slate-500); font-style: italic; margin-bottom: 16px; line-height: 1.6;\">")
-	b.WriteString(fmt.Sprintf("This report was generated from a read-only diagnostic session on %s. No changes were made to the system.",
+	// Dashed top border (CF Workers style)
+	b.WriteString("<div style=\"position: relative; padding-top: 24px;\">\n")
+	b.WriteString("  <div style=\"position: absolute; top: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x;\"></div>\n")
+	b.WriteString(fmt.Sprintf("  <p style=\"font-size: 8.5pt; color: var(--cf-text-subtle); font-style: italic; margin-bottom: 16px; line-height: 1.6;\">This report was generated from a read-only diagnostic session on %s. No changes were made to the system.</p>\n",
 		escHTML(snap.Timestamp.Format("2 January 2006"))))
-	b.WriteString("</p>\n")
 
 	// Data sources
 	sources := []string{}
@@ -1052,8 +1085,7 @@ func writeFooter(b *strings.Builder, snap *internal.Snapshot) {
 		sources = append(sources, "parity-checks.log")
 	}
 
-	b.WriteString(fmt.Sprintf("  <p style=\"font-size: 8pt; color: var(--slate-400); text-align: center;\">Data sources: %s.</p>\n",
+	b.WriteString(fmt.Sprintf("  <p style=\"font-size: 8pt; color: var(--cf-text-subtle); text-align: center;\">Data sources: %s.</p>\n",
 		escHTML(strings.Join(sources, ", "))))
-
 	b.WriteString("</div>\n")
 }
