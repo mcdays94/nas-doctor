@@ -31,14 +31,21 @@ Thumbs.db
 .env
 .dev.vars
 
-# Build
+# Build artifacts (CI builds these)
 dist/
+nas-doctor-linux-amd64
+nas-doctor-docker.tar.gz
 
-# Agent context (session-specific, not for repo)
+# Agent context (session-specific)
 AGENT-CONTEXT.md
 
-# Node (playwright dev dependency)
+# Reference files
+unraid-diagnostic-report.pdf
+
+# Node (dev dependency)
 node_modules/
 package.json
 package-lock.json
-unraid-diagnostic-report.pdf
+
+# Empty dirs
+web/

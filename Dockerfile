@@ -1,19 +1,6 @@
-# ---- Build Stage ----
-FROM golang:1-alpine AS builder
-
-RUN apk add --no-cache ca-certificates git
-
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /nas-doctor ./cmd/nas-doctor
-
-# ---- Runtime Stage ----
+# Runtime-only Dockerfile — uses pre-compiled binary
 FROM alpine:3.21
 
-# OCI labels (used by Unraid, Portainer, GHCR, etc.)
 LABEL org.opencontainers.image.title="NAS Doctor" \
       org.opencontainers.image.description="Local NAS diagnostic and monitoring tool with SMART analysis, Prometheus metrics, and webhook alerts" \
       org.opencontainers.image.url="https://github.com/mcdays94/nas-doctor" \
@@ -21,29 +8,21 @@ LABEL org.opencontainers.image.title="NAS Doctor" \
       org.opencontainers.image.vendor="mcdays94" \
       org.opencontainers.image.licenses="MIT" \
       net.unraid.docker.icon="https://raw.githubusercontent.com/mcdays94/nas-doctor/main/icons/icon3.png" \
-      net.unraid.docker.webui="http://[IP]:[PORT:8080]/" \
+      net.unraid.docker.webui="http://[IP]:[PORT:8060]/" \
       net.unraid.docker.managed="dockerman"
 
-RUN apk add --no-cache \
-    smartmontools \
-    hdparm \
-    iproute2 \
-    docker-cli \
-    util-linux \
-    procps \
-    ca-certificates \
-    tzdata \
-    && apk add --no-cache dmidecode ethtool 2>/dev/null || true
+COPY nas-doctor-linux-amd64 /app/nas-doctor
+RUN chmod +x /app/nas-doctor
 
-# Create non-root user (though we need root for smartctl/dmesg)
-# Run as root for hardware access
+# Critical packages (must succeed)
+RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata
+# Optional packages (may not be available on all architectures)
+RUN apk add --no-cache hdparm iproute2 || true
+RUN apk add --no-cache dmidecode ethtool || true
+
 WORKDIR /app
-COPY --from=builder /nas-doctor /app/nas-doctor
-
-# Data volume
 VOLUME /data
 
-# Environment defaults
 ENV NAS_DOCTOR_LISTEN=":8060" \
     NAS_DOCTOR_DATA="/data" \
     NAS_DOCTOR_INTERVAL="6h" \
