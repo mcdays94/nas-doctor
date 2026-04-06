@@ -16,7 +16,7 @@ services:
       - /var/log:/host/log:ro                          # System logs (syslog, messages)
     environment:
       - TZ=${TZ:-UTC}
-      - NAS_DOCTOR_LISTEN=:8080
+      - NAS_DOCTOR_LISTEN=:8060
       - NAS_DOCTOR_DATA=/data
       - NAS_DOCTOR_INTERVAL=${SCAN_INTERVAL:-6h}
       # Optional: Webhook notifications
@@ -24,7 +24,7 @@ services:
       # - NAS_DOCTOR_WEBHOOK_TYPE=discord
       # - NAS_DOCTOR_WEBHOOK_MIN_LEVEL=warning
     ports:
-      - "8080:8080"
+      - "8060:8060"
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=true"  # Auto-update with Watchtower

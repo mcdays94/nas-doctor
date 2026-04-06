@@ -29,7 +29,7 @@ Features:
 - Dashboard section visibility toggles
   </Overview>
   <Category>Tools: Monitoring Status:Stable</Category>
-  <WebUI>http://[IP]:[PORT:8080]</WebUI>
+  <WebUI>http://[IP]:[PORT:8060]</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/mcdays94/nas-doctor/main/unraid-template.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/mcdays94/nas-doctor/main/icons/icon3.png</Icon>
   <ExtraParams/>
@@ -37,7 +37,7 @@ Features:
   <DonateText>Buy Me a Coffee</DonateText>
   <DonateLink>https://buymeacoffee.com/miguelcaetanodias</DonateLink>
   <Requires/>
-  <Config Name="Web UI Port" Target="8080" Default="8080" Mode="tcp" Description="Web dashboard and API port" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Web UI Port" Target="8060" Default="8060" Mode="tcp" Description="Web dashboard and API port" Type="Port" Display="always" Required="true" Mask="false">8060</Config>
   <Config Name="Data Directory" Target="/data" Default="/mnt/user/appdata/nas-doctor" Mode="rw" Description="Persistent data (SQLite database, config, backups)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/nas-doctor</Config>
   <Config Name="Boot Config" Target="/host/boot" Default="/boot" Mode="ro" Description="Unraid boot config (parity logs, ident)" Type="Path" Display="always" Required="false" Mask="false">/boot</Config>
   <Config Name="System Logs" Target="/host/log" Default="/var/log" Mode="ro" Description="System log files (syslog, messages)" Type="Path" Display="always" Required="false" Mask="false">/var/log</Config>

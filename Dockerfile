@@ -44,14 +44,14 @@ COPY --from=builder /nas-doctor /app/nas-doctor
 VOLUME /data
 
 # Environment defaults
-ENV NAS_DOCTOR_LISTEN=":8080" \
+ENV NAS_DOCTOR_LISTEN=":8060" \
     NAS_DOCTOR_DATA="/data" \
     NAS_DOCTOR_INTERVAL="6h" \
     TZ="UTC"
 
-EXPOSE 8080
+EXPOSE 8060
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/v1/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8060/api/v1/health || exit 1
 
 ENTRYPOINT ["/app/nas-doctor"]

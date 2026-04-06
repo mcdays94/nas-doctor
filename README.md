@@ -95,7 +95,7 @@ services:
       - TZ=Europe/Lisbon
       - NAS_DOCTOR_INTERVAL=6h
     ports:
-      - "8080:8080"
+      - "8080:8060"
     restart: unless-stopped
 
 volumes:
@@ -106,7 +106,7 @@ volumes:
 docker compose up -d
 ```
 
-Then open `http://your-nas:8080`.
+Then open `http://your-nas:8060`.
 
 ### Docker Run
 
@@ -120,7 +120,7 @@ docker run -d \
   -v /boot:/host/boot:ro \
   -v /var/log:/host/log:ro \
   -e TZ=Europe/Lisbon \
-  -p 8080:8080 \
+  -p 8080:8060 \
   --restart unless-stopped \
   ghcr.io/mcdays94/nas-doctor:latest
 ```
@@ -131,7 +131,7 @@ docker run -d \
 git clone https://github.com/mcdays94/nas-doctor.git
 cd nas-doctor
 go build -o nas-doctor ./cmd/nas-doctor
-./nas-doctor -listen :8080 -data ./data -interval 6h
+./nas-doctor -listen :8060 -data ./data -interval 6h
 ```
 
 ---
@@ -173,7 +173,7 @@ All configurable from the web UI at `/settings`:
 
 | Variable | Default | Description |
 |---|---|---|
-| `NAS_DOCTOR_LISTEN` | `:8080` | HTTP listen address |
+| `NAS_DOCTOR_LISTEN` | `:8060` | HTTP listen address |
 | `NAS_DOCTOR_DATA` | `/data` | SQLite database directory |
 | `NAS_DOCTOR_INTERVAL` | `6h` | Diagnostic scan interval |
 | `TZ` | `UTC` | Timezone |
@@ -276,7 +276,7 @@ Preview all themes with realistic mock data (no NAS needed):
 
 ```bash
 go build -o nas-doctor ./cmd/nas-doctor
-./nas-doctor -demo -listen :8080
+./nas-doctor -demo -listen :8060
 ```
 
 Demo includes: 7 SMART drives (with Backblaze-informed findings), 14 Docker containers, 2 ZFS pools (one DEGRADED), UPS monitoring, OS update notification, 30 days of historical sparkline data.

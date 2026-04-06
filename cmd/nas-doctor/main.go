@@ -41,7 +41,7 @@ const version = "0.1.0"
 
 func main() {
 	// Flags
-	listenAddr := flag.String("listen", envOr("NAS_DOCTOR_LISTEN", ":8080"), "HTTP listen address")
+	listenAddr := flag.String("listen", envOr("NAS_DOCTOR_LISTEN", ":8060"), "HTTP listen address")
 	dataDir := flag.String("data", envOr("NAS_DOCTOR_DATA", "/tmp/nas-doctor-data"), "Data directory for SQLite DB")
 	intervalStr := flag.String("interval", envOr("NAS_DOCTOR_INTERVAL", "6h"), "Diagnostic scan interval")
 	configPath := flag.String("config", envOr("NAS_DOCTOR_CONFIG", ""), "Path to JSON config file")
