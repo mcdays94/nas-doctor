@@ -27,6 +27,7 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.Parity = demoParity()
 	snap.ZFS = demoZFS()
 	snap.UPS = demoUPS()
+	snap.Update = demoUpdate(snap.System.Platform, snap.System.PlatformVer)
 
 	return snap
 }
@@ -198,6 +199,18 @@ func demoParity() *internal.ParityInfo {
 			{Date: "2026-01-22", Duration: 151200, SpeedMBs: 50.5, Errors: 5, ExitCode: 0, Action: "check", SizeGB: 28000},
 			{Date: "2026-03-30", Duration: 172800, SpeedMBs: 44.1, Errors: 12, ExitCode: 0, Action: "check", SizeGB: 28000},
 		},
+	}
+}
+
+func demoUpdate(platform, version string) *internal.UpdateInfo {
+	return &internal.UpdateInfo{
+		Platform:         platform,
+		InstalledVersion: version,
+		LatestVersion:    "7.2.0",
+		UpdateAvailable:  true,
+		ReleaseName:      "Unraid 7.2.0",
+		ReleaseURL:       "https://unraid.net/blog/7-2-0",
+		CheckedAt:        time.Now().Format(time.RFC3339),
 	}
 }
 

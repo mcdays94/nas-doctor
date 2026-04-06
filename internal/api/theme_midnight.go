@@ -325,6 +325,16 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     h += '</div>';
     h += '</div>';
 
+    // Update banner
+    var upd = sn ? sn.update : null;
+    if (upd && upd.update_available) {
+      h += '<div class="fade-in" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(94,106,210,0.08);border:1px solid rgba(94,106,210,0.2);border-radius:var(--radius);margin-bottom:8px;font-size:12px">';
+      h += '<span style="color:var(--accent);font-weight:600">Update Available</span>';
+      h += '<span style="color:var(--text-tertiary)">' + esc(upd.platform) + ' ' + esc(upd.installed_version) + ' → ' + esc(upd.latest_version) + '</span>';
+      if (upd.release_url) h += '<a href="' + esc(upd.release_url) + '" target="_blank" style="color:var(--accent);text-decoration:underline;margin-left:auto">Release notes</a>';
+      h += '</div>';
+    }
+
     // Scan bar — compact
     h += '<div class="scan-bar fade-in">';
     h += '<div class="scan-info">Last scan: <strong>' + esc(lastScan) + '</strong></div>';

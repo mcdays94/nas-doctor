@@ -5,6 +5,7 @@ package analyzer
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mcdays94/nas-doctor/internal"
@@ -33,6 +34,10 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 
 	if snap.UPS != nil && snap.UPS.Available {
 		findings = append(findings, analyzeUPS(snap.UPS)...)
+	}
+
+	if snap.Update != nil {
+		findings = append(findings, analyzeOSUpdate(snap.Update)...)
 	}
 
 	// Cross-correlation: combine related findings
@@ -1076,4 +1081,75 @@ func analyzeUPS(ups *internal.UPSInfo) []internal.Finding {
 	}
 
 	return findings
+}
+
+// ---------- OS Update Rules ----------
+
+func analyzeOSUpdate(update *internal.UpdateInfo) []internal.Finding {
+	var findings []internal.Finding
+
+	if !update.UpdateAvailable || update.LatestVersion == "" {
+		return findings
+	}
+
+	findings = append(findings, internal.Finding{
+		Severity:    internal.SeverityInfo,
+		Category:    internal.CategorySystem,
+		Title:       fmt.Sprintf("OS Update Available: %s %s → %s", update.Platform, update.InstalledVersion, update.LatestVersion),
+		Description: fmt.Sprintf("You are running %s %s. Version %s is available. Keeping your NAS OS up to date ensures you have the latest security patches and bug fixes.", update.Platform, update.InstalledVersion, update.LatestVersion),
+		Evidence: []string{
+			fmt.Sprintf("Installed: %s", update.InstalledVersion),
+			fmt.Sprintf("Latest: %s", update.LatestVersion),
+			fmt.Sprintf("Checked: %s", update.CheckedAt),
+		},
+		Impact:   "Missing security patches and bug fixes.",
+		Action:   "Update your NAS OS when convenient. Review release notes before updating.",
+		Priority: "medium-term",
+	})
+
+	// If major version behind or >=3 minor versions behind, escalate
+	installed := parseVersionParts(update.InstalledVersion)
+	latest := parseVersionParts(update.LatestVersion)
+	if len(installed) > 0 && len(latest) > 0 {
+		majorDiff := latest[0] - installed[0]
+		minorDiff := 0
+		if len(installed) > 1 && len(latest) > 1 {
+			minorDiff = latest[1] - installed[1]
+		}
+		if majorDiff > 0 || minorDiff >= 3 {
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategorySystem,
+				Title:       fmt.Sprintf("NAS OS Significantly Out of Date (%s → %s)", update.InstalledVersion, update.LatestVersion),
+				Description: fmt.Sprintf("You are %d major/%d minor versions behind. Significantly outdated OS versions may have unpatched security vulnerabilities.", majorDiff, minorDiff),
+				Evidence: []string{
+					fmt.Sprintf("Installed: %s %s", update.Platform, update.InstalledVersion),
+					fmt.Sprintf("Latest: %s", update.LatestVersion),
+				},
+				Impact:   "Security vulnerabilities, missing critical fixes.",
+				Action:   "Plan an update soon. Back up your configuration first.",
+				Priority: "short-term",
+			})
+		}
+	}
+
+	return findings
+}
+
+func parseVersionParts(v string) []int {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	if idx := strings.IndexAny(v, "-+"); idx >= 0 {
+		v = v[:idx]
+	}
+	parts := strings.Split(v, ".")
+	var nums []int
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			break
+		}
+		nums = append(nums, n)
+	}
+	return nums
 }

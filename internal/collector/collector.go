@@ -100,6 +100,15 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 		snap.UPS = upsInfo
 	}
 
+	// OS update check (cached, runs max once per 24h)
+	c.logger.Info("checking OS update status")
+	if sys.Platform != "" && sys.PlatformVer != "" {
+		updateInfo := collectUpdateInfo(sys.Platform, sys.PlatformVer)
+		if updateInfo != nil {
+			snap.Update = updateInfo
+		}
+	}
+
 	// ZFS (if available)
 	c.logger.Info("collecting ZFS info")
 	zfsInfo, err := collectZFS()

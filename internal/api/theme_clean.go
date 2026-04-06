@@ -842,6 +842,16 @@ body {
     html += '</div>';
 
     // ---- Two-column grid ----
+    // Update banner
+    if (snapshot && snapshot.update && snapshot.update.update_available) {
+      var upd = snapshot.update;
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#f5f5f5;border:1px solid rgba(0,0,0,0.08);border-radius:8px;margin-bottom:12px;font-size:13px">';
+      html += '<span style="color:#171717;font-weight:600">Update Available</span>';
+      html += '<span style="color:#808080">' + escapeHTML(upd.platform) + ' ' + escapeHTML(upd.installed_version) + ' → ' + escapeHTML(upd.latest_version) + '</span>';
+      if (upd.release_url) html += '<a href="' + escapeHTML(upd.release_url) + '" target="_blank" style="color:#171717;text-decoration:underline;margin-left:auto">Release notes</a>';
+      html += '</div>';
+    }
+
     html += '<div class="two-col" id="two-col">';
     html += '<div class="col-left" id="col-left"></div>';
     html += '<div class="col-right" id="col-right"></div>';

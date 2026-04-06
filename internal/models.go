@@ -46,6 +46,7 @@ type Snapshot struct {
 	Parity    *ParityInfo `json:"parity,omitempty"`
 	ZFS       *ZFSInfo    `json:"zfs,omitempty"`
 	UPS       *UPSInfo    `json:"ups,omitempty"`
+	Update    *UpdateInfo `json:"update,omitempty"`
 	Findings  []Finding   `json:"findings"`
 }
 
@@ -184,6 +185,19 @@ type ParityCheck struct {
 	ExitCode int     `json:"exit_code"`
 	Action   string  `json:"action"` // check, correct, recon
 	SizeGB   float64 `json:"size_gb"`
+}
+
+// ---------- OS Update ----------
+
+type UpdateInfo struct {
+	Platform         string `json:"platform"`
+	InstalledVersion string `json:"installed_version"`
+	LatestVersion    string `json:"latest_version,omitempty"`
+	UpdateAvailable  bool   `json:"update_available"`
+	ReleaseName      string `json:"release_name,omitempty"`
+	ReleaseURL       string `json:"release_url,omitempty"`
+	CheckedAt        string `json:"checked_at,omitempty"`
+	Error            string `json:"error,omitempty"`
 }
 
 // ---------- UPS ----------

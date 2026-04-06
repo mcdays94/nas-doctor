@@ -1184,6 +1184,16 @@ td.mono {
     html += "</div>";
 
     /* ---- Two-Column Grid ---- */
+    /* Update banner */
+    if (snapshot && snapshot.update && snapshot.update.update_available) {
+      var upd = snapshot.update;
+      html += "<div style=\"display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(85,179,255,0.06);border:1px solid rgba(85,179,255,0.15);border-radius:8px;margin-bottom:12px;font-size:12px\">";
+      html += "<span style=\"color:var(--blue);font-weight:600\">Update Available</span>";
+      html += "<span style=\"color:var(--text-tertiary)\">" + esc(upd.platform) + " " + esc(upd.installed_version) + " → " + esc(upd.latest_version) + "</span>";
+      if (upd.release_url) html += "<a href=\"" + esc(upd.release_url) + "\" target=\"_blank\" style=\"color:var(--blue);text-decoration:underline;margin-left:auto\">Release notes</a>";
+      html += "</div>";
+    }
+
     html += "<div class=\"two-col\" id=\"two-col\">";
     html += "<div class=\"col-left\" id=\"col-left\"></div>";
     html += "<div class=\"col-right\" id=\"col-right\"></div>";
