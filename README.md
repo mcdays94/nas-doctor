@@ -283,20 +283,6 @@ Demo includes: 7 SMART drives (with Backblaze-informed findings), 14 Docker cont
 
 ---
 
-## Icons
-
-NAS Doctor ships with 3 app icons. The default is **icon3**.
-
-<p>
-  <img src="icons/icon1.png" alt="Icon 1" width="64"> &nbsp;
-  <img src="icons/icon2.png" alt="Icon 2" width="64"> &nbsp;
-  <img src="icons/icon3.png" alt="Icon 3 (default)" width="64">
-</p>
-
-Available at `/icons/icon1.png`, `/icons/icon2.png`, `/icons/icon3.png`.
-
----
-
 ## Roadmap
 
 - [x] Config UI in dashboard (manage webhooks, scan interval, theme, icon selection)

@@ -707,6 +707,11 @@ select{cursor:pointer;-webkit-appearance:none;appearance:none;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238a8f98'%3E%3Cpath d='M6 8.5L1 3.5h10z'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 10px center}
 input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
+/* Sticky save bar */
+.save-bar{position:fixed;bottom:0;left:0;right:0;z-index:100;background:var(--surface);border-top:1px solid var(--border);padding:12px 24px;transform:translateY(100%);transition:transform 0.25s ease;box-shadow:0 -4px 20px rgba(0,0,0,0.3)}
+.save-bar.visible{transform:translateY(0)}
+.save-bar-inner{max-width:840px;margin:0 auto;display:flex;align-items:center;justify-content:space-between}
+.save-bar-text{font-size:13px;color:var(--text2)}
 
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 @media(max-width:600px){.form-row{grid-template-columns:1fr}}
@@ -879,7 +884,6 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
         </div>
       </div>
     </div>
-    <button class="btn btn-primary" style="margin-top:16px" onclick="saveSettings()">Save General Settings</button>
   </div>
 
   <!-- 2. Notifications — Webhooks -->
@@ -1084,6 +1088,14 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
+</div>
+
+<!-- Sticky save bar -->
+<div class="save-bar" id="save-bar">
+  <div class="save-bar-inner">
+    <span class="save-bar-text" id="save-bar-text">Unsaved changes</span>
+    <button class="btn btn-primary" onclick="saveSettings()">Save All Settings</button>
+  </div>
 </div>
 
 <script>
@@ -1355,6 +1367,7 @@ function saveSettings() {
   })
   .then(function() {
     showToast("Settings saved", "success");
+    markSaved();
     /* Apply theme live */
     applyTheme(payload.theme);
     try { localStorage.setItem("nas-doctor-theme", payload.theme); } catch(e) {}
@@ -1736,6 +1749,35 @@ function triggerBackup() {
     })
     .catch(function(e) { showToast("Backup error: " + e.message, "error"); });
 }
+
+/* ---------- Change Detection ---------- */
+var settingsChanged = false;
+
+function markChanged() {
+  if (!settingsChanged) {
+    settingsChanged = true;
+    var bar = document.getElementById("save-bar");
+    if (bar) bar.classList.add("visible");
+  }
+}
+
+function markSaved() {
+  settingsChanged = false;
+  var bar = document.getElementById("save-bar");
+  if (bar) bar.classList.remove("visible");
+}
+
+// Attach change listeners to all inputs, selects, and toggles
+document.addEventListener("input", function(e) {
+  if (e.target.closest(".card")) markChanged();
+});
+document.addEventListener("change", function(e) {
+  if (e.target.closest(".card")) markChanged();
+});
+document.addEventListener("click", function(e) {
+  if (e.target.closest(".toggle")) markChanged();
+  if (e.target.closest(".theme-option")) markChanged();
+});
 
 /* ---------- Init ---------- */
 loadSettings();
