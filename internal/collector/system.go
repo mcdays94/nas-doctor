@@ -165,20 +165,14 @@ func detectPlatform(hp internal.HostPaths) (platform, version string) {
 			break
 		}
 	}
-	// Fallback: extract version from kernel string (e.g. "6.6.78-Unraid" or "6.12.10-Unraid")
-	if platform == "unraid" && version == "" {
+	// Note: /proc/version contains the KERNEL version (e.g. "6.12.24-Unraid"),
+	// NOT the Unraid OS version (e.g. "7.1.4"). We only use it to confirm
+	// the platform is Unraid, not to extract the version number.
+	if platform == "" {
 		if data, err := os.ReadFile("/proc/version"); err == nil {
-			vs := string(data)
-			// Look for pattern like "X.Y.Z-Unraid"
-			if idx := strings.Index(vs, "-Unraid"); idx > 0 {
-				// Walk backwards to find the version start
-				start := idx
-				for start > 0 && (vs[start-1] == '.' || (vs[start-1] >= '0' && vs[start-1] <= '9')) {
-					start--
-				}
-				if start < idx {
-					version = vs[start:idx]
-				}
+			if strings.Contains(string(data), "-Unraid") {
+				platform = "unraid"
+				// version stays empty — can't determine OS version from kernel
 			}
 		}
 	}
