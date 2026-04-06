@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"path/filepath"
+
 	"github.com/mcdays94/nas-doctor/internal"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/scheduler"
@@ -24,6 +26,16 @@ type Settings struct {
 	Notifications SettingsNotifications `json:"notifications"`
 	LogPush       SettingsLogForward    `json:"log_push"`
 	Retention     RetentionSettings     `json:"retention"`
+	Backup        BackupSettings        `json:"backup"`
+}
+
+// BackupSettings controls automatic backup of the application database.
+type BackupSettings struct {
+	Enabled    bool   `json:"enabled"`
+	Path       string `json:"path"`                  // Custom backup directory (empty = default: <data_dir>/backups)
+	KeepCount  int    `json:"keep_count"`            // Number of backups to retain (0 = default 4)
+	IntervalH  int    `json:"interval_hours"`        // Hours between backups (0 = default 168 = weekly)
+	LastBackup string `json:"last_backup,omitempty"` // ISO timestamp of last successful backup
 }
 
 // RetentionSettings controls data lifecycle / auto-pruning.
@@ -71,6 +83,11 @@ func defaultSettings() Settings {
 			MaxDBSizeMB:   500,
 			NotifyLogDays: 30,
 		},
+		Backup: BackupSettings{
+			Enabled:   true,
+			KeepCount: 4,
+			IntervalH: 168, // weekly
+		},
 	}
 }
 
@@ -86,6 +103,8 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/disks/{serial}", s.handleGetDisk)
 	r.Get("/api/v1/history/system", s.handleSystemHistory)
 	r.Get("/api/v1/notifications/log", s.handleNotificationLog)
+	r.Post("/api/v1/backup", s.handleCreateBackup)
+	r.Get("/api/v1/backup", s.handleListBackups)
 	r.Get("/api/v1/db/stats", s.handleDBStats)
 	r.Get("/api/v1/sparklines", s.handleSparklines)
 
@@ -207,6 +226,21 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			MaxDBSizeMB:   settings.Retention.MaxDBSizeMB,
 			NotifyLogDays: settings.Retention.NotifyLogDays,
 		})
+		// Update backup config
+		keepCount := settings.Backup.KeepCount
+		if keepCount <= 0 {
+			keepCount = 4
+		}
+		intervalH := settings.Backup.IntervalH
+		if intervalH <= 0 {
+			intervalH = 168
+		}
+		s.scheduler.UpdateBackup(scheduler.BackupConfig{
+			Enabled:   settings.Backup.Enabled,
+			Path:      settings.Backup.Path,
+			KeepCount: keepCount,
+			IntervalH: intervalH,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, settings)
@@ -233,6 +267,53 @@ func (s *Server) handleSparklines(w http.ResponseWriter, r *http.Request) {
 		System: sysHistory,
 		Disks:  diskHistory,
 	})
+}
+
+// handleCreateBackup triggers an immediate backup.
+// POST /api/v1/backup
+func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
+	settings := s.getSettings()
+	backupDir := settings.Backup.Path
+	result, err := s.store.CreateBackup(backupDir, s.logger)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "backup failed: " + err.Error()})
+		return
+	}
+	keepCount := settings.Backup.KeepCount
+	if keepCount <= 0 {
+		keepCount = 4
+	}
+	dir := backupDir
+	if dir == "" {
+		dir = filepath.Dir(result.Path)
+	}
+	storage.PruneBackups(dir, keepCount, s.logger)
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleListBackups returns existing backups.
+// GET /api/v1/backup
+func (s *Server) handleListBackups(w http.ResponseWriter, r *http.Request) {
+	settings := s.getSettings()
+	backupDir := settings.Backup.Path
+	if backupDir == "" {
+		backupDir = filepath.Join(s.store.DataDir(), "backups")
+	}
+	backups, err := storage.ListBackups(backupDir)
+	if err != nil {
+		writeJSON(w, http.StatusOK, storage.BackupInfo{Backups: nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, storage.BackupInfo{Backups: backups})
+}
+
+// getSettings loads and returns the current settings with defaults applied.
+func (s *Server) getSettings() Settings {
+	settings := defaultSettings()
+	if raw, err := s.store.GetConfig(settingsConfigKey); err == nil && raw != "" {
+		json.Unmarshal([]byte(raw), &settings)
+	}
+	return settings
 }
 
 // handleDBStats returns database size and row count statistics.
@@ -767,7 +848,43 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 5. Notification History -->
+  <!-- 5. Backup -->
+  <div class="card" id="card-backup">
+    <div class="card-title">Automatic Backup</div>
+    <div class="card-desc">Periodically back up settings and historical data so you can restore after a Docker reinstall.</div>
+    <div class="form-group">
+      <div class="toggle-wrap" style="margin-bottom:16px">
+        <div class="toggle on" id="backup-toggle" onclick="toggleBackup()"><div class="toggle-knob"></div></div>
+        <span class="toggle-label">Enable automatic backups</span>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="backup-path">Backup directory</label>
+        <input type="text" id="backup-path" placeholder="Leave empty for default (data/backups/)">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Set a path to a mounted share for off-server backups.</p>
+      </div>
+      <div>
+        <label for="backup-keep">Keep last N backups</label>
+        <input type="number" id="backup-keep" min="1" max="52" value="4" style="text-align:center">
+      </div>
+    </div>
+    <div class="form-row" style="margin-top:12px">
+      <div>
+        <label for="backup-interval">Backup every (hours)</label>
+        <input type="number" id="backup-interval" min="1" max="8760" value="168" style="text-align:center">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">168 = weekly, 24 = daily</p>
+      </div>
+      <div>
+        <div id="backup-info" style="font-size:12px;color:var(--text2);line-height:1.8;padding-top:20px">Loading backup info...</div>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <button class="btn-secondary" onclick="triggerBackup()">Backup Now</button>
+    </div>
+  </div>
+
+  <!-- 6. Notification History -->
   <div class="card" id="card-history">
     <div class="card-title">Notification History</div>
     <div class="card-desc">Recent webhook delivery attempts. <span class="log-refresh">Auto-refreshes every 30s.</span></div>
@@ -964,6 +1081,13 @@ function loadSettings() {
       document.getElementById("ret-snapshot-days").value = ret.snapshot_days || 90;
       document.getElementById("ret-notify-days").value = ret.notify_log_days || 30;
       document.getElementById("ret-max-db").value = ret.max_db_size_mb || 500;
+      /* Backup */
+      var bk = data.backup || {};
+      var bkToggle = document.getElementById("backup-toggle");
+      if (bk.enabled === false) { bkToggle.classList.remove("on"); } else { bkToggle.classList.add("on"); }
+      document.getElementById("backup-path").value = bk.path || "";
+      document.getElementById("backup-keep").value = bk.keep_count || 4;
+      document.getElementById("backup-interval").value = bk.interval_hours || 168;
     })
     .catch(function(e) { showToast("Failed to load settings: " + e, "error"); });
 }
@@ -979,6 +1103,12 @@ function buildSettingsPayload() {
       snapshot_days: parseInt(document.getElementById("ret-snapshot-days").value, 10) || 90,
       max_db_size_mb: parseInt(document.getElementById("ret-max-db").value, 10) || 500,
       notify_log_days: parseInt(document.getElementById("ret-notify-days").value, 10) || 30
+    },
+    backup: {
+      enabled: document.getElementById("backup-toggle").classList.contains("on"),
+      path: document.getElementById("backup-path").value.trim(),
+      keep_count: parseInt(document.getElementById("backup-keep").value, 10) || 4,
+      interval_hours: parseInt(document.getElementById("backup-interval").value, 10) || 168
     }
   };
 }
@@ -1224,10 +1354,50 @@ function loadDBStats() {
     });
 }
 
+/* ---------- Backup ---------- */
+function toggleBackup() {
+  var el = document.getElementById("backup-toggle");
+  el.classList.toggle("on");
+}
+
+function loadBackupInfo() {
+  fetch("/api/v1/backup")
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var el = document.getElementById("backup-info");
+      var backups = d.backups || [];
+      if (backups.length === 0) {
+        el.textContent = "No backups yet";
+      } else {
+        var lines = [];
+        lines.push("<strong>" + backups.length + "</strong> backup(s) stored");
+        lines.push("Latest: " + backups[0].timestamp.substring(0, 10));
+        lines.push("Size: " + backups[0].size_mb.toFixed(1) + " MB");
+        el.innerHTML = lines.join("<br>");
+      }
+    })
+    .catch(function() {
+      document.getElementById("backup-info").textContent = "Failed to load";
+    });
+}
+
+function triggerBackup() {
+  showToast("Creating backup...", "success");
+  fetch("/api/v1/backup", { method: "POST" })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { showToast("Backup failed: " + d.error, "error"); return; }
+      showToast("Backup created: " + d.size_mb.toFixed(1) + " MB", "success");
+      loadBackupInfo();
+    })
+    .catch(function(e) { showToast("Backup error: " + e.message, "error"); });
+}
+
 /* ---------- Init ---------- */
 loadSettings();
 loadNotificationLog();
 loadDBStats();
+loadBackupInfo();
 setInterval(loadNotificationLog, 30000);
 </script>
 </body>

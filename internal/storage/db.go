@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
@@ -15,6 +16,7 @@ import (
 // DB wraps the SQLite database.
 type DB struct {
 	db     *sql.DB
+	path   string
 	logger *slog.Logger
 }
 
@@ -39,11 +41,16 @@ func Open(path string, logger *slog.Logger) (*DB, error) {
 		}
 	}
 
-	d := &DB{db: sqldb, logger: logger}
+	d := &DB{db: sqldb, path: path, logger: logger}
 	if err := d.migrate(); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return d, nil
+}
+
+// DataDir returns the directory containing the database file.
+func (d *DB) DataDir() string {
+	return filepath.Dir(d.path)
 }
 
 // Close closes the database.

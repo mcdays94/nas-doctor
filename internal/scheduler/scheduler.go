@@ -3,6 +3,7 @@ package scheduler
 
 import (
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -20,6 +21,15 @@ type RetentionConfig struct {
 	NotifyLogDays int // days to keep notification logs (default 30)
 }
 
+// BackupConfig holds backup scheduling settings.
+type BackupConfig struct {
+	Enabled    bool
+	Path       string // backup directory
+	KeepCount  int
+	IntervalH  int
+	LastBackup time.Time
+}
+
 // Scheduler periodically runs diagnostic collections and analysis.
 type Scheduler struct {
 	collector *collector.Collector
@@ -35,6 +45,7 @@ type Scheduler struct {
 	running bool
 	stop    chan struct{}
 	restart chan time.Duration // signal to update interval
+	backup  BackupConfig
 }
 
 // New creates a new Scheduler.
@@ -170,6 +181,9 @@ func (s *Scheduler) RunOnce() {
 
 	// Data lifecycle: prune old data
 	s.pruneData()
+
+	// Auto backup check
+	s.checkBackup()
 }
 
 // Latest returns the most recent snapshot from the cache.
@@ -272,6 +286,66 @@ func (s *Scheduler) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.running
+}
+
+// UpdateBackup updates the backup configuration.
+func (s *Scheduler) UpdateBackup(cfg BackupConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.backup = cfg
+	s.logger.Info("backup config updated",
+		"enabled", cfg.Enabled,
+		"path", cfg.Path,
+		"keep", cfg.KeepCount,
+		"interval_h", cfg.IntervalH,
+	)
+}
+
+// checkBackup runs a backup if enough time has elapsed since the last one.
+func (s *Scheduler) checkBackup() {
+	s.mu.RLock()
+	cfg := s.backup
+	s.mu.RUnlock()
+
+	if !cfg.Enabled {
+		return
+	}
+
+	intervalH := cfg.IntervalH
+	if intervalH <= 0 {
+		intervalH = 168 // weekly
+	}
+
+	if !cfg.LastBackup.IsZero() && time.Since(cfg.LastBackup) < time.Duration(intervalH)*time.Hour {
+		return // not time yet
+	}
+
+	result, err := s.store.CreateBackup(cfg.Path, s.logger)
+	if err != nil {
+		s.logger.Warn("auto backup failed", "error", err)
+		return
+	}
+
+	// Prune old backups
+	backupDir := cfg.Path
+	if backupDir == "" {
+		// Extract directory from result path
+		backupDir = filepath.Dir(result.Path)
+	}
+
+	keepCount := cfg.KeepCount
+	if keepCount <= 0 {
+		keepCount = 4
+	}
+	if pruned, err := storage.PruneBackups(backupDir, keepCount, s.logger); err != nil {
+		s.logger.Warn("backup prune failed", "error", err)
+	} else if pruned > 0 {
+		s.logger.Info("pruned old backups", "count", pruned)
+	}
+
+	s.mu.Lock()
+	s.backup.LastBackup = result.Timestamp
+	s.mu.Unlock()
 }
 
 func countSeverity(findings []internal.Finding, sev internal.Severity) int {
