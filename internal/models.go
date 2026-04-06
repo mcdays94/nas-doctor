@@ -187,6 +187,30 @@ type ParityCheck struct {
 	SizeGB   float64 `json:"size_gb"`
 }
 
+// ---------- Fleet / Multi-Server ----------
+
+type RemoteServer struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"` // friendly name ("Backup NAS", "Proxmox")
+	URL     string `json:"url"`  // base URL ("http://192.168.1.50:8080")
+	Enabled bool   `json:"enabled"`
+	APIKey  string `json:"api_key,omitempty"` // for future auth
+}
+
+type RemoteServerStatus struct {
+	Server        RemoteServer `json:"server"`
+	Online        bool         `json:"online"`
+	LastPoll      string       `json:"last_poll"` // ISO timestamp
+	Hostname      string       `json:"hostname"`
+	Platform      string       `json:"platform"`
+	Uptime        string       `json:"uptime"`
+	OverallHealth string       `json:"overall_health"` // healthy, warning, critical
+	CriticalCount int          `json:"critical_count"`
+	WarningCount  int          `json:"warning_count"`
+	InfoCount     int          `json:"info_count"`
+	Error         string       `json:"error,omitempty"`
+}
+
 // ---------- OS Update ----------
 
 type UpdateInfo struct {

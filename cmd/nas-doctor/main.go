@@ -31,6 +31,7 @@ import (
 	"github.com/mcdays94/nas-doctor/internal/api"
 	"github.com/mcdays94/nas-doctor/internal/collector"
 	"github.com/mcdays94/nas-doctor/internal/demo"
+	"github.com/mcdays94/nas-doctor/internal/fleet"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/scheduler"
 	"github.com/mcdays94/nas-doctor/internal/storage"
@@ -182,8 +183,22 @@ func main() {
 		defer sched.Stop()
 	}
 
+	// Fleet manager (multi-server monitoring)
+	fleetMgr := fleet.New(logger)
+	// Load fleet servers from settings
+	if raw, err := store.GetConfig("settings"); err == nil && raw != "" {
+		var settingsData struct {
+			Fleet []internal.RemoteServer `json:"fleet"`
+		}
+		if json.Unmarshal([]byte(raw), &settingsData) == nil && len(settingsData.Fleet) > 0 {
+			fleetMgr.SetServers(settingsData.Fleet)
+			fleetMgr.Start(60 * time.Second) // poll every 60s
+			logger.Info("fleet monitoring started", "servers", len(settingsData.Fleet))
+		}
+	}
+
 	// Create API server
-	apiServer := api.New(store, sched, metrics, logger)
+	apiServer := api.New(store, sched, metrics, fleetMgr, logger)
 
 	// HTTP server
 	srv := &http.Server{

@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"fmt"
 	"path/filepath"
 
 	"github.com/mcdays94/nas-doctor/internal"
@@ -21,13 +22,14 @@ import (
 
 // Settings represents the user-configurable application settings stored in the DB.
 type Settings struct {
-	ScanInterval  string                `json:"scan_interval"`
-	Theme         string                `json:"theme"`
-	Notifications SettingsNotifications `json:"notifications"`
-	LogPush       SettingsLogForward    `json:"log_push"`
-	Retention     RetentionSettings     `json:"retention"`
-	Backup        BackupSettings        `json:"backup"`
-	Sections      DashboardSections     `json:"sections"`
+	ScanInterval  string                  `json:"scan_interval"`
+	Theme         string                  `json:"theme"`
+	Notifications SettingsNotifications   `json:"notifications"`
+	LogPush       SettingsLogForward      `json:"log_push"`
+	Retention     RetentionSettings       `json:"retention"`
+	Backup        BackupSettings          `json:"backup"`
+	Sections      DashboardSections       `json:"sections"`
+	Fleet         []internal.RemoteServer `json:"fleet,omitempty"`
 }
 
 // DashboardSections controls which sections appear on the dashboard.
@@ -127,6 +129,13 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/disks/{serial}", s.handleGetDisk)
 	r.Get("/api/v1/history/system", s.handleSystemHistory)
 	r.Get("/api/v1/notifications/log", s.handleNotificationLog)
+	r.Get("/api/v1/fleet", s.handleFleetStatus)
+	r.Get("/api/v1/fleet/servers", s.handleFleetServers)
+	r.Put("/api/v1/fleet/servers", s.handleFleetUpdateServers)
+	r.Post("/api/v1/fleet/test", s.handleFleetTestServer)
+
+	// Fleet dashboard page
+	r.Get("/fleet", s.handleFleetPage)
 	r.Post("/api/v1/backup", s.handleCreateBackup)
 	r.Get("/api/v1/backup", s.handleListBackups)
 	r.Get("/api/v1/db/stats", s.handleDBStats)
@@ -299,6 +308,81 @@ func (s *Server) handleSparklines(w http.ResponseWriter, r *http.Request) {
 		System: sysHistory,
 		Disks:  diskHistory,
 	})
+}
+
+// ---------- Fleet handlers ----------
+
+// handleFleetStatus returns aggregated status of all remote servers.
+func (s *Server) handleFleetStatus(w http.ResponseWriter, r *http.Request) {
+	if s.fleet == nil {
+		writeJSON(w, http.StatusOK, []internal.RemoteServerStatus{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.fleet.GetStatuses())
+}
+
+// handleFleetServers returns the configured remote servers.
+func (s *Server) handleFleetServers(w http.ResponseWriter, r *http.Request) {
+	if s.fleet == nil {
+		writeJSON(w, http.StatusOK, []internal.RemoteServer{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.fleet.GetServers())
+}
+
+// handleFleetUpdateServers replaces the list of remote servers.
+func (s *Server) handleFleetUpdateServers(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
+		return
+	}
+	var servers []internal.RemoteServer
+	if err := json.Unmarshal(body, &servers); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	// Assign IDs to new servers
+	for i := range servers {
+		if servers[i].ID == "" {
+			servers[i].ID = fmt.Sprintf("srv-%d", time.Now().UnixNano()+int64(i))
+		}
+	}
+
+	// Persist in settings
+	settings := s.getSettings()
+	settings.Fleet = servers
+	data, _ := json.Marshal(settings)
+	s.store.SetConfig(settingsConfigKey, string(data))
+
+	// Update fleet manager
+	if s.fleet != nil {
+		s.fleet.SetServers(servers)
+		go s.fleet.PollAll() // poll immediately
+	}
+
+	writeJSON(w, http.StatusOK, servers)
+}
+
+// handleFleetTestServer tests connectivity to a single server.
+func (s *Server) handleFleetTestServer(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
+		return
+	}
+	var srv internal.RemoteServer
+	if err := json.Unmarshal(body, &srv); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if s.fleet == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "fleet not initialized"})
+		return
+	}
+	result := s.fleet.TestServer(srv)
+	writeJSON(w, http.StatusOK, result)
 }
 
 // handleCreateBackup triggers an immediate backup.
@@ -880,7 +964,20 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 5. Dashboard Sections -->
+  <!-- 5. Fleet / Multi-Server -->
+  <div class="card" id="card-fleet">
+    <div class="card-title">Fleet Monitoring</div>
+    <div class="card-desc">Monitor multiple NAS Doctor instances from this dashboard. Each remote server must be running NAS Doctor.</div>
+    <div id="fleet-list" style="margin-bottom:12px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input type="text" id="fleet-name" placeholder="Server name" style="flex:1;min-width:120px">
+      <input type="url" id="fleet-url" placeholder="http://192.168.1.50:8080" style="flex:2;min-width:200px">
+      <button class="btn-secondary" onclick="addFleetServer()">Add Server</button>
+    </div>
+    <div style="margin-top:8px"><a href="/fleet" style="color:var(--accent);font-size:13px">Open Fleet Dashboard &rarr;</a></div>
+  </div>
+
+  <!-- 6. Dashboard Sections -->
   <div class="card" id="card-sections">
     <div class="card-title">Dashboard Sections</div>
     <div class="card-desc">Toggle which sections appear on the dashboard. Disabled sections are hidden but data is still collected.</div>
@@ -1443,6 +1540,66 @@ function loadDBStats() {
     });
 }
 
+/* ---------- Fleet ---------- */
+var fleetServers = [];
+
+function loadFleetServers() {
+  fetch("/api/v1/fleet/servers")
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      fleetServers = data || [];
+      renderFleetList();
+    }).catch(function() {});
+}
+
+function renderFleetList() {
+  var el = document.getElementById("fleet-list");
+  if (!fleetServers || fleetServers.length === 0) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:8px 0">No remote servers configured.</div>';
+    return;
+  }
+  var h = '';
+  for (var i = 0; i < fleetServers.length; i++) {
+    var s = fleetServers[i];
+    h += '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">';
+    h += '<span style="font-weight:500;flex:1">' + (s.name || 'Server ' + (i+1)) + '</span>';
+    h += '<span style="font-size:12px;color:var(--text2);flex:2">' + (s.url || '') + '</span>';
+    h += '<button class="btn-danger" onclick="removeFleetServer(' + i + ')" style="padding:4px 10px;font-size:11px">Remove</button>';
+    h += '</div>';
+  }
+  el.innerHTML = h;
+}
+
+function addFleetServer() {
+  var name = document.getElementById("fleet-name").value.trim();
+  var url = document.getElementById("fleet-url").value.trim();
+  if (!name || !url) { showToast("Name and URL required", "error"); return; }
+  fleetServers.push({ id: "", name: name, url: url, enabled: true });
+  saveFleetServers();
+  document.getElementById("fleet-name").value = "";
+  document.getElementById("fleet-url").value = "";
+}
+
+function removeFleetServer(idx) {
+  fleetServers.splice(idx, 1);
+  saveFleetServers();
+}
+
+function saveFleetServers() {
+  fetch("/api/v1/fleet/servers", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fleetServers)
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    fleetServers = data;
+    renderFleetList();
+    showToast("Fleet updated", "success");
+  })
+  .catch(function(e) { showToast("Error: " + e.message, "error"); });
+}
+
 /* ---------- Backup ---------- */
 var backupPresets = ["12", "24", "72", "168", "336", "720"];
 
@@ -1542,6 +1699,7 @@ loadSettings();
 loadNotificationLog();
 loadDBStats();
 loadBackupInfo();
+loadFleetServers();
 setInterval(loadNotificationLog, 30000);
 </script>
 </body>

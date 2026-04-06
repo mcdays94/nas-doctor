@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/mcdays94/nas-doctor/internal"
+	"github.com/mcdays94/nas-doctor/internal/fleet"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/scheduler"
 	"github.com/mcdays94/nas-doctor/internal/storage"
@@ -32,16 +33,18 @@ type Server struct {
 	store     *storage.DB
 	scheduler *scheduler.Scheduler
 	metrics   *notifier.Metrics
+	fleet     *fleet.Manager
 	logger    *slog.Logger
 	startTime time.Time
 }
 
 // New creates a new API server.
-func New(store *storage.DB, sched *scheduler.Scheduler, metrics *notifier.Metrics, logger *slog.Logger) *Server {
+func New(store *storage.DB, sched *scheduler.Scheduler, metrics *notifier.Metrics, fleetMgr *fleet.Manager, logger *slog.Logger) *Server {
 	return &Server{
 		store:     store,
 		scheduler: sched,
 		metrics:   metrics,
+		fleet:     fleetMgr,
 		logger:    logger,
 		startTime: time.Now(),
 	}
