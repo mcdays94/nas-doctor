@@ -483,7 +483,7 @@ func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, findings []i
 	}
 
 	if len(cfg.Policies) == 0 {
-		notif.NotifyFindings(findings, hostname)
+		s.dispatchLegacyNotifications(notif, findings, hostname, now, cfg.DefaultCooldownSec)
 		return
 	}
 
@@ -547,7 +547,42 @@ func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, findings []i
 	}
 
 	if !matchedPolicy {
-		notif.NotifyFindings(findings, hostname)
+		s.dispatchLegacyNotifications(notif, findings, hostname, now, cfg.DefaultCooldownSec)
+	}
+}
+
+func (s *Scheduler) dispatchLegacyNotifications(notif *notifier.Notifier, findings []internal.Finding, hostname string, now time.Time, defaultCooldownSec int) {
+	if defaultCooldownSec <= 0 {
+		defaultCooldownSec = 900
+	}
+	for _, wh := range notif.Webhooks() {
+		if !wh.Enabled {
+			continue
+		}
+		filtered := filterBySeverity(findings, wh.MinLevel)
+		if len(filtered) == 0 {
+			continue
+		}
+		routeKey := "legacy:" + strings.ToLower(strings.TrimSpace(wh.Name))
+		toSend := s.applyCooldown(filtered, routeKey, time.Duration(defaultCooldownSec)*time.Second, now)
+		if len(toSend) == 0 {
+			_ = s.store.SaveNotificationLog(wh.Name, wh.Type, "suppressed_cooldown", len(filtered), "")
+			continue
+		}
+		if err := notif.NotifyWebhook(wh, toSend, hostname); err != nil {
+			continue
+		}
+		fingerprints := make([]string, 0, len(toSend))
+		for _, f := range toSend {
+			fp := findingFingerprint(f)
+			fingerprints = append(fingerprints, fp)
+			if err := s.store.SaveNotificationState(fp, routeKey, "sent", now); err != nil {
+				s.logger.Warn("failed to save notification state", "fingerprint", fp, "route", routeKey, "error", err)
+			}
+		}
+		if err := s.store.MarkAlertsNotifiedByFingerprint(fingerprints, now); err != nil {
+			s.logger.Warn("failed to mark alerts notified", "error", err)
+		}
 	}
 }
 
@@ -605,6 +640,13 @@ func (s *Scheduler) applyCooldown(findings []internal.Finding, routeKey string, 
 			continue
 		}
 		seen[fp] = struct{}{}
+
+		suppressed, _, err := s.store.IsAlertSuppressed(fp, now)
+		if err != nil {
+			s.logger.Warn("alert suppression check failed", "fingerprint", fp, "error", err)
+		} else if suppressed {
+			continue
+		}
 
 		allowed, err := s.store.CanSendNotification(fp, routeKey, cooldown, now)
 		if err != nil {
