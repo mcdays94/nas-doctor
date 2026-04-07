@@ -37,7 +37,9 @@ import (
 	"github.com/mcdays94/nas-doctor/internal/storage"
 )
 
-const version = "0.1.0"
+// version is set at build time via -ldflags="-X main.version=x.y.z".
+// Falls back to "dev" for local builds.
+var version = "dev"
 
 func main() {
 	// Flags
@@ -198,7 +200,7 @@ func main() {
 	}
 
 	// Create API server
-	apiServer := api.New(store, sched, metrics, fleetMgr, logger)
+	apiServer := api.New(store, sched, metrics, fleetMgr, logger, version)
 
 	// HTTP server
 	srv := &http.Server{
