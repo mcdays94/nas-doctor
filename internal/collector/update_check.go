@@ -78,7 +78,7 @@ func getLatestVersion(platform string) (*cachedVersion, error) {
 	case "unraid":
 		latest, err = fetchUnraidLatest()
 	case "truenas":
-		latest, err = fetchGitHubLatestRelease("truenas/middleware")
+		latest, err = fetchTrueNASLatest()
 	default:
 		return nil, fmt.Errorf("update checks not supported for %s", platform)
 	}
@@ -141,7 +141,61 @@ func fetchUnraidLatest() (*cachedVersion, error) {
 	}, nil
 }
 
-// ── GitHub: for TrueNAS and other platforms ─────────────────────────
+// ── TrueNAS SCALE: query local API (container runs with --network host) ─
+
+func fetchTrueNASLatest() (*cachedVersion, error) {
+	// TrueNAS SCALE exposes a local WebSocket/HTTP API.
+	// From a container with --network host, we can query it at localhost.
+	// The /api/v2.0/update/check_available endpoint returns available updates.
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("POST", "http://localhost/api/v2.0/update/check_available", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create TrueNAS API request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("TrueNAS API unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 403 || resp.StatusCode == 401 {
+		// API requires authentication — can't check updates without API key.
+		return nil, fmt.Errorf("TrueNAS API requires authentication (HTTP %d)", resp.StatusCode)
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("TrueNAS API returned HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Status  string `json:"status"`
+		Version string `json:"version"`
+		Notes   string `json:"release_notes_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode TrueNAS update response: %w", err)
+	}
+
+	if result.Status != "AVAILABLE" {
+		// No update available — current version is latest
+		return &cachedVersion{
+			version:   "", // empty signals no update
+			name:      "TrueNAS SCALE (up to date)",
+			url:       "",
+			checkedAt: time.Now(),
+		}, nil
+	}
+
+	return &cachedVersion{
+		version:   normalizeVersion(result.Version),
+		name:      "TrueNAS SCALE " + result.Version,
+		url:       result.Notes,
+		checkedAt: time.Now(),
+	}, nil
+}
+
+// ── GitHub: for other platforms ──────────────────────────────────────
 
 type githubRelease struct {
 	TagName string `json:"tag_name"`
