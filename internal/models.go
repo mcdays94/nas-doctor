@@ -22,6 +22,7 @@ const (
 	CategorySMART   Category = "smart"
 	CategoryDocker  Category = "docker"
 	CategoryNetwork Category = "network"
+	CategoryService Category = "service"
 	CategoryMemory  Category = "memory"
 	CategoryThermal Category = "thermal"
 	CategoryLogs    Category = "logs"
@@ -34,20 +35,58 @@ const (
 
 // Snapshot represents a single point-in-time diagnostic collection.
 type Snapshot struct {
-	ID        string      `json:"id" db:"id"`
-	Timestamp time.Time   `json:"timestamp" db:"timestamp"`
-	Duration  float64     `json:"duration_seconds" db:"duration_seconds"` // how long the collection took
-	System    SystemInfo  `json:"system"`
-	Disks     []DiskInfo  `json:"disks"`
-	SMART     []SMARTInfo `json:"smart"`
-	Docker    DockerInfo  `json:"docker"`
-	Network   NetworkInfo `json:"network"`
-	Logs      LogInfo     `json:"logs"`
-	Parity    *ParityInfo `json:"parity,omitempty"`
-	ZFS       *ZFSInfo    `json:"zfs,omitempty"`
-	UPS       *UPSInfo    `json:"ups,omitempty"`
-	Update    *UpdateInfo `json:"update,omitempty"`
-	Findings  []Finding   `json:"findings"`
+	ID        string               `json:"id" db:"id"`
+	Timestamp time.Time            `json:"timestamp" db:"timestamp"`
+	Duration  float64              `json:"duration_seconds" db:"duration_seconds"` // how long the collection took
+	System    SystemInfo           `json:"system"`
+	Disks     []DiskInfo           `json:"disks"`
+	SMART     []SMARTInfo          `json:"smart"`
+	Docker    DockerInfo           `json:"docker"`
+	Network   NetworkInfo          `json:"network"`
+	Logs      LogInfo              `json:"logs"`
+	Parity    *ParityInfo          `json:"parity,omitempty"`
+	ZFS       *ZFSInfo             `json:"zfs,omitempty"`
+	UPS       *UPSInfo             `json:"ups,omitempty"`
+	Update    *UpdateInfo          `json:"update,omitempty"`
+	Services  []ServiceCheckResult `json:"service_checks,omitempty"`
+	Findings  []Finding            `json:"findings"`
+}
+
+// ---------- Service Checks ----------
+
+const (
+	ServiceCheckHTTP = "http"
+	ServiceCheckTCP  = "tcp"
+	ServiceCheckDNS  = "dns"
+	ServiceCheckSMB  = "smb"
+	ServiceCheckNFS  = "nfs"
+)
+
+type ServiceCheckConfig struct {
+	Name             string   `json:"name"`
+	Type             string   `json:"type"`
+	Target           string   `json:"target"`
+	Enabled          bool     `json:"enabled"`
+	TimeoutSec       int      `json:"timeout_sec,omitempty"`
+	Port             int      `json:"port,omitempty"`
+	FailureThreshold int      `json:"failure_threshold,omitempty"`
+	FailureSeverity  Severity `json:"failure_severity,omitempty"`
+	ExpectedMin      int      `json:"expected_status_min,omitempty"`
+	ExpectedMax      int      `json:"expected_status_max,omitempty"`
+}
+
+type ServiceCheckResult struct {
+	Key                 string   `json:"key"`
+	Name                string   `json:"name"`
+	Type                string   `json:"type"`
+	Target              string   `json:"target"`
+	Status              string   `json:"status"` // up, down
+	ResponseMS          int64    `json:"response_ms"`
+	Error               string   `json:"error,omitempty"`
+	CheckedAt           string   `json:"checked_at"`
+	ConsecutiveFailures int      `json:"consecutive_failures"`
+	FailureThreshold    int      `json:"failure_threshold"`
+	FailureSeverity     Severity `json:"failure_severity"`
 }
 
 // ---------- System ----------

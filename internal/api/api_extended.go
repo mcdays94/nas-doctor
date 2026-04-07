@@ -27,6 +27,7 @@ type Settings struct {
 	Theme             string                  `json:"theme"`
 	Icon              string                  `json:"icon"`
 	Notifications     SettingsNotifications   `json:"notifications"`
+	ServiceChecks     SettingsServiceChecks   `json:"service_checks"`
 	LogPush           SettingsLogForward      `json:"log_push"`
 	Retention         RetentionSettings       `json:"retention"`
 	Backup            BackupSettings          `json:"backup"`
@@ -73,6 +74,11 @@ type SettingsNotifications struct {
 	DefaultCooldownSec int                           `json:"default_cooldown_sec,omitempty"`
 }
 
+// SettingsServiceChecks holds configured service checks.
+type SettingsServiceChecks struct {
+	Checks []internal.ServiceCheckConfig `json:"checks"`
+}
+
 // SettingsLogForward holds the log-forwarding configuration within settings.
 type SettingsLogForward struct {
 	Enabled      bool                    `json:"enabled"`
@@ -106,6 +112,9 @@ func defaultSettings() Settings {
 				EndHHMM:   "07:00",
 			},
 			DefaultCooldownSec: 900,
+		},
+		ServiceChecks: SettingsServiceChecks{
+			Checks: []internal.ServiceCheckConfig{},
 		},
 		LogPush: SettingsLogForward{
 			Enabled:      false,
@@ -146,6 +155,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/disks/{serial}", s.handleGetDisk)
 	r.Get("/api/v1/history/system", s.handleSystemHistory)
 	r.Get("/api/v1/notifications/log", s.handleNotificationLog)
+	r.Get("/api/v1/service-checks", s.handleServiceChecks)
+	r.Get("/api/v1/service-checks/history", s.handleServiceCheckHistory)
+	r.Post("/api/v1/service-checks/run", s.handleRunServiceChecks)
 	r.Get("/api/v1/alerts", s.handleListAlerts)
 	r.Get("/api/v1/alerts/{id}", s.handleGetAlert)
 	r.Get("/api/v1/alerts/{id}/events", s.handleGetAlertEvents)
@@ -215,6 +227,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if settings.Notifications.DefaultCooldownSec <= 0 {
 		settings.Notifications.DefaultCooldownSec = 900
+	}
+	if settings.ServiceChecks.Checks == nil {
+		settings.ServiceChecks.Checks = []internal.ServiceCheckConfig{}
 	}
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
@@ -345,6 +360,70 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if settings.ServiceChecks.Checks == nil {
+		settings.ServiceChecks.Checks = []internal.ServiceCheckConfig{}
+	}
+	serviceNames := make(map[string]struct{}, len(settings.ServiceChecks.Checks))
+	for i := range settings.ServiceChecks.Checks {
+		check := &settings.ServiceChecks.Checks[i]
+		check.Name = strings.TrimSpace(check.Name)
+		check.Type = strings.ToLower(strings.TrimSpace(check.Type))
+		check.Target = strings.TrimSpace(check.Target)
+		if check.Name == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "service_checks.checks name is required"})
+			return
+		}
+		if check.Target == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "service_checks.checks target is required"})
+			return
+		}
+		if _, exists := serviceNames[strings.ToLower(check.Name)]; exists {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "duplicate service check name: " + check.Name})
+			return
+		}
+		serviceNames[strings.ToLower(check.Name)] = struct{}{}
+		switch check.Type {
+		case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS:
+			// valid
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid service check type: " + check.Type})
+			return
+		}
+		if check.TimeoutSec <= 0 {
+			check.TimeoutSec = 5
+		}
+		if check.TimeoutSec > 30 {
+			check.TimeoutSec = 30
+		}
+		if check.Port < 0 || check.Port > 65535 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "service check port must be between 0 and 65535"})
+			return
+		}
+		if check.FailureThreshold <= 0 {
+			check.FailureThreshold = 1
+		}
+		if check.FailureSeverity == "" {
+			check.FailureSeverity = internal.SeverityWarning
+		}
+		switch check.FailureSeverity {
+		case internal.SeverityInfo, internal.SeverityWarning, internal.SeverityCritical:
+			// valid
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid service check failure_severity"})
+			return
+		}
+		if check.Type == internal.ServiceCheckHTTP {
+			if check.ExpectedMin <= 0 {
+				check.ExpectedMin = 200
+			}
+			if check.ExpectedMax <= 0 {
+				check.ExpectedMax = 399
+			}
+			if check.ExpectedMax < check.ExpectedMin {
+				check.ExpectedMax = check.ExpectedMin
+			}
+		}
+	}
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
 	}
@@ -405,6 +484,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			MaintenanceWindows: settings.Notifications.MaintenanceWindows,
 			DefaultCooldownSec: settings.Notifications.DefaultCooldownSec,
 		})
+		s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
 	}
 
 	writeJSON(w, http.StatusOK, settings)
@@ -794,6 +874,80 @@ func (s *Server) handleNotificationLog(w http.ResponseWriter, r *http.Request) {
 		entries = []storage.NotificationLogEntry{}
 	}
 	writeJSON(w, http.StatusOK, entries)
+}
+
+// ---------- Service checks handlers ----------
+
+// handleServiceChecks returns latest status per configured service check.
+// GET /api/v1/service-checks
+func (s *Server) handleServiceChecks(w http.ResponseWriter, r *http.Request) {
+	limit := 200
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 500 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit"})
+			return
+		}
+		limit = parsed
+	}
+
+	entries, err := s.store.ListLatestServiceChecks(limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list service checks: " + err.Error()})
+		return
+	}
+	if entries == nil {
+		entries = []storage.ServiceCheckEntry{}
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+// handleServiceCheckHistory returns recent status history for a check key.
+// GET /api/v1/service-checks/history?key=<service_check_key>&limit=100
+func (s *Server) handleServiceCheckHistory(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query param 'key' is required"})
+		return
+	}
+
+	limit := 200
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 1000 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit"})
+			return
+		}
+		limit = parsed
+	}
+
+	history, err := s.store.GetServiceCheckHistory(key, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load service check history: " + err.Error()})
+		return
+	}
+	if history == nil {
+		history = []storage.ServiceCheckEntry{}
+	}
+	writeJSON(w, http.StatusOK, history)
+}
+
+// handleRunServiceChecks triggers immediate service check execution.
+// POST /api/v1/service-checks/run
+func (s *Server) handleRunServiceChecks(w http.ResponseWriter, r *http.Request) {
+	if s.scheduler == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service checks unavailable in demo mode"})
+		return
+	}
+	results, err := s.scheduler.RunServiceChecksNow()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "service checks failed: " + err.Error()})
+		return
+	}
+	if results == nil {
+		results = []internal.ServiceCheckResult{}
+	}
+	writeJSON(w, http.StatusOK, results)
 }
 
 // ---------- Alerts handlers ----------

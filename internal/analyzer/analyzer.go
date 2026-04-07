@@ -23,6 +23,7 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 	findings = append(findings, analyzeDocker(snap.Docker)...)
 	findings = append(findings, analyzeNetwork(snap.Network)...)
 	findings = append(findings, analyzeLogs(snap.Logs)...)
+	findings = append(findings, analyzeServiceChecks(snap.Services)...)
 
 	if snap.Parity != nil {
 		findings = append(findings, analyzeParity(snap.Parity)...)
@@ -555,6 +556,46 @@ func analyzeLogs(logs internal.LogInfo) []internal.Finding {
 		})
 	}
 
+	return findings
+}
+
+func analyzeServiceChecks(checks []internal.ServiceCheckResult) []internal.Finding {
+	var findings []internal.Finding
+	for _, check := range checks {
+		if strings.ToLower(check.Status) != "down" {
+			continue
+		}
+
+		threshold := check.FailureThreshold
+		if threshold <= 0 {
+			threshold = 1
+		}
+		if check.ConsecutiveFailures < threshold {
+			continue
+		}
+
+		severity := check.FailureSeverity
+		if severity == "" {
+			severity = internal.SeverityWarning
+		}
+
+		findings = append(findings, internal.Finding{
+			Severity:    severity,
+			Category:    internal.CategoryService,
+			Title:       fmt.Sprintf("Service Check Failed: %s", check.Name),
+			Description: fmt.Sprintf("%s check for %s is failing (%d consecutive failures).", strings.ToUpper(check.Type), check.Target, check.ConsecutiveFailures),
+			Evidence: []string{
+				fmt.Sprintf("Status: %s", check.Status),
+				fmt.Sprintf("Target: %s", check.Target),
+				fmt.Sprintf("Consecutive failures: %d (threshold %d)", check.ConsecutiveFailures, threshold),
+				fmt.Sprintf("Last check at: %s", check.CheckedAt),
+			},
+			Impact:   "Dependent applications and clients may fail while this service remains unavailable.",
+			Action:   "Verify the service process, endpoint reachability, network path, and authentication/configuration for this target.",
+			Priority: priorityFromSeverity(severity),
+			Cost:     "none",
+		})
+	}
 	return findings
 }
 

@@ -709,12 +709,17 @@ function loadSettings() {
 
 /* ---------- Save settings ---------- */
 function buildSettingsPayload() {
+  var base = settings || {};
+  var notifications = base.notifications || {};
+  notifications.webhooks = webhooks;
+
   return {
     scan_interval: getScanInterval(),
     theme: getSelectedTheme(),
     icon: getSelectedIcon(),
-    notifications: { webhooks: webhooks },
-    log_push: { enabled: false, destinations: [] },
+    notifications: notifications,
+    service_checks: base.service_checks || { checks: [] },
+    log_push: base.log_push || { enabled: false, destinations: [] },
     retention: {
       snapshot_days: parseInt(document.getElementById("ret-snapshot-days").value, 10) || 90,
       max_db_size_mb: parseInt(document.getElementById("ret-max-db").value, 10) || 500,
@@ -735,7 +740,9 @@ function buildSettingsPayload() {
       path: document.getElementById("backup-path").value.trim(),
       keep_count: parseInt(document.getElementById("backup-keep").value, 10) || 4,
       interval_hours: getBackupIntervalH()
-    }
+    },
+    fleet: base.fleet || [],
+    dismissed_findings: base.dismissed_findings || []
   };
 }
 
@@ -750,7 +757,8 @@ function saveSettings() {
     if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Save failed"); });
     return r.json();
   })
-  .then(function() {
+  .then(function(saved) {
+    settings = saved;
     showToast("Settings saved", "success");
     markSaved();
     /* Apply theme live */
