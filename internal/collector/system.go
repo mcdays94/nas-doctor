@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
 )
@@ -90,8 +91,8 @@ func collectSystem(hp internal.HostPaths) (internal.SystemInfo, error) {
 		}
 	}
 
-	// I/O wait from /proc/stat (simple snapshot)
-	info.IOWait = readIOWait()
+	// CPU usage and I/O wait from /proc/stat (two samples, 500ms apart)
+	info.CPUUsage, info.IOWait = readCPUStats()
 
 	// Detect platform
 	info.Platform, info.PlatformVer = detectPlatform(hp)
@@ -119,31 +120,51 @@ func collectSystem(hp internal.HostPaths) (internal.SystemInfo, error) {
 	return info, nil
 }
 
-func readIOWait() float64 {
-	data, err := os.ReadFile("/proc/stat")
-	if err != nil {
-		return 0
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "cpu ") {
-			fields := strings.Fields(line)
-			if len(fields) >= 6 {
-				// fields: cpu user nice system idle iowait ...
-				idle, _ := strconv.ParseFloat(fields[4], 64)
-				iowait, _ := strconv.ParseFloat(fields[5], 64)
-				total := 0.0
-				for _, f := range fields[1:] {
-					v, _ := strconv.ParseFloat(f, 64)
-					total += v
-				}
-				if total > 0 {
-					_ = idle // used in total
-					return iowait / total * 100
+// readCPUStats reads /proc/stat twice with a short delay to compute
+// instantaneous CPU usage and I/O wait percentages.
+func readCPUStats() (cpuUsage, ioWait float64) {
+	parse := func() (idle, iowait, total float64, ok bool) {
+		data, err := os.ReadFile("/proc/stat")
+		if err != nil {
+			return 0, 0, 0, false
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "cpu ") {
+				fields := strings.Fields(line)
+				if len(fields) >= 6 {
+					// fields: cpu user nice system idle iowait irq softirq steal ...
+					idle, _ = strconv.ParseFloat(fields[4], 64)
+					iowait, _ = strconv.ParseFloat(fields[5], 64)
+					for _, f := range fields[1:] {
+						v, _ := strconv.ParseFloat(f, 64)
+						total += v
+					}
+					return idle, iowait, total, true
 				}
 			}
 		}
+		return 0, 0, 0, false
 	}
-	return 0
+
+	idle1, iowait1, total1, ok1 := parse()
+	time.Sleep(500 * time.Millisecond)
+	idle2, iowait2, total2, ok2 := parse()
+
+	if !ok1 || !ok2 {
+		return 0, 0
+	}
+
+	totalDelta := total2 - total1
+	if totalDelta <= 0 {
+		return 0, 0
+	}
+
+	idleDelta := idle2 - idle1
+	iowaitDelta := iowait2 - iowait1
+
+	cpuUsage = (1.0 - idleDelta/totalDelta) * 100
+	ioWait = (iowaitDelta / totalDelta) * 100
+	return cpuUsage, ioWait
 }
 
 func detectPlatform(hp internal.HostPaths) (platform, version string) {
