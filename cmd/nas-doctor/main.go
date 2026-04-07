@@ -399,4 +399,5 @@ func applySchedulerSettingsFromStore(sched *scheduler.Scheduler, settings *api.S
 		MaintenanceWindows: settings.Notifications.MaintenanceWindows,
 		DefaultCooldownSec: defaultCooldown,
 	})
+	sched.UpdateServiceChecks(settings.ServiceChecks.Checks)
 }
