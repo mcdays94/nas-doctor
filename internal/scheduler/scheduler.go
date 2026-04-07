@@ -2,10 +2,14 @@
 package scheduler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -72,14 +76,15 @@ type AlertingConfig struct {
 
 // Scheduler periodically runs diagnostic collections and analysis.
 type Scheduler struct {
-	collector *collector.Collector
-	store     *storage.DB
-	notifier  *notifier.Notifier
-	metrics   *notifier.Metrics
-	logger    *slog.Logger
-	interval  time.Duration
-	retention RetentionConfig
-	alerting  AlertingConfig
+	collector     *collector.Collector
+	store         *storage.DB
+	notifier      *notifier.Notifier
+	metrics       *notifier.Metrics
+	logger        *slog.Logger
+	interval      time.Duration
+	retention     RetentionConfig
+	alerting      AlertingConfig
+	serviceChecks []internal.ServiceCheckConfig
 
 	mu      sync.RWMutex
 	latest  *internal.Snapshot
@@ -115,8 +120,9 @@ func New(
 			MaintenanceWindows: []MaintenanceWindow{},
 			DefaultCooldownSec: 900,
 		},
-		stop:    make(chan struct{}),
-		restart: make(chan time.Duration, 1),
+		serviceChecks: []internal.ServiceCheckConfig{},
+		stop:          make(chan struct{}),
+		restart:       make(chan time.Duration, 1),
 	}
 }
 
@@ -192,6 +198,12 @@ func (s *Scheduler) RunOnce() {
 		s.logger.Error("collection failed", "error", err)
 		return
 	}
+
+	serviceResults, err := s.runServiceChecks(snap.Timestamp)
+	if err != nil {
+		s.logger.Warn("service checks partial failure", "error", err)
+	}
+	snap.Services = serviceResults
 
 	// Analyze
 	snap.Findings = analyzer.Analyze(snap)
@@ -321,6 +333,14 @@ func (s *Scheduler) pruneData() {
 		needsVacuum = true
 	}
 
+	// 3b. Prune service check history
+	if pruned, err := s.store.PruneServiceCheckHistory(notifyAge); err != nil {
+		s.logger.Warn("prune service check history failed", "error", err)
+	} else if pruned > 0 {
+		s.logger.Info("pruned service check history", "count", pruned)
+		needsVacuum = true
+	}
+
 	// 4. Prune resolved alerts (same retention as notifications)
 	if pruned, err := s.store.PruneAlerts(notifyAge); err != nil {
 		s.logger.Warn("prune alerts failed", "error", err)
@@ -401,6 +421,43 @@ func (s *Scheduler) UpdateAlerting(cfg AlertingConfig) {
 	)
 }
 
+// UpdateServiceChecks replaces service check configuration used in each run.
+func (s *Scheduler) UpdateServiceChecks(checks []internal.ServiceCheckConfig) {
+	normalized := make([]internal.ServiceCheckConfig, 0, len(checks))
+	for _, check := range checks {
+		check.Type = strings.ToLower(strings.TrimSpace(check.Type))
+		check.Name = strings.TrimSpace(check.Name)
+		check.Target = strings.TrimSpace(check.Target)
+		if check.Name == "" || check.Target == "" {
+			continue
+		}
+		if !isSupportedServiceCheckType(check.Type) {
+			continue
+		}
+		if check.TimeoutSec <= 0 {
+			check.TimeoutSec = 5
+		}
+		if check.FailureThreshold <= 0 {
+			check.FailureThreshold = 1
+		}
+		if check.FailureSeverity == "" {
+			check.FailureSeverity = internal.SeverityWarning
+		}
+		normalized = append(normalized, check)
+	}
+
+	s.mu.Lock()
+	s.serviceChecks = normalized
+	s.mu.Unlock()
+
+	s.logger.Info("service check config updated", "checks", len(normalized))
+}
+
+// RunServiceChecksNow executes configured service checks immediately and persists results.
+func (s *Scheduler) RunServiceChecksNow() ([]internal.ServiceCheckResult, error) {
+	return s.runServiceChecks(time.Now().UTC())
+}
+
 // UpdateNotifier swaps the notifier used for delivery.
 func (s *Scheduler) UpdateNotifier(notif *notifier.Notifier) {
 	s.mu.Lock()
@@ -458,6 +515,233 @@ func (s *Scheduler) checkBackup() {
 	s.mu.Lock()
 	s.backup.LastBackup = result.Timestamp
 	s.mu.Unlock()
+}
+
+func (s *Scheduler) runServiceChecks(now time.Time) ([]internal.ServiceCheckResult, error) {
+	s.mu.RLock()
+	checks := make([]internal.ServiceCheckConfig, len(s.serviceChecks))
+	copy(checks, s.serviceChecks)
+	s.mu.RUnlock()
+
+	if len(checks) == 0 {
+		return []internal.ServiceCheckResult{}, nil
+	}
+
+	results := make([]internal.ServiceCheckResult, 0, len(checks))
+	for _, check := range checks {
+		if !check.Enabled {
+			continue
+		}
+
+		result := executeServiceCheck(check, now)
+
+		state, ok, err := s.store.GetLatestServiceCheckState(result.Key)
+		if err != nil {
+			s.logger.Warn("failed to read previous service check state", "check", result.Name, "error", err)
+		}
+		if result.Status == "down" {
+			if ok && state.Status == "down" {
+				result.ConsecutiveFailures = state.ConsecutiveFailures + 1
+			} else {
+				result.ConsecutiveFailures = 1
+			}
+		}
+
+		results = append(results, result)
+	}
+
+	if len(results) == 0 {
+		return results, nil
+	}
+	if err := s.store.SaveServiceCheckResults(results); err != nil {
+		return results, err
+	}
+	return results, nil
+}
+
+func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) internal.ServiceCheckResult {
+	typeName := strings.ToLower(strings.TrimSpace(check.Type))
+	timeoutSec := check.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = 5
+	}
+	threshold := check.FailureThreshold
+	if threshold <= 0 {
+		threshold = 1
+	}
+	severity := check.FailureSeverity
+	if severity == "" {
+		severity = internal.SeverityWarning
+	}
+
+	result := internal.ServiceCheckResult{
+		Key:              serviceCheckKey(check),
+		Name:             strings.TrimSpace(check.Name),
+		Type:             typeName,
+		Target:           strings.TrimSpace(check.Target),
+		Status:           "down",
+		CheckedAt:        now.UTC().Format(time.RFC3339),
+		FailureThreshold: threshold,
+		FailureSeverity:  severity,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	switch typeName {
+	case internal.ServiceCheckHTTP:
+		urlValue := normalizeHTTPURL(check.Target)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlValue, nil)
+		if err != nil {
+			result.Error = err.Error()
+			break
+		}
+		resp, err := (&http.Client{Timeout: time.Duration(timeoutSec) * time.Second}).Do(req)
+		result.ResponseMS = time.Since(start).Milliseconds()
+		if err != nil {
+			result.Error = err.Error()
+			break
+		}
+		_ = resp.Body.Close()
+		minStatus := check.ExpectedMin
+		maxStatus := check.ExpectedMax
+		if minStatus <= 0 {
+			minStatus = 200
+		}
+		if maxStatus <= 0 {
+			maxStatus = 399
+		}
+		if maxStatus < minStatus {
+			maxStatus = minStatus
+		}
+		if resp.StatusCode < minStatus || resp.StatusCode > maxStatus {
+			result.Error = fmt.Sprintf("unexpected HTTP status %d", resp.StatusCode)
+			break
+		}
+		result.Status = "up"
+
+	case internal.ServiceCheckDNS:
+		host := normalizeDNSHost(check.Target)
+		if host == "" {
+			result.Error = "empty DNS target"
+			break
+		}
+		addrs, err := net.DefaultResolver.LookupHost(ctx, host)
+		result.ResponseMS = time.Since(start).Milliseconds()
+		if err != nil {
+			result.Error = err.Error()
+			break
+		}
+		if len(addrs) == 0 {
+			result.Error = "no DNS records found"
+			break
+		}
+		result.Status = "up"
+
+	case internal.ServiceCheckTCP, internal.ServiceCheckSMB, internal.ServiceCheckNFS:
+		addr, err := normalizeTCPAddress(check)
+		if err != nil {
+			result.Error = err.Error()
+			break
+		}
+		dialer := net.Dialer{Timeout: time.Duration(timeoutSec) * time.Second}
+		conn, err := dialer.DialContext(ctx, "tcp", addr)
+		result.ResponseMS = time.Since(start).Milliseconds()
+		if err != nil {
+			result.Error = err.Error()
+			break
+		}
+		_ = conn.Close()
+		result.Status = "up"
+
+	default:
+		result.Error = "unsupported service check type"
+	}
+
+	if result.ResponseMS == 0 {
+		result.ResponseMS = time.Since(start).Milliseconds()
+	}
+	if result.Status == "up" {
+		result.Error = ""
+	}
+	return result
+}
+
+func isSupportedServiceCheckType(checkType string) bool {
+	switch strings.ToLower(strings.TrimSpace(checkType)) {
+	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeHTTPURL(rawTarget string) string {
+	target := strings.TrimSpace(rawTarget)
+	if target == "" {
+		return target
+	}
+	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+		return target
+	}
+	return "http://" + target
+}
+
+func normalizeDNSHost(rawTarget string) string {
+	target := strings.TrimSpace(rawTarget)
+	if target == "" {
+		return ""
+	}
+	if strings.Contains(target, "://") {
+		if parsed, err := url.Parse(target); err == nil {
+			if host := strings.TrimSpace(parsed.Hostname()); host != "" {
+				return host
+			}
+		}
+	}
+	if host, _, err := net.SplitHostPort(target); err == nil {
+		return host
+	}
+	return target
+}
+
+func normalizeTCPAddress(check internal.ServiceCheckConfig) (string, error) {
+	target := strings.TrimSpace(check.Target)
+	if target == "" {
+		return "", fmt.Errorf("empty target")
+	}
+	if strings.Contains(target, "://") {
+		parsed, err := url.Parse(target)
+		if err == nil && parsed.Host != "" {
+			target = parsed.Host
+		}
+	}
+
+	if _, _, err := net.SplitHostPort(target); err == nil {
+		return target, nil
+	}
+
+	port := check.Port
+	if port <= 0 {
+		switch strings.ToLower(strings.TrimSpace(check.Type)) {
+		case internal.ServiceCheckSMB:
+			port = 445
+		case internal.ServiceCheckNFS:
+			port = 2049
+		}
+	}
+	if port <= 0 {
+		return "", fmt.Errorf("missing port")
+	}
+	host := normalizeDNSHost(target)
+	return net.JoinHostPort(host, fmt.Sprintf("%d", port)), nil
+}
+
+func serviceCheckKey(check internal.ServiceCheckConfig) string {
+	raw := strings.ToLower(strings.TrimSpace(check.Name)) + "|" + strings.ToLower(strings.TrimSpace(check.Type)) + "|" + strings.ToLower(strings.TrimSpace(check.Target)) + "|" + fmt.Sprintf("%d", check.Port)
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, findings []internal.Finding, hostname string, now time.Time) {

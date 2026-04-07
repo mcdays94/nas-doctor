@@ -166,6 +166,25 @@ func (d *DB) migrate() error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_alert_events_alert ON alert_events(alert_id, created_at DESC)`,
+
+		// --- Service checks ---
+		`CREATE TABLE IF NOT EXISTS service_checks_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			check_key TEXT NOT NULL,
+			name TEXT NOT NULL,
+			check_type TEXT NOT NULL,
+			target TEXT NOT NULL,
+			status TEXT NOT NULL,
+			response_ms INTEGER,
+			error_message TEXT,
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			failure_threshold INTEGER NOT NULL DEFAULT 1,
+			failure_severity TEXT NOT NULL DEFAULT 'warning',
+			checked_at DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_service_checks_key_ts ON service_checks_history(check_key, checked_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_service_checks_ts ON service_checks_history(checked_at DESC)`,
 	}
 
 	for _, m := range migrations {
@@ -935,6 +954,207 @@ func (d *DB) SaveNotificationState(fingerprint, routeKey, status string, sentAt 
 	return err
 }
 
+// ServiceCheckState is the latest status snapshot for a service check key.
+type ServiceCheckState struct {
+	Status              string
+	ConsecutiveFailures int
+	CheckedAt           time.Time
+}
+
+// ServiceCheckEntry represents a stored service check result.
+type ServiceCheckEntry struct {
+	Key                 string `json:"key"`
+	Name                string `json:"name"`
+	Type                string `json:"type"`
+	Target              string `json:"target"`
+	Status              string `json:"status"`
+	ResponseMS          int64  `json:"response_ms"`
+	Error               string `json:"error,omitempty"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
+	FailureThreshold    int    `json:"failure_threshold"`
+	FailureSeverity     string `json:"failure_severity"`
+	CheckedAt           string `json:"checked_at"`
+}
+
+// SaveServiceCheckResults appends service check run results to history.
+func (d *DB) SaveServiceCheckResults(results []internal.ServiceCheckResult) error {
+	if len(results) == 0 {
+		return nil
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, result := range results {
+		if strings.TrimSpace(result.Key) == "" {
+			continue
+		}
+		checkedAt := time.Now().UTC()
+		if parsed, err := time.Parse(time.RFC3339, result.CheckedAt); err == nil {
+			checkedAt = parsed.UTC()
+		}
+		_, err := tx.Exec(
+			`INSERT INTO service_checks_history (
+				check_key, name, check_type, target, status, response_ms, error_message,
+				consecutive_failures, failure_threshold, failure_severity, checked_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			result.Key,
+			result.Name,
+			result.Type,
+			result.Target,
+			result.Status,
+			result.ResponseMS,
+			result.Error,
+			result.ConsecutiveFailures,
+			result.FailureThreshold,
+			result.FailureSeverity,
+			checkedAt,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetLatestServiceCheckState returns the most recent known state for a service check key.
+func (d *DB) GetLatestServiceCheckState(checkKey string) (ServiceCheckState, bool, error) {
+	var state ServiceCheckState
+	if strings.TrimSpace(checkKey) == "" {
+		return state, false, nil
+	}
+	row := d.db.QueryRow(
+		`SELECT status, consecutive_failures, checked_at
+		 FROM service_checks_history
+		 WHERE check_key = ?
+		 ORDER BY checked_at DESC
+		 LIMIT 1`,
+		checkKey,
+	)
+	if err := row.Scan(&state.Status, &state.ConsecutiveFailures, &state.CheckedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return ServiceCheckState{}, false, nil
+		}
+		return ServiceCheckState{}, false, err
+	}
+	return state, true, nil
+}
+
+// ListLatestServiceChecks returns latest status per service check key.
+func (d *DB) ListLatestServiceChecks(limit int) ([]ServiceCheckEntry, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := d.db.Query(
+		`SELECT h.check_key, h.name, h.check_type, h.target, h.status,
+				COALESCE(h.response_ms, 0), COALESCE(h.error_message, ''),
+				COALESCE(h.consecutive_failures, 0), COALESCE(h.failure_threshold, 1), COALESCE(h.failure_severity, 'warning'),
+				h.checked_at
+		 FROM service_checks_history h
+		 INNER JOIN (
+			SELECT check_key, MAX(checked_at) AS checked_at
+			FROM service_checks_history
+			GROUP BY check_key
+		 ) latest
+		 ON latest.check_key = h.check_key AND latest.checked_at = h.checked_at
+		 ORDER BY h.checked_at DESC
+		 LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []ServiceCheckEntry
+	for rows.Next() {
+		var e ServiceCheckEntry
+		var checkedAt time.Time
+		if err := rows.Scan(
+			&e.Key,
+			&e.Name,
+			&e.Type,
+			&e.Target,
+			&e.Status,
+			&e.ResponseMS,
+			&e.Error,
+			&e.ConsecutiveFailures,
+			&e.FailureThreshold,
+			&e.FailureSeverity,
+			&checkedAt,
+		); err != nil {
+			return nil, err
+		}
+		e.CheckedAt = checkedAt.UTC().Format(time.RFC3339)
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// GetServiceCheckHistory returns recent history for a specific check key.
+func (d *DB) GetServiceCheckHistory(checkKey string, limit int) ([]ServiceCheckEntry, error) {
+	if strings.TrimSpace(checkKey) == "" {
+		return []ServiceCheckEntry{}, nil
+	}
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	rows, err := d.db.Query(
+		`SELECT check_key, name, check_type, target, status,
+				COALESCE(response_ms, 0), COALESCE(error_message, ''),
+				COALESCE(consecutive_failures, 0), COALESCE(failure_threshold, 1), COALESCE(failure_severity, 'warning'),
+				checked_at
+		 FROM service_checks_history
+		 WHERE check_key = ?
+		 ORDER BY checked_at DESC
+		 LIMIT ?`,
+		checkKey,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []ServiceCheckEntry
+	for rows.Next() {
+		var e ServiceCheckEntry
+		var checkedAt time.Time
+		if err := rows.Scan(
+			&e.Key,
+			&e.Name,
+			&e.Type,
+			&e.Target,
+			&e.Status,
+			&e.ResponseMS,
+			&e.Error,
+			&e.ConsecutiveFailures,
+			&e.FailureThreshold,
+			&e.FailureSeverity,
+			&checkedAt,
+		); err != nil {
+			return nil, err
+		}
+		e.CheckedAt = checkedAt.UTC().Format(time.RFC3339)
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// PruneServiceCheckHistory deletes service check history rows older than the given duration.
+func (d *DB) PruneServiceCheckHistory(olderThan time.Duration) (int, error) {
+	cutoff := time.Now().Add(-olderThan)
+	result, err := d.db.Exec("DELETE FROM service_checks_history WHERE checked_at < ?", cutoff)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
+}
+
 // GetFindingHistory returns how a specific finding category has changed over time.
 func (d *DB) GetFindingHistory(category string, limit int) ([]internal.Finding, error) {
 	rows, err := d.db.Query(`
@@ -1208,15 +1428,16 @@ func (d *DB) Vacuum() error {
 
 // DBStats returns size information about the database.
 type DBStats struct {
-	FileSizeMB     float64 `json:"file_size_mb"`
-	SnapshotCount  int     `json:"snapshot_count"`
-	SMARTRows      int     `json:"smart_history_rows"`
-	SystemRows     int     `json:"system_history_rows"`
-	FindingRows    int     `json:"finding_rows"`
-	NotifyLogRows  int     `json:"notify_log_rows"`
-	AlertRows      int     `json:"alert_rows"`
-	OldestSnapshot string  `json:"oldest_snapshot,omitempty"`
-	NewestSnapshot string  `json:"newest_snapshot,omitempty"`
+	FileSizeMB       float64 `json:"file_size_mb"`
+	SnapshotCount    int     `json:"snapshot_count"`
+	SMARTRows        int     `json:"smart_history_rows"`
+	SystemRows       int     `json:"system_history_rows"`
+	FindingRows      int     `json:"finding_rows"`
+	NotifyLogRows    int     `json:"notify_log_rows"`
+	ServiceCheckRows int     `json:"service_check_rows"`
+	AlertRows        int     `json:"alert_rows"`
+	OldestSnapshot   string  `json:"oldest_snapshot,omitempty"`
+	NewestSnapshot   string  `json:"newest_snapshot,omitempty"`
 }
 
 // GetDBStats returns statistics about the database contents.
@@ -1233,6 +1454,7 @@ func (d *DB) GetDBStats() (*DBStats, error) {
 		{"SELECT COUNT(*) FROM system_history", &stats.SystemRows},
 		{"SELECT COUNT(*) FROM findings", &stats.FindingRows},
 		{"SELECT COUNT(*) FROM notification_log", &stats.NotifyLogRows},
+		{"SELECT COUNT(*) FROM service_checks_history", &stats.ServiceCheckRows},
 		{"SELECT COUNT(*) FROM alerts", &stats.AlertRows},
 	} {
 		if err := d.db.QueryRow(q.query).Scan(q.dest); err != nil {
