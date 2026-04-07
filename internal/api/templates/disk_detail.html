@@ -7,22 +7,43 @@
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Literata:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap" rel="stylesheet">
 <script src="/js/charts.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
+:root,body.theme-midnight{
   --bg-base:#0f1011;--bg-surface:#191a1b;--bg-elevated:#242526;
   --text-primary:#f7f8f8;--text-secondary:#d0d6e0;--text-tertiary:#8a8f98;
   --accent:#5e6ad2;--accent-hover:#7170ff;
-  --green:#10b981;--green-bg:rgba(16,185,129,0.1);
+  --green:#27a644;--green-bg:rgba(39,166,68,0.1);
   --amber:#d97706;--amber-bg:rgba(217,119,6,0.1);
   --red:#dc2626;--red-bg:rgba(220,38,38,0.1);
   --border:rgba(255,255,255,0.08);
   --radius:8px;--sp:8px;
 }
+body.theme-clean{
+  --bg-base:#ffffff;--bg-surface:#ffffff;--bg-elevated:#fafafa;
+  --text-primary:#171717;--text-secondary:#4d4d4d;--text-tertiary:#808080;
+  --accent:#171717;--accent-hover:#404040;
+  --green:#16a34a;--green-bg:rgba(22,163,74,0.08);
+  --amber:#d97706;--amber-bg:rgba(217,119,6,0.08);
+  --red:#dc2626;--red-bg:rgba(220,38,38,0.08);
+  --border:rgba(0,0,0,0.08);
+}
+body.theme-ember{
+  --bg-base:#07080a;--bg-surface:#101111;--bg-elevated:#1a1b1c;
+  --text-primary:#f9f9f9;--text-secondary:#d0d0d0;--text-tertiary:#9c9c9d;
+  --accent:#55b3ff;--accent-hover:#7ec8ff;
+  --green:#5fc992;--green-bg:rgba(95,201,146,0.1);
+  --amber:#FACC15;--amber-bg:rgba(250,204,21,0.1);
+  --red:#FF6363;--red-bg:rgba(255,99,99,0.1);
+  --border:rgba(255,255,255,0.06);
+}
+body.theme-ember{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif}
+body.theme-ember .drive-title,body.theme-ember .section-title{font-family:'Literata','Georgia',serif}
+body.theme-ember .badge,body.theme-ember .attr-raw,body.theme-ember .attr-value{font-family:'JetBrains Mono',ui-monospace,'SF Mono',monospace}
 html{background:var(--bg-base);color:var(--text-primary);font-family:"Inter",system-ui,-apple-system,sans-serif;font-feature-settings:"cv01","ss03";font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
-body{min-height:100vh;padding:calc(var(--sp)*3)}
+body{min-height:100vh;padding:calc(var(--sp)*3);transition:background 0.2s,color 0.2s}
 a{color:var(--accent);text-decoration:none}
 a:hover{color:var(--accent-hover)}
 
@@ -137,6 +158,12 @@ a:hover{color:var(--accent-hover)}
 </div>
 
 <script>
+/* Theme detection */
+(function(){
+  function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
+  try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
+  fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
+})();
 (function(){
   "use strict";
 
@@ -300,10 +327,12 @@ a:hover{color:var(--accent-hover)}
     /* ── Header ────────────────────────────────────────────────── */
     html += "<div class=\"page-header\">";
     html += "<div class=\"header-left\">";
-    html += "<a href=\"/\" class=\"back-link\">";
-    html += "<svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">";
-    html += "<path d=\"M10 12L6 8L10 4\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>";
-    html += "</svg> Dashboard</a>";
+    html += "<div style=\"display:flex;gap:8px;margin-bottom:8px\">";
+    html += "<a href=\"/\" class=\"back-link\">Dashboard</a>";
+    html += "<a href=\"/alerts\" class=\"back-link\">Alerts</a>";
+    html += "<a href=\"/stats\" class=\"back-link\">Stats</a>";
+    html += "<a href=\"/settings\" class=\"back-link\" title=\"Settings\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:middle\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z\"/></svg></a>";
+    html += "</div>";
     html += "<h1 class=\"drive-title\">" + escHtml(disk.model || "Unknown Drive") + "</h1>";
     html += "<div class=\"badge-row\">";
     html += "<span class=\"badge\">" + escHtml(disk.serial || serial) + "</span>";
@@ -515,11 +544,11 @@ a:hover{color:var(--accent-hover)}
 
       var sparkColor = function(data, zeroGood) {
         var mx = Math.max.apply(null, data);
-        if (zeroGood) return mx > 0 ? "#d97706" : "#10b981";
+        if (zeroGood) return mx > 0 ? "#d97706" : "#27a644";
         return "#5e6ad2";
       };
 
-      NasChart.sparkline("sparkTemp", { data: tempData, color: disk.temperature >= 50 ? "#dc2626" : disk.temperature >= 40 ? "#d97706" : "#10b981", width: 120, height: 28 });
+      NasChart.sparkline("sparkTemp", { data: tempData, color: disk.temperature >= 50 ? "#dc2626" : disk.temperature >= 40 ? "#d97706" : "#27a644", width: 120, height: 28 });
       NasChart.sparkline("sparkRealloc", { data: reallocData, color: sparkColor(reallocData, true), width: 120, height: 28 });
       NasChart.sparkline("sparkPending", { data: pendingData, color: sparkColor(pendingData, true), width: 120, height: 28 });
       NasChart.sparkline("sparkCrc", { data: crcData, color: sparkColor(crcData, true), width: 120, height: 28 });
@@ -549,13 +578,13 @@ a:hover{color:var(--accent-hover)}
       /* ── Trend Charts ──────────────────────────────────────── */
       var hasNonZeroRealloc = Math.max.apply(null, reallocData) > 0;
       NasChart.area("chartRealloc", {
-        datasets: [{ data: reallocData, color: hasNonZeroRealloc ? "#dc2626" : "#10b981", label: "Reallocated" }],
+        datasets: [{ data: reallocData, color: hasNonZeroRealloc ? "#dc2626" : "#27a644", label: "Reallocated" }],
         labels: labels,
         yLabel: "Sectors"
       });
 
       NasChart.area("chartPending", {
-        datasets: [{ data: pendingData, color: Math.max.apply(null, pendingData) > 0 ? "#d97706" : "#10b981", label: "Pending" }],
+        datasets: [{ data: pendingData, color: Math.max.apply(null, pendingData) > 0 ? "#d97706" : "#27a644", label: "Pending" }],
         labels: labels,
         yLabel: "Sectors"
       });

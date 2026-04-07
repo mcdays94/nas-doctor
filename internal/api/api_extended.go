@@ -179,6 +179,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	// Fleet dashboard page
 	r.Get("/fleet", s.handleFleetPage)
 
+	// Alerts page
+	r.Get("/alerts", s.handleAlertsPage)
+
 	// Stats page
 	r.Get("/stats", s.handleStatsPage)
 	r.Post("/api/v1/backup", s.handleCreateBackup)
@@ -1658,6 +1661,13 @@ func (s *Server) handleUnsnoozeAlert(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(SettingsPage))
+}
+
+// handleAlertsPage serves the alerts HTML page.
+// GET /alerts
+func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(alertsPageHTML))
 }
 
 // handleDiskPage serves the disk detail HTML page.

@@ -5,25 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NAS Doctor — Fleet</title>
 <link rel="icon" href="/icon.png">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/shared.css">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0f1011;--surface:#191a1b;--text:#f7f8f8;--text2:#8a8f98;--text3:#5a5f6a;--accent:#5e6ad2;--green:#27a644;--amber:#d97706;--red:#dc2626;--border:rgba(255,255,255,0.08);--radius:10px}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+/* Fleet-specific styles */
+body{padding:0}
+.fleet-container{max-width:1100px;margin:0 auto;padding:24px}
 .container{max-width:1100px;margin:0 auto;padding:24px}
-.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px}
-.header-left{display:flex;align-items:center;gap:12px}
+/* Fleet-specific: header sizing, grid, fleet cards, health dots */
 .header-left img{width:28px;height:28px;border-radius:6px}
-.header-title{font-size:20px;font-weight:600;letter-spacing:-0.3px}
-.header-sub{font-size:13px;color:var(--text2)}
-.back{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);text-decoration:none;padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);transition:all 0.15s}
-.back:hover{color:var(--text);border-color:rgba(255,255,255,0.15)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;transition:border-color 0.15s}
-.card:hover{border-color:rgba(255,255,255,0.12)}
-.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.fleet-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;transition:border-color 0.15s}
+.fleet-card:hover{border-color:var(--border-hover)}
+.fleet-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .card-name{font-size:15px;font-weight:600}
-.card-hostname{font-size:12px;color:var(--text2);margin-top:2px}
+.card-hostname{font-size:12px;color:var(--text2);margin-top:2px;font-family:var(--font-mono)}
 .health-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 .health-dot.healthy{background:var(--green)}
 .health-dot.warning{background:var(--amber)}
@@ -32,36 +27,42 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .stats{display:flex;gap:16px;margin-top:12px;font-size:12px;color:var(--text2)}
 .stat-val{font-weight:600;color:var(--text)}
 .findings-row{display:flex;gap:10px;margin-top:10px}
-.pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px}
 .pill-crit{background:rgba(220,38,38,0.1);color:var(--red)}
 .pill-warn{background:rgba(217,119,6,0.1);color:var(--amber)}
 .pill-info{background:rgba(94,106,210,0.1);color:var(--accent)}
 .error-msg{font-size:12px;color:var(--red);margin-top:8px}
 .empty{text-align:center;padding:60px 20px;color:var(--text2)}
 .empty-title{font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px}
-.add-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;background:var(--accent);color:#fff;border:none;border-radius:9999px;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;text-decoration:none;transition:background 0.15s}
-.add-btn:hover{background:#7170ff}
+.add-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:background 0.15s}
+.add-btn:hover{background:var(--accent-hover)}
 a.card-link{text-decoration:none;color:inherit;display:block}
 </style>
 </head>
 <body>
-<div class="container">
+<div class="fleet-container">
   <div class="header">
-    <a href="/" class="header-left" style="text-decoration:none;color:inherit">
-      <img src="/icon.png" alt="">
-      <div>
-        <div class="header-title">Fleet Overview</div>
-        <div class="header-sub">Monitor all your NAS Doctor instances</div>
-      </div>
-    </a>
-    <div style="display:flex;gap:8px">
-      <a href="/" class="back">&larr; Dashboard</a>
-      <a href="/settings" class="back">Settings</a>
+    <div class="header-left">
+      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a>
+      <span class="page-title">Fleet</span>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link">Dashboard</a>
+      <a href="/alerts" class="nav-link">Alerts</a>
+      <a href="/stats" class="nav-link">Stats</a>
+      <a href="/fleet" class="nav-link active">Fleet</a>
+      <a href="/settings" class="nav-link" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
+      <a href="https://github.com/mcdays94/nas-doctor" class="nav-link" target="_blank" title="GitHub"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.02 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.82.58C20.56 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
     </div>
   </div>
   <div id="app"></div>
 </div>
 <script>
+/* Theme detection */
+(function(){
+  function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
+  try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
+  fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
+})();
 (function() {
   function esc(s) { var d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
 
@@ -80,8 +81,8 @@ a.card-link{text-decoration:none;color:inherit;display:block}
       var url = s.server.url || "#";
 
       h += '<a class="card-link" href="' + esc(url) + '" target="_blank">';
-      h += '<div class="card">';
-      h += '<div class="card-header">';
+      h += '<div class="fleet-card">';
+      h += '<div class="fleet-card-header">';
       h += '<div><div class="card-name">' + esc(s.server.name || s.hostname || "Unknown") + '</div>';
       if (s.hostname && s.hostname !== s.server.name) h += '<div class="card-hostname">' + esc(s.hostname) + '</div>';
       h += '</div>';

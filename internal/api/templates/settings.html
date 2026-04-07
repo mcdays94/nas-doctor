@@ -7,117 +7,14 @@
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/shared.css">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-/* Midnight theme (default) */
-:root, body.theme-midnight{
-  --bg:#0f1011;--surface:#191a1b;--text:#f7f8f8;--text2:#8a8f98;
-  --accent:#5e6ad2;--accent-hover:#7170ff;--success:#27a644;--error:#dc2626;
-  --border:rgba(255,255,255,0.08);--radius:8px;
-  --input-bg:rgba(255,255,255,0.04);--code-bg:rgba(255,255,255,0.06);
-}
-/* Clean theme */
-body.theme-clean{
-  --bg:#ffffff;--surface:#ffffff;--text:#171717;--text2:#808080;
-  --accent:#171717;--accent-hover:#404040;--success:#16a34a;--error:#dc2626;
-  --border:rgba(0,0,0,0.08);--radius:8px;
-  --input-bg:rgba(0,0,0,0.03);--code-bg:rgba(0,0,0,0.04);
-}
-body.theme-clean a{color:#171717}
-body.theme-clean a:hover{color:#404040}
-body.theme-clean .btn-primary{background:#171717;border-color:#171717}
-body.theme-clean .btn-primary:hover{background:#333}
-body.theme-clean .btn-secondary{background:#fff;color:#4d4d4d;border-color:rgba(0,0,0,0.15)}
-body.theme-clean .btn-secondary:hover{color:#171717;background:#fafafa;border-color:rgba(0,0,0,0.2)}
-body.theme-clean .btn-danger{background:rgba(220,38,38,0.06);border-color:rgba(220,38,38,0.15)}
-body.theme-clean .btn-success{background:rgba(22,163,74,0.06);color:var(--success);border-color:rgba(22,163,74,0.15)}
-body.theme-clean .card{border-color:rgba(0,0,0,0.08);box-shadow:0 1px 3px rgba(0,0,0,0.04)}
-body.theme-clean .toggle{background:rgba(0,0,0,0.1)}
-body.theme-clean .toggle.on{background:var(--accent)}
-body.theme-clean .webhook-item{background:rgba(0,0,0,0.01);border-color:rgba(0,0,0,0.08)}
-body.theme-clean .webhook-item:hover{background:rgba(0,0,0,0.03)}
-body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,0.02)}
-body.theme-clean .theme-option{border-color:rgba(0,0,0,0.12)}
-body.theme-clean .theme-option:hover{border-color:rgba(0,0,0,0.2)}
-body.theme-clean .theme-option.active{border-color:var(--accent);background:rgba(0,0,0,0.03)}
-body.theme-clean .log-table th{color:#808080;border-bottom-color:rgba(0,0,0,0.08)}
-body.theme-clean .log-table td{color:#171717;border-bottom-color:rgba(0,0,0,0.04)}
-body.theme-clean .log-table tr:hover td{background:rgba(0,0,0,0.02)}
-body.theme-clean .swatch{border-color:rgba(0,0,0,0.1)}
-body.theme-clean select,body.theme-clean input[type="text"],body.theme-clean input[type="url"],body.theme-clean input[type="password"],body.theme-clean input[type="number"]{
-  background:var(--input-bg);border-color:rgba(0,0,0,0.12);color:var(--text)}
-body.theme-clean select:focus,body.theme-clean input:focus{border-color:var(--accent)}
-body.theme-clean .back-link{color:#808080;border-color:rgba(0,0,0,0.12)}
-body.theme-clean .back-link:hover{color:#171717;border-color:rgba(0,0,0,0.2);background:rgba(0,0,0,0.02)}
-body.theme-clean .coming-soon::after{color:var(--accent);background:rgba(0,0,0,0.05)}
-/* Ember theme */
-body.theme-ember{
-  --bg:#07080a;--surface:#101111;--text:#f9f9f9;--text2:#9c9c9d;
-  --accent:#55b3ff;--accent-hover:#7ec8ff;--success:#5fc992;--error:#FF6363;
-  --border:rgba(255,255,255,0.06);--radius:8px;
-  --input-bg:rgba(255,255,255,0.04);--code-bg:rgba(255,255,255,0.06);
-}
-body.theme-ember .btn-primary{background:var(--accent);border-color:var(--accent)}
-body.theme-ember .btn-primary:hover{background:var(--accent-hover)}
-body.theme-ember .coming-soon::after{color:var(--accent);background:rgba(85,179,255,0.12)}
-html{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
-body{min-height:100vh;padding:24px;transition:background 0.2s ease,color 0.2s ease}
-a{color:var(--accent);text-decoration:none}
-a:hover{color:var(--accent-hover)}
-
-.container{max-width:860px;margin:0 auto}
-
-/* Header */
-.header{display:flex;align-items:center;justify-content:space-between;padding:16px 0;margin-bottom:32px;border-bottom:1px solid var(--border)}
-.header-left{display:flex;align-items:center;gap:16px}
-.logo{display:flex;align-items:center;gap:8px;font-size:20px;font-weight:600;letter-spacing:-0.5px;color:var(--text)}
-.logo img{width:24px;height:24px;border-radius:4px}
-.page-title{font-size:20px;font-weight:600;color:var(--text2)}
-.back-link{font-size:13px;font-weight:500;padding:6px 14px;border-radius:var(--radius);border:1px solid var(--border);color:var(--text2);transition:all 0.15s}
-.back-link:hover{color:var(--text);border-color:rgba(255,255,255,0.15);background:rgba(255,255,255,0.03)}
-
-/* Cards */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:24px;transition:background 0.2s ease,border-color 0.2s ease}
-.card-title{font-size:16px;font-weight:600;margin-bottom:4px}
-.card-desc{font-size:13px;color:var(--text2);margin-bottom:20px}
-
-/* Form elements */
-label{display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px}
-select,input[type="text"],input[type="url"],input[type="password"],input[type="number"]{
-  width:100%;padding:8px 12px;background:var(--input-bg);border:1px solid var(--border);
-  border-radius:var(--radius);color:var(--text);font-size:14px;font-family:inherit;outline:none;transition:border 0.15s}
-select:focus,input:focus{border-color:var(--accent)}
-select{cursor:pointer;-webkit-appearance:none;appearance:none;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238a8f98'%3E%3Cpath d='M6 8.5L1 3.5h10z'/%3E%3C/svg%3E");
-  background-repeat:no-repeat;background-position:right 10px center}
-input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
-/* Sticky save bar */
-.save-bar{position:fixed;bottom:0;left:0;right:0;z-index:100;background:var(--surface);border-top:1px solid var(--border);padding:12px 24px;transform:translateY(100%);transition:transform 0.25s ease;box-shadow:0 -4px 20px rgba(0,0,0,0.3)}
-.save-bar.visible{transform:translateY(0)}
-.save-bar-inner{max-width:840px;margin:0 auto;display:flex;align-items:center;justify-content:space-between}
-.save-bar-text{font-size:13px;color:var(--text2)}
-
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
-@media(max-width:600px){.form-row{grid-template-columns:1fr}}
-.form-group{margin-bottom:16px}
-
-/* Buttons */
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:var(--radius);font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;border:1px solid transparent;transition:all 0.15s}
-.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-.btn-primary:hover{background:var(--accent-hover)}
-.btn-secondary{background:rgba(255,255,255,0.04);color:var(--text2);border-color:var(--border)}
-.btn-secondary:hover{color:var(--text);border-color:rgba(255,255,255,0.15);background:rgba(255,255,255,0.06)}
-.btn-danger{background:rgba(220,38,38,0.1);color:var(--error);border-color:rgba(220,38,38,0.2)}
-.btn-danger:hover{background:rgba(220,38,38,0.18)}
-.btn-success{background:rgba(39,166,68,0.1);color:var(--success);border-color:rgba(39,166,68,0.2)}
-.btn:disabled{opacity:0.4;cursor:not-allowed}
-.btn-sm{padding:5px 10px;font-size:12px}
+/* Settings-specific styles only */
 
 /* Theme swatches */
 .theme-options{display:flex;gap:12px;margin-bottom:16px}
 .theme-option{display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;transition:all 0.15s;background:transparent}
-.theme-option:hover{border-color:rgba(255,255,255,0.15)}
+.theme-option:hover{border-color:var(--border-hover)}
 .theme-option.active{border-color:var(--accent);background:rgba(94,106,210,0.06)}
 .theme-option input{display:none}
 .swatch{width:24px;height:24px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);flex-shrink:0}
@@ -125,78 +22,13 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
 .swatch-clean{background:linear-gradient(135deg,#ffffff 50%,#000000 50%)}
 .swatch-ember{background:linear-gradient(135deg,#1a1a1a 50%,#f97316 50%)}
 .theme-name{font-size:13px;font-weight:500;color:var(--text)}
-
-/* Toggle */
-.toggle-wrap{display:flex;align-items:center;gap:10px;cursor:pointer}
-.toggle{position:relative;width:40px;height:22px;background:rgba(255,255,255,0.1);border-radius:11px;transition:background 0.2s;flex-shrink:0}
-.toggle.on{background:var(--accent)}
-.toggle-knob{position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:left 0.2s}
-.toggle.on .toggle-knob{left:20px}
-.toggle-label{font-size:13px;color:var(--text2)}
-
-/* Webhooks list */
-.webhook-item{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;background:rgba(255,255,255,0.02);transition:background 0.15s}
-.webhook-item:hover{background:rgba(255,255,255,0.04)}
-.webhook-info{flex:1;min-width:0}
-.webhook-name{font-size:14px;font-weight:600;color:var(--text)}
-.webhook-url{font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
-.badge{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:2px 8px;border-radius:4px;margin-left:8px}
-.badge-discord{background:rgba(88,101,242,0.15);color:#5865f2}
-.badge-slack{background:rgba(74,21,75,0.15);color:#e01e5a}
-.badge-gotify{background:rgba(16,185,129,0.15);color:#10b981}
-.badge-ntfy{background:rgba(59,130,246,0.15);color:#3b82f6}
-.badge-generic{background:rgba(255,255,255,0.08);color:var(--text2)}
-.webhook-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
-
-/* Webhook form */
-.webhook-form{border:1px solid var(--accent);border-radius:var(--radius);padding:20px;margin-top:12px;background:rgba(94,106,210,0.04);display:none}
-.webhook-form.visible{display:block}
-.webhook-form-actions{display:flex;gap:8px;margin-top:16px}
-
-/* Coming soon overlay */
-.coming-soon{position:relative}
-.coming-soon::after{content:"Coming Soon";position:absolute;top:12px;right:12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);background:rgba(94,106,210,0.12);padding:3px 10px;border-radius:4px}
-.coming-soon .form-group{opacity:0.4;pointer-events:none}
-
-/* Notification log table */
-.log-table{width:100%;border-collapse:collapse}
-.log-table th{text-align:left;font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;padding:8px 12px;border-bottom:1px solid var(--border)}
-.log-table td{padding:8px 12px;font-size:13px;color:var(--text);border-bottom:1px solid rgba(255,255,255,0.04);white-space:nowrap}
-.log-table tr:hover td{background:rgba(255,255,255,0.02)}
-.status-badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px}
-.status-success{color:var(--success);background:rgba(39,166,68,0.12)}
-.status-failed{color:var(--error);background:rgba(220,38,38,0.12)}
-.status-up{color:var(--success);background:rgba(39,166,68,0.12)}
-.status-down{color:var(--error);background:rgba(220,38,38,0.12)}
-.status-open{color:var(--text);background:rgba(255,255,255,0.08)}
-.status-acknowledged{color:#f59e0b;background:rgba(245,158,11,0.12)}
-.status-snoozed{color:#3b82f6;background:rgba(59,130,246,0.12)}
-.status-resolved{color:var(--success);background:rgba(39,166,68,0.12)}
-.log-empty{text-align:center;padding:32px;color:var(--text2);font-size:13px}
-.log-refresh{font-size:12px;color:var(--text2);margin-top:8px}
-.overflow-x{overflow-x:auto}
-
-.mini-list-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;background:rgba(255,255,255,0.02)}
-.mini-list-main{flex:1;min-width:0}
-.mini-list-title{font-size:13px;font-weight:600;color:var(--text)}
-.mini-list-sub{font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pill{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:2px 8px;border-radius:999px}
-.pill-http{background:rgba(59,130,246,0.14);color:#60a5fa}
-.pill-tcp{background:rgba(16,185,129,0.14);color:#34d399}
-.pill-dns{background:rgba(236,72,153,0.14);color:#f472b6}
-.pill-smb,.pill-nfs{background:rgba(245,158,11,0.14);color:#fbbf24}
-.inline-muted{font-size:11px;color:var(--text2)}
-.chart-card{background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);padding:10px}
-.chart-label{font-size:12px;color:var(--text2);margin-bottom:6px}
-
-/* Toasts */
-.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-.toast{padding:10px 18px;border-radius:var(--radius);font-size:13px;font-weight:500;color:#fff;animation:toast-in 0.25s ease;pointer-events:none}
-.toast-success{background:var(--success)}
-.toast-error{background:var(--error)}
-.toast-info{background:var(--accent)}
-@keyframes toast-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
-@keyframes toast-out{from{opacity:1}to{opacity:0;transform:translateY(-8px)}}
+/* cron preview mono */
+#scan-cron-preview{font-family:var(--font-mono);font-size:11px}
+body.theme-clean .theme-option{border-color:rgba(0,0,0,0.12)}
+body.theme-clean .theme-option:hover{border-color:rgba(0,0,0,0.2)}
+body.theme-clean .theme-option.active{border-color:var(--accent);background:rgba(0,0,0,0.03)}
+body.theme-clean .swatch{border-color:rgba(0,0,0,0.1)}
+body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,0.02)}
 </style>
 </head>
 <body>
@@ -209,7 +41,25 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
       <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a>
       <span class="page-title">Settings</span>
     </div>
-    <a href="/" class="back-link">&#8592; Dashboard</a>
+    <div class="nav-links">
+      <a href="/" class="nav-link">Dashboard</a>
+      <a href="/alerts" class="nav-link">Alerts</a>
+      <a href="/stats" class="nav-link">Stats</a>
+      <a href="/fleet" class="nav-link">Fleet</a>
+      <a href="/settings" class="nav-link active" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
+    </div>
+  </div>
+
+  <!-- Section navigation -->
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px;padding:8px 0;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50;background:var(--bg)">
+    <a href="#card-general" class="btn btn-secondary btn-sm" style="text-decoration:none">General</a>
+    <a href="#card-webhooks" class="btn btn-secondary btn-sm" style="text-decoration:none">Webhooks</a>
+    <a href="#card-notification-behavior" class="btn btn-secondary btn-sm" style="text-decoration:none">Behavior</a>
+    <a href="#card-service-checks" class="btn btn-secondary btn-sm" style="text-decoration:none">Services</a>
+    <a href="#card-fleet" class="btn btn-secondary btn-sm" style="text-decoration:none">Fleet</a>
+    <a href="#card-sections" class="btn btn-secondary btn-sm" style="text-decoration:none">Dashboard</a>
+    <a href="#card-retention" class="btn btn-secondary btn-sm" style="text-decoration:none">Data</a>
+    <a href="#card-backup" class="btn btn-secondary btn-sm" style="text-decoration:none">Backup</a>
   </div>
 
   <!-- 1. General -->
@@ -332,10 +182,178 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
           <input type="password" id="wh-secret" placeholder="Leave blank if not needed">
         </div>
       </div>
+      <div class="form-group" style="margin-top:12px">
+        <label style="cursor:pointer;user-select:none" onclick="document.getElementById('wh-headers-panel').style.display=document.getElementById('wh-headers-panel').style.display==='none'?'block':'none'">Custom Headers (optional) &#9662;</label>
+        <div id="wh-headers-panel" style="display:none;margin-top:8px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
+          <div id="wh-headers-list"></div>
+          <button class="btn btn-secondary btn-sm" onclick="addWebhookHeader()" style="margin-top:8px">+ Add Header</button>
+        </div>
+      </div>
       <div class="webhook-form-actions">
         <button class="btn btn-primary" onclick="saveWebhook()">Save Webhook</button>
         <button class="btn btn-success btn-sm" onclick="testWebhook()">Test</button>
         <button class="btn btn-secondary" onclick="cancelWebhookForm()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2b. Notification Behavior — Policies, Quiet Hours, Maintenance Windows -->
+  <div class="card" id="card-notification-behavior">
+    <div class="card-title">Notification Behavior</div>
+    <div class="card-desc">Configure alert routing policies, quiet hours, maintenance windows, and deduplication cooldown.</div>
+
+    <!-- Default cooldown -->
+    <div class="form-group">
+      <label for="notif-cooldown">Default notification cooldown (minutes)</label>
+      <div style="display:flex;gap:8px;align-items:center;max-width:200px">
+        <input type="number" id="notif-cooldown" min="0" max="1440" value="15" style="text-align:center">
+      </div>
+      <p style="font-size:11px;color:var(--text2);margin-top:4px">Minimum time between repeated notifications for the same alert. Set 0 to disable.</p>
+    </div>
+
+    <!-- Quiet Hours -->
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:14px;font-weight:600">Quiet Hours</div>
+        <div class="toggle-wrap" onclick="document.getElementById('qh-enabled').checked=!document.getElementById('qh-enabled').checked;this.querySelector('.toggle').classList.toggle('on',document.getElementById('qh-enabled').checked)">
+          <div class="toggle" id="qh-toggle"><div class="toggle-knob"></div></div>
+          <input type="checkbox" id="qh-enabled" style="display:none">
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Suppress notifications during a daily time window. Alerts are still recorded.</p>
+      <div class="form-row">
+        <div>
+          <label for="qh-timezone">Timezone</label>
+          <select id="qh-timezone">
+            <option value="UTC">UTC</option>
+            <option value="America/New_York">America/New_York</option>
+            <option value="America/Chicago">America/Chicago</option>
+            <option value="America/Denver">America/Denver</option>
+            <option value="America/Los_Angeles">America/Los_Angeles</option>
+            <option value="Europe/London">Europe/London</option>
+            <option value="Europe/Paris">Europe/Paris</option>
+            <option value="Europe/Berlin">Europe/Berlin</option>
+            <option value="Europe/Lisbon">Europe/Lisbon</option>
+            <option value="Asia/Tokyo">Asia/Tokyo</option>
+            <option value="Asia/Shanghai">Asia/Shanghai</option>
+            <option value="Australia/Sydney">Australia/Sydney</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px">
+          <div style="flex:1">
+            <label for="qh-start">Start</label>
+            <input type="text" id="qh-start" placeholder="22:00" value="22:00" style="text-align:center">
+          </div>
+          <div style="flex:1">
+            <label for="qh-end">End</label>
+            <input type="text" id="qh-end" placeholder="07:00" value="07:00" style="text-align:center">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Maintenance Windows -->
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:14px;font-weight:600">Maintenance Windows</div>
+        <button class="btn btn-secondary btn-sm" onclick="toggleMaintenanceForm()">+ Add Window</button>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Explicitly suppress notifications during scheduled maintenance periods.</p>
+      <div id="maintenance-list"></div>
+      <div class="webhook-form" id="maintenance-form">
+        <input type="hidden" id="mw-edit-index" value="-1">
+        <div class="form-row">
+          <div>
+            <label for="mw-name">Name</label>
+            <input type="text" id="mw-name" placeholder="e.g. Monthly parity check">
+          </div>
+          <div>
+            <div class="toggle-wrap" style="margin-top:20px" onclick="document.getElementById('mw-enabled').checked=!document.getElementById('mw-enabled').checked;this.querySelector('.toggle').classList.toggle('on',document.getElementById('mw-enabled').checked)">
+              <div class="toggle on"><div class="toggle-knob"></div></div>
+              <span class="toggle-label">Enabled</span>
+              <input type="checkbox" id="mw-enabled" checked style="display:none">
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="mw-start">Start (ISO 8601)</label>
+            <input type="text" id="mw-start" placeholder="2026-04-10T02:00:00Z">
+          </div>
+          <div>
+            <label for="mw-end">End (ISO 8601)</label>
+            <input type="text" id="mw-end" placeholder="2026-04-10T06:00:00Z">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="mw-hostnames">Hostnames (comma-separated, leave blank for all)</label>
+          <input type="text" id="mw-hostnames" placeholder="e.g. nas1,nas2">
+        </div>
+        <div class="webhook-form-actions">
+          <button class="btn btn-primary" onclick="saveMaintenanceWindow()">Save Window</button>
+          <button class="btn btn-secondary" onclick="cancelMaintenanceForm()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notification Policies -->
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:14px;font-weight:600">Notification Policies</div>
+        <button class="btn btn-secondary btn-sm" onclick="togglePolicyForm()">+ Add Policy</button>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Route alerts to specific webhooks by severity, category, and hostname. Policies override the default webhook min-level.</p>
+      <div id="policy-list"></div>
+      <div class="webhook-form" id="policy-form">
+        <input type="hidden" id="pol-edit-index" value="-1">
+        <div class="form-row">
+          <div>
+            <label for="pol-name">Policy Name</label>
+            <input type="text" id="pol-name" placeholder="e.g. Critical to Discord">
+          </div>
+          <div>
+            <label for="pol-webhook">Target Webhook</label>
+            <select id="pol-webhook"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="pol-severity">Minimum Severity</label>
+            <select id="pol-severity">
+              <option value="critical">Critical</option>
+              <option value="warning">Warning</option>
+              <option value="info" selected>Info</option>
+            </select>
+          </div>
+          <div>
+            <label for="pol-cooldown">Cooldown (seconds)</label>
+            <input type="number" id="pol-cooldown" min="0" max="86400" value="900" style="text-align:center">
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="pol-categories">Categories (comma-separated, or leave blank for all)</label>
+            <input type="text" id="pol-categories" placeholder="e.g. storage,network,system">
+          </div>
+          <div>
+            <label for="pol-hostnames">Hostnames (comma-separated, or blank for all)</label>
+            <input type="text" id="pol-hostnames" placeholder="e.g. nas1,nas2">
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <div class="toggle-wrap" onclick="document.getElementById('pol-enabled').checked=!document.getElementById('pol-enabled').checked;this.querySelector('.toggle').classList.toggle('on',document.getElementById('pol-enabled').checked)">
+              <div class="toggle on"><div class="toggle-knob"></div></div>
+              <span class="toggle-label">Enabled</span>
+              <input type="checkbox" id="pol-enabled" checked style="display:none">
+            </div>
+          </div>
+          <div></div>
+        </div>
+        <div class="webhook-form-actions">
+          <button class="btn btn-primary" onclick="savePolicy()">Save Policy</button>
+          <button class="btn btn-secondary" onclick="cancelPolicyForm()">Cancel</button>
+        </div>
       </div>
     </div>
   </div>
@@ -496,6 +514,7 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <input type="text" id="fleet-name" placeholder="Server name" style="flex:1;min-width:120px">
       <input type="url" id="fleet-url" placeholder="http://192.168.1.50:8080" style="flex:2;min-width:200px">
+      <input type="password" id="fleet-apikey" placeholder="API Key (optional)" style="flex:1;min-width:120px">
       <button class="btn-secondary" onclick="addFleetServer()">Add Server</button>
     </div>
     <div style="margin-top:8px"><a href="/fleet" style="color:var(--accent);font-size:13px">Open Fleet Dashboard &rarr;</a></div>
@@ -573,112 +592,10 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 9. Alerts -->
-  <div class="card" id="card-alerts">
-    <div class="card-title">Alerts</div>
-    <div class="card-desc">Manage active alerts with acknowledge/snooze actions and inspect lifecycle timelines.</div>
-    <div class="form-row" style="margin-bottom:10px">
-      <div>
-        <label for="alerts-filter-status">Status filter</label>
-        <select id="alerts-filter-status" onchange="loadAlerts()">
-          <option value="open">Open</option>
-          <option value="acknowledged">Acknowledged</option>
-          <option value="snoozed">Snoozed</option>
-          <option value="resolved">Resolved</option>
-          <option value="">All</option>
-        </select>
-      </div>
-      <div style="display:flex;align-items:flex-end">
-        <button class="btn btn-secondary" onclick="loadAlerts()">Refresh Alerts</button>
-      </div>
-    </div>
-    <div class="overflow-x">
-      <table class="log-table">
-        <thead>
-          <tr><th>ID</th><th>Severity</th><th>Title</th><th>Status</th><th>Created</th><th>Actions</th></tr>
-        </thead>
-        <tbody id="alerts-body">
-          <tr><td colspan="6" class="log-empty">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <div id="alert-events-panel" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>
-  </div>
-
-  <!-- 10. Incident Timeline -->
-  <div class="card" id="card-incidents">
-    <div class="card-title">Incident Timeline & Correlation</div>
-    <div class="card-desc">Correlate alerts and notifications against CPU, memory, I/O wait, and average disk temperature over selectable windows.</div>
-    <div class="form-row" style="margin-bottom:10px">
-      <div>
-        <label for="timeline-range">Time range</label>
-        <select id="timeline-range" onchange="loadIncidentTimeline()">
-          <option value="24h">Last 24 hours</option>
-          <option value="7d" selected>Last 7 days</option>
-          <option value="30d">Last 30 days</option>
-        </select>
-      </div>
-      <div>
-        <label for="timeline-severity">Severity filter</label>
-        <select id="timeline-severity" onchange="loadIncidentTimeline()">
-          <option value="">All severities</option>
-          <option value="critical">Critical</option>
-          <option value="warning">Warning</option>
-          <option value="info">Info</option>
-        </select>
-      </div>
-    </div>
-    <div class="chart-card" style="margin-bottom:10px">
-      <div class="chart-label">Metrics (downsampled)</div>
-      <canvas id="timeline-metrics-chart" width="900" height="180" style="width:100%;height:180px"></canvas>
-    </div>
-    <div class="overflow-x">
-      <table class="log-table">
-        <thead>
-          <tr><th>Time</th><th>Type</th><th>Severity</th><th>Title/Source</th><th>Status</th><th>Actions</th></tr>
-        </thead>
-        <tbody id="timeline-body">
-          <tr><td colspan="6" class="log-empty">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <div id="timeline-correlation" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>
-  </div>
-
-  <!-- 11. Predictive Trends -->
-  <div class="card" id="card-trends">
-    <div class="card-title">Predictive Trend Intelligence</div>
-    <div class="card-desc">Worsening-pattern detection for SMART counters with urgency and confidence guidance, plus parity risk markers.</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      <button class="btn btn-secondary" onclick="loadSmartTrends()">Refresh Trends</button>
-    </div>
-    <div id="parity-trend-summary" style="margin-bottom:10px;font-size:12px;color:var(--text2)"></div>
-    <div class="overflow-x">
-      <table class="log-table">
-        <thead>
-          <tr><th>Drive</th><th>Risk</th><th>Urgency</th><th>Confidence</th><th>Deltas</th><th>Recommendation</th></tr>
-        </thead>
-        <tbody id="smart-trends-body">
-          <tr><td colspan="6" class="log-empty">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- 12. Notification History -->
-  <div class="card" id="card-history">
-    <div class="card-title">Notification History</div>
-    <div class="card-desc">Recent webhook delivery attempts. <span class="log-refresh">Auto-refreshes every 30s.</span></div>
-    <div class="overflow-x">
-      <table class="log-table">
-        <thead>
-          <tr><th>Time</th><th>Webhook</th><th>Type</th><th>Status</th><th>Findings</th><th>Error</th></tr>
-        </thead>
-        <tbody id="log-body">
-          <tr><td colspan="6" class="log-empty">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
+  <!-- Alerts, Incidents, Trends, and Notification History have moved to /alerts -->
+  <div class="card" style="background:transparent;border-style:dashed;text-align:center;padding:20px">
+    <div style="font-size:13px;color:var(--text2)">Alerts, Incidents, Trends, and Notification History have moved to their own dedicated page.</div>
+    <a href="/alerts" style="display:inline-block;margin-top:10px;padding:8px 20px;border-radius:var(--radius);background:var(--accent);color:#fff;font-size:13px;font-weight:600;text-decoration:none">Open Alerts &rarr;</a>
   </div>
 
 </div>
@@ -917,6 +834,22 @@ function loadSettings() {
       document.getElementById("backup-path").value = bk.path || "";
       document.getElementById("backup-keep").value = bk.keep_count || 4;
       setBackupIntervalUI(bk.interval_hours || 168);
+      /* Notification behavior */
+      var notif = data.notifications || {};
+      document.getElementById("notif-cooldown").value = Math.round((notif.default_cooldown_sec || 900) / 60);
+      /* Quiet hours */
+      var qh = notif.quiet_hours || {};
+      if (qh.enabled) { document.getElementById("qh-toggle").classList.add("on"); document.getElementById("qh-enabled").checked = true; }
+      else { document.getElementById("qh-toggle").classList.remove("on"); document.getElementById("qh-enabled").checked = false; }
+      document.getElementById("qh-timezone").value = qh.timezone || "UTC";
+      document.getElementById("qh-start").value = qh.start || "22:00";
+      document.getElementById("qh-end").value = qh.end || "07:00";
+      /* Maintenance windows */
+      maintenanceWindows = notif.maintenance_windows || [];
+      renderMaintenanceWindows();
+      /* Policies */
+      policies = notif.policies || [];
+      renderPolicies();
     })
     .catch(function(e) { showToast("Failed to load settings: " + e, "error"); });
 }
@@ -924,8 +857,19 @@ function loadSettings() {
 /* ---------- Save settings ---------- */
 function buildSettingsPayload() {
   var base = settings || {};
-  var notifications = base.notifications || {};
-  notifications.webhooks = webhooks;
+  var cooldownMin = parseInt(document.getElementById("notif-cooldown").value, 10) || 0;
+  var notifications = {
+    webhooks: webhooks,
+    policies: policies,
+    quiet_hours: {
+      enabled: document.getElementById("qh-enabled").checked,
+      timezone: document.getElementById("qh-timezone").value,
+      start: document.getElementById("qh-start").value.trim() || "22:00",
+      end: document.getElementById("qh-end").value.trim() || "07:00"
+    },
+    maintenance_windows: maintenanceWindows,
+    default_cooldown_sec: cooldownMin * 60
+  };
 
   return {
     scan_interval: getScanInterval(),
@@ -974,6 +918,8 @@ function saveSettings() {
   .then(function(saved) {
     settings = saved;
     webhooks = (saved.notifications && saved.notifications.webhooks) ? saved.notifications.webhooks : webhooks;
+    policies = (saved.notifications && saved.notifications.policies) ? saved.notifications.policies : policies;
+    maintenanceWindows = (saved.notifications && saved.notifications.maintenance_windows) ? saved.notifications.maintenance_windows : maintenanceWindows;
     serviceChecks = (saved.service_checks && saved.service_checks.checks) ? saved.service_checks.checks : serviceChecks;
     showToast("Settings saved", "success");
     markSaved();
@@ -981,6 +927,8 @@ function saveSettings() {
     applyTheme(payload.theme);
     try { localStorage.setItem("nas-doctor-theme", payload.theme); } catch(e) {}
     renderWebhooks();
+    renderPolicies();
+    renderMaintenanceWindows();
     renderServiceChecks();
     loadServiceCheckResults();
   })
@@ -1391,364 +1339,9 @@ function viewServiceCheckHistory(key, name) {
     });
 }
 
-/* ---------- Notification log ---------- */
-function loadNotificationLog() {
-  fetch("/api/v1/notifications/log")
-    .then(function(r) { return r.json(); })
-    .then(function(entries) {
-      var tbody = document.getElementById("log-body");
-      if (!entries || entries.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No notifications sent yet.</td></tr>';
-        return;
-      }
-      var html = "";
-      for (var i = 0; i < entries.length; i++) {
-        var e = entries[i];
-        var ts = e.created_at ? new Date(e.created_at).toLocaleString() : "—";
-        var st = String(e.status || "").toLowerCase();
-        var statusCls = (st === "sent" || st === "success") ? "status-success" : (st.indexOf("suppressed") === 0 ? "status-open" : "status-failed");
-        var badgeClass = "badge-" + (e.webhook_type || "generic");
-        var typeName = (e.webhook_type || "generic").charAt(0).toUpperCase() + (e.webhook_type || "generic").slice(1);
-        html += "<tr>";
-        html += "<td>" + escapeHtml(ts) + "</td>";
-        html += "<td>" + escapeHtml(e.webhook_name || "—") + "</td>";
-        html += '<td><span class="badge ' + badgeClass + '">' + typeName + "</span></td>";
-        html += '<td><span class="status-badge ' + statusCls + '">' + escapeHtml(e.status || "unknown") + "</span></td>";
-        html += "<td>" + (e.findings_count != null ? e.findings_count : "—") + "</td>";
-        html += "<td>" + escapeHtml(e.error_message || "—") + "</td>";
-        html += "</tr>";
-      }
-      tbody.innerHTML = html;
-    })
-    .catch(function() {
-      document.getElementById("log-body").innerHTML = '<tr><td colspan="6" class="log-empty">Failed to load log.</td></tr>';
-    });
-}
+/* ---------- Alerts, Incidents, Trends, Notification History have moved to /alerts ---------- */
 
-/* ---------- Alerts ---------- */
-function statusClassForAlert(status) {
-  var s = (status || "").toLowerCase();
-  if (s === "open") return "status-open";
-  if (s === "acknowledged") return "status-acknowledged";
-  if (s === "snoozed") return "status-snoozed";
-  if (s === "resolved") return "status-resolved";
-  return "status-open";
-}
-
-function loadAlerts() {
-  var status = document.getElementById("alerts-filter-status") ? document.getElementById("alerts-filter-status").value : "open";
-  var qs = status ? ("?status=" + encodeURIComponent(status)) : "";
-  fetch("/api/v1/alerts" + qs)
-    .then(function(r) { return r.json(); })
-    .then(function(alerts) {
-      var tbody = document.getElementById("alerts-body");
-      if (!tbody) return;
-      if (!alerts || alerts.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No alerts for this filter.</td></tr>';
-        return;
-      }
-      var html = "";
-      for (var i = 0; i < alerts.length; i++) {
-        var a = alerts[i];
-        var sev = escapeHtml(a.severity || "—");
-        var created = a.created_at ? new Date(a.created_at).toLocaleString() : "—";
-        var statusLabel = a.status || "open";
-        if (a.suppression_reason) statusLabel += " (" + a.suppression_reason + ")";
-
-        html += '<tr>';
-        html += '<td>#' + a.id + '</td>';
-        html += '<td>' + sev + '</td>';
-        html += '<td>' + escapeHtml(a.title || "") + '</td>';
-        html += '<td><span class="status-badge ' + statusClassForAlert(a.status) + '">' + escapeHtml(statusLabel) + '</span></td>';
-        html += '<td>' + escapeHtml(created) + '</td>';
-        html += '<td style="display:flex;gap:6px;flex-wrap:wrap">';
-        if (a.status === "open") {
-          html += '<button class="btn btn-secondary btn-sm" onclick="ackAlert(' + a.id + ')">Ack</button>';
-          html += '<button class="btn btn-secondary btn-sm" onclick="snoozeAlert(' + a.id + ')">Snooze</button>';
-        } else if (a.status === "acknowledged") {
-          html += '<button class="btn btn-secondary btn-sm" onclick="unackAlert(' + a.id + ')">Unack</button>';
-          html += '<button class="btn btn-secondary btn-sm" onclick="snoozeAlert(' + a.id + ')">Snooze</button>';
-        } else if (a.status === "snoozed") {
-          html += '<button class="btn btn-secondary btn-sm" onclick="unsnoozeAlert(' + a.id + ')">Unsnooze</button>';
-          html += '<button class="btn btn-secondary btn-sm" onclick="ackAlert(' + a.id + ')">Ack</button>';
-        }
-        html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertEvents(' + a.id + ', \'' + escapeHtml(a.title || "").replace(/'/g, "\\'") + '\')">Timeline</button>';
-        html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertCorrelation(' + a.id + ')">Correlation</button>';
-        html += '</td>';
-        html += '</tr>';
-      }
-      tbody.innerHTML = html;
-    })
-    .catch(function() {
-      var tbody = document.getElementById("alerts-body");
-      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="log-empty">Failed to load alerts.</td></tr>';
-    });
-}
-
-function postAlertAction(id, action, payload, successMsg) {
-  fetch("/api/v1/alerts/" + id + "/" + action, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: payload ? JSON.stringify(payload) : ""
-  })
-    .then(function(r) {
-      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Action failed"); });
-      return r.json();
-    })
-    .then(function() {
-      if (successMsg) showToast(successMsg, "success");
-      loadAlerts();
-    })
-    .catch(function(e) {
-      showToast("Alert action failed: " + e.message, "error");
-    });
-}
-
-function ackAlert(id) { postAlertAction(id, "ack", { actor: "settings-ui" }, "Alert acknowledged"); }
-function unackAlert(id) { postAlertAction(id, "unack", { actor: "settings-ui" }, "Alert unacknowledged"); }
-function unsnoozeAlert(id) { postAlertAction(id, "unsnooze", { actor: "settings-ui" }, "Alert unsnoozed"); }
-
-function snoozeAlert(id) {
-  var hoursRaw = prompt("Snooze for how many hours?", "2");
-  if (hoursRaw === null) return;
-  var hours = parseFloat(hoursRaw);
-  if (!isFinite(hours) || hours <= 0) {
-    showToast("Invalid snooze duration", "error");
-    return;
-  }
-  var until = new Date(Date.now() + (hours * 3600 * 1000)).toISOString();
-  postAlertAction(id, "snooze", { actor: "settings-ui", until: until }, "Alert snoozed");
-}
-
-function loadAlertEvents(id, title) {
-  var panel = document.getElementById("alert-events-panel");
-  if (!panel) return;
-  panel.innerHTML = "Loading timeline...";
-  fetch("/api/v1/alerts/" + id + "/events?limit=50")
-    .then(function(r) { return r.json(); })
-    .then(function(events) {
-      if (!events || events.length === 0) {
-        panel.innerHTML = "No timeline events for alert #" + id + ".";
-        return;
-      }
-      events.sort(function(a, b) {
-        var ta = a && a.created_at ? Date.parse(a.created_at) : 0;
-        var tb = b && b.created_at ? Date.parse(b.created_at) : 0;
-        return ta - tb;
-      });
-      var html = '<div style="font-weight:600;color:var(--text);margin-bottom:6px">Timeline for #' + id + ' - ' + escapeHtml(title || "") + '</div>';
-      html += '<div class="overflow-x"><table class="log-table"><thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Data</th></tr></thead><tbody>';
-      for (var i = 0; i < events.length; i++) {
-        var e = events[i];
-        var ts = e.created_at ? new Date(e.created_at).toLocaleString() : "—";
-        var data = e.data ? JSON.stringify(e.data) : "—";
-        html += '<tr>';
-        html += '<td>' + escapeHtml(ts) + '</td>';
-        html += '<td>' + escapeHtml(e.event_type || "") + '</td>';
-        html += '<td>' + escapeHtml(e.actor || "system") + '</td>';
-        html += '<td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(data) + '</td>';
-        html += '</tr>';
-      }
-      html += '</tbody></table></div>';
-      panel.innerHTML = html;
-    })
-    .catch(function() {
-      panel.innerHTML = "Failed to load timeline.";
-    });
-}
-
-/* ---------- Incident timeline ---------- */
-function parseTimelineRange(rangeKey) {
-  var now = new Date();
-  var from = new Date(now.getTime());
-  if (rangeKey === "24h") from = new Date(now.getTime() - 24 * 3600 * 1000);
-  else if (rangeKey === "30d") from = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
-  else from = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
-  return { from: from.toISOString(), to: now.toISOString() };
-}
-
-function loadIncidentTimeline() {
-  var rangeKey = document.getElementById("timeline-range") ? document.getElementById("timeline-range").value : "7d";
-  var sev = document.getElementById("timeline-severity") ? document.getElementById("timeline-severity").value : "";
-  var range = parseTimelineRange(rangeKey);
-  var qs = "?from=" + encodeURIComponent(range.from) + "&to=" + encodeURIComponent(range.to) + "&points=400";
-  if (sev) qs += "&severity=" + encodeURIComponent(sev);
-
-  fetch("/api/v1/incidents/timeline" + qs)
-    .then(function(r) {
-      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Failed to load timeline"); });
-      return r.json();
-    })
-    .then(function(data) {
-      renderIncidentTimelineTable(data.events || []);
-      renderIncidentTimelineChart(data.system_metrics || [], data.avg_disk_temp || []);
-    })
-    .catch(function(e) {
-      var tbody = document.getElementById("timeline-body");
-      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="log-empty">' + escapeHtml(e.message || "Failed to load timeline") + '</td></tr>';
-    });
-}
-
-function renderIncidentTimelineTable(events) {
-  var tbody = document.getElementById("timeline-body");
-  if (!tbody) return;
-  if (!events || events.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No timeline events in this range.</td></tr>';
-    return;
-  }
-
-  var html = "";
-  for (var i = 0; i < events.length; i++) {
-    var e = events[i];
-    var ts = e.time ? new Date(e.time).toLocaleString() : "—";
-    html += "<tr>";
-    html += "<td>" + escapeHtml(ts) + "</td>";
-    html += "<td>" + escapeHtml(e.type || "") + "</td>";
-    html += "<td>" + escapeHtml(e.severity || "—") + "</td>";
-    html += "<td>" + escapeHtml(e.title || e.source || "—") + "</td>";
-    html += "<td>" + escapeHtml(e.status || "—") + "</td>";
-    html += "<td>";
-    if (e.alert_id) {
-      html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertCorrelation(' + e.alert_id + ')">Correlation</button>';
-    } else {
-      html += "—";
-    }
-    html += "</td>";
-    html += "</tr>";
-  }
-  tbody.innerHTML = html;
-}
-
-function renderIncidentTimelineChart(systemMetrics, tempMetrics) {
-  var chartId = "timeline-metrics-chart";
-  var chartEl = document.getElementById(chartId);
-  if (!chartEl || !window.NasChart) return;
-
-  if (!systemMetrics || systemMetrics.length < 2) {
-    try { chartEl.getContext("2d").clearRect(0, 0, chartEl.width, chartEl.height); } catch (e) {}
-    return;
-  }
-
-  var labels = systemMetrics.map(function(_, idx) { return idx; });
-  var cpu = systemMetrics.map(function(p) { return p.cpu_usage || 0; });
-  var mem = systemMetrics.map(function(p) { return p.mem_percent || 0; });
-  var io = systemMetrics.map(function(p) { return p.io_wait || 0; });
-
-  var temp = [];
-  if (tempMetrics && tempMetrics.length > 0) {
-    for (var i = 0; i < systemMetrics.length; i++) {
-      var idx = Math.round((i / Math.max(1, systemMetrics.length - 1)) * Math.max(0, tempMetrics.length - 1));
-      temp.push((tempMetrics[idx] && tempMetrics[idx].value) ? tempMetrics[idx].value : 0);
-    }
-  } else {
-    temp = cpu.map(function() { return 0; });
-  }
-
-  try {
-    NasChart.line(chartId, {
-      labels: labels,
-      datasets: [
-        { label: "CPU %", data: cpu, color: "#5e6ad2" },
-        { label: "Mem %", data: mem, color: "#7170ff" },
-        { label: "I/O Wait %", data: io, color: "#f59e0b" },
-        { label: "Avg Disk Temp C", data: temp, color: "#22c55e" }
-      ]
-    });
-  } catch (e) {
-    /* no-op */
-  }
-}
-
-function loadAlertCorrelation(alertId) {
-  var panel = document.getElementById("timeline-correlation");
-  if (!panel) return;
-  panel.innerHTML = "Loading correlation...";
-  fetch("/api/v1/incidents/correlation?alert_id=" + encodeURIComponent(alertId) + "&window_hours=24")
-    .then(function(r) {
-      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Failed to load correlation"); });
-      return r.json();
-    })
-    .then(function(data) {
-      var alert = data.alert || {};
-      var before = data.before || {};
-      var during = data.during || {};
-      var after = data.after || {};
-      var html = '<div style="font-weight:600;color:var(--text);margin-bottom:6px">Correlation for alert #' + alertId + ': ' + escapeHtml(alert.title || "") + '</div>';
-      html += '<div class="overflow-x"><table class="log-table"><thead><tr><th>Window</th><th>Samples</th><th>CPU %</th><th>Mem %</th><th>I/O %</th><th>Avg Temp C</th></tr></thead><tbody>';
-      html += '<tr><td>Before</td><td>' + (before.samples || 0) + '</td><td>' + (before.avg_cpu || 0).toFixed(1) + '</td><td>' + (before.avg_memory || 0).toFixed(1) + '</td><td>' + (before.avg_io_wait || 0).toFixed(1) + '</td><td>' + (before.avg_disk_temp || 0).toFixed(1) + '</td></tr>';
-      html += '<tr><td>During</td><td>' + (during.samples || 0) + '</td><td>' + (during.avg_cpu || 0).toFixed(1) + '</td><td>' + (during.avg_memory || 0).toFixed(1) + '</td><td>' + (during.avg_io_wait || 0).toFixed(1) + '</td><td>' + (during.avg_disk_temp || 0).toFixed(1) + '</td></tr>';
-      html += '<tr><td>After</td><td>' + (after.samples || 0) + '</td><td>' + (after.avg_cpu || 0).toFixed(1) + '</td><td>' + (after.avg_memory || 0).toFixed(1) + '</td><td>' + (after.avg_io_wait || 0).toFixed(1) + '</td><td>' + (after.avg_disk_temp || 0).toFixed(1) + '</td></tr>';
-      html += '</tbody></table></div>';
-      panel.innerHTML = html;
-    })
-    .catch(function(e) {
-      panel.innerHTML = escapeHtml(e.message || "Failed to load correlation");
-    });
-}
-
-/* ---------- SMART trends ---------- */
-function urgencyClass(u) {
-  if (u === "immediate") return "status-resolved";
-  if (u === "short-term") return "status-acknowledged";
-  return "status-open";
-}
-
-function loadSmartTrends() {
-  fetch("/api/v1/smart/trends")
-    .then(function(r) {
-      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Failed to load trends"); });
-      return r.json();
-    })
-    .then(function(data) {
-      renderSmartTrendTable(data.drives || []);
-      renderParityTrend(data.parity || null);
-    })
-    .catch(function(e) {
-      var tbody = document.getElementById("smart-trends-body");
-      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="log-empty">' + escapeHtml(e.message || "Failed to load trends") + '</td></tr>';
-    });
-}
-
-function renderSmartTrendTable(drives) {
-  var tbody = document.getElementById("smart-trends-body");
-  if (!tbody) return;
-  if (!drives || drives.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No trend data yet. Collect more scans to build velocity confidence.</td></tr>';
-    return;
-  }
-  var html = "";
-  for (var i = 0; i < drives.length; i++) {
-    var d = drives[i];
-    var deltas = 'temp ' + ((d.temp_delta >= 0 ? '+' : '') + d.temp_delta) + 'C, realloc ' + ((d.reallocated_delta >= 0 ? '+' : '') + d.reallocated_delta) + ', pending ' + ((d.pending_delta >= 0 ? '+' : '') + d.pending_delta) + ', crc ' + ((d.crc_delta >= 0 ? '+' : '') + d.crc_delta);
-    html += '<tr>';
-    html += '<td><strong>' + escapeHtml(d.device || "") + '</strong><div class="inline-muted">' + escapeHtml(d.model || "") + '</div></td>';
-    html += '<td>' + (d.risk_score || 0) + (d.replacement_candidate ? ' <span class="status-badge status-snoozed">candidate</span>' : '') + '</td>';
-    html += '<td><span class="status-badge ' + urgencyClass(d.urgency || "monitor") + '">' + escapeHtml(d.urgency || "monitor") + '</span></td>';
-    html += '<td>' + escapeHtml(d.confidence || "low") + '</td>';
-    html += '<td>' + escapeHtml(deltas) + '</td>';
-    html += '<td>' + escapeHtml(d.recommendation || "") + '</td>';
-    html += '</tr>';
-  }
-  tbody.innerHTML = html;
-}
-
-function renderParityTrend(parity) {
-  var el = document.getElementById("parity-trend-summary");
-  if (!el) return;
-  if (!parity) {
-    el.innerHTML = "Parity trend data unavailable for this platform.";
-    return;
-  }
-  var risk = parity.risk || "stable";
-  var cls = risk === "critical" ? "status-resolved" : (risk === "warning" ? "status-acknowledged" : "status-open");
-  var html = '';
-  html += '<span class="status-badge ' + cls + '">Parity risk: ' + escapeHtml(risk) + '</span>';
-  html += '<span style="margin-left:10px">Checks: ' + (parity.checks || 0) + '</span>';
-  html += '<span style="margin-left:10px">Recent errors: ' + (parity.recent_errors || 0) + '</span>';
-  html += '<span style="margin-left:10px">Speed degradation: ' + ((parity.speed_degradation_pct || 0).toFixed ? parity.speed_degradation_pct.toFixed(1) : parity.speed_degradation_pct) + '%</span>';
-  html += '<span style="margin-left:10px">Latest speed: ' + ((parity.latest_speed_mb_s || 0).toFixed ? parity.latest_speed_mb_s.toFixed(1) : parity.latest_speed_mb_s) + ' MB/s</span>';
-  el.innerHTML = html;
-}
+/* (Alerts, incidents, trends, notification history functions moved to /alerts page) */
 
 /* ---------- Helpers ---------- */
 function escapeHtml(str) {
@@ -1831,11 +1424,15 @@ function renderFleetList() {
 function addFleetServer() {
   var name = document.getElementById("fleet-name").value.trim();
   var url = document.getElementById("fleet-url").value.trim();
+  var apikey = document.getElementById("fleet-apikey").value.trim();
   if (!name || !url) { showToast("Name and URL required", "error"); return; }
-  fleetServers.push({ id: "", name: name, url: url, enabled: true });
+  var server = { id: "", name: name, url: url, enabled: true };
+  if (apikey) server.api_key = apikey;
+  fleetServers.push(server);
   saveFleetServers();
   document.getElementById("fleet-name").value = "";
   document.getElementById("fleet-url").value = "";
+  document.getElementById("fleet-apikey").value = "";
 }
 
 function removeFleetServer(idx) {
@@ -1952,6 +1549,265 @@ function triggerBackup() {
     .catch(function(e) { showToast("Backup error: " + e.message, "error"); });
 }
 
+/* ---------- Webhook Custom Headers ---------- */
+var webhookHeaders = {};
+
+function renderWebhookHeaders() {
+  var container = document.getElementById("wh-headers-list");
+  if (!container) return;
+  var keys = Object.keys(webhookHeaders);
+  if (keys.length === 0) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:4px 0">No custom headers.</div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    html += '<div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">';
+    html += '<input type="text" value="' + escapeHtml(k) + '" style="flex:1;font-size:12px;padding:4px 8px" onchange="renameWebhookHeader(this, \'' + escapeHtml(k).replace(/'/g, "\\'") + '\')">';
+    html += '<input type="text" value="' + escapeHtml(webhookHeaders[k]) + '" style="flex:2;font-size:12px;padding:4px 8px" onchange="updateWebhookHeaderValue(\'' + escapeHtml(k).replace(/'/g, "\\'") + '\', this.value)">';
+    html += '<button class="btn btn-danger btn-sm" onclick="removeWebhookHeader(\'' + escapeHtml(k).replace(/'/g, "\\'") + '\')" style="padding:3px 8px;font-size:11px">X</button>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function addWebhookHeader() {
+  var key = "X-Custom-" + (Object.keys(webhookHeaders).length + 1);
+  webhookHeaders[key] = "";
+  renderWebhookHeaders();
+}
+
+function removeWebhookHeader(key) {
+  delete webhookHeaders[key];
+  renderWebhookHeaders();
+}
+
+function renameWebhookHeader(input, oldKey) {
+  var newKey = input.value.trim();
+  if (!newKey || newKey === oldKey) return;
+  var val = webhookHeaders[oldKey] || "";
+  delete webhookHeaders[oldKey];
+  webhookHeaders[newKey] = val;
+  renderWebhookHeaders();
+}
+
+function updateWebhookHeaderValue(key, val) {
+  webhookHeaders[key] = val;
+}
+
+/* ---------- Maintenance Windows ---------- */
+var maintenanceWindows = [];
+
+function renderMaintenanceWindows() {
+  var container = document.getElementById("maintenance-list");
+  if (!container) return;
+  if (!maintenanceWindows || maintenanceWindows.length === 0) {
+    container.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:8px 0">No maintenance windows configured.</div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < maintenanceWindows.length; i++) {
+    var mw = maintenanceWindows[i];
+    var start = mw.start ? mw.start.substring(0, 16).replace("T", " ") : "—";
+    var end = mw.end ? mw.end.substring(0, 16).replace("T", " ") : "—";
+    var hosts = mw.hostnames && mw.hostnames.length ? mw.hostnames.join(", ") : "all";
+    html += '<div class="webhook-item">';
+    html += '  <div class="webhook-info">';
+    html += '    <div class="webhook-name">' + escapeHtml(mw.name || "Unnamed") + '</div>';
+    html += '    <div class="webhook-url">' + escapeHtml(start) + ' — ' + escapeHtml(end) + ' &middot; Hosts: ' + escapeHtml(hosts) + '</div>';
+    html += '  </div>';
+    html += '  <div class="webhook-actions">';
+    html += '    <div class="toggle-wrap" onclick="toggleMaintenanceEnabled(' + i + ')"><div class="toggle' + (mw.enabled ? ' on' : '') + '"><div class="toggle-knob"></div></div></div>';
+    html += '    <button class="btn btn-secondary btn-sm" onclick="editMaintenanceWindow(' + i + ')">Edit</button>';
+    html += '    <button class="btn btn-danger btn-sm" onclick="removeMaintenanceWindow(' + i + ')">Remove</button>';
+    html += '  </div>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function toggleMaintenanceForm() {
+  var form = document.getElementById("maintenance-form");
+  if (form.classList.contains("visible")) { cancelMaintenanceForm(); return; }
+  document.getElementById("mw-edit-index").value = "-1";
+  document.getElementById("mw-name").value = "";
+  document.getElementById("mw-start").value = "";
+  document.getElementById("mw-end").value = "";
+  document.getElementById("mw-hostnames").value = "";
+  document.getElementById("mw-enabled").checked = true;
+  form.querySelector(".toggle").classList.add("on");
+  form.classList.add("visible");
+}
+
+function cancelMaintenanceForm() { document.getElementById("maintenance-form").classList.remove("visible"); }
+
+function editMaintenanceWindow(idx) {
+  var mw = maintenanceWindows[idx];
+  document.getElementById("mw-edit-index").value = String(idx);
+  document.getElementById("mw-name").value = mw.name || "";
+  document.getElementById("mw-start").value = mw.start || "";
+  document.getElementById("mw-end").value = mw.end || "";
+  document.getElementById("mw-hostnames").value = (mw.hostnames || []).join(", ");
+  document.getElementById("mw-enabled").checked = mw.enabled !== false;
+  var toggle = document.getElementById("maintenance-form").querySelector(".toggle");
+  toggle.classList.toggle("on", mw.enabled !== false);
+  document.getElementById("maintenance-form").classList.add("visible");
+}
+
+function saveMaintenanceWindow() {
+  var name = document.getElementById("mw-name").value.trim();
+  var start = document.getElementById("mw-start").value.trim();
+  var end = document.getElementById("mw-end").value.trim();
+  if (!name || !start || !end) { showToast("Name, start, and end are required", "error"); return; }
+  var hostnames = document.getElementById("mw-hostnames").value.trim();
+  var hostnameArr = hostnames ? hostnames.split(",").map(function(h) { return h.trim(); }).filter(Boolean) : [];
+  var mw = {
+    name: name,
+    enabled: document.getElementById("mw-enabled").checked,
+    start: start,
+    end: end,
+    hostnames: hostnameArr
+  };
+  var editIdx = parseInt(document.getElementById("mw-edit-index").value, 10);
+  if (editIdx >= 0 && editIdx < maintenanceWindows.length) {
+    maintenanceWindows[editIdx] = mw;
+  } else {
+    maintenanceWindows.push(mw);
+  }
+  renderMaintenanceWindows();
+  cancelMaintenanceForm();
+  markChanged();
+}
+
+function removeMaintenanceWindow(idx) {
+  if (!confirm("Remove maintenance window?")) return;
+  maintenanceWindows.splice(idx, 1);
+  renderMaintenanceWindows();
+  markChanged();
+}
+
+function toggleMaintenanceEnabled(idx) {
+  maintenanceWindows[idx].enabled = !maintenanceWindows[idx].enabled;
+  renderMaintenanceWindows();
+  markChanged();
+}
+
+/* ---------- Notification Policies ---------- */
+var policies = [];
+
+function renderPolicies() {
+  var container = document.getElementById("policy-list");
+  if (!container) return;
+  // Update the webhook dropdown in the policy form
+  var polWebhookSel = document.getElementById("pol-webhook");
+  if (polWebhookSel) {
+    var currentVal = polWebhookSel.value;
+    polWebhookSel.innerHTML = "";
+    for (var w = 0; w < webhooks.length; w++) {
+      var opt = document.createElement("option");
+      opt.value = webhooks[w].name || "";
+      opt.textContent = webhooks[w].name || "Unnamed";
+      polWebhookSel.appendChild(opt);
+    }
+    if (currentVal) polWebhookSel.value = currentVal;
+  }
+  if (!policies || policies.length === 0) {
+    container.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:8px 0">No notification policies configured. Default webhook min-level rules apply.</div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < policies.length; i++) {
+    var p = policies[i];
+    var cats = p.categories && p.categories.length ? p.categories.join(", ") : "all";
+    var hosts = p.hostnames && p.hostnames.length ? p.hostnames.join(", ") : "all";
+    html += '<div class="webhook-item">';
+    html += '  <div class="webhook-info">';
+    html += '    <div class="webhook-name">' + escapeHtml(p.name || "Unnamed") + ' <span class="badge badge-generic">' + escapeHtml(p.min_severity || "info") + '+</span></div>';
+    html += '    <div class="webhook-url">Webhook: ' + escapeHtml(p.webhook_name || "—") + ' &middot; Categories: ' + escapeHtml(cats) + ' &middot; Hosts: ' + escapeHtml(hosts) + ' &middot; Cooldown: ' + (p.cooldown_sec || 0) + 's</div>';
+    html += '  </div>';
+    html += '  <div class="webhook-actions">';
+    html += '    <div class="toggle-wrap" onclick="togglePolicyEnabled(' + i + ')"><div class="toggle' + (p.enabled ? ' on' : '') + '"><div class="toggle-knob"></div></div></div>';
+    html += '    <button class="btn btn-secondary btn-sm" onclick="editPolicy(' + i + ')">Edit</button>';
+    html += '    <button class="btn btn-danger btn-sm" onclick="removePolicy(' + i + ')">Remove</button>';
+    html += '  </div>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function togglePolicyForm() {
+  var form = document.getElementById("policy-form");
+  if (form.classList.contains("visible")) { cancelPolicyForm(); return; }
+  document.getElementById("pol-edit-index").value = "-1";
+  document.getElementById("pol-name").value = "";
+  document.getElementById("pol-severity").value = "info";
+  document.getElementById("pol-cooldown").value = "900";
+  document.getElementById("pol-categories").value = "";
+  document.getElementById("pol-hostnames").value = "";
+  document.getElementById("pol-enabled").checked = true;
+  form.querySelector(".toggle").classList.add("on");
+  // Refresh webhook dropdown
+  renderPolicies();
+  form.classList.add("visible");
+}
+
+function cancelPolicyForm() { document.getElementById("policy-form").classList.remove("visible"); }
+
+function editPolicy(idx) {
+  var p = policies[idx];
+  document.getElementById("pol-edit-index").value = String(idx);
+  document.getElementById("pol-name").value = p.name || "";
+  document.getElementById("pol-webhook").value = p.webhook_name || "";
+  document.getElementById("pol-severity").value = p.min_severity || "info";
+  document.getElementById("pol-cooldown").value = String(p.cooldown_sec || 900);
+  document.getElementById("pol-categories").value = (p.categories || []).join(", ");
+  document.getElementById("pol-hostnames").value = (p.hostnames || []).join(", ");
+  document.getElementById("pol-enabled").checked = p.enabled !== false;
+  var toggle = document.getElementById("policy-form").querySelector(".toggle");
+  toggle.classList.toggle("on", p.enabled !== false);
+  renderPolicies();
+  document.getElementById("policy-form").classList.add("visible");
+}
+
+function savePolicy() {
+  var name = document.getElementById("pol-name").value.trim();
+  if (!name) { showToast("Policy name is required", "error"); return; }
+  var cats = document.getElementById("pol-categories").value.trim();
+  var hosts = document.getElementById("pol-hostnames").value.trim();
+  var pol = {
+    name: name,
+    enabled: document.getElementById("pol-enabled").checked,
+    webhook_name: document.getElementById("pol-webhook").value,
+    min_severity: document.getElementById("pol-severity").value,
+    cooldown_sec: parseInt(document.getElementById("pol-cooldown").value, 10) || 900,
+    categories: cats ? cats.split(",").map(function(c) { return c.trim(); }).filter(Boolean) : [],
+    hostnames: hosts ? hosts.split(",").map(function(h) { return h.trim(); }).filter(Boolean) : []
+  };
+  var editIdx = parseInt(document.getElementById("pol-edit-index").value, 10);
+  if (editIdx >= 0 && editIdx < policies.length) {
+    policies[editIdx] = pol;
+  } else {
+    policies.push(pol);
+  }
+  renderPolicies();
+  cancelPolicyForm();
+  markChanged();
+}
+
+function removePolicy(idx) {
+  if (!confirm("Remove policy?")) return;
+  policies.splice(idx, 1);
+  renderPolicies();
+  markChanged();
+}
+
+function togglePolicyEnabled(idx) {
+  policies[idx].enabled = !policies[idx].enabled;
+  renderPolicies();
+  markChanged();
+}
+
 /* ---------- Change Detection ---------- */
 var settingsChanged = false;
 
@@ -1983,19 +1839,11 @@ document.addEventListener("click", function(e) {
 
 /* ---------- Init ---------- */
 loadSettings();
-loadNotificationLog();
-loadAlerts();
-loadIncidentTimeline();
-loadSmartTrends();
 loadDBStats();
 loadBackupInfo();
 loadFleetServers();
 loadServiceCheckResults();
 onServiceTypeChange();
-setInterval(loadNotificationLog, 60000);
-setInterval(loadAlerts, 60000);
-setInterval(loadIncidentTimeline, 60000);
-setInterval(loadSmartTrends, 180000);
 setInterval(loadServiceCheckResults, 60000);
 </script>
 </body>

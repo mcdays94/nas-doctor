@@ -1,8 +1,15 @@
 // UPS monitoring via NUT (upsc) or apcupsd (apcaccess).
+//
+// Environment variables for cross-platform / remote UPS support:
+//
+//	NAS_DOCTOR_UPS_NAME    — NUT UPS name (default: auto-detect first from `upsc -l`)
+//	NAS_DOCTOR_NUT_HOST    — NUT remote host (e.g. "192.168.1.10", used as upsname@host)
+//	NAS_DOCTOR_APCUPSD_HOST — apcupsd remote host:port (e.g. "192.168.1.10:3551")
 package collector
 
 import (
 	"bufio"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -10,14 +17,14 @@ import (
 	"github.com/mcdays94/nas-doctor/internal"
 )
 
-// collectUPS tries NUT first, then apcupsd. Returns nil if neither is available.
+// collectUPS tries NUT first, then apcupsd. Returns Available=false if neither is available.
 func collectUPS() (*internal.UPSInfo, error) {
-	// Try NUT first (more common on TrueNAS, Synology)
+	// Try NUT first (works on TrueNAS, Synology, generic Linux, FreeBSD, macOS with brew)
 	if info, err := collectNUT(); err == nil && info != nil {
 		return info, nil
 	}
 
-	// Try apcupsd (common on Unraid)
+	// Try apcupsd (common on Unraid, available on all Linux/FreeBSD/macOS)
 	if info, err := collectApcupsd(); err == nil && info != nil {
 		return info, nil
 	}
@@ -28,31 +35,51 @@ func collectUPS() (*internal.UPSInfo, error) {
 // ── NUT (Network UPS Tools) via `upsc` ──────────────────────────────
 
 func collectNUT() (*internal.UPSInfo, error) {
-	// Get list of UPS devices
 	if _, err := exec.LookPath("upsc"); err != nil {
 		return nil, err
 	}
 
-	// Try to list UPS devices
-	listOut, err := exec.Command("upsc", "-l").Output()
-	if err != nil {
-		return nil, err
-	}
+	nutHost := os.Getenv("NAS_DOCTOR_NUT_HOST")
+	upsName := os.Getenv("NAS_DOCTOR_UPS_NAME")
 
-	upsName := ""
-	for _, line := range strings.Split(strings.TrimSpace(string(listOut)), "\n") {
-		name := strings.TrimSpace(line)
-		if name != "" {
-			upsName = name
-			break // use first UPS
+	// If no explicit UPS name, auto-detect from `upsc -l [host]`
+	if upsName == "" {
+		listArgs := []string{"-l"}
+		if nutHost != "" {
+			listArgs = append(listArgs, nutHost)
+		}
+		listOut, err := exec.Command("upsc", listArgs...).Output()
+		if err != nil {
+			// Some older NUT versions use -L (capital). Try fallback.
+			listOut, err = exec.Command("upsc", "-L").Output()
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		for _, line := range strings.Split(strings.TrimSpace(string(listOut)), "\n") {
+			name := strings.TrimSpace(line)
+			// upsc -L output can be "upsname: description" — extract just the name
+			if idx := strings.Index(name, ":"); idx > 0 {
+				name = strings.TrimSpace(name[:idx])
+			}
+			if name != "" {
+				upsName = name
+				break // use first UPS
+			}
 		}
 	}
 	if upsName == "" {
 		return nil, nil
 	}
 
-	// Get UPS data
-	out, err := exec.Command("upsc", upsName).Output()
+	// Build the UPS identifier: "upsname" or "upsname@host" for remote
+	upsID := upsName
+	if nutHost != "" {
+		upsID = upsName + "@" + nutHost
+	}
+
+	out, err := exec.Command("upsc", upsID).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +190,13 @@ func collectApcupsd() (*internal.UPSInfo, error) {
 		return nil, err
 	}
 
-	out, err := exec.Command("apcaccess").Output()
+	// Support remote apcupsd daemon via NAS_DOCTOR_APCUPSD_HOST (e.g. "192.168.1.10:3551")
+	args := []string{}
+	if host := os.Getenv("NAS_DOCTOR_APCUPSD_HOST"); host != "" {
+		args = append(args, "-h", host)
+	}
+
+	out, err := exec.Command("apcaccess", args...).Output()
 	if err != nil {
 		return nil, err
 	}
