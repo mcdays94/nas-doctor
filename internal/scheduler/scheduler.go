@@ -2,8 +2,12 @@
 package scheduler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +34,42 @@ type BackupConfig struct {
 	LastBackup time.Time
 }
 
+// AlertPolicy routes matching findings to a target webhook.
+type AlertPolicy struct {
+	Name        string              `json:"name"`
+	Enabled     bool                `json:"enabled"`
+	WebhookName string              `json:"webhook_name"`
+	MinSeverity internal.Severity   `json:"min_severity"`
+	Categories  []internal.Category `json:"categories,omitempty"`
+	Hostnames   []string            `json:"hostnames,omitempty"`
+	CooldownSec int                 `json:"cooldown_sec"`
+}
+
+// QuietHours suppresses notifications in a daily local time window.
+type QuietHours struct {
+	Enabled   bool   `json:"enabled"`
+	Timezone  string `json:"timezone"`
+	StartHHMM string `json:"start_hhmm"`
+	EndHHMM   string `json:"end_hhmm"`
+}
+
+// MaintenanceWindow suppresses notifications during an explicit time range.
+type MaintenanceWindow struct {
+	Name      string   `json:"name"`
+	Enabled   bool     `json:"enabled"`
+	StartISO  string   `json:"start_iso"`
+	EndISO    string   `json:"end_iso"`
+	Hostnames []string `json:"hostnames,omitempty"`
+}
+
+// AlertingConfig controls policy routing and suppression behavior.
+type AlertingConfig struct {
+	Policies           []AlertPolicy       `json:"policies,omitempty"`
+	QuietHours         QuietHours          `json:"quiet_hours,omitempty"`
+	MaintenanceWindows []MaintenanceWindow `json:"maintenance_windows,omitempty"`
+	DefaultCooldownSec int                 `json:"default_cooldown_sec,omitempty"`
+}
+
 // Scheduler periodically runs diagnostic collections and analysis.
 type Scheduler struct {
 	collector *collector.Collector
@@ -39,6 +79,7 @@ type Scheduler struct {
 	logger    *slog.Logger
 	interval  time.Duration
 	retention RetentionConfig
+	alerting  AlertingConfig
 
 	mu      sync.RWMutex
 	latest  *internal.Snapshot
@@ -68,6 +109,11 @@ func New(
 			SnapshotDays:  90,
 			MaxDBSizeMB:   500,
 			NotifyLogDays: 30,
+		},
+		alerting: AlertingConfig{
+			Policies:           []AlertPolicy{},
+			MaintenanceWindows: []MaintenanceWindow{},
+			DefaultCooldownSec: 900,
 		},
 		stop:    make(chan struct{}),
 		restart: make(chan time.Duration, 1),
@@ -175,6 +221,19 @@ func (s *Scheduler) RunOnce() {
 	s.latest = snap
 	s.mu.Unlock()
 
+	stateFindings := make([]storage.AlertStateFinding, 0, len(snap.Findings))
+	for _, f := range snap.Findings {
+		stateFindings = append(stateFindings, storage.AlertStateFinding{
+			Fingerprint: findingFingerprint(f),
+			FindingID:   f.ID,
+			Severity:    string(f.Severity),
+			Title:       f.Title,
+		})
+	}
+	if err := s.store.SyncAlertStates(snap.ID, stateFindings, snap.Timestamp); err != nil {
+		s.logger.Warn("sync alert states failed", "error", err)
+	}
+
 	// Notify
 	s.mu.RLock()
 	notif := s.notifier
@@ -184,7 +243,7 @@ func (s *Scheduler) RunOnce() {
 		if hostname == "" {
 			hostname = "Unknown"
 		}
-		notif.NotifyFindings(snap.Findings, hostname)
+		s.dispatchNotifications(notif, snap.Findings, hostname, snap.Timestamp)
 	}
 
 	// Data lifecycle: prune old data
@@ -316,6 +375,32 @@ func (s *Scheduler) UpdateBackup(cfg BackupConfig) {
 	)
 }
 
+// UpdateAlerting updates policy routing and suppression configuration.
+func (s *Scheduler) UpdateAlerting(cfg AlertingConfig) {
+	if cfg.Policies == nil {
+		cfg.Policies = []AlertPolicy{}
+	}
+	if cfg.MaintenanceWindows == nil {
+		cfg.MaintenanceWindows = []MaintenanceWindow{}
+	}
+	if cfg.DefaultCooldownSec <= 0 {
+		cfg.DefaultCooldownSec = 900
+	}
+	if cfg.QuietHours.Timezone == "" {
+		cfg.QuietHours.Timezone = "UTC"
+	}
+
+	s.mu.Lock()
+	s.alerting = cfg
+	s.mu.Unlock()
+
+	s.logger.Info("alerting config updated",
+		"policies", len(cfg.Policies),
+		"maintenance_windows", len(cfg.MaintenanceWindows),
+		"quiet_hours_enabled", cfg.QuietHours.Enabled,
+	)
+}
+
 // UpdateNotifier swaps the notifier used for delivery.
 func (s *Scheduler) UpdateNotifier(notif *notifier.Notifier) {
 	s.mu.Lock()
@@ -373,6 +458,312 @@ func (s *Scheduler) checkBackup() {
 	s.mu.Lock()
 	s.backup.LastBackup = result.Timestamp
 	s.mu.Unlock()
+}
+
+func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, findings []internal.Finding, hostname string, now time.Time) {
+	if notif == nil || len(findings) == 0 {
+		return
+	}
+
+	s.mu.RLock()
+	cfg := s.alerting
+	s.mu.RUnlock()
+
+	if cfg.DefaultCooldownSec <= 0 {
+		cfg.DefaultCooldownSec = 900
+	}
+
+	if inMaintenanceWindow(cfg.MaintenanceWindows, hostname, now) {
+		s.logSuppressed(notif, findings, hostname, cfg, "suppressed_maintenance")
+		return
+	}
+	if inQuietHours(cfg.QuietHours, now) {
+		s.logSuppressed(notif, findings, hostname, cfg, "suppressed_quiet_hours")
+		return
+	}
+
+	if len(cfg.Policies) == 0 {
+		notif.NotifyFindings(findings, hostname)
+		return
+	}
+
+	webhooks := make(map[string]internal.WebhookConfig)
+	for _, wh := range notif.Webhooks() {
+		webhooks[strings.ToLower(strings.TrimSpace(wh.Name))] = wh
+	}
+
+	matchedPolicy := false
+	for i, policy := range cfg.Policies {
+		if !policy.Enabled {
+			continue
+		}
+		if !matchesHostname(policy.Hostnames, hostname) {
+			continue
+		}
+
+		whName := strings.ToLower(strings.TrimSpace(policy.WebhookName))
+		if whName == "" {
+			continue
+		}
+		wh, ok := webhooks[whName]
+		if !ok || !wh.Enabled {
+			s.logger.Warn("alert policy references unknown webhook", "policy", policy.Name, "webhook", policy.WebhookName)
+			continue
+		}
+
+		filtered := filterFindingsForPolicy(findings, policy)
+		if len(filtered) == 0 {
+			continue
+		}
+		matchedPolicy = true
+
+		routeKey := policyRouteKey(policy, i, wh.Name)
+		cooldown := time.Duration(policy.CooldownSec) * time.Second
+		if cooldown <= 0 {
+			cooldown = time.Duration(cfg.DefaultCooldownSec) * time.Second
+		}
+
+		toSend := s.applyCooldown(filtered, routeKey, cooldown, now)
+		if len(toSend) == 0 {
+			_ = s.store.SaveNotificationLog(wh.Name, wh.Type, "suppressed_cooldown", len(filtered), "")
+			continue
+		}
+
+		if err := notif.NotifyWebhook(wh, toSend, hostname); err != nil {
+			continue
+		}
+
+		fingerprints := make([]string, 0, len(toSend))
+		for _, f := range toSend {
+			fp := findingFingerprint(f)
+			fingerprints = append(fingerprints, fp)
+			if err := s.store.SaveNotificationState(fp, routeKey, "sent", now); err != nil {
+				s.logger.Warn("failed to save notification state", "fingerprint", fp, "route", routeKey, "error", err)
+			}
+		}
+		if err := s.store.MarkAlertsNotifiedByFingerprint(fingerprints, now); err != nil {
+			s.logger.Warn("failed to mark alerts notified", "error", err)
+		}
+	}
+
+	if !matchedPolicy {
+		notif.NotifyFindings(findings, hostname)
+	}
+}
+
+func (s *Scheduler) logSuppressed(notif *notifier.Notifier, findings []internal.Finding, hostname string, cfg AlertingConfig, status string) {
+	if len(cfg.Policies) == 0 {
+		for _, wh := range notif.Webhooks() {
+			if !wh.Enabled {
+				continue
+			}
+			filtered := filterBySeverity(findings, wh.MinLevel)
+			if len(filtered) == 0 {
+				continue
+			}
+			if err := s.store.SaveNotificationLog(wh.Name, wh.Type, status, len(filtered), ""); err != nil {
+				s.logger.Warn("failed to save suppressed notification log", "error", err)
+			}
+		}
+		s.logger.Info("notifications suppressed", "reason", status, "hostname", hostname)
+		return
+	}
+
+	webhooks := make(map[string]internal.WebhookConfig)
+	for _, wh := range notif.Webhooks() {
+		webhooks[strings.ToLower(strings.TrimSpace(wh.Name))] = wh
+	}
+	for _, policy := range cfg.Policies {
+		if !policy.Enabled || !matchesHostname(policy.Hostnames, hostname) {
+			continue
+		}
+		wh, ok := webhooks[strings.ToLower(strings.TrimSpace(policy.WebhookName))]
+		if !ok || !wh.Enabled {
+			continue
+		}
+		filtered := filterFindingsForPolicy(findings, policy)
+		if len(filtered) == 0 {
+			continue
+		}
+		if err := s.store.SaveNotificationLog(wh.Name, wh.Type, status, len(filtered), ""); err != nil {
+			s.logger.Warn("failed to save suppressed policy log", "error", err)
+		}
+	}
+	s.logger.Info("notifications suppressed", "reason", status, "hostname", hostname)
+}
+
+func (s *Scheduler) applyCooldown(findings []internal.Finding, routeKey string, cooldown time.Duration, now time.Time) []internal.Finding {
+	seen := map[string]struct{}{}
+	out := make([]internal.Finding, 0, len(findings))
+	for _, f := range findings {
+		fp := findingFingerprint(f)
+		if fp == "" {
+			out = append(out, f)
+			continue
+		}
+		if _, exists := seen[fp]; exists {
+			continue
+		}
+		seen[fp] = struct{}{}
+
+		allowed, err := s.store.CanSendNotification(fp, routeKey, cooldown, now)
+		if err != nil {
+			s.logger.Warn("cooldown check failed; allowing notification", "route", routeKey, "fingerprint", fp, "error", err)
+			out = append(out, f)
+			continue
+		}
+		if allowed {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func filterFindingsForPolicy(findings []internal.Finding, policy AlertPolicy) []internal.Finding {
+	min := policy.MinSeverity
+	if min == "" {
+		min = internal.SeverityWarning
+	}
+
+	catSet := make(map[string]struct{}, len(policy.Categories))
+	for _, c := range policy.Categories {
+		catSet[strings.ToLower(string(c))] = struct{}{}
+	}
+
+	out := make([]internal.Finding, 0, len(findings))
+	for _, f := range findings {
+		if severityRank(f.Severity) < severityRank(min) {
+			continue
+		}
+		if len(catSet) > 0 {
+			if _, ok := catSet[strings.ToLower(string(f.Category))]; !ok {
+				continue
+			}
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+func filterBySeverity(findings []internal.Finding, minLevel internal.Severity) []internal.Finding {
+	min := minLevel
+	if min == "" {
+		min = internal.SeverityWarning
+	}
+	out := make([]internal.Finding, 0, len(findings))
+	for _, f := range findings {
+		if severityRank(f.Severity) >= severityRank(min) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func severityRank(sev internal.Severity) int {
+	switch sev {
+	case internal.SeverityCritical:
+		return 3
+	case internal.SeverityWarning:
+		return 2
+	case internal.SeverityInfo:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func matchesHostname(policyHosts []string, hostname string) bool {
+	if len(policyHosts) == 0 {
+		return true
+	}
+	h := strings.ToLower(strings.TrimSpace(hostname))
+	for _, candidate := range policyHosts {
+		if strings.ToLower(strings.TrimSpace(candidate)) == h {
+			return true
+		}
+	}
+	return false
+}
+
+func policyRouteKey(policy AlertPolicy, idx int, webhookName string) string {
+	if name := strings.TrimSpace(policy.Name); name != "" {
+		return "policy:" + name
+	}
+	return fmt.Sprintf("policy:%d:%s", idx, strings.ToLower(strings.TrimSpace(webhookName)))
+}
+
+func inQuietHours(cfg QuietHours, now time.Time) bool {
+	if !cfg.Enabled {
+		return false
+	}
+	start, err := parseHHMM(cfg.StartHHMM)
+	if err != nil {
+		return false
+	}
+	end, err := parseHHMM(cfg.EndHHMM)
+	if err != nil {
+		return false
+	}
+	if start == end {
+		return false
+	}
+
+	loc := time.UTC
+	if cfg.Timezone != "" {
+		if loaded, err := time.LoadLocation(cfg.Timezone); err == nil {
+			loc = loaded
+		}
+	}
+	localNow := now.In(loc)
+	mins := localNow.Hour()*60 + localNow.Minute()
+
+	if start < end {
+		return mins >= start && mins < end
+	}
+	return mins >= start || mins < end
+}
+
+func parseHHMM(v string) (int, error) {
+	parts := strings.Split(strings.TrimSpace(v), ":")
+	if len(parts) != 2 {
+		return 0, fmt.Errorf("invalid time")
+	}
+	h, err := time.Parse("15:04", fmt.Sprintf("%s:%s", parts[0], parts[1]))
+	if err != nil {
+		return 0, err
+	}
+	return h.Hour()*60 + h.Minute(), nil
+}
+
+func inMaintenanceWindow(windows []MaintenanceWindow, hostname string, now time.Time) bool {
+	for _, w := range windows {
+		if !w.Enabled {
+			continue
+		}
+		if !matchesHostname(w.Hostnames, hostname) {
+			continue
+		}
+		start, err1 := time.Parse(time.RFC3339, strings.TrimSpace(w.StartISO))
+		end, err2 := time.Parse(time.RFC3339, strings.TrimSpace(w.EndISO))
+		if err1 != nil || err2 != nil || !end.After(start) {
+			continue
+		}
+		if (now.Equal(start) || now.After(start)) && now.Before(end) {
+			return true
+		}
+	}
+	return false
+}
+
+func findingFingerprint(f internal.Finding) string {
+	parts := []string{
+		strings.ToLower(strings.TrimSpace(string(f.Category))),
+		strings.ToLower(strings.TrimSpace(f.Title)),
+		strings.ToLower(strings.TrimSpace(f.RelatedDisk)),
+	}
+	raw := strings.Join(parts, "|")
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }
 
 func countSeverity(findings []internal.Finding, sev internal.Severity) int {

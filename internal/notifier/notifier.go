@@ -52,29 +52,47 @@ func (n *Notifier) NotifyFindings(findings []internal.Finding, hostname string) 
 		if len(filtered) == 0 {
 			continue
 		}
-
-		var err error
-		switch strings.ToLower(wh.Type) {
-		case "discord":
-			err = n.sendDiscord(wh, filtered, hostname)
-		case "slack":
-			err = n.sendSlack(wh, filtered, hostname)
-		case "gotify":
-			err = n.sendGotify(wh, filtered, hostname)
-		case "ntfy":
-			err = n.sendNtfy(wh, filtered, hostname)
-		default:
-			err = n.sendGeneric(wh, filtered, hostname)
-		}
-
-		if err != nil {
-			n.logger.Error("webhook notification failed", "name", wh.Name, "type", wh.Type, "error", err)
-			n.logResult(wh, "failed", len(filtered), err.Error())
-		} else {
-			n.logger.Info("webhook notification sent", "name", wh.Name, "type", wh.Type, "findings", len(filtered))
-			n.logResult(wh, "sent", len(filtered), "")
-		}
+		n.NotifyWebhook(wh, filtered, hostname)
 	}
+}
+
+// NotifyWebhook sends the given findings to a single webhook target.
+// The findings are sent as-is; caller is responsible for severity filtering.
+func (n *Notifier) NotifyWebhook(wh internal.WebhookConfig, findings []internal.Finding, hostname string) error {
+	if !wh.Enabled || len(findings) == 0 {
+		return nil
+	}
+
+	var err error
+	switch strings.ToLower(wh.Type) {
+	case "discord":
+		err = n.sendDiscord(wh, findings, hostname)
+	case "slack":
+		err = n.sendSlack(wh, findings, hostname)
+	case "gotify":
+		err = n.sendGotify(wh, findings, hostname)
+	case "ntfy":
+		err = n.sendNtfy(wh, findings, hostname)
+	default:
+		err = n.sendGeneric(wh, findings, hostname)
+	}
+
+	if err != nil {
+		n.logger.Error("webhook notification failed", "name", wh.Name, "type", wh.Type, "error", err)
+		n.logResult(wh, "failed", len(findings), err.Error())
+		return err
+	}
+
+	n.logger.Info("webhook notification sent", "name", wh.Name, "type", wh.Type, "findings", len(findings))
+	n.logResult(wh, "sent", len(findings), "")
+	return nil
+}
+
+// Webhooks returns a copy of configured webhooks.
+func (n *Notifier) Webhooks() []internal.WebhookConfig {
+	out := make([]internal.WebhookConfig, len(n.webhooks))
+	copy(out, n.webhooks)
+	return out
 }
 
 func (n *Notifier) logResult(wh internal.WebhookConfig, status string, findingsCount int, errMsg string) {
