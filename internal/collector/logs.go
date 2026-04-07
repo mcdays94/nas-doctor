@@ -9,8 +9,32 @@ import (
 	"github.com/mcdays94/nas-doctor/internal"
 )
 
-var errorPattern = regexp.MustCompile(`(?i)(error|fail|reset|timeout|ata.*err|i/o|medium|offline|UNC|sector|reallocat|abort|DRDY|critical|emerg|panic|oops)`)
-var warningPattern = regexp.MustCompile(`(?i)(warning|warn|degraded|retry)`)
+var errorPattern = regexp.MustCompile(`(?i)(` +
+	`\berror\b` + // generic errors
+	`|\bfail(ed|ure|ing)\b` + // failures (not failover/failsafe)
+	`|\b(bus|device)\s+reset\b` + // bus/device resets only
+	`|\btimed?\s*out\b` + // timeout, timed out
+	`|ata.*\berr` + // ATA errors
+	`|i/o\s+error` + // I/O errors (not "i/o scheduler")
+	`|\bmedium\s+error` + // SCSI medium errors
+	`|\boffline\s+uncorrectable` + // SMART offline uncorrectable
+	`|\bUNC\b` + // uncorrectable sectors
+	`|(bad|pending|reallocat\w*)\s+sector` + // bad/pending/reallocated sectors
+	`|\breallocat` + // SMART reallocated event/count
+	`|\babort(ed|ing)?\b` + // aborted commands
+	`|\bDRDY\b` + // Drive Ready errors
+	`|\bcritical\b` + // critical-level messages
+	`|\bemerg(ency)?\b` + // emergency-level messages
+	`|\bpanic\b` + // kernel panics
+	`|\boops\b` + // kernel oops
+	`)`)
+
+var warningPattern = regexp.MustCompile(`(?i)(` +
+	`\bwarning\b` + // explicit "warning"
+	`|\bwarn\b` + // log-level "warn" (not "forwarn")
+	`|\bdegraded\b` + // degraded array/pool state
+	`|\bretry(ing)?\b` + // retry/retrying
+	`)`)
 
 func collectLogs(hp internal.HostPaths) (internal.LogInfo, error) {
 	info := internal.LogInfo{}
