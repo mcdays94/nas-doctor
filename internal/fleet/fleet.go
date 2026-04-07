@@ -20,6 +20,7 @@ type Manager struct {
 	logger   *slog.Logger
 	client   *http.Client
 	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 // New creates a new fleet manager.
@@ -71,9 +72,9 @@ func (m *Manager) Start(interval time.Duration) {
 	}()
 }
 
-// Stop halts the polling loop.
+// Stop halts the polling loop. Safe to call multiple times.
 func (m *Manager) Stop() {
-	close(m.stop)
+	m.stopOnce.Do(func() { close(m.stop) })
 }
 
 // PollAll polls all enabled remote servers concurrently.
