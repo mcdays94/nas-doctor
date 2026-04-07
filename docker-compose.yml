@@ -12,10 +12,11 @@ services:
       - nas-doctor-data:/data
       # Host system access (read-only)
       - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker monitoring
-      - /boot:/host/boot:ro                            # Unraid config, parity logs
       - /var/log:/host/log:ro                          # System logs (syslog, messages)
       - /mnt:/host/mnt:ro                              # Host disk mounts (per-disk space)
-      - /etc/unraid-version:/etc/unraid-version:ro     # Unraid OS version
+      # Unraid-specific (comment out on non-Unraid systems):
+      # - /boot:/host/boot:ro                          # Unraid config, parity logs
+      # - /etc/unraid-version:/etc/unraid-version:ro   # Unraid OS version detection
     environment:
       - TZ=${TZ:-UTC}
       - NAS_DOCTOR_LISTEN=:8060

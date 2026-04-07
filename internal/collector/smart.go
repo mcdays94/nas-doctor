@@ -53,9 +53,21 @@ func collectSMART() ([]internal.SMARTInfo, error) {
 func discoverDrives() []string {
 	var drives []string
 
-	// Discover /dev/sd* drives
+	// Discover /dev/sd* drives (Linux SCSI/SATA)
 	matches, _ := filepath.Glob("/dev/sd[a-z]")
 	drives = append(drives, matches...)
+
+	// Discover /dev/da* drives (FreeBSD SCSI/SAS — TrueNAS CORE)
+	daMatches, _ := filepath.Glob("/dev/da[0-9]")
+	drives = append(drives, daMatches...)
+	daMatches2, _ := filepath.Glob("/dev/da[0-9][0-9]")
+	drives = append(drives, daMatches2...)
+
+	// Discover /dev/ada* drives (FreeBSD ATA — TrueNAS CORE)
+	adaMatches, _ := filepath.Glob("/dev/ada[0-9]")
+	drives = append(drives, adaMatches...)
+	adaMatches2, _ := filepath.Glob("/dev/ada[0-9][0-9]")
+	drives = append(drives, adaMatches2...)
 
 	// Discover NVMe drives
 	nvmeMatches, _ := filepath.Glob("/dev/nvme[0-9]n1")

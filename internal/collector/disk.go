@@ -29,7 +29,8 @@ func collectDisks() ([]internal.DiskInfo, error) {
 }
 
 // collectHostMountDisks reads disk info from the host's /mnt via the bind mount at /host/mnt.
-// This is the primary method for Unraid where disks are at /mnt/disk1, /mnt/disk2, etc.
+// On Unraid, disks are at /mnt/disk1, /mnt/disk2, etc.
+// On TrueNAS, ZFS datasets are at /mnt/poolname/dataset (e.g. /mnt/apps, /mnt/media).
 func collectHostMountDisks() []internal.DiskInfo {
 	// Check if /host/mnt exists (bind-mounted from host)
 	out, err := execCmd("df", "-h", "--output=source,fstype,size,used,avail,pcent,target")
@@ -49,12 +50,21 @@ func collectHostMountDisks() []internal.DiskInfo {
 		}
 		mount := fields[6]
 
-		// Only include /host/mnt/disk*, /host/mnt/cache*, /host/mnt/user
+		// Include host-mounted paths under /host/mnt/
+		// Unraid: /host/mnt/disk1, /host/mnt/cache, /host/mnt/user
+		// TrueNAS: /host/mnt/apps, /host/mnt/media, /host/mnt/poolname/dataset
 		if !strings.HasPrefix(mount, "/host/mnt/") {
 			continue
 		}
 
 		device := fields[0]
+		fstype := fields[1]
+
+		// Skip ZFS boot-pool system datasets (TrueNAS internal — not user data)
+		if strings.HasPrefix(device, "boot-pool/") {
+			continue
+		}
+
 		total := parseSize(fields[2])
 		used := parseSize(fields[3])
 		free := parseSize(fields[4])
@@ -68,7 +78,7 @@ func collectHostMountDisks() []internal.DiskInfo {
 			Device:     device,
 			MountPoint: displayMount,
 			Label:      guessLabel(displayMount, device),
-			FSType:     fields[1],
+			FSType:     fstype,
 			TotalGB:    total,
 			UsedGB:     used,
 			FreeGB:     free,
@@ -254,6 +264,16 @@ func guessLabel(mount, device string) string {
 	}
 	if mount == "/mnt/user" || mount == "/mnt/user0" {
 		return "User Share"
+	}
+	// ZFS dataset patterns (TrueNAS, Proxmox, generic ZFS)
+	// Device looks like "pool/dataset" or "tank/media/movies"
+	if strings.Contains(device, "/") && !strings.HasPrefix(device, "/dev/") {
+		// Use the last path component as the label, capitalized
+		parts := strings.Split(device, "/")
+		label := parts[len(parts)-1]
+		if label != "" {
+			return strings.ToUpper(label[:1]) + label[1:]
+		}
 	}
 	// Read label from filesystem if available
 	if strings.HasPrefix(device, "/dev/") {

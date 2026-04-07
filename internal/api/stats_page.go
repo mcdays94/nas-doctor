@@ -317,10 +317,10 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
       // Duplicate single point so charts can draw a line
       if (sys.length === 1) sys = [sys[0], sys[0]];
       var lb = sys.map(function(p,i){return i});
-      try { NasChart.area("chart-cpu",{data:sys.map(function(p){return p.cpu_usage}),labels:lb,color:"#5e6ad2",fillAlpha:0.12,yMin:0}); } catch(e){}
-      try { NasChart.area("chart-mem",{data:sys.map(function(p){return p.mem_percent}),labels:lb,color:"#7170ff",fillAlpha:0.12,yMin:0}); } catch(e){}
-      try { NasChart.area("chart-io",{data:sys.map(function(p){return p.io_wait}),labels:lb,color:"#f59e0b",fillAlpha:0.12,yMin:0}); } catch(e){}
-      try { NasChart.line("chart-load",{data:sys.map(function(p){return p.load_1}),labels:lb,color:"#22c55e"}); } catch(e){}
+      try { NasChart.area("chart-cpu",{datasets:[{data:sys.map(function(p){return p.cpu_usage}),color:"#5e6ad2",label:"CPU"}],labels:lb,yLabel:"%"}); } catch(e){}
+      try { NasChart.area("chart-mem",{datasets:[{data:sys.map(function(p){return p.mem_percent}),color:"#7170ff",label:"Memory"}],labels:lb,yLabel:"%"}); } catch(e){}
+      try { NasChart.area("chart-io",{datasets:[{data:sys.map(function(p){return p.io_wait}),color:"#f59e0b",label:"I/O Wait"}],labels:lb,yLabel:"%"}); } catch(e){}
+      try { NasChart.line("chart-load",{datasets:[{data:sys.map(function(p){return p.load_avg_1}),color:"#22c55e",label:"Load 1m"}],labels:lb}); } catch(e){}
     }
     for (var i = 0; i < smart.length; i++) {
       var el = document.getElementById("temp-chart-"+i);
@@ -331,7 +331,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
           var temps = disks[d].temps.map(function(p){return p.temp});
           var mx = Math.max.apply(null,temps);
           var clr = mx>=55?"#ef4444":mx>=45?"#f59e0b":"#22c55e";
-          try { NasChart.area("temp-chart-"+i,{data:temps,labels:temps.map(function(v,k){return k}),color:clr,fillAlpha:0.1}); } catch(e){}
+          try { NasChart.area("temp-chart-"+i,{datasets:[{data:temps,color:clr,label:"Temp"}],labels:temps.map(function(v,k){return k}),yLabel:"\u00B0C"}); } catch(e){}
           break;
         }
       }

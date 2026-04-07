@@ -56,7 +56,7 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 		c.logger.Warn("SMART collection partial failure", "error", err)
 	}
 	// Enrich SMART data with Unraid array slot mapping (md -> physical device)
-	if smart != nil {
+	if smart != nil && sys.Platform == "unraid" {
 		mdMap := buildMDToPhysicalMap() // "sdb" -> "1" (for /mnt/disk1)
 		for i := range smart {
 			devName := strings.TrimPrefix(smart[i].Device, "/dev/")
