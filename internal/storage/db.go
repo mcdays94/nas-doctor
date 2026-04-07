@@ -155,6 +155,17 @@ func (d *DB) migrate() error {
 			PRIMARY KEY (fingerprint, route_key)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_notification_state_route ON notification_state(route_key)`,
+
+		// --- Alert lifecycle events ---
+		`CREATE TABLE IF NOT EXISTS alert_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			alert_id INTEGER NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+			event_type TEXT NOT NULL,
+			actor TEXT NOT NULL DEFAULT 'system',
+			data JSON,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_alert_events_alert ON alert_events(alert_id, created_at DESC)`,
 	}
 
 	for _, m := range migrations {
@@ -166,8 +177,23 @@ func (d *DB) migrate() error {
 	if err := d.ensureColumn("alerts", "fingerprint", "TEXT"); err != nil {
 		return fmt.Errorf("ensure alerts.fingerprint: %w", err)
 	}
+	if err := d.ensureColumn("alerts", "acknowledged_at", "DATETIME"); err != nil {
+		return fmt.Errorf("ensure alerts.acknowledged_at: %w", err)
+	}
+	if err := d.ensureColumn("alerts", "acknowledged_by", "TEXT"); err != nil {
+		return fmt.Errorf("ensure alerts.acknowledged_by: %w", err)
+	}
+	if err := d.ensureColumn("alerts", "snoozed_until", "DATETIME"); err != nil {
+		return fmt.Errorf("ensure alerts.snoozed_until: %w", err)
+	}
 	if _, err := d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_alerts_fingerprint_open ON alerts(fingerprint, resolved_at)`); err != nil {
 		return fmt.Errorf("create alerts fingerprint index: %w", err)
+	}
+	if _, err := d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_alerts_ack ON alerts(acknowledged_at)`); err != nil {
+		return fmt.Errorf("create alerts ack index: %w", err)
+	}
+	if _, err := d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_alerts_snooze ON alerts(snoozed_until)`); err != nil {
+		return fmt.Errorf("create alerts snooze index: %w", err)
 	}
 
 	return nil
@@ -355,6 +381,44 @@ type AlertStateFinding struct {
 	Title       string
 }
 
+// AlertStatus describes the current lifecycle state of an alert.
+type AlertStatus string
+
+const (
+	AlertStatusOpen         AlertStatus = "open"
+	AlertStatusAcknowledged AlertStatus = "acknowledged"
+	AlertStatusSnoozed      AlertStatus = "snoozed"
+	AlertStatusResolved     AlertStatus = "resolved"
+)
+
+// AlertRecord is the API-facing representation of an alert row.
+type AlertRecord struct {
+	ID                int64       `json:"id"`
+	FindingID         string      `json:"finding_id"`
+	SnapshotID        string      `json:"snapshot_id"`
+	Fingerprint       string      `json:"fingerprint,omitempty"`
+	Severity          string      `json:"severity"`
+	Title             string      `json:"title"`
+	Status            AlertStatus `json:"status"`
+	SuppressionReason string      `json:"suppression_reason,omitempty"`
+	NotifiedAt        string      `json:"notified_at,omitempty"`
+	ResolvedAt        string      `json:"resolved_at,omitempty"`
+	AcknowledgedAt    string      `json:"acknowledged_at,omitempty"`
+	AcknowledgedBy    string      `json:"acknowledged_by,omitempty"`
+	SnoozedUntil      string      `json:"snoozed_until,omitempty"`
+	CreatedAt         string      `json:"created_at"`
+}
+
+// AlertEvent is a lifecycle event tied to an alert.
+type AlertEvent struct {
+	ID        int64  `json:"id"`
+	AlertID   int64  `json:"alert_id"`
+	EventType string `json:"event_type"`
+	Actor     string `json:"actor"`
+	Data      any    `json:"data,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
 // SyncAlertStates updates open/resolved alert state based on current findings.
 func (d *DB) SyncAlertStates(snapshotID string, findings []AlertStateFinding, now time.Time) error {
 	tx, err := d.db.Begin()
@@ -405,6 +469,9 @@ func (d *DB) SyncAlertStates(snapshotID string, findings []AlertStateFinding, no
 		if _, err := tx.Exec("UPDATE alerts SET resolved_at = ? WHERE id = ?", now, id); err != nil {
 			return err
 		}
+		if err := d.appendAlertEventTx(tx, id, "resolved", "system", map[string]any{"reason": "deduplicated_open_rows"}, now); err != nil {
+			return err
+		}
 	}
 
 	for fp, f := range active {
@@ -419,22 +486,391 @@ func (d *DB) SyncAlertStates(snapshotID string, findings []AlertStateFinding, no
 			continue
 		}
 
-		if _, err := tx.Exec(
+		result, err := tx.Exec(
 			`INSERT INTO alerts (finding_id, snapshot_id, severity, title, fingerprint)
 			 VALUES (?, ?, ?, ?, ?)`,
 			f.FindingID, snapshotID, f.Severity, f.Title, fp,
-		); err != nil {
+		)
+		if err != nil {
+			return err
+		}
+		id, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if err := d.appendAlertEventTx(tx, id, "opened", "system", nil, now); err != nil {
 			return err
 		}
 	}
 
-	for _, id := range openByFingerprint {
+	for fp, id := range openByFingerprint {
 		if _, err := tx.Exec("UPDATE alerts SET resolved_at = ? WHERE id = ?", now, id); err != nil {
+			return err
+		}
+		if err := d.appendAlertEventTx(tx, id, "resolved", "system", map[string]any{"fingerprint": fp}, now); err != nil {
 			return err
 		}
 	}
 
 	return tx.Commit()
+}
+
+// ListAlerts returns recent alerts, optionally filtered by status.
+func (d *DB) ListAlerts(status string, limit int, now time.Time) ([]AlertRecord, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := d.db.Query(
+		`SELECT id, finding_id, snapshot_id, COALESCE(fingerprint, ''), severity, title,
+				notified_at, resolved_at, acknowledged_at, COALESCE(acknowledged_by, ''), snoozed_until, created_at
+		 FROM alerts
+		 ORDER BY created_at DESC
+		 LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	status = strings.ToLower(strings.TrimSpace(status))
+	var out []AlertRecord
+	for rows.Next() {
+		raw, err := scanAlertRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		record := buildAlertRecord(raw, now)
+		if status != "" && string(record.Status) != status {
+			continue
+		}
+		out = append(out, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetAlert fetches a single alert by numeric ID.
+func (d *DB) GetAlert(id int64, now time.Time) (*AlertRecord, error) {
+	row := d.db.QueryRow(
+		`SELECT id, finding_id, snapshot_id, COALESCE(fingerprint, ''), severity, title,
+				notified_at, resolved_at, acknowledged_at, COALESCE(acknowledged_by, ''), snoozed_until, created_at
+		 FROM alerts WHERE id = ?`,
+		id,
+	)
+	raw, err := scanAlertRow(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	record := buildAlertRecord(raw, now)
+	return &record, nil
+}
+
+// GetAlertEvents returns alert lifecycle events in reverse chronological order.
+func (d *DB) GetAlertEvents(alertID int64, limit int) ([]AlertEvent, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := d.db.Query(
+		`SELECT id, alert_id, event_type, actor, COALESCE(data, ''), created_at
+		 FROM alert_events
+		 WHERE alert_id = ?
+		 ORDER BY created_at DESC
+		 LIMIT ?`,
+		alertID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []AlertEvent
+	for rows.Next() {
+		var ev AlertEvent
+		var dataRaw string
+		var createdAt time.Time
+		if err := rows.Scan(&ev.ID, &ev.AlertID, &ev.EventType, &ev.Actor, &dataRaw, &createdAt); err != nil {
+			return nil, err
+		}
+		ev.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		if dataRaw != "" {
+			var parsed any
+			if err := json.Unmarshal([]byte(dataRaw), &parsed); err == nil {
+				ev.Data = parsed
+			} else {
+				ev.Data = dataRaw
+			}
+		}
+		events = append(events, ev)
+	}
+	return events, rows.Err()
+}
+
+// AcknowledgeAlert marks an unresolved alert as acknowledged.
+func (d *DB) AcknowledgeAlert(id int64, actor string, now time.Time) (bool, error) {
+	if actor == "" {
+		actor = "manual"
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
+		`UPDATE alerts
+		 SET acknowledged_at = ?, acknowledged_by = ?, snoozed_until = NULL
+		 WHERE id = ? AND resolved_at IS NULL`,
+		now, actor, id,
+	)
+	if err != nil {
+		return false, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return false, nil
+	}
+	if err := d.appendAlertEventTx(tx, id, "acknowledged", actor, nil, now); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// UnacknowledgeAlert removes acknowledgement state from an unresolved alert.
+func (d *DB) UnacknowledgeAlert(id int64, actor string, now time.Time) (bool, error) {
+	if actor == "" {
+		actor = "manual"
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
+		`UPDATE alerts
+		 SET acknowledged_at = NULL, acknowledged_by = NULL
+		 WHERE id = ? AND resolved_at IS NULL`,
+		id,
+	)
+	if err != nil {
+		return false, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return false, nil
+	}
+	if err := d.appendAlertEventTx(tx, id, "unacknowledged", actor, nil, now); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// SnoozeAlert suppresses notifications for an unresolved alert until the given time.
+func (d *DB) SnoozeAlert(id int64, until time.Time, actor string, now time.Time) (bool, error) {
+	if actor == "" {
+		actor = "manual"
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
+		`UPDATE alerts
+		 SET snoozed_until = ?, acknowledged_at = NULL, acknowledged_by = NULL
+		 WHERE id = ? AND resolved_at IS NULL`,
+		until, id,
+	)
+	if err != nil {
+		return false, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return false, nil
+	}
+	if err := d.appendAlertEventTx(tx, id, "snoozed", actor, map[string]any{"until": until.UTC().Format(time.RFC3339)}, now); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// UnsnoozeAlert removes snooze state from an unresolved alert.
+func (d *DB) UnsnoozeAlert(id int64, actor string, now time.Time) (bool, error) {
+	if actor == "" {
+		actor = "manual"
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
+		`UPDATE alerts
+		 SET snoozed_until = NULL
+		 WHERE id = ? AND resolved_at IS NULL`,
+		id,
+	)
+	if err != nil {
+		return false, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return false, nil
+	}
+	if err := d.appendAlertEventTx(tx, id, "unsnoozed", actor, nil, now); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// IsAlertSuppressed reports whether an unresolved alert fingerprint is suppressed.
+func (d *DB) IsAlertSuppressed(fingerprint string, now time.Time) (bool, string, error) {
+	if strings.TrimSpace(fingerprint) == "" {
+		return false, "", nil
+	}
+
+	row := d.db.QueryRow(
+		`SELECT acknowledged_at, snoozed_until
+		 FROM alerts
+		 WHERE fingerprint = ? AND resolved_at IS NULL
+		 ORDER BY id DESC
+		 LIMIT 1`,
+		fingerprint,
+	)
+	var acknowledgedAt sql.NullTime
+	var snoozedUntil sql.NullTime
+	if err := row.Scan(&acknowledgedAt, &snoozedUntil); err != nil {
+		if err == sql.ErrNoRows {
+			return false, "", nil
+		}
+		return false, "", err
+	}
+
+	if snoozedUntil.Valid && snoozedUntil.Time.After(now) {
+		return true, "snoozed", nil
+	}
+	if acknowledgedAt.Valid {
+		return true, "acknowledged", nil
+	}
+	return false, "", nil
+}
+
+type alertRowScanner interface {
+	Scan(dest ...any) error
+}
+
+type alertRow struct {
+	ID             int64
+	FindingID      string
+	SnapshotID     string
+	Fingerprint    string
+	Severity       string
+	Title          string
+	NotifiedAt     sql.NullTime
+	ResolvedAt     sql.NullTime
+	AcknowledgedAt sql.NullTime
+	AcknowledgedBy string
+	SnoozedUntil   sql.NullTime
+	CreatedAt      time.Time
+}
+
+func scanAlertRow(s alertRowScanner) (alertRow, error) {
+	var row alertRow
+	err := s.Scan(
+		&row.ID,
+		&row.FindingID,
+		&row.SnapshotID,
+		&row.Fingerprint,
+		&row.Severity,
+		&row.Title,
+		&row.NotifiedAt,
+		&row.ResolvedAt,
+		&row.AcknowledgedAt,
+		&row.AcknowledgedBy,
+		&row.SnoozedUntil,
+		&row.CreatedAt,
+	)
+	return row, err
+}
+
+func buildAlertRecord(row alertRow, now time.Time) AlertRecord {
+	status, reason := alertStatus(row.ResolvedAt, row.AcknowledgedAt, row.SnoozedUntil, now)
+	return AlertRecord{
+		ID:                row.ID,
+		FindingID:         row.FindingID,
+		SnapshotID:        row.SnapshotID,
+		Fingerprint:       row.Fingerprint,
+		Severity:          row.Severity,
+		Title:             row.Title,
+		Status:            status,
+		SuppressionReason: reason,
+		NotifiedAt:        nullTimeRFC3339(row.NotifiedAt),
+		ResolvedAt:        nullTimeRFC3339(row.ResolvedAt),
+		AcknowledgedAt:    nullTimeRFC3339(row.AcknowledgedAt),
+		AcknowledgedBy:    row.AcknowledgedBy,
+		SnoozedUntil:      nullTimeRFC3339(row.SnoozedUntil),
+		CreatedAt:         row.CreatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func alertStatus(resolvedAt, acknowledgedAt, snoozedUntil sql.NullTime, now time.Time) (AlertStatus, string) {
+	if resolvedAt.Valid {
+		return AlertStatusResolved, ""
+	}
+	if snoozedUntil.Valid && snoozedUntil.Time.After(now) {
+		return AlertStatusSnoozed, "snoozed"
+	}
+	if acknowledgedAt.Valid {
+		return AlertStatusAcknowledged, "acknowledged"
+	}
+	return AlertStatusOpen, ""
+}
+
+func nullTimeRFC3339(t sql.NullTime) string {
+	if !t.Valid {
+		return ""
+	}
+	return t.Time.UTC().Format(time.RFC3339)
+}
+
+func (d *DB) appendAlertEventTx(tx *sql.Tx, alertID int64, eventType, actor string, data any, at time.Time) error {
+	if actor == "" {
+		actor = "system"
+	}
+	var payload any
+	if data != nil {
+		b, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		payload = string(b)
+	}
+	_, err := tx.Exec(
+		`INSERT INTO alert_events (alert_id, event_type, actor, data, created_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		alertID, eventType, actor, payload, at,
+	)
+	return err
 }
 
 // MarkAlertsNotifiedByFingerprint updates open alerts as notified.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -145,6 +146,13 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/disks/{serial}", s.handleGetDisk)
 	r.Get("/api/v1/history/system", s.handleSystemHistory)
 	r.Get("/api/v1/notifications/log", s.handleNotificationLog)
+	r.Get("/api/v1/alerts", s.handleListAlerts)
+	r.Get("/api/v1/alerts/{id}", s.handleGetAlert)
+	r.Get("/api/v1/alerts/{id}/events", s.handleGetAlertEvents)
+	r.Post("/api/v1/alerts/{id}/ack", s.handleAckAlert)
+	r.Post("/api/v1/alerts/{id}/unack", s.handleUnackAlert)
+	r.Post("/api/v1/alerts/{id}/snooze", s.handleSnoozeAlert)
+	r.Post("/api/v1/alerts/{id}/unsnooze", s.handleUnsnoozeAlert)
 	r.Get("/api/v1/fleet", s.handleFleetStatus)
 	r.Get("/api/v1/fleet/servers", s.handleFleetServers)
 	r.Put("/api/v1/fleet/servers", s.handleFleetUpdateServers)
@@ -788,6 +796,232 @@ func (s *Server) handleNotificationLog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
+// ---------- Alerts handlers ----------
+
+// handleListAlerts returns recent alerts with optional status filtering.
+// GET /api/v1/alerts
+func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
+	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
+	switch status {
+	case "", string(storage.AlertStatusOpen), string(storage.AlertStatusAcknowledged), string(storage.AlertStatusSnoozed), string(storage.AlertStatusResolved):
+		// valid
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid status filter"})
+		return
+	}
+
+	limit := 200
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 500 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit"})
+			return
+		}
+		limit = parsed
+	}
+
+	alerts, err := s.store.ListAlerts(status, limit, time.Now().UTC())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list alerts: " + err.Error()})
+		return
+	}
+	if alerts == nil {
+		alerts = []storage.AlertRecord{}
+	}
+	writeJSON(w, http.StatusOK, alerts)
+}
+
+// handleGetAlert returns a single alert by ID.
+// GET /api/v1/alerts/{id}
+func (s *Server) handleGetAlert(w http.ResponseWriter, r *http.Request) {
+	alertID, err := parseAlertID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	alert, err := s.store.GetAlert(alertID, time.Now().UTC())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get alert: " + err.Error()})
+		return
+	}
+	if alert == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "alert not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, alert)
+}
+
+// handleGetAlertEvents returns timeline events for an alert.
+// GET /api/v1/alerts/{id}/events
+func (s *Server) handleGetAlertEvents(w http.ResponseWriter, r *http.Request) {
+	alertID, err := parseAlertID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	alert, err := s.store.GetAlert(alertID, time.Now().UTC())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get alert: " + err.Error()})
+		return
+	}
+	if alert == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "alert not found"})
+		return
+	}
+
+	limit := 200
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 500 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit"})
+			return
+		}
+		limit = parsed
+	}
+
+	events, err := s.store.GetAlertEvents(alertID, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get alert events: " + err.Error()})
+		return
+	}
+	if events == nil {
+		events = []storage.AlertEvent{}
+	}
+	writeJSON(w, http.StatusOK, events)
+}
+
+// handleAckAlert acknowledges an alert.
+// POST /api/v1/alerts/{id}/ack
+func (s *Server) handleAckAlert(w http.ResponseWriter, r *http.Request) {
+	alertID, err := parseAlertID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	actor, err := parseAlertActor(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	now := time.Now().UTC()
+	found, err := s.store.AcknowledgeAlert(alertID, actor, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to acknowledge alert: " + err.Error()})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "alert not found or already resolved"})
+		return
+	}
+	alert, _ := s.store.GetAlert(alertID, now)
+	writeJSON(w, http.StatusOK, alert)
+}
+
+// handleUnackAlert clears acknowledgment for an alert.
+// POST /api/v1/alerts/{id}/unack
+func (s *Server) handleUnackAlert(w http.ResponseWriter, r *http.Request) {
+	alertID, err := parseAlertID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	actor, err := parseAlertActor(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	now := time.Now().UTC()
+	found, err := s.store.UnacknowledgeAlert(alertID, actor, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to clear acknowledgment: " + err.Error()})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "alert not found or already resolved"})
+		return
+	}
+	alert, _ := s.store.GetAlert(alertID, now)
+	writeJSON(w, http.StatusOK, alert)
+}
+
+// handleSnoozeAlert snoozes notifications for an alert until a timestamp.
+// POST /api/v1/alerts/{id}/snooze
+func (s *Server) handleSnoozeAlert(w http.ResponseWriter, r *http.Request) {
+	alertID, err := parseAlertID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
+		return
+	}
+	defer r.Body.Close()
+
+	var req struct {
+		Until string `json:"until"`
+		Actor string `json:"actor"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	until, err := time.Parse(time.RFC3339, strings.TrimSpace(req.Until))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "until must be RFC3339"})
+		return
+	}
+	now := time.Now().UTC()
+	until = until.UTC()
+	if !until.After(now) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "until must be in the future"})
+		return
+	}
+	actor := strings.TrimSpace(req.Actor)
+	if actor == "" {
+		actor = "manual"
+	}
+	found, err := s.store.SnoozeAlert(alertID, until, actor, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to snooze alert: " + err.Error()})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "alert not found or already resolved"})
+		return
+	}
+	alert, _ := s.store.GetAlert(alertID, now)
+	writeJSON(w, http.StatusOK, alert)
+}
+
+// handleUnsnoozeAlert clears alert snooze state.
+// POST /api/v1/alerts/{id}/unsnooze
+func (s *Server) handleUnsnoozeAlert(w http.ResponseWriter, r *http.Request) {
+	alertID, err := parseAlertID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	actor, err := parseAlertActor(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	now := time.Now().UTC()
+	found, err := s.store.UnsnoozeAlert(alertID, actor, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to unsnooze alert: " + err.Error()})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "alert not found or already resolved"})
+		return
+	}
+	alert, _ := s.store.GetAlert(alertID, now)
+	writeJSON(w, http.StatusOK, alert)
+}
+
 // ---------- Page handlers ----------
 
 // handleSettingsPage serves the settings HTML page.
@@ -805,6 +1039,40 @@ func (s *Server) handleDiskPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- Internal helpers ----------
+
+func parseAlertID(r *http.Request) (int64, error) {
+	raw := strings.TrimSpace(chi.URLParam(r, "id"))
+	if raw == "" {
+		return 0, fmt.Errorf("alert id is required")
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid alert id")
+	}
+	return id, nil
+}
+
+func parseAlertActor(r *http.Request) (string, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		return "", fmt.Errorf("failed to read request body")
+	}
+	defer r.Body.Close()
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return "manual", nil
+	}
+	var req struct {
+		Actor string `json:"actor"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return "", fmt.Errorf("invalid JSON")
+	}
+	actor := strings.TrimSpace(req.Actor)
+	if actor == "" {
+		actor = "manual"
+	}
+	return actor, nil
+}
 
 // latestSnapshot retrieves the most recent snapshot, preferring the in-memory
 // scheduler copy and falling back to the database.
