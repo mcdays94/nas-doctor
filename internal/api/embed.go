@@ -16,6 +16,7 @@ var (
 var (
 	statsPageHTML  string
 	fleetPageHTML  string
+	alertsPageHTML string
 	SettingsPage   string
 	DiskDetailPage string
 )
@@ -34,6 +35,7 @@ func init() {
 	DashboardEmber = read("ember.html")
 	statsPageHTML = read("stats.html")
 	fleetPageHTML = read("fleet.html")
+	alertsPageHTML = read("alerts.html")
 	SettingsPage = read("settings.html")
 	DiskDetailPage = read("disk_detail.html")
 }

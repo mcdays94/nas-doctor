@@ -97,6 +97,9 @@ func (s *Server) Router() http.Handler {
 		w.Write([]byte(ChartJS))
 	})
 
+	// Shared design system CSS
+	r.Get("/css/shared.css", serveSharedCSS)
+
 	// Icons
 	r.Get("/icon.png", func(w http.ResponseWriter, r *http.Request) {
 		settings := s.getSettings()
