@@ -64,7 +64,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Content-Type"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: false,
@@ -159,6 +159,12 @@ type statusResponse struct {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp := statusResponse{}
+	settings := s.getSettings()
+	dismissed := make(map[string]struct{}, len(settings.DismissedFindings))
+	for _, title := range settings.DismissedFindings {
+		dismissed[title] = struct{}{}
+	}
+
 	if s.scheduler != nil {
 		resp.ScanRunning = s.scheduler.IsRunning()
 		resp.ScanIntervalSecs = int(s.scheduler.Interval().Seconds())
@@ -178,6 +184,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		resp.LastScan = snap.Timestamp.Format(time.RFC3339)
 
 		for _, f := range snap.Findings {
+			if _, ok := dismissed[f.Title]; ok {
+				continue
+			}
 			switch f.Severity {
 			case "critical":
 				resp.CriticalCount++
@@ -198,7 +207,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Include section visibility and dismissed findings from settings
-	settings := s.getSettings()
 	resp.Sections = &settings.Sections
 	resp.DismissedFindings = settings.DismissedFindings
 

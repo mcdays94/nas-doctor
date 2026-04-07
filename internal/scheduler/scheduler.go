@@ -176,12 +176,15 @@ func (s *Scheduler) RunOnce() {
 	s.mu.Unlock()
 
 	// Notify
-	if s.notifier != nil {
+	s.mu.RLock()
+	notif := s.notifier
+	s.mu.RUnlock()
+	if notif != nil {
 		hostname := snap.System.Hostname
 		if hostname == "" {
 			hostname = "Unknown"
 		}
-		s.notifier.NotifyFindings(snap.Findings, hostname)
+		notif.NotifyFindings(snap.Findings, hostname)
 	}
 
 	// Data lifecycle: prune old data
@@ -311,6 +314,18 @@ func (s *Scheduler) UpdateBackup(cfg BackupConfig) {
 		"keep", cfg.KeepCount,
 		"interval_h", cfg.IntervalH,
 	)
+}
+
+// UpdateNotifier swaps the notifier used for delivery.
+func (s *Scheduler) UpdateNotifier(notif *notifier.Notifier) {
+	s.mu.Lock()
+	s.notifier = notif
+	s.mu.Unlock()
+	if notif == nil {
+		s.logger.Info("notifier updated", "enabled", false)
+		return
+	}
+	s.logger.Info("notifier updated", "enabled", true)
 }
 
 // checkBackup runs a backup if enough time has elapsed since the last one.
