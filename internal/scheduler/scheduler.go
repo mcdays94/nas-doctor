@@ -293,6 +293,13 @@ func (s *Scheduler) IsRunning() bool {
 	return s.running
 }
 
+// Interval returns the current scan interval.
+func (s *Scheduler) Interval() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.interval
+}
+
 // UpdateBackup updates the backup configuration.
 func (s *Scheduler) UpdateBackup(cfg BackupConfig) {
 	s.mu.Lock()

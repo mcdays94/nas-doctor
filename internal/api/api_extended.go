@@ -1838,7 +1838,7 @@ loadNotificationLog();
 loadDBStats();
 loadBackupInfo();
 loadFleetServers();
-setInterval(loadNotificationLog, 30000);
+setInterval(loadNotificationLog, 60000);
 </script>
 </body>
 </html>`

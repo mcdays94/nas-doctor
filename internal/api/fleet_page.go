@@ -127,7 +127,7 @@ a.card-link{text-decoration:none;color:inherit;display:block}
   }
 
   load();
-  setInterval(load, 30000);
+  setInterval(load, 60000);
 })();
 </script>
 </body>
