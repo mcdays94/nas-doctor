@@ -616,6 +616,37 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     }
     h += '</div>'; // end section-block network
 
+    // ======= Section: Service Checks =======
+    h += '<div class="section-block" data-section="services">';
+    var svcChecks = sn ? (sn.service_checks || []) : [];
+    if (svcChecks && svcChecks.length > 0) {
+      h += '<div>';
+      h += '<div class="section-title">Service Checks (' + svcChecks.length + ')</div>';
+      h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+      h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Name</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Type</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Status</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Latency</th>';
+      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Failures</th>';
+      h += '</tr>';
+      for (var svi = 0; svi < svcChecks.length; svi++) {
+        var sc = svcChecks[svi];
+        var scStatus = (sc.status || '').toLowerCase();
+        var scClass = scStatus === 'up' ? 'td-healthy' : 'td-crit';
+        h += '<tr>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><div style="font-weight:500">' + esc(sc.name || 'Service') + '</div><div style="font-size:11px;color:var(--text-quaternary)">' + esc(sc.target || '') + '</div></td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc((sc.type || '').toUpperCase()) + '</td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)" class="' + scClass + '">' + esc(sc.status || 'unknown') + '</td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + ((sc.response_ms != null) ? (sc.response_ms + ' ms') : '—') + '</td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + (sc.consecutive_failures || 0) + ' / ' + (sc.failure_threshold || 1) + '</td>';
+        h += '</tr>';
+      }
+      h += '</table>';
+      h += '</div>';
+    }
+    h += '</div>'; // end section-block services
+
     // ======= Section: Parity =======
     h += '<div class="section-block" data-section="parity">';
     var parity = sn ? sn.parity : null;
@@ -713,6 +744,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       "docker": sec.docker !== false,
       "zfs": sec.zfs !== false,
       "ups": sec.ups !== false,
+      "services": true,
       "network": sec.network !== false,
       "parity": sec.parity !== false
     };

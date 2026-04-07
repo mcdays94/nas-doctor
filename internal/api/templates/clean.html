@@ -1094,6 +1094,25 @@ body {
     }
     html += '</div>'; // end section-block network
 
+    // ==== Section: Service Checks ====
+    html += '<div class="section-block" data-section="services">';
+    if (snapshot && snapshot.service_checks && snapshot.service_checks.length > 0) {
+      html += '<div class="section"><div class="section-title">Service Checks (' + snapshot.service_checks.length + ')</div>';
+      html += '<table style="width:100%;font-size:13px;border-collapse:collapse">';
+      html += '<tr style="color:#808080;font-size:11px"><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Name</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Type</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Status</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Latency</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Failures</th></tr>';
+      for (var si = 0; si < snapshot.service_checks.length; si++) {
+        var sc = snapshot.service_checks[si];
+        var scColor = (sc.status === "up") ? "#16a34a" : "#dc2626";
+        html += '<tr><td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)"><div style="font-weight:500">' + escapeHTML(sc.name || 'Service') + '</div><div style="font-size:12px;color:#808080">' + escapeHTML(sc.target || '') + '</div></td>';
+        html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML((sc.type || '').toUpperCase()) + '</td>';
+        html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04);color:' + scColor + '">' + escapeHTML(sc.status || 'unknown') + '</td>';
+        html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + ((sc.response_ms != null) ? (sc.response_ms + ' ms') : '—') + '</td>';
+        html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + (sc.consecutive_failures || 0) + ' / ' + (sc.failure_threshold || 1) + '</td></tr>';
+      }
+      html += '</table></div>';
+    }
+    html += '</div>'; // end section-block services
+
     // ==== Section: Parity ====
     html += '<div class="section-block" data-section="parity">';
     if (snapshot && snapshot.parity) {
@@ -1178,7 +1197,7 @@ body {
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
     var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
-    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "network": sec.network !== false, "parity": sec.parity !== false };
+    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "parity": sec.parity !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var items = [];

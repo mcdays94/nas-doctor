@@ -1460,6 +1460,25 @@ td.mono {
     }
     html += "</div>"; /* section-block network */
 
+    /* ==== Section: Service Checks ==== */
+    html += "<div class=\"section-block\" data-section=\"services\">";
+    if (snapshot && snapshot.service_checks && snapshot.service_checks.length > 0) {
+      html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Service Checks (" + snapshot.service_checks.length + ")</div>";
+      html += "<table style=\"width:100%;font-size:12px;border-collapse:collapse\">";
+      html += "<tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Name</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Type</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Status</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Latency</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Failures</th></tr>";
+      for (var si = 0; si < snapshot.service_checks.length; si++) {
+        var sc = snapshot.service_checks[si];
+        var scClr = (sc.status === "up") ? "var(--green)" : "var(--red)";
+        html += "<tr><td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\"><div style=\"font-weight:500\">" + esc(sc.name || "Service") + "</div><div style=\"font-size:11px;color:var(--text-dim)\">" + esc(sc.target || "") + "</div></td>";
+        html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc((sc.type || "").toUpperCase()) + "</td>";
+        html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border);color:" + scClr + "\">" + esc(sc.status || "unknown") + "</td>";
+        html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + ((sc.response_ms != null) ? (sc.response_ms + " ms") : "—") + "</td>";
+        html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + (sc.consecutive_failures || 0) + " / " + (sc.failure_threshold || 1) + "</td></tr>";
+      }
+      html += "</table></div>";
+    }
+    html += "</div>"; /* section-block services */
+
     /* ==== Section: Parity ==== */
     html += "<div class=\"section-block\" data-section=\"parity\">";
     if (snapshot && snapshot.parity) {
@@ -1572,7 +1591,7 @@ td.mono {
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
     var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
-    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "network": sec.network !== false, "parity": sec.parity !== false };
+    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "parity": sec.parity !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var items = [];

@@ -166,9 +166,26 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
 .status-badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px}
 .status-success{color:var(--success);background:rgba(39,166,68,0.12)}
 .status-failed{color:var(--error);background:rgba(220,38,38,0.12)}
+.status-up{color:var(--success);background:rgba(39,166,68,0.12)}
+.status-down{color:var(--error);background:rgba(220,38,38,0.12)}
+.status-open{color:var(--text);background:rgba(255,255,255,0.08)}
+.status-acknowledged{color:#f59e0b;background:rgba(245,158,11,0.12)}
+.status-snoozed{color:#3b82f6;background:rgba(59,130,246,0.12)}
+.status-resolved{color:var(--success);background:rgba(39,166,68,0.12)}
 .log-empty{text-align:center;padding:32px;color:var(--text2);font-size:13px}
 .log-refresh{font-size:12px;color:var(--text2);margin-top:8px}
 .overflow-x{overflow-x:auto}
+
+.mini-list-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;background:rgba(255,255,255,0.02)}
+.mini-list-main{flex:1;min-width:0}
+.mini-list-title{font-size:13px;font-weight:600;color:var(--text)}
+.mini-list-sub{font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:2px 8px;border-radius:999px}
+.pill-http{background:rgba(59,130,246,0.14);color:#60a5fa}
+.pill-tcp{background:rgba(16,185,129,0.14);color:#34d399}
+.pill-dns{background:rgba(236,72,153,0.14);color:#f472b6}
+.pill-smb,.pill-nfs{background:rgba(245,158,11,0.14);color:#fbbf24}
+.inline-muted{font-size:11px;color:var(--text2)}
 
 /* Toasts */
 .toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
@@ -321,7 +338,104 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 3. Log Forwarding (coming soon) -->
+  <!-- 3. Service Checks -->
+  <div class="card" id="card-service-checks">
+    <div class="card-title">Service Checks</div>
+    <div class="card-desc">Monitor service endpoints (HTTP, TCP, DNS, SMB, NFS) and trigger findings when they fail repeatedly.</div>
+    <div id="service-check-list"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn btn-secondary" id="btn-add-service-check" onclick="toggleServiceCheckForm()">+ Add Service Check</button>
+      <button class="btn btn-success" onclick="runServiceChecksNow()">Run Checks Now</button>
+    </div>
+
+    <div class="webhook-form" id="service-check-form" style="margin-top:12px">
+      <input type="hidden" id="sc-edit-index" value="-1">
+      <div class="form-row">
+        <div>
+          <label for="sc-name">Name</label>
+          <input type="text" id="sc-name" placeholder="e.g. Home Assistant UI">
+        </div>
+        <div>
+          <label for="sc-type">Type</label>
+          <select id="sc-type" onchange="onServiceTypeChange()">
+            <option value="http">HTTP</option>
+            <option value="tcp">TCP</option>
+            <option value="dns">DNS</option>
+            <option value="smb">SMB</option>
+            <option value="nfs">NFS</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="sc-target">Target</label>
+          <input type="text" id="sc-target" placeholder="https://nas.local/health, 192.168.1.10, or host:port">
+        </div>
+        <div id="sc-port-wrap">
+          <label for="sc-port">Port (optional)</label>
+          <input type="number" id="sc-port" min="0" max="65535" placeholder="443">
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="sc-timeout">Timeout (seconds)</label>
+          <input type="number" id="sc-timeout" min="1" max="30" value="5">
+        </div>
+        <div>
+          <label for="sc-threshold">Failure threshold</label>
+          <input type="number" id="sc-threshold" min="1" max="20" value="1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="sc-severity">Failure severity</label>
+          <select id="sc-severity">
+            <option value="critical">Critical</option>
+            <option value="warning" selected>Warning</option>
+            <option value="info">Info</option>
+          </select>
+        </div>
+        <div id="sc-http-expected-wrap">
+          <label for="sc-http-min">HTTP success range (status)</label>
+          <div style="display:flex;gap:8px">
+            <input type="number" id="sc-http-min" min="100" max="599" value="200" placeholder="Min">
+            <input type="number" id="sc-http-max" min="100" max="599" value="399" placeholder="Max">
+          </div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <div class="toggle-wrap" onclick="document.getElementById('sc-enabled').checked = !document.getElementById('sc-enabled').checked; this.querySelector('.toggle').classList.toggle('on', document.getElementById('sc-enabled').checked)">
+            <div class="toggle on"><div class="toggle-knob"></div></div>
+            <span class="toggle-label">Enabled</span>
+            <input type="checkbox" id="sc-enabled" checked style="display:none">
+          </div>
+        </div>
+        <div></div>
+      </div>
+      <div class="webhook-form-actions">
+        <button class="btn btn-primary" onclick="saveServiceCheck()">Save Check</button>
+        <button class="btn btn-secondary" onclick="cancelServiceCheckForm()">Cancel</button>
+      </div>
+    </div>
+
+    <div style="margin-top:18px">
+      <label>Latest Status</label>
+      <div class="overflow-x" style="margin-top:6px">
+        <table class="log-table">
+          <thead>
+            <tr><th>Check</th><th>Type</th><th>Status</th><th>Latency</th><th>Failures</th><th>Checked</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="service-check-results-body">
+            <tr><td colspan="7" class="log-empty">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="service-check-history" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>
+    </div>
+  </div>
+
+  <!-- 4. Log Forwarding (coming soon) -->
   <div class="card coming-soon" id="card-logfwd">
     <div class="card-title">Log Forwarding</div>
     <div class="card-desc">Forward scan results and metrics to external logging or observability endpoints (e.g. Grafana via Prometheus).</div>
@@ -345,7 +459,7 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 4. Data Lifecycle -->
+  <!-- 5. Data Lifecycle -->
   <div class="card" id="card-retention">
     <div class="card-title">Data Lifecycle</div>
     <div class="card-desc">Control how long diagnostic data is stored. Older data is automatically pruned after each scan.</div>
@@ -372,7 +486,7 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 5. Fleet / Multi-Server -->
+  <!-- 6. Fleet / Multi-Server -->
   <div class="card" id="card-fleet">
     <div class="card-title">Fleet Monitoring</div>
     <div class="card-desc">Monitor multiple NAS Doctor instances from this dashboard. Each remote server must be running NAS Doctor.</div>
@@ -385,7 +499,7 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     <div style="margin-top:8px"><a href="/fleet" style="color:var(--accent);font-size:13px">Open Fleet Dashboard &rarr;</a></div>
   </div>
 
-  <!-- 6. Dashboard Sections -->
+  <!-- 7. Dashboard Sections -->
   <div class="card" id="card-sections">
     <div class="card-title">Dashboard Sections</div>
     <div class="card-desc">Toggle which sections appear on the dashboard. Disabled sections are hidden but data is still collected.</div>
@@ -401,7 +515,7 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 6. Backup -->
+  <!-- 8. Backup -->
   <div class="card" id="card-backup">
     <div class="card-title">Automatic Backup</div>
     <div class="card-desc">Periodically back up settings and historical data so you can restore after a Docker reinstall.</div>
@@ -457,7 +571,39 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     </div>
   </div>
 
-  <!-- 6. Notification History -->
+  <!-- 9. Alerts -->
+  <div class="card" id="card-alerts">
+    <div class="card-title">Alerts</div>
+    <div class="card-desc">Manage active alerts with acknowledge/snooze actions and inspect lifecycle timelines.</div>
+    <div class="form-row" style="margin-bottom:10px">
+      <div>
+        <label for="alerts-filter-status">Status filter</label>
+        <select id="alerts-filter-status" onchange="loadAlerts()">
+          <option value="open">Open</option>
+          <option value="acknowledged">Acknowledged</option>
+          <option value="snoozed">Snoozed</option>
+          <option value="resolved">Resolved</option>
+          <option value="">All</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button class="btn btn-secondary" onclick="loadAlerts()">Refresh Alerts</button>
+      </div>
+    </div>
+    <div class="overflow-x">
+      <table class="log-table">
+        <thead>
+          <tr><th>ID</th><th>Severity</th><th>Title</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="alerts-body">
+          <tr><td colspan="6" class="log-empty">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="alert-events-panel" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>
+  </div>
+
+  <!-- 10. Notification History -->
   <div class="card" id="card-history">
     <div class="card-title">Notification History</div>
     <div class="card-desc">Recent webhook delivery attempts. <span class="log-refresh">Auto-refreshes every 30s.</span></div>
@@ -487,6 +633,7 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
 /* ---------- State ---------- */
 var settings = null;
 var webhooks = [];
+var serviceChecks = [];
 
 /* ---------- Toast ---------- */
 function showToast(msg, type) {
@@ -680,6 +827,10 @@ function loadSettings() {
       /* Webhooks */
       webhooks = (data.notifications && data.notifications.webhooks) ? data.notifications.webhooks : [];
       renderWebhooks();
+      /* Service checks */
+      serviceChecks = (data.service_checks && data.service_checks.checks) ? data.service_checks.checks : [];
+      renderServiceChecks();
+      loadServiceCheckResults();
       /* Retention */
       var ret = data.retention || {};
       document.getElementById("ret-snapshot-days").value = ret.snapshot_days || 90;
@@ -718,7 +869,7 @@ function buildSettingsPayload() {
     theme: getSelectedTheme(),
     icon: getSelectedIcon(),
     notifications: notifications,
-    service_checks: base.service_checks || { checks: [] },
+    service_checks: { checks: serviceChecks },
     log_push: base.log_push || { enabled: false, destinations: [] },
     retention: {
       snapshot_days: parseInt(document.getElementById("ret-snapshot-days").value, 10) || 90,
@@ -759,11 +910,16 @@ function saveSettings() {
   })
   .then(function(saved) {
     settings = saved;
+    webhooks = (saved.notifications && saved.notifications.webhooks) ? saved.notifications.webhooks : webhooks;
+    serviceChecks = (saved.service_checks && saved.service_checks.checks) ? saved.service_checks.checks : serviceChecks;
     showToast("Settings saved", "success");
     markSaved();
     /* Apply theme live */
     applyTheme(payload.theme);
     try { localStorage.setItem("nas-doctor-theme", payload.theme); } catch(e) {}
+    renderWebhooks();
+    renderServiceChecks();
+    loadServiceCheckResults();
   })
   .catch(function(e) { showToast("Error: " + e.message, "error"); });
 }
@@ -909,6 +1065,269 @@ function testWebhook() {
   .catch(function(e) { showToast("Error: " + e.message, "error"); });
 }
 
+/* ---------- Service checks ---------- */
+function normalizeServiceCheck(sc) {
+  var out = {
+    name: (sc && sc.name) ? sc.name : "",
+    type: (sc && sc.type) ? String(sc.type).toLowerCase() : "http",
+    target: (sc && sc.target) ? sc.target : "",
+    enabled: !(sc && sc.enabled === false),
+    timeout_sec: (sc && sc.timeout_sec) ? sc.timeout_sec : 5,
+    port: (sc && sc.port) ? sc.port : 0,
+    failure_threshold: (sc && sc.failure_threshold) ? sc.failure_threshold : 1,
+    failure_severity: (sc && sc.failure_severity) ? sc.failure_severity : "warning",
+    expected_status_min: (sc && sc.expected_status_min) ? sc.expected_status_min : 200,
+    expected_status_max: (sc && sc.expected_status_max) ? sc.expected_status_max : 399
+  };
+  if (out.timeout_sec < 1) out.timeout_sec = 5;
+  if (out.failure_threshold < 1) out.failure_threshold = 1;
+  return out;
+}
+
+function serviceTypePillClass(t) {
+  var type = (t || "").toLowerCase();
+  if (type === "http") return "pill-http";
+  if (type === "tcp") return "pill-tcp";
+  if (type === "dns") return "pill-dns";
+  if (type === "smb") return "pill-smb";
+  if (type === "nfs") return "pill-nfs";
+  return "pill-http";
+}
+
+function renderServiceChecks() {
+  var container = document.getElementById("service-check-list");
+  if (!container) return;
+  if (!serviceChecks || serviceChecks.length === 0) {
+    container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text2);font-size:13px">No service checks configured yet.</div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < serviceChecks.length; i++) {
+    var sc = normalizeServiceCheck(serviceChecks[i]);
+    var t = (sc.type || "http").toUpperCase();
+    html += '<div class="mini-list-item">';
+    html += '  <div class="mini-list-main">';
+    html += '    <div class="mini-list-title">' + escapeHtml(sc.name) + ' <span class="pill ' + serviceTypePillClass(sc.type) + '">' + escapeHtml(t) + '</span></div>';
+    html += '    <div class="mini-list-sub">' + escapeHtml(sc.target) + (sc.port ? (':' + sc.port) : '') + '</div>';
+    html += '    <div class="inline-muted">Threshold: ' + sc.failure_threshold + ' &middot; Severity: ' + escapeHtml(sc.failure_severity) + ' &middot; Timeout: ' + sc.timeout_sec + 's</div>';
+    html += '  </div>';
+    html += '  <div class="webhook-actions">';
+    html += '    <div class="toggle-wrap" onclick="toggleServiceCheckEnabled(' + i + ')"><div class="toggle' + (sc.enabled ? ' on' : '') + '"><div class="toggle-knob"></div></div></div>';
+    html += '    <button class="btn btn-secondary btn-sm" onclick="editServiceCheck(' + i + ')">Edit</button>';
+    html += '    <button class="btn btn-danger btn-sm" onclick="removeServiceCheck(' + i + ')">Remove</button>';
+    html += '  </div>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function toggleServiceCheckEnabled(idx) {
+  if (idx < 0 || idx >= serviceChecks.length) return;
+  var sc = normalizeServiceCheck(serviceChecks[idx]);
+  sc.enabled = !sc.enabled;
+  serviceChecks[idx] = sc;
+  renderServiceChecks();
+  saveSettings();
+}
+
+function toggleServiceCheckForm() {
+  var form = document.getElementById("service-check-form");
+  if (form.classList.contains("visible")) {
+    cancelServiceCheckForm();
+    return;
+  }
+  document.getElementById("sc-edit-index").value = "-1";
+  document.getElementById("sc-name").value = "";
+  document.getElementById("sc-type").value = "http";
+  document.getElementById("sc-target").value = "";
+  document.getElementById("sc-port").value = "";
+  document.getElementById("sc-timeout").value = "5";
+  document.getElementById("sc-threshold").value = "1";
+  document.getElementById("sc-severity").value = "warning";
+  document.getElementById("sc-http-min").value = "200";
+  document.getElementById("sc-http-max").value = "399";
+  setServiceCheckEnabledUI(true);
+  onServiceTypeChange();
+  form.classList.add("visible");
+}
+
+function setServiceCheckEnabledUI(enabled) {
+  var checkbox = document.getElementById("sc-enabled");
+  if (checkbox) checkbox.checked = !!enabled;
+  var toggleWrap = checkbox ? checkbox.parentElement : null;
+  var toggle = toggleWrap ? toggleWrap.querySelector(".toggle") : null;
+  if (toggle) toggle.classList.toggle("on", !!enabled);
+}
+
+function onServiceTypeChange() {
+  var type = document.getElementById("sc-type").value;
+  var httpWrap = document.getElementById("sc-http-expected-wrap");
+  var portWrap = document.getElementById("sc-port-wrap");
+  if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
+  if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
+}
+
+function editServiceCheck(idx) {
+  if (idx < 0 || idx >= serviceChecks.length) return;
+  var sc = normalizeServiceCheck(serviceChecks[idx]);
+  document.getElementById("sc-edit-index").value = String(idx);
+  document.getElementById("sc-name").value = sc.name;
+  document.getElementById("sc-type").value = sc.type;
+  document.getElementById("sc-target").value = sc.target;
+  document.getElementById("sc-port").value = sc.port > 0 ? String(sc.port) : "";
+  document.getElementById("sc-timeout").value = String(sc.timeout_sec || 5);
+  document.getElementById("sc-threshold").value = String(sc.failure_threshold || 1);
+  document.getElementById("sc-severity").value = sc.failure_severity || "warning";
+  document.getElementById("sc-http-min").value = String(sc.expected_status_min || 200);
+  document.getElementById("sc-http-max").value = String(sc.expected_status_max || 399);
+  setServiceCheckEnabledUI(sc.enabled !== false);
+  onServiceTypeChange();
+  document.getElementById("service-check-form").classList.add("visible");
+}
+
+function cancelServiceCheckForm() {
+  document.getElementById("service-check-form").classList.remove("visible");
+}
+
+function saveServiceCheck() {
+  var name = document.getElementById("sc-name").value.trim();
+  var target = document.getElementById("sc-target").value.trim();
+  if (!name || !target) {
+    showToast("Name and target are required", "error");
+    return;
+  }
+  var type = document.getElementById("sc-type").value;
+  var sc = {
+    name: name,
+    type: type,
+    target: target,
+    enabled: document.getElementById("sc-enabled").checked,
+    timeout_sec: parseInt(document.getElementById("sc-timeout").value, 10) || 5,
+    port: parseInt(document.getElementById("sc-port").value, 10) || 0,
+    failure_threshold: parseInt(document.getElementById("sc-threshold").value, 10) || 1,
+    failure_severity: document.getElementById("sc-severity").value,
+    expected_status_min: parseInt(document.getElementById("sc-http-min").value, 10) || 200,
+    expected_status_max: parseInt(document.getElementById("sc-http-max").value, 10) || 399
+  };
+  if (sc.timeout_sec < 1) sc.timeout_sec = 5;
+  if (sc.timeout_sec > 30) sc.timeout_sec = 30;
+  if (sc.failure_threshold < 1) sc.failure_threshold = 1;
+  if (type !== "http") {
+    sc.expected_status_min = 0;
+    sc.expected_status_max = 0;
+  }
+
+  for (var i = 0; i < serviceChecks.length; i++) {
+    if (i === parseInt(document.getElementById("sc-edit-index").value, 10)) continue;
+    if ((serviceChecks[i].name || "").toLowerCase() === name.toLowerCase()) {
+      showToast("Service check name must be unique", "error");
+      return;
+    }
+  }
+
+  var editIdx = parseInt(document.getElementById("sc-edit-index").value, 10);
+  if (editIdx >= 0 && editIdx < serviceChecks.length) {
+    serviceChecks[editIdx] = sc;
+  } else {
+    serviceChecks.push(sc);
+  }
+  renderServiceChecks();
+  cancelServiceCheckForm();
+  saveSettings();
+}
+
+function removeServiceCheck(idx) {
+  if (idx < 0 || idx >= serviceChecks.length) return;
+  if (!confirm('Remove service check "' + (serviceChecks[idx].name || "Unnamed") + '"?')) return;
+  serviceChecks.splice(idx, 1);
+  renderServiceChecks();
+  saveSettings();
+}
+
+function runServiceChecksNow() {
+  showToast("Running service checks...", "info");
+  fetch("/api/v1/service-checks/run", { method: "POST" })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Run failed"); });
+      return r.json();
+    })
+    .then(function() {
+      showToast("Service checks completed", "success");
+      loadServiceCheckResults();
+    })
+    .catch(function(e) {
+      showToast("Run failed: " + e.message, "error");
+    });
+}
+
+function loadServiceCheckResults() {
+  fetch("/api/v1/service-checks")
+    .then(function(r) { return r.json(); })
+    .then(function(entries) {
+      var tbody = document.getElementById("service-check-results-body");
+      if (!tbody) return;
+      if (!entries || entries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="log-empty">No service check results yet.</td></tr>';
+        document.getElementById("service-check-history").innerHTML = "";
+        return;
+      }
+      var html = "";
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        var checked = e.checked_at ? new Date(e.checked_at).toLocaleString() : "—";
+        var statusCls = e.status === "up" ? "status-up" : "status-down";
+        var typePill = '<span class="pill ' + serviceTypePillClass(e.type) + '">' + escapeHtml((e.type || "").toUpperCase()) + '</span>';
+        html += '<tr>';
+        html += '<td><strong>' + escapeHtml(e.name || "—") + '</strong><div class="inline-muted">' + escapeHtml(e.target || "") + '</div></td>';
+        html += '<td>' + typePill + '</td>';
+        html += '<td><span class="status-badge ' + statusCls + '">' + escapeHtml(e.status || "unknown") + '</span></td>';
+        html += '<td>' + (e.response_ms != null ? e.response_ms + ' ms' : '—') + '</td>';
+        html += '<td>' + (e.consecutive_failures || 0) + ' / ' + (e.failure_threshold || 1) + '</td>';
+        html += '<td>' + escapeHtml(checked) + '</td>';
+        html += '<td><button class="btn btn-secondary btn-sm" onclick="viewServiceCheckHistory(\'' + escapeHtml(e.key).replace(/'/g, "\\'") + '\', \'' + escapeHtml(e.name).replace(/'/g, "\\'") + '\')">History</button></td>';
+        html += '</tr>';
+      }
+      tbody.innerHTML = html;
+    })
+    .catch(function() {
+      var tbody = document.getElementById("service-check-results-body");
+      if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="log-empty">Failed to load service checks.</td></tr>';
+    });
+}
+
+function viewServiceCheckHistory(key, name) {
+  var panel = document.getElementById("service-check-history");
+  if (!panel) return;
+  panel.innerHTML = "Loading history...";
+  fetch("/api/v1/service-checks/history?key=" + encodeURIComponent(key) + "&limit=30")
+    .then(function(r) { return r.json(); })
+    .then(function(rows) {
+      if (!rows || rows.length === 0) {
+        panel.innerHTML = "No history for this service check yet.";
+        return;
+      }
+      var html = '<div style="font-weight:600;color:var(--text);margin-bottom:6px">History: ' + escapeHtml(name) + '</div>';
+      html += '<div class="overflow-x"><table class="log-table"><thead><tr><th>Checked</th><th>Status</th><th>Latency</th><th>Failures</th><th>Error</th></tr></thead><tbody>';
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        var ts = r.checked_at ? new Date(r.checked_at).toLocaleString() : "—";
+        var cls = r.status === "up" ? "status-up" : "status-down";
+        html += '<tr>';
+        html += '<td>' + escapeHtml(ts) + '</td>';
+        html += '<td><span class="status-badge ' + cls + '">' + escapeHtml(r.status || "unknown") + '</span></td>';
+        html += '<td>' + (r.response_ms != null ? r.response_ms + ' ms' : '—') + '</td>';
+        html += '<td>' + (r.consecutive_failures || 0) + ' / ' + (r.failure_threshold || 1) + '</td>';
+        html += '<td>' + escapeHtml(r.error || '—') + '</td>';
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+      panel.innerHTML = html;
+    })
+    .catch(function() {
+      panel.innerHTML = "Failed to load history.";
+    });
+}
+
 /* ---------- Notification log ---------- */
 function loadNotificationLog() {
   fetch("/api/v1/notifications/log")
@@ -923,7 +1342,8 @@ function loadNotificationLog() {
       for (var i = 0; i < entries.length; i++) {
         var e = entries[i];
         var ts = e.created_at ? new Date(e.created_at).toLocaleString() : "—";
-        var statusCls = e.status === "success" ? "status-success" : "status-failed";
+        var st = String(e.status || "").toLowerCase();
+        var statusCls = (st === "sent" || st === "success") ? "status-success" : (st.indexOf("suppressed") === 0 ? "status-open" : "status-failed");
         var badgeClass = "badge-" + (e.webhook_type || "generic");
         var typeName = (e.webhook_type || "generic").charAt(0).toUpperCase() + (e.webhook_type || "generic").slice(1);
         html += "<tr>";
@@ -939,6 +1359,137 @@ function loadNotificationLog() {
     })
     .catch(function() {
       document.getElementById("log-body").innerHTML = '<tr><td colspan="6" class="log-empty">Failed to load log.</td></tr>';
+    });
+}
+
+/* ---------- Alerts ---------- */
+function statusClassForAlert(status) {
+  var s = (status || "").toLowerCase();
+  if (s === "open") return "status-open";
+  if (s === "acknowledged") return "status-acknowledged";
+  if (s === "snoozed") return "status-snoozed";
+  if (s === "resolved") return "status-resolved";
+  return "status-open";
+}
+
+function loadAlerts() {
+  var status = document.getElementById("alerts-filter-status") ? document.getElementById("alerts-filter-status").value : "open";
+  var qs = status ? ("?status=" + encodeURIComponent(status)) : "";
+  fetch("/api/v1/alerts" + qs)
+    .then(function(r) { return r.json(); })
+    .then(function(alerts) {
+      var tbody = document.getElementById("alerts-body");
+      if (!tbody) return;
+      if (!alerts || alerts.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No alerts for this filter.</td></tr>';
+        return;
+      }
+      var html = "";
+      for (var i = 0; i < alerts.length; i++) {
+        var a = alerts[i];
+        var sev = escapeHtml(a.severity || "—");
+        var created = a.created_at ? new Date(a.created_at).toLocaleString() : "—";
+        var statusLabel = a.status || "open";
+        if (a.suppression_reason) statusLabel += " (" + a.suppression_reason + ")";
+
+        html += '<tr>';
+        html += '<td>#' + a.id + '</td>';
+        html += '<td>' + sev + '</td>';
+        html += '<td>' + escapeHtml(a.title || "") + '</td>';
+        html += '<td><span class="status-badge ' + statusClassForAlert(a.status) + '">' + escapeHtml(statusLabel) + '</span></td>';
+        html += '<td>' + escapeHtml(created) + '</td>';
+        html += '<td style="display:flex;gap:6px;flex-wrap:wrap">';
+        if (a.status === "open") {
+          html += '<button class="btn btn-secondary btn-sm" onclick="ackAlert(' + a.id + ')">Ack</button>';
+          html += '<button class="btn btn-secondary btn-sm" onclick="snoozeAlert(' + a.id + ')">Snooze</button>';
+        } else if (a.status === "acknowledged") {
+          html += '<button class="btn btn-secondary btn-sm" onclick="unackAlert(' + a.id + ')">Unack</button>';
+          html += '<button class="btn btn-secondary btn-sm" onclick="snoozeAlert(' + a.id + ')">Snooze</button>';
+        } else if (a.status === "snoozed") {
+          html += '<button class="btn btn-secondary btn-sm" onclick="unsnoozeAlert(' + a.id + ')">Unsnooze</button>';
+          html += '<button class="btn btn-secondary btn-sm" onclick="ackAlert(' + a.id + ')">Ack</button>';
+        }
+        html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertEvents(' + a.id + ', \'' + escapeHtml(a.title || "").replace(/'/g, "\\'") + '\')">Timeline</button>';
+        html += '</td>';
+        html += '</tr>';
+      }
+      tbody.innerHTML = html;
+    })
+    .catch(function() {
+      var tbody = document.getElementById("alerts-body");
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="log-empty">Failed to load alerts.</td></tr>';
+    });
+}
+
+function postAlertAction(id, action, payload, successMsg) {
+  fetch("/api/v1/alerts/" + id + "/" + action, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: payload ? JSON.stringify(payload) : ""
+  })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Action failed"); });
+      return r.json();
+    })
+    .then(function() {
+      if (successMsg) showToast(successMsg, "success");
+      loadAlerts();
+    })
+    .catch(function(e) {
+      showToast("Alert action failed: " + e.message, "error");
+    });
+}
+
+function ackAlert(id) { postAlertAction(id, "ack", { actor: "settings-ui" }, "Alert acknowledged"); }
+function unackAlert(id) { postAlertAction(id, "unack", { actor: "settings-ui" }, "Alert unacknowledged"); }
+function unsnoozeAlert(id) { postAlertAction(id, "unsnooze", { actor: "settings-ui" }, "Alert unsnoozed"); }
+
+function snoozeAlert(id) {
+  var hoursRaw = prompt("Snooze for how many hours?", "2");
+  if (hoursRaw === null) return;
+  var hours = parseFloat(hoursRaw);
+  if (!isFinite(hours) || hours <= 0) {
+    showToast("Invalid snooze duration", "error");
+    return;
+  }
+  var until = new Date(Date.now() + (hours * 3600 * 1000)).toISOString();
+  postAlertAction(id, "snooze", { actor: "settings-ui", until: until }, "Alert snoozed");
+}
+
+function loadAlertEvents(id, title) {
+  var panel = document.getElementById("alert-events-panel");
+  if (!panel) return;
+  panel.innerHTML = "Loading timeline...";
+  fetch("/api/v1/alerts/" + id + "/events?limit=50")
+    .then(function(r) { return r.json(); })
+    .then(function(events) {
+      if (!events || events.length === 0) {
+        panel.innerHTML = "No timeline events for alert #" + id + ".";
+        return;
+      }
+      events.sort(function(a, b) {
+        var ta = a && a.created_at ? Date.parse(a.created_at) : 0;
+        var tb = b && b.created_at ? Date.parse(b.created_at) : 0;
+        return ta - tb;
+      });
+      var html = '<div style="font-weight:600;color:var(--text);margin-bottom:6px">Timeline for #' + id + ' - ' + escapeHtml(title || "") + '</div>';
+      html += '<div class="overflow-x"><table class="log-table"><thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Data</th></tr></thead><tbody>';
+      for (var i = 0; i < events.length; i++) {
+        var e = events[i];
+        var ts = e.created_at ? new Date(e.created_at).toLocaleString() : "—";
+        var data = e.data ? JSON.stringify(e.data) : "—";
+        html += '<tr>';
+        html += '<td>' + escapeHtml(ts) + '</td>';
+        html += '<td>' + escapeHtml(e.event_type || "") + '</td>';
+        html += '<td>' + escapeHtml(e.actor || "system") + '</td>';
+        html += '<td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(data) + '</td>';
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+      panel.innerHTML = html;
+    })
+    .catch(function() {
+      panel.innerHTML = "Failed to load timeline.";
     });
 }
 
@@ -977,6 +1528,7 @@ function loadDBStats() {
       lines.push(d.snapshot_count + " snapshots stored");
       lines.push(d.smart_history_rows + " SMART history rows");
       lines.push(d.system_history_rows + " system history rows");
+      lines.push((d.service_check_rows || 0) + " service check rows");
       if (d.oldest_snapshot) {
         var oldest = d.oldest_snapshot.substring(0, 10);
         var newest = d.newest_snapshot.substring(0, 10);
@@ -1175,10 +1727,15 @@ document.addEventListener("click", function(e) {
 /* ---------- Init ---------- */
 loadSettings();
 loadNotificationLog();
+loadAlerts();
 loadDBStats();
 loadBackupInfo();
 loadFleetServers();
+loadServiceCheckResults();
+onServiceTypeChange();
 setInterval(loadNotificationLog, 60000);
+setInterval(loadAlerts, 60000);
+setInterval(loadServiceCheckResults, 60000);
 </script>
 </body>
 </html>
