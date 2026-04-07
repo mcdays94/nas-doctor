@@ -122,51 +122,74 @@ func collectSystem(hp internal.HostPaths) (internal.SystemInfo, error) {
 	return info, nil
 }
 
-// readCPUStats reads /proc/stat twice with a short delay to compute
-// instantaneous CPU usage and I/O wait percentages.
+// readCPUStats samples /proc/stat multiple times over a few seconds to compute
+// a smoothed CPU usage and I/O wait percentage. Multiple samples reduce the
+// impact of short-lived spikes (including our own collection overhead).
 func readCPUStats() (cpuUsage, ioWait float64) {
-	parse := func() (idle, iowait, total float64, ok bool) {
+	type cpuSample struct {
+		idle, iowait, total float64
+	}
+
+	parse := func() (cpuSample, bool) {
 		data, err := os.ReadFile("/proc/stat")
 		if err != nil {
-			return 0, 0, 0, false
+			return cpuSample{}, false
 		}
 		for _, line := range strings.Split(string(data), "\n") {
 			if strings.HasPrefix(line, "cpu ") {
 				fields := strings.Fields(line)
 				if len(fields) >= 6 {
 					// fields: cpu user nice system idle iowait irq softirq steal ...
-					idle, _ = strconv.ParseFloat(fields[4], 64)
-					iowait, _ = strconv.ParseFloat(fields[5], 64)
+					var s cpuSample
+					s.idle, _ = strconv.ParseFloat(fields[4], 64)
+					s.iowait, _ = strconv.ParseFloat(fields[5], 64)
 					for _, f := range fields[1:] {
 						v, _ := strconv.ParseFloat(f, 64)
-						total += v
+						s.total += v
 					}
-					return idle, iowait, total, true
+					return s, true
 				}
 			}
 		}
-		return 0, 0, 0, false
+		return cpuSample{}, false
 	}
 
-	idle1, iowait1, total1, ok1 := parse()
-	time.Sleep(500 * time.Millisecond)
-	idle2, iowait2, total2, ok2 := parse()
+	// Take 4 samples over 3 seconds (1s apart) and average the 3 intervals.
+	// This gives a representative ~3s window that smooths out short spikes.
+	const numSamples = 4
+	const sampleInterval = time.Second
+	samples := make([]cpuSample, 0, numSamples)
 
-	if !ok1 || !ok2 {
+	for i := 0; i < numSamples; i++ {
+		s, ok := parse()
+		if !ok {
+			return 0, 0
+		}
+		samples = append(samples, s)
+		if i < numSamples-1 {
+			time.Sleep(sampleInterval)
+		}
+	}
+
+	var totalCPU, totalIOWait float64
+	intervals := 0
+	for i := 1; i < len(samples); i++ {
+		totalDelta := samples[i].total - samples[i-1].total
+		if totalDelta <= 0 {
+			continue
+		}
+		idleDelta := samples[i].idle - samples[i-1].idle
+		iowaitDelta := samples[i].iowait - samples[i-1].iowait
+
+		totalCPU += (1.0 - idleDelta/totalDelta) * 100
+		totalIOWait += (iowaitDelta / totalDelta) * 100
+		intervals++
+	}
+
+	if intervals == 0 {
 		return 0, 0
 	}
-
-	totalDelta := total2 - total1
-	if totalDelta <= 0 {
-		return 0, 0
-	}
-
-	idleDelta := idle2 - idle1
-	iowaitDelta := iowait2 - iowait1
-
-	cpuUsage = (1.0 - idleDelta/totalDelta) * 100
-	ioWait = (iowaitDelta / totalDelta) * 100
-	return cpuUsage, ioWait
+	return totalCPU / float64(intervals), totalIOWait / float64(intervals)
 }
 
 func detectPlatform(hp internal.HostPaths) (platform, version string) {
