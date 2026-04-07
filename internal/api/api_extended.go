@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -158,6 +159,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/service-checks", s.handleServiceChecks)
 	r.Get("/api/v1/service-checks/history", s.handleServiceCheckHistory)
 	r.Post("/api/v1/service-checks/run", s.handleRunServiceChecks)
+	r.Get("/api/v1/incidents/timeline", s.handleIncidentTimeline)
+	r.Get("/api/v1/incidents/correlation", s.handleIncidentCorrelation)
+	r.Get("/api/v1/smart/trends", s.handleSMARTTrends)
 	r.Get("/api/v1/alerts", s.handleListAlerts)
 	r.Get("/api/v1/alerts/{id}", s.handleGetAlert)
 	r.Get("/api/v1/alerts/{id}/events", s.handleGetAlertEvents)
@@ -950,6 +954,477 @@ func (s *Server) handleRunServiceChecks(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, results)
 }
 
+type incidentTimelineEvent struct {
+	Time     string `json:"time"`
+	Type     string `json:"type"`
+	Severity string `json:"severity,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Title    string `json:"title,omitempty"`
+	AlertID  int64  `json:"alert_id,omitempty"`
+	Source   string `json:"source,omitempty"`
+	Details  string `json:"details,omitempty"`
+}
+
+// handleIncidentTimeline returns alert/notification timeline events and downsampled metrics.
+// GET /api/v1/incidents/timeline?from=<rfc3339>&to=<rfc3339>&severity=<critical|warning|info>&points=400
+func (s *Server) handleIncidentTimeline(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().UTC()
+	from := now.Add(-7 * 24 * time.Hour)
+	to := now
+	if raw := strings.TrimSpace(r.URL.Query().Get("from")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid from timestamp"})
+			return
+		}
+		from = parsed.UTC()
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("to")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid to timestamp"})
+			return
+		}
+		to = parsed.UTC()
+	}
+	if to.Before(from) {
+		from, to = to, from
+	}
+
+	severityFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("severity")))
+	switch severityFilter {
+	case "", string(internal.SeverityCritical), string(internal.SeverityWarning), string(internal.SeverityInfo):
+		// valid
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid severity filter"})
+		return
+	}
+
+	points := 400
+	if raw := strings.TrimSpace(r.URL.Query().Get("points")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 10 || parsed > 5000 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid points value"})
+			return
+		}
+		points = parsed
+	}
+
+	eventLimit := 1000
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 10000 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit value"})
+			return
+		}
+		eventLimit = parsed
+	}
+
+	alerts, err := s.store.ListAlerts("", 5000, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list alerts: " + err.Error()})
+		return
+	}
+	notifications, err := s.store.GetNotificationLogRange(from, to, eventLimit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list notifications: " + err.Error()})
+		return
+	}
+	system, err := s.store.GetSystemHistoryRange(from, to, points)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load system history: " + err.Error()})
+		return
+	}
+	temps, err := s.store.GetAverageDiskTemperatureRange(from, to, points)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load disk temperature history: " + err.Error()})
+		return
+	}
+
+	type sortableEvent struct {
+		when  time.Time
+		event incidentTimelineEvent
+	}
+	events := make([]sortableEvent, 0, len(alerts)*2+len(notifications))
+	for _, alert := range alerts {
+		if severityFilter != "" && strings.ToLower(alert.Severity) != severityFilter {
+			continue
+		}
+		created, err := time.Parse(time.RFC3339, alert.CreatedAt)
+		if err == nil && !created.Before(from) && !created.After(to) {
+			events = append(events, sortableEvent{
+				when: created,
+				event: incidentTimelineEvent{
+					Time:     created.UTC().Format(time.RFC3339),
+					Type:     "alert_opened",
+					Severity: alert.Severity,
+					Status:   string(alert.Status),
+					Title:    alert.Title,
+					AlertID:  alert.ID,
+					Source:   "alerts",
+				},
+			})
+		}
+		if alert.ResolvedAt != "" {
+			if resolved, err := time.Parse(time.RFC3339, alert.ResolvedAt); err == nil && !resolved.Before(from) && !resolved.After(to) {
+				events = append(events, sortableEvent{
+					when: resolved,
+					event: incidentTimelineEvent{
+						Time:     resolved.UTC().Format(time.RFC3339),
+						Type:     "alert_resolved",
+						Severity: alert.Severity,
+						Status:   string(alert.Status),
+						Title:    alert.Title,
+						AlertID:  alert.ID,
+						Source:   "alerts",
+					},
+				})
+			}
+		}
+	}
+	for _, n := range notifications {
+		if n.CreatedAt.Before(from) || n.CreatedAt.After(to) {
+			continue
+		}
+		events = append(events, sortableEvent{
+			when: n.CreatedAt,
+			event: incidentTimelineEvent{
+				Time:    n.CreatedAt.UTC().Format(time.RFC3339),
+				Type:    "notification",
+				Status:  n.Status,
+				Source:  n.WebhookName,
+				Details: n.ErrorMessage,
+			},
+		})
+	}
+
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].when.After(events[j].when)
+	})
+	if len(events) > eventLimit {
+		events = events[:eventLimit]
+	}
+	outEvents := make([]incidentTimelineEvent, 0, len(events))
+	for _, event := range events {
+		outEvents = append(outEvents, event.event)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"from":              from.UTC().Format(time.RFC3339),
+		"to":                to.UTC().Format(time.RFC3339),
+		"severity":          severityFilter,
+		"events":            outEvents,
+		"system_metrics":    system,
+		"avg_disk_temp":     temps,
+		"downsample_points": points,
+	})
+}
+
+type correlationMetricWindow struct {
+	Samples   int     `json:"samples"`
+	AvgCPU    float64 `json:"avg_cpu"`
+	AvgMemory float64 `json:"avg_memory"`
+	AvgIOWait float64 `json:"avg_io_wait"`
+	AvgDiskT  float64 `json:"avg_disk_temp"`
+}
+
+// handleIncidentCorrelation returns metric shifts around an alert timestamp.
+// GET /api/v1/incidents/correlation?alert_id=123&window_hours=24
+func (s *Server) handleIncidentCorrelation(w http.ResponseWriter, r *http.Request) {
+	alertIDRaw := strings.TrimSpace(r.URL.Query().Get("alert_id"))
+	if alertIDRaw == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "alert_id is required"})
+		return
+	}
+	alertID, err := strconv.ParseInt(alertIDRaw, 10, 64)
+	if err != nil || alertID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid alert_id"})
+		return
+	}
+
+	windowHours := 24
+	if raw := strings.TrimSpace(r.URL.Query().Get("window_hours")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 168 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid window_hours"})
+			return
+		}
+		windowHours = parsed
+	}
+
+	now := time.Now().UTC()
+	alert, err := s.store.GetAlert(alertID, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load alert: " + err.Error()})
+		return
+	}
+	if alert == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "alert not found"})
+		return
+	}
+	alertTime, err := time.Parse(time.RFC3339, alert.CreatedAt)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "alert timestamp is invalid"})
+		return
+	}
+
+	window := time.Duration(windowHours) * time.Hour
+	duringWindow := window / 4
+	if duringWindow > 2*time.Hour {
+		duringWindow = 2 * time.Hour
+	}
+	if duringWindow < 30*time.Minute {
+		duringWindow = 30 * time.Minute
+	}
+
+	from := alertTime.Add(-window)
+	to := alertTime.Add(window)
+	system, err := s.store.GetSystemHistoryRange(from, to, 400)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load system metrics: " + err.Error()})
+		return
+	}
+	temps, err := s.store.GetAverageDiskTemperatureRange(from, to, 400)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load temperature metrics: " + err.Error()})
+		return
+	}
+
+	beforeStart := alertTime.Add(-window)
+	beforeEnd := alertTime
+	duringStart := alertTime
+	duringEnd := alertTime.Add(duringWindow)
+	afterStart := duringEnd
+	afterEnd := alertTime.Add(window)
+
+	before := summarizeMetrics(system, temps, beforeStart, beforeEnd)
+	during := summarizeMetrics(system, temps, duringStart, duringEnd)
+	after := summarizeMetrics(system, temps, afterStart, afterEnd)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"alert":          alert,
+		"window_hours":   windowHours,
+		"reference_time": alertTime.UTC().Format(time.RFC3339),
+		"system_metrics": system,
+		"avg_disk_temp":  temps,
+		"before":         before,
+		"during":         during,
+		"after":          after,
+		"before_range":   []string{beforeStart.UTC().Format(time.RFC3339), beforeEnd.UTC().Format(time.RFC3339)},
+		"during_range":   []string{duringStart.UTC().Format(time.RFC3339), duringEnd.UTC().Format(time.RFC3339)},
+		"after_range":    []string{afterStart.UTC().Format(time.RFC3339), afterEnd.UTC().Format(time.RFC3339)},
+	})
+}
+
+func summarizeMetrics(system []storage.SystemHistoryPoint, temps []storage.NumericPoint, start, end time.Time) correlationMetricWindow {
+	var out correlationMetricWindow
+	if end.Before(start) {
+		start, end = end, start
+	}
+	var cpu, mem, io float64
+	for _, point := range system {
+		if point.Timestamp.Before(start) || !point.Timestamp.Before(end) {
+			continue
+		}
+		out.Samples++
+		cpu += point.CPUUsage
+		mem += point.MemPercent
+		io += point.IOWait
+	}
+	if out.Samples > 0 {
+		out.AvgCPU = cpu / float64(out.Samples)
+		out.AvgMemory = mem / float64(out.Samples)
+		out.AvgIOWait = io / float64(out.Samples)
+	}
+
+	var tempSamples int
+	var tempSum float64
+	for _, point := range temps {
+		if point.Timestamp.Before(start) || !point.Timestamp.Before(end) {
+			continue
+		}
+		tempSamples++
+		tempSum += point.Value
+	}
+	if tempSamples > 0 {
+		out.AvgDiskT = tempSum / float64(tempSamples)
+	}
+	return out
+}
+
+type smartTrendDrive struct {
+	Serial               string  `json:"serial"`
+	Device               string  `json:"device"`
+	Model                string  `json:"model"`
+	Points               int     `json:"points"`
+	DaysSpan             float64 `json:"days_span"`
+	CurrentTemp          int     `json:"current_temp"`
+	TempDelta            int     `json:"temp_delta"`
+	CurrentReallocated   int64   `json:"current_reallocated"`
+	ReallocatedDelta     int64   `json:"reallocated_delta"`
+	CurrentPending       int64   `json:"current_pending"`
+	PendingDelta         int64   `json:"pending_delta"`
+	CurrentCRC           int64   `json:"current_crc"`
+	CRCDelta             int64   `json:"crc_delta"`
+	RiskScore            int     `json:"risk_score"`
+	Urgency              string  `json:"urgency"`
+	Confidence           string  `json:"confidence"`
+	Worsening            bool    `json:"worsening"`
+	ReplacementCandidate bool    `json:"replacement_candidate"`
+	Recommendation       string  `json:"recommendation"`
+}
+
+// handleSMARTTrends returns predictive trend summaries for drives and parity.
+// GET /api/v1/smart/trends
+func (s *Server) handleSMARTTrends(w http.ResponseWriter, r *http.Request) {
+	disks, err := s.store.ListDisks()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list disks: " + err.Error()})
+		return
+	}
+
+	trends := make([]smartTrendDrive, 0, len(disks))
+	for _, disk := range disks {
+		history, err := s.store.GetDiskHistory(disk.Serial, 120)
+		if err != nil || len(history) < 2 {
+			continue
+		}
+		first := history[0]
+		last := history[len(history)-1]
+		days := last.Timestamp.Sub(first.Timestamp).Hours() / 24.0
+		if days < 1 {
+			days = 1
+		}
+
+		reallocDelta := last.Reallocated - first.Reallocated
+		pendingDelta := last.Pending - first.Pending
+		crcDelta := last.UDMACRC - first.UDMACRC
+		tempDelta := last.Temperature - first.Temperature
+
+		riskScore := 0
+		if last.Pending > 0 {
+			riskScore += 40
+		}
+		if pendingDelta > 0 {
+			riskScore += 25
+		}
+		if reallocDelta > 0 {
+			riskScore += int(minInt64(reallocDelta, 20))
+		}
+		if crcDelta > 5 {
+			riskScore += 10
+		}
+		if last.Temperature >= 50 {
+			riskScore += 15
+		} else if last.Temperature >= 45 {
+			riskScore += 8
+		}
+		if tempDelta >= 4 {
+			riskScore += 10
+		}
+
+		urgency := "monitor"
+		if riskScore >= 70 {
+			urgency = "immediate"
+		} else if riskScore >= 40 {
+			urgency = "short-term"
+		}
+		confidence := "low"
+		if len(history) >= 10 && days >= 7 {
+			confidence = "high"
+		} else if len(history) >= 5 && days >= 3 {
+			confidence = "medium"
+		}
+
+		worsening := reallocDelta > 0 || pendingDelta > 0 || crcDelta > 0 || (tempDelta >= 4 && last.Temperature >= 45)
+		replacementCandidate := urgency == "immediate" || last.Pending > 0 || reallocDelta >= 20
+
+		recommendation := "Continue monitoring trend slope and keep backups verified."
+		if urgency == "short-term" {
+			recommendation = "Plan replacement window and inspect cabling/power path to reduce progression risk."
+		}
+		if urgency == "immediate" {
+			recommendation = "Prepare immediate drive replacement and verify restore path before failure escalates."
+		}
+
+		trends = append(trends, smartTrendDrive{
+			Serial:               disk.Serial,
+			Device:               disk.Device,
+			Model:                disk.Model,
+			Points:               len(history),
+			DaysSpan:             days,
+			CurrentTemp:          last.Temperature,
+			TempDelta:            tempDelta,
+			CurrentReallocated:   last.Reallocated,
+			ReallocatedDelta:     reallocDelta,
+			CurrentPending:       last.Pending,
+			PendingDelta:         pendingDelta,
+			CurrentCRC:           last.UDMACRC,
+			CRCDelta:             crcDelta,
+			RiskScore:            riskScore,
+			Urgency:              urgency,
+			Confidence:           confidence,
+			Worsening:            worsening,
+			ReplacementCandidate: replacementCandidate,
+			Recommendation:       recommendation,
+		})
+	}
+
+	sort.Slice(trends, func(i, j int) bool {
+		if trends[i].RiskScore == trends[j].RiskScore {
+			return trends[i].CurrentPending > trends[j].CurrentPending
+		}
+		return trends[i].RiskScore > trends[j].RiskScore
+	})
+
+	var paritySummary map[string]any
+	if snap := s.latestSnapshot(); snap != nil && snap.Parity != nil {
+		history := snap.Parity.History
+		if len(history) > 0 {
+			recentErrors := 0
+			startIdx := len(history) - 3
+			if startIdx < 0 {
+				startIdx = 0
+			}
+			for i := startIdx; i < len(history); i++ {
+				recentErrors += history[i].Errors
+			}
+
+			degradationPct := 0.0
+			if len(history) >= 2 {
+				first := history[0]
+				last := history[len(history)-1]
+				if first.SpeedMBs > 0 && last.SpeedMBs > 0 {
+					degradationPct = (first.SpeedMBs - last.SpeedMBs) / first.SpeedMBs * 100.0
+				}
+			}
+
+			risk := "stable"
+			if recentErrors > 0 {
+				risk = "critical"
+			} else if degradationPct > 30 {
+				risk = "warning"
+			}
+
+			last := history[len(history)-1]
+			paritySummary = map[string]any{
+				"checks":                len(history),
+				"recent_errors":         recentErrors,
+				"speed_degradation_pct": degradationPct,
+				"latest_speed_mb_s":     last.SpeedMBs,
+				"latest_date":           last.Date,
+				"risk":                  risk,
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"generated_at": time.Now().UTC().Format(time.RFC3339),
+		"drives":       trends,
+		"parity":       paritySummary,
+	})
+}
+
 // ---------- Alerts handlers ----------
 
 // handleListAlerts returns recent alerts with optional status filtering.
@@ -1193,6 +1668,13 @@ func (s *Server) handleDiskPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- Internal helpers ----------
+
+func minInt64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 func parseAlertID(r *http.Request) (int64, error) {
 	raw := strings.TrimSpace(chi.URLParam(r, "id"))

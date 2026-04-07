@@ -186,6 +186,8 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
 .pill-dns{background:rgba(236,72,153,0.14);color:#f472b6}
 .pill-smb,.pill-nfs{background:rgba(245,158,11,0.14);color:#fbbf24}
 .inline-muted{font-size:11px;color:var(--text2)}
+.chart-card{background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);padding:10px}
+.chart-label{font-size:12px;color:var(--text2);margin-bottom:6px}
 
 /* Toasts */
 .toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
@@ -603,7 +605,67 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
     <div id="alert-events-panel" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>
   </div>
 
-  <!-- 10. Notification History -->
+  <!-- 10. Incident Timeline -->
+  <div class="card" id="card-incidents">
+    <div class="card-title">Incident Timeline & Correlation</div>
+    <div class="card-desc">Correlate alerts and notifications against CPU, memory, I/O wait, and average disk temperature over selectable windows.</div>
+    <div class="form-row" style="margin-bottom:10px">
+      <div>
+        <label for="timeline-range">Time range</label>
+        <select id="timeline-range" onchange="loadIncidentTimeline()">
+          <option value="24h">Last 24 hours</option>
+          <option value="7d" selected>Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+        </select>
+      </div>
+      <div>
+        <label for="timeline-severity">Severity filter</label>
+        <select id="timeline-severity" onchange="loadIncidentTimeline()">
+          <option value="">All severities</option>
+          <option value="critical">Critical</option>
+          <option value="warning">Warning</option>
+          <option value="info">Info</option>
+        </select>
+      </div>
+    </div>
+    <div class="chart-card" style="margin-bottom:10px">
+      <div class="chart-label">Metrics (downsampled)</div>
+      <canvas id="timeline-metrics-chart" width="900" height="180" style="width:100%;height:180px"></canvas>
+    </div>
+    <div class="overflow-x">
+      <table class="log-table">
+        <thead>
+          <tr><th>Time</th><th>Type</th><th>Severity</th><th>Title/Source</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="timeline-body">
+          <tr><td colspan="6" class="log-empty">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="timeline-correlation" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>
+  </div>
+
+  <!-- 11. Predictive Trends -->
+  <div class="card" id="card-trends">
+    <div class="card-title">Predictive Trend Intelligence</div>
+    <div class="card-desc">Worsening-pattern detection for SMART counters with urgency and confidence guidance, plus parity risk markers.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="btn btn-secondary" onclick="loadSmartTrends()">Refresh Trends</button>
+    </div>
+    <div id="parity-trend-summary" style="margin-bottom:10px;font-size:12px;color:var(--text2)"></div>
+    <div class="overflow-x">
+      <table class="log-table">
+        <thead>
+          <tr><th>Drive</th><th>Risk</th><th>Urgency</th><th>Confidence</th><th>Deltas</th><th>Recommendation</th></tr>
+        </thead>
+        <tbody id="smart-trends-body">
+          <tr><td colspan="6" class="log-empty">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 12. Notification History -->
   <div class="card" id="card-history">
     <div class="card-title">Notification History</div>
     <div class="card-desc">Recent webhook delivery attempts. <span class="log-refresh">Auto-refreshes every 30s.</span></div>
@@ -629,6 +691,7 @@ input:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
   </div>
 </div>
 
+<script src="/js/charts.js"></script>
 <script>
 /* ---------- State ---------- */
 var settings = null;
@@ -1410,6 +1473,7 @@ function loadAlerts() {
           html += '<button class="btn btn-secondary btn-sm" onclick="ackAlert(' + a.id + ')">Ack</button>';
         }
         html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertEvents(' + a.id + ', \'' + escapeHtml(a.title || "").replace(/'/g, "\\'") + '\')">Timeline</button>';
+        html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertCorrelation(' + a.id + ')">Correlation</button>';
         html += '</td>';
         html += '</tr>';
       }
@@ -1491,6 +1555,199 @@ function loadAlertEvents(id, title) {
     .catch(function() {
       panel.innerHTML = "Failed to load timeline.";
     });
+}
+
+/* ---------- Incident timeline ---------- */
+function parseTimelineRange(rangeKey) {
+  var now = new Date();
+  var from = new Date(now.getTime());
+  if (rangeKey === "24h") from = new Date(now.getTime() - 24 * 3600 * 1000);
+  else if (rangeKey === "30d") from = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
+  else from = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+  return { from: from.toISOString(), to: now.toISOString() };
+}
+
+function loadIncidentTimeline() {
+  var rangeKey = document.getElementById("timeline-range") ? document.getElementById("timeline-range").value : "7d";
+  var sev = document.getElementById("timeline-severity") ? document.getElementById("timeline-severity").value : "";
+  var range = parseTimelineRange(rangeKey);
+  var qs = "?from=" + encodeURIComponent(range.from) + "&to=" + encodeURIComponent(range.to) + "&points=400";
+  if (sev) qs += "&severity=" + encodeURIComponent(sev);
+
+  fetch("/api/v1/incidents/timeline" + qs)
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Failed to load timeline"); });
+      return r.json();
+    })
+    .then(function(data) {
+      renderIncidentTimelineTable(data.events || []);
+      renderIncidentTimelineChart(data.system_metrics || [], data.avg_disk_temp || []);
+    })
+    .catch(function(e) {
+      var tbody = document.getElementById("timeline-body");
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="log-empty">' + escapeHtml(e.message || "Failed to load timeline") + '</td></tr>';
+    });
+}
+
+function renderIncidentTimelineTable(events) {
+  var tbody = document.getElementById("timeline-body");
+  if (!tbody) return;
+  if (!events || events.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No timeline events in this range.</td></tr>';
+    return;
+  }
+
+  var html = "";
+  for (var i = 0; i < events.length; i++) {
+    var e = events[i];
+    var ts = e.time ? new Date(e.time).toLocaleString() : "—";
+    html += "<tr>";
+    html += "<td>" + escapeHtml(ts) + "</td>";
+    html += "<td>" + escapeHtml(e.type || "") + "</td>";
+    html += "<td>" + escapeHtml(e.severity || "—") + "</td>";
+    html += "<td>" + escapeHtml(e.title || e.source || "—") + "</td>";
+    html += "<td>" + escapeHtml(e.status || "—") + "</td>";
+    html += "<td>";
+    if (e.alert_id) {
+      html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertCorrelation(' + e.alert_id + ')">Correlation</button>';
+    } else {
+      html += "—";
+    }
+    html += "</td>";
+    html += "</tr>";
+  }
+  tbody.innerHTML = html;
+}
+
+function renderIncidentTimelineChart(systemMetrics, tempMetrics) {
+  var chartId = "timeline-metrics-chart";
+  var chartEl = document.getElementById(chartId);
+  if (!chartEl || !window.NasChart) return;
+
+  if (!systemMetrics || systemMetrics.length < 2) {
+    try { chartEl.getContext("2d").clearRect(0, 0, chartEl.width, chartEl.height); } catch (e) {}
+    return;
+  }
+
+  var labels = systemMetrics.map(function(_, idx) { return idx; });
+  var cpu = systemMetrics.map(function(p) { return p.cpu_usage || 0; });
+  var mem = systemMetrics.map(function(p) { return p.mem_percent || 0; });
+  var io = systemMetrics.map(function(p) { return p.io_wait || 0; });
+
+  var temp = [];
+  if (tempMetrics && tempMetrics.length > 0) {
+    for (var i = 0; i < systemMetrics.length; i++) {
+      var idx = Math.round((i / Math.max(1, systemMetrics.length - 1)) * Math.max(0, tempMetrics.length - 1));
+      temp.push((tempMetrics[idx] && tempMetrics[idx].value) ? tempMetrics[idx].value : 0);
+    }
+  } else {
+    temp = cpu.map(function() { return 0; });
+  }
+
+  try {
+    NasChart.line(chartId, {
+      labels: labels,
+      datasets: [
+        { label: "CPU %", data: cpu, color: "#5e6ad2" },
+        { label: "Mem %", data: mem, color: "#7170ff" },
+        { label: "I/O Wait %", data: io, color: "#f59e0b" },
+        { label: "Avg Disk Temp C", data: temp, color: "#22c55e" }
+      ]
+    });
+  } catch (e) {
+    /* no-op */
+  }
+}
+
+function loadAlertCorrelation(alertId) {
+  var panel = document.getElementById("timeline-correlation");
+  if (!panel) return;
+  panel.innerHTML = "Loading correlation...";
+  fetch("/api/v1/incidents/correlation?alert_id=" + encodeURIComponent(alertId) + "&window_hours=24")
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Failed to load correlation"); });
+      return r.json();
+    })
+    .then(function(data) {
+      var alert = data.alert || {};
+      var before = data.before || {};
+      var during = data.during || {};
+      var after = data.after || {};
+      var html = '<div style="font-weight:600;color:var(--text);margin-bottom:6px">Correlation for alert #' + alertId + ': ' + escapeHtml(alert.title || "") + '</div>';
+      html += '<div class="overflow-x"><table class="log-table"><thead><tr><th>Window</th><th>Samples</th><th>CPU %</th><th>Mem %</th><th>I/O %</th><th>Avg Temp C</th></tr></thead><tbody>';
+      html += '<tr><td>Before</td><td>' + (before.samples || 0) + '</td><td>' + (before.avg_cpu || 0).toFixed(1) + '</td><td>' + (before.avg_memory || 0).toFixed(1) + '</td><td>' + (before.avg_io_wait || 0).toFixed(1) + '</td><td>' + (before.avg_disk_temp || 0).toFixed(1) + '</td></tr>';
+      html += '<tr><td>During</td><td>' + (during.samples || 0) + '</td><td>' + (during.avg_cpu || 0).toFixed(1) + '</td><td>' + (during.avg_memory || 0).toFixed(1) + '</td><td>' + (during.avg_io_wait || 0).toFixed(1) + '</td><td>' + (during.avg_disk_temp || 0).toFixed(1) + '</td></tr>';
+      html += '<tr><td>After</td><td>' + (after.samples || 0) + '</td><td>' + (after.avg_cpu || 0).toFixed(1) + '</td><td>' + (after.avg_memory || 0).toFixed(1) + '</td><td>' + (after.avg_io_wait || 0).toFixed(1) + '</td><td>' + (after.avg_disk_temp || 0).toFixed(1) + '</td></tr>';
+      html += '</tbody></table></div>';
+      panel.innerHTML = html;
+    })
+    .catch(function(e) {
+      panel.innerHTML = escapeHtml(e.message || "Failed to load correlation");
+    });
+}
+
+/* ---------- SMART trends ---------- */
+function urgencyClass(u) {
+  if (u === "immediate") return "status-resolved";
+  if (u === "short-term") return "status-acknowledged";
+  return "status-open";
+}
+
+function loadSmartTrends() {
+  fetch("/api/v1/smart/trends")
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Failed to load trends"); });
+      return r.json();
+    })
+    .then(function(data) {
+      renderSmartTrendTable(data.drives || []);
+      renderParityTrend(data.parity || null);
+    })
+    .catch(function(e) {
+      var tbody = document.getElementById("smart-trends-body");
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="log-empty">' + escapeHtml(e.message || "Failed to load trends") + '</td></tr>';
+    });
+}
+
+function renderSmartTrendTable(drives) {
+  var tbody = document.getElementById("smart-trends-body");
+  if (!tbody) return;
+  if (!drives || drives.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No trend data yet. Collect more scans to build velocity confidence.</td></tr>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < drives.length; i++) {
+    var d = drives[i];
+    var deltas = 'temp ' + ((d.temp_delta >= 0 ? '+' : '') + d.temp_delta) + 'C, realloc ' + ((d.reallocated_delta >= 0 ? '+' : '') + d.reallocated_delta) + ', pending ' + ((d.pending_delta >= 0 ? '+' : '') + d.pending_delta) + ', crc ' + ((d.crc_delta >= 0 ? '+' : '') + d.crc_delta);
+    html += '<tr>';
+    html += '<td><strong>' + escapeHtml(d.device || "") + '</strong><div class="inline-muted">' + escapeHtml(d.model || "") + '</div></td>';
+    html += '<td>' + (d.risk_score || 0) + (d.replacement_candidate ? ' <span class="status-badge status-snoozed">candidate</span>' : '') + '</td>';
+    html += '<td><span class="status-badge ' + urgencyClass(d.urgency || "monitor") + '">' + escapeHtml(d.urgency || "monitor") + '</span></td>';
+    html += '<td>' + escapeHtml(d.confidence || "low") + '</td>';
+    html += '<td>' + escapeHtml(deltas) + '</td>';
+    html += '<td>' + escapeHtml(d.recommendation || "") + '</td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+function renderParityTrend(parity) {
+  var el = document.getElementById("parity-trend-summary");
+  if (!el) return;
+  if (!parity) {
+    el.innerHTML = "Parity trend data unavailable for this platform.";
+    return;
+  }
+  var risk = parity.risk || "stable";
+  var cls = risk === "critical" ? "status-resolved" : (risk === "warning" ? "status-acknowledged" : "status-open");
+  var html = '';
+  html += '<span class="status-badge ' + cls + '">Parity risk: ' + escapeHtml(risk) + '</span>';
+  html += '<span style="margin-left:10px">Checks: ' + (parity.checks || 0) + '</span>';
+  html += '<span style="margin-left:10px">Recent errors: ' + (parity.recent_errors || 0) + '</span>';
+  html += '<span style="margin-left:10px">Speed degradation: ' + ((parity.speed_degradation_pct || 0).toFixed ? parity.speed_degradation_pct.toFixed(1) : parity.speed_degradation_pct) + '%</span>';
+  html += '<span style="margin-left:10px">Latest speed: ' + ((parity.latest_speed_mb_s || 0).toFixed ? parity.latest_speed_mb_s.toFixed(1) : parity.latest_speed_mb_s) + ' MB/s</span>';
+  el.innerHTML = html;
 }
 
 /* ---------- Helpers ---------- */
@@ -1728,6 +1985,8 @@ document.addEventListener("click", function(e) {
 loadSettings();
 loadNotificationLog();
 loadAlerts();
+loadIncidentTimeline();
+loadSmartTrends();
 loadDBStats();
 loadBackupInfo();
 loadFleetServers();
@@ -1735,6 +1994,8 @@ loadServiceCheckResults();
 onServiceTypeChange();
 setInterval(loadNotificationLog, 60000);
 setInterval(loadAlerts, 60000);
+setInterval(loadIncidentTimeline, 60000);
+setInterval(loadSmartTrends, 180000);
 setInterval(loadServiceCheckResults, 60000);
 </script>
 </body>

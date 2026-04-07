@@ -1271,10 +1271,14 @@ type DiskHistoryPoint struct {
 func (d *DB) GetDiskHistory(serial string, limit int) ([]DiskHistoryPoint, error) {
 	rows, err := d.db.Query(
 		`SELECT timestamp, temperature, reallocated, pending, udma_crc, command_timeout, power_on_hours, health_passed
-		 FROM smart_history
-		 WHERE serial = ?
-		 ORDER BY timestamp ASC
-		 LIMIT ?`,
+		 FROM (
+			SELECT timestamp, temperature, reallocated, pending, udma_crc, command_timeout, power_on_hours, health_passed
+			FROM smart_history
+			WHERE serial = ?
+			ORDER BY timestamp DESC
+			LIMIT ?
+		 ) recent
+		 ORDER BY timestamp ASC`,
 		serial, limit,
 	)
 	if err != nil {
@@ -1328,6 +1332,107 @@ func (d *DB) GetSystemHistory(limit int) ([]SystemHistoryPoint, error) {
 		points = append(points, p)
 	}
 	return points, rows.Err()
+}
+
+// NumericPoint represents a timestamped numeric value series.
+type NumericPoint struct {
+	Timestamp time.Time `json:"timestamp"`
+	Value     float64   `json:"value"`
+}
+
+// GetSystemHistoryRange returns system metrics between start and end, downsampled to maxPoints when needed.
+func (d *DB) GetSystemHistoryRange(start, end time.Time, maxPoints int) ([]SystemHistoryPoint, error) {
+	if end.Before(start) {
+		start, end = end, start
+	}
+	rows, err := d.db.Query(
+		`SELECT timestamp, cpu_usage, mem_percent, io_wait, load_avg_1, load_avg_5
+		 FROM system_history
+		 WHERE timestamp >= ? AND timestamp <= ?
+		 ORDER BY timestamp ASC`,
+		start, end,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []SystemHistoryPoint
+	for rows.Next() {
+		var p SystemHistoryPoint
+		if err := rows.Scan(&p.Timestamp, &p.CPUUsage, &p.MemPercent, &p.IOWait, &p.LoadAvg1, &p.LoadAvg5); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return downsampleSystemHistory(points, maxPoints), nil
+}
+
+// GetAverageDiskTemperatureRange returns average disk temperature over time in a range, downsampled to maxPoints.
+func (d *DB) GetAverageDiskTemperatureRange(start, end time.Time, maxPoints int) ([]NumericPoint, error) {
+	if end.Before(start) {
+		start, end = end, start
+	}
+	rows, err := d.db.Query(
+		`SELECT timestamp, AVG(COALESCE(temperature, 0))
+		 FROM smart_history
+		 WHERE timestamp >= ? AND timestamp <= ?
+		 GROUP BY timestamp
+		 ORDER BY timestamp ASC`,
+		start, end,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []NumericPoint
+	for rows.Next() {
+		var p NumericPoint
+		if err := rows.Scan(&p.Timestamp, &p.Value); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return downsampleNumeric(points, maxPoints), nil
+}
+
+func downsampleSystemHistory(points []SystemHistoryPoint, maxPoints int) []SystemHistoryPoint {
+	if maxPoints <= 0 || len(points) <= maxPoints {
+		return points
+	}
+	step := float64(len(points)-1) / float64(maxPoints-1)
+	out := make([]SystemHistoryPoint, 0, maxPoints)
+	for i := 0; i < maxPoints; i++ {
+		idx := int(float64(i) * step)
+		if idx >= len(points) {
+			idx = len(points) - 1
+		}
+		out = append(out, points[idx])
+	}
+	return out
+}
+
+func downsampleNumeric(points []NumericPoint, maxPoints int) []NumericPoint {
+	if maxPoints <= 0 || len(points) <= maxPoints {
+		return points
+	}
+	step := float64(len(points)-1) / float64(maxPoints-1)
+	out := make([]NumericPoint, 0, maxPoints)
+	for i := 0; i < maxPoints; i++ {
+		idx := int(float64(i) * step)
+		if idx >= len(points) {
+			idx = len(points) - 1
+		}
+		out = append(out, points[idx])
+	}
+	return out
 }
 
 // ---------- Disk listing ----------
@@ -1637,6 +1742,38 @@ func (d *DB) GetNotificationLog(limit int) ([]NotificationLogEntry, error) {
 		 ORDER BY created_at DESC
 		 LIMIT ?`,
 		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []NotificationLogEntry
+	for rows.Next() {
+		var e NotificationLogEntry
+		if err := rows.Scan(&e.ID, &e.WebhookName, &e.WebhookType, &e.Status, &e.FindingsCount, &e.ErrorMessage, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// GetNotificationLogRange returns notification attempts within a time range, newest first.
+func (d *DB) GetNotificationLogRange(start, end time.Time, limit int) ([]NotificationLogEntry, error) {
+	if end.Before(start) {
+		start, end = end, start
+	}
+	if limit <= 0 || limit > 5000 {
+		limit = 500
+	}
+	rows, err := d.db.Query(
+		`SELECT id, webhook_name, webhook_type, status, findings_count, COALESCE(error_message, ''), created_at
+		 FROM notification_log
+		 WHERE created_at >= ? AND created_at <= ?
+		 ORDER BY created_at DESC
+		 LIMIT ?`,
+		start, end, limit,
 	)
 	if err != nil {
 		return nil, err
