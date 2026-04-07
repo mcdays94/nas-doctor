@@ -5,28 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NAS Doctor — Drive Health</title>
 <link rel="icon" href="/icon.png">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/shared.css">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-/* Midnight (default) */
-:root,body.theme-midnight{--bg:#0f1011;--surface:#191a1b;--elevated:#242526;--text:#f7f8f8;--text2:#8a8f98;--text3:#5a5f6a;--accent:#5e6ad2;--green:#27a644;--amber:#d97706;--red:#dc2626;--border:rgba(255,255,255,0.08);--radius:10px}
-/* Clean */
-body.theme-clean{--bg:#ffffff;--surface:#ffffff;--elevated:#fafafa;--text:#171717;--text2:#808080;--text3:#b3b3b3;--accent:#171717;--green:#16a34a;--amber:#d97706;--red:#dc2626;--border:rgba(0,0,0,0.08)}
+/* Stats-specific: drives, charts, SMART tables */
+body{padding:0}
+.stats-container{max-width:1200px;margin:0 auto;padding:24px}
+.header-left img{width:28px;height:28px;border-radius:6px}
+/* Additional tokens for stats page */
+:root,body.theme-midnight{--elevated:#242526;--text3:#5a5f6a}
+body.theme-clean{--elevated:#fafafa;--text3:#b3b3b3}
+body.theme-ember{--elevated:#1a1b1c;--text3:#5a5b5c}
 body.theme-clean .drive,.theme-clean .summary-box,.theme-clean .chart-card,.theme-clean .smart-table{box-shadow:0 0 0 1px rgba(0,0,0,0.08)}
 body.theme-clean .drive:hover{box-shadow:0 0 0 1px rgba(0,0,0,0.15)}
-body.theme-clean .back{border-color:rgba(0,0,0,0.12);color:#808080}
-body.theme-clean .back:hover{color:#171717;border-color:rgba(0,0,0,0.2)}
-/* Ember */
-body.theme-ember{--bg:#07080a;--surface:#101111;--elevated:#1a1b1c;--text:#f9f9f9;--text2:#9c9c9d;--text3:#5a5b5c;--accent:#55b3ff;--green:#5fc992;--amber:#FACC15;--red:#FF6363;--border:rgba(255,255,255,0.06)}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;transition:background 0.2s,color 0.2s}
-.container{max-width:1200px;margin:0 auto;padding:24px}
-.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
-.header-left{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit}
-.header-left img{width:28px;height:28px;border-radius:6px}
-.header-title{font-size:20px;font-weight:600;letter-spacing:-0.3px}
-.header-sub{font-size:13px;color:var(--text2)}
-.back{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);text-decoration:none;padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);transition:all 0.15s}
-.back:hover{color:var(--text);border-color:rgba(255,255,255,0.15)}
 .summary{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
 .summary-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;flex:1;min-width:100px;text-align:center}
 .summary-val{font-size:22px;font-weight:600}
@@ -90,16 +80,20 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 </style>
 </head>
 <body>
-<div class="container">
+<div class="stats-container">
   <div class="header">
-    <a href="/" class="header-left">
-      <img src="/icon.png" alt="">
-      <div>
-        <div class="header-title">Drive Health & Stats</div>
-        <div class="header-sub">SMART analysis powered by Backblaze failure data (Q4-2025)</div>
-      </div>
-    </a>
-    <a href="/" class="back">&larr; Dashboard</a>
+    <div class="header-left">
+      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a>
+      <span class="page-title">Stats</span>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link">Dashboard</a>
+      <a href="/alerts" class="nav-link">Alerts</a>
+      <a href="/stats" class="nav-link active">Stats</a>
+      <a href="/fleet" class="nav-link">Fleet</a>
+      <a href="/settings" class="nav-link" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
+      <a href="https://github.com/mcdays94/nas-doctor" class="nav-link" target="_blank" title="GitHub"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.02 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.82.58C20.56 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
+    </div>
   </div>
   <div id="app"><div class="loading">Loading...</div></div>
 </div>
