@@ -2,7 +2,9 @@ package collector
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -201,6 +203,32 @@ func detectPlatform(hp internal.HostPaths) (platform, version string) {
 		return
 	}
 
+	// Check TrueNAS SCALE — the host kernel contains "+truenas" in /proc/version
+	// (e.g. "Linux version 6.12.15-production+truenas"). /proc is shared from the
+	// host even inside a container, making this the most reliable detection method.
+	if procVer, err := os.ReadFile("/proc/version"); err == nil {
+		if strings.Contains(string(procVer), "+truenas") {
+			platform = "truenas"
+			// Try to read the TrueNAS version from /etc/version (host-mounted paths).
+			// Inside a Docker container, this requires a bind mount like:
+			//   -v /etc/version:/host/etc/version:ro
+			for _, path := range []string{"/host/etc/version", "/etc/version"} {
+				if data, err := os.ReadFile(path); err == nil {
+					ver := strings.TrimSpace(string(data))
+					if ver != "" {
+						version = ver
+						break
+					}
+				}
+			}
+			// Fallback: try the TrueNAS local API (available with --network host)
+			if version == "" {
+				version = fetchTrueNASVersion()
+			}
+			return
+		}
+	}
+
 	// Check /etc/os-release for others
 	if f, err := os.Open("/etc/os-release"); err == nil {
 		defer f.Close()
@@ -222,10 +250,35 @@ func detectPlatform(hp internal.HostPaths) (platform, version string) {
 	return
 }
 
+// fetchTrueNASVersion queries the TrueNAS local API to get the system version.
+// This works when the container runs with --network host.
+func fetchTrueNASVersion() string {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://localhost/api/v2.0/system/version")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ""
+	}
+	var ver string
+	if err := json.NewDecoder(resp.Body).Decode(&ver); err != nil {
+		return ""
+	}
+	// Response is like "TrueNAS-25.04.2.1" — strip the prefix
+	ver = strings.TrimPrefix(ver, "TrueNAS-")
+	return ver
+}
+
 func collectTopProcesses(n int) []internal.ProcessInfo {
+	// Try GNU ps first (--sort flag), fall back to POSIX ps without sorting
 	out, err := execCmd("ps", "aux", "--sort=-%cpu")
 	if err != nil {
-		return nil
+		out, err = execCmd("ps", "aux")
+		if err != nil {
+			return nil
+		}
 	}
 	var procs []internal.ProcessInfo
 	lines := strings.Split(out, "\n")
