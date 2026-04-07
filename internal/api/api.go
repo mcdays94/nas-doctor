@@ -35,17 +35,19 @@ type Server struct {
 	metrics   *notifier.Metrics
 	fleet     *fleet.Manager
 	logger    *slog.Logger
+	version   string
 	startTime time.Time
 }
 
 // New creates a new API server.
-func New(store *storage.DB, sched *scheduler.Scheduler, metrics *notifier.Metrics, fleetMgr *fleet.Manager, logger *slog.Logger) *Server {
+func New(store *storage.DB, sched *scheduler.Scheduler, metrics *notifier.Metrics, fleetMgr *fleet.Manager, logger *slog.Logger, version string) *Server {
 	return &Server{
 		store:     store,
 		scheduler: sched,
 		metrics:   metrics,
 		fleet:     fleetMgr,
 		logger:    logger,
+		version:   version,
 		startTime: time.Now(),
 	}
 }
@@ -134,7 +136,7 @@ func (s *Server) Router() http.Handler {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
-		"version": "0.1.0",
+		"version": s.version,
 		"uptime":  time.Since(s.startTime).String(),
 		"themes":  []string{ThemeMidnight, ThemeClean, ThemeEmber},
 	})
