@@ -22,6 +22,7 @@ type Notifier struct {
 	webhooks []internal.WebhookConfig
 	client   *http.Client
 	logger   *slog.Logger
+	resultFn func(name, webhookType, status string, findingsCount int, errMsg string)
 }
 
 // New creates a Notifier with the given webhook configurations.
@@ -33,6 +34,11 @@ func New(webhooks []internal.WebhookConfig, logger *slog.Logger) *Notifier {
 		},
 		logger: logger,
 	}
+}
+
+// SetResultHook registers a callback invoked for each webhook delivery result.
+func (n *Notifier) SetResultHook(fn func(name, webhookType, status string, findingsCount int, errMsg string)) {
+	n.resultFn = fn
 }
 
 // NotifyFindings sends alerts for the given findings to all configured webhooks.
@@ -63,10 +69,19 @@ func (n *Notifier) NotifyFindings(findings []internal.Finding, hostname string) 
 
 		if err != nil {
 			n.logger.Error("webhook notification failed", "name", wh.Name, "type", wh.Type, "error", err)
+			n.logResult(wh, "failed", len(filtered), err.Error())
 		} else {
 			n.logger.Info("webhook notification sent", "name", wh.Name, "type", wh.Type, "findings", len(filtered))
+			n.logResult(wh, "sent", len(filtered), "")
 		}
 	}
+}
+
+func (n *Notifier) logResult(wh internal.WebhookConfig, status string, findingsCount int, errMsg string) {
+	if n.resultFn == nil {
+		return
+	}
+	n.resultFn(wh.Name, wh.Type, status, findingsCount, errMsg)
 }
 
 // ---------- Discord ----------

@@ -290,6 +290,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			KeepCount: keepCount,
 			IntervalH: intervalH,
 		})
+
+		// Update notifier webhooks at runtime.
+		s.scheduler.UpdateNotifier(s.buildNotifier(settings.Notifications.Webhooks))
 	}
 
 	writeJSON(w, http.StatusOK, settings)
@@ -487,6 +490,19 @@ func (s *Server) getSettings() Settings {
 	return settings
 }
 
+func (s *Server) buildNotifier(webhooks []internal.WebhookConfig) *notifier.Notifier {
+	if len(webhooks) == 0 {
+		return nil
+	}
+	n := notifier.New(webhooks, s.logger)
+	n.SetResultHook(func(name, webhookType, status string, findingsCount int, errMsg string) {
+		if err := s.store.SaveNotificationLog(name, webhookType, status, findingsCount, errMsg); err != nil {
+			s.logger.Warn("failed to save notification log", "error", err)
+		}
+	})
+	return n
+}
+
 // handleDBStats returns database size and row count statistics.
 // GET /api/v1/db/stats
 func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) {
@@ -542,6 +558,11 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	// Create a temporary notifier with just this webhook.
 	testLogger := s.logger.With("handler", "test-webhook")
 	n := notifier.New([]internal.WebhookConfig{wh}, testLogger)
+	n.SetResultHook(func(name, webhookType, status string, findingsCount int, errMsg string) {
+		if err := s.store.SaveNotificationLog(name, webhookType, status, findingsCount, errMsg); err != nil {
+			s.logger.Warn("failed to save notification log", "error", err)
+		}
+	})
 	n.NotifyFindings(testFindings, "nas-doctor-test")
 
 	// NotifyFindings does not return an error (it logs internally).
