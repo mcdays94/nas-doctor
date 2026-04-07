@@ -212,6 +212,20 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 	m.ioWait.Set(snap.System.IOWait)
 	m.uptime.Set(float64(snap.System.UptimeSecs))
 
+	// Reset label-based metrics to clear stale entries from removed
+	// disks, drives, or containers that no longer appear in the snapshot.
+	m.diskUsedBytes.Reset()
+	m.diskTotalBytes.Reset()
+	m.diskUsedPct.Reset()
+	m.smartHealthy.Reset()
+	m.smartTemp.Reset()
+	m.smartReallocated.Reset()
+	m.smartPending.Reset()
+	m.smartUDMACRC.Reset()
+	m.smartPowerOnHours.Reset()
+	m.containerCPU.Reset()
+	m.containerMem.Reset()
+
 	// Disks
 	for _, d := range snap.Disks {
 		labels := prometheus.Labels{
