@@ -65,7 +65,11 @@ type RetentionSettings struct {
 
 // SettingsNotifications holds the webhook list within settings.
 type SettingsNotifications struct {
-	Webhooks []internal.WebhookConfig `json:"webhooks"`
+	Webhooks           []internal.WebhookConfig      `json:"webhooks"`
+	Policies           []scheduler.AlertPolicy       `json:"policies,omitempty"`
+	QuietHours         scheduler.QuietHours          `json:"quiet_hours,omitempty"`
+	MaintenanceWindows []scheduler.MaintenanceWindow `json:"maintenance_windows,omitempty"`
+	DefaultCooldownSec int                           `json:"default_cooldown_sec,omitempty"`
 }
 
 // SettingsLogForward holds the log-forwarding configuration within settings.
@@ -91,7 +95,16 @@ func defaultSettings() Settings {
 		Theme:        ThemeMidnight,
 		Icon:         "icon3",
 		Notifications: SettingsNotifications{
-			Webhooks: []internal.WebhookConfig{},
+			Webhooks:           []internal.WebhookConfig{},
+			Policies:           []scheduler.AlertPolicy{},
+			MaintenanceWindows: []scheduler.MaintenanceWindow{},
+			QuietHours: scheduler.QuietHours{
+				Enabled:   false,
+				Timezone:  "UTC",
+				StartHHMM: "22:00",
+				EndHHMM:   "07:00",
+			},
+			DefaultCooldownSec: 900,
 		},
 		LogPush: SettingsLogForward{
 			Enabled:      false,
@@ -177,6 +190,24 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	if settings.Notifications.Webhooks == nil {
 		settings.Notifications.Webhooks = []internal.WebhookConfig{}
 	}
+	if settings.Notifications.Policies == nil {
+		settings.Notifications.Policies = []scheduler.AlertPolicy{}
+	}
+	if settings.Notifications.MaintenanceWindows == nil {
+		settings.Notifications.MaintenanceWindows = []scheduler.MaintenanceWindow{}
+	}
+	if settings.Notifications.QuietHours.Timezone == "" {
+		settings.Notifications.QuietHours.Timezone = "UTC"
+	}
+	if settings.Notifications.QuietHours.StartHHMM == "" {
+		settings.Notifications.QuietHours.StartHHMM = "22:00"
+	}
+	if settings.Notifications.QuietHours.EndHHMM == "" {
+		settings.Notifications.QuietHours.EndHHMM = "07:00"
+	}
+	if settings.Notifications.DefaultCooldownSec <= 0 {
+		settings.Notifications.DefaultCooldownSec = 900
+	}
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
 	}
@@ -239,6 +270,73 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if settings.Notifications.Webhooks == nil {
 		settings.Notifications.Webhooks = []internal.WebhookConfig{}
 	}
+	if settings.Notifications.Policies == nil {
+		settings.Notifications.Policies = []scheduler.AlertPolicy{}
+	}
+	if settings.Notifications.MaintenanceWindows == nil {
+		settings.Notifications.MaintenanceWindows = []scheduler.MaintenanceWindow{}
+	}
+	if settings.Notifications.DefaultCooldownSec <= 0 {
+		settings.Notifications.DefaultCooldownSec = 900
+	}
+	if settings.Notifications.QuietHours.Timezone == "" {
+		settings.Notifications.QuietHours.Timezone = "UTC"
+	}
+	if settings.Notifications.QuietHours.StartHHMM == "" {
+		settings.Notifications.QuietHours.StartHHMM = "22:00"
+	}
+	if settings.Notifications.QuietHours.EndHHMM == "" {
+		settings.Notifications.QuietHours.EndHHMM = "07:00"
+	}
+	if settings.Notifications.QuietHours.Enabled {
+		if _, err := time.Parse("15:04", settings.Notifications.QuietHours.StartHHMM); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid quiet_hours.start_hhmm (expected HH:MM)"})
+			return
+		}
+		if _, err := time.Parse("15:04", settings.Notifications.QuietHours.EndHHMM); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid quiet_hours.end_hhmm (expected HH:MM)"})
+			return
+		}
+		if _, err := time.LoadLocation(settings.Notifications.QuietHours.Timezone); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid quiet_hours.timezone"})
+			return
+		}
+	}
+	knownWebhooks := make(map[string]struct{}, len(settings.Notifications.Webhooks))
+	for _, wh := range settings.Notifications.Webhooks {
+		knownWebhooks[strings.ToLower(strings.TrimSpace(wh.Name))] = struct{}{}
+	}
+	for i := range settings.Notifications.Policies {
+		p := &settings.Notifications.Policies[i]
+		if p.MinSeverity == "" {
+			p.MinSeverity = internal.SeverityWarning
+		}
+		if p.CooldownSec < 0 {
+			p.CooldownSec = 0
+		}
+		if p.Name == "" {
+			p.Name = fmt.Sprintf("policy-%d", i+1)
+		}
+		if p.WebhookName == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "notifications.policies webhook_name is required"})
+			return
+		}
+		if _, ok := knownWebhooks[strings.ToLower(strings.TrimSpace(p.WebhookName))]; !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "notifications.policies references unknown webhook: " + p.WebhookName})
+			return
+		}
+	}
+	for _, mw := range settings.Notifications.MaintenanceWindows {
+		if !mw.Enabled {
+			continue
+		}
+		start, err1 := time.Parse(time.RFC3339, strings.TrimSpace(mw.StartISO))
+		end, err2 := time.Parse(time.RFC3339, strings.TrimSpace(mw.EndISO))
+		if err1 != nil || err2 != nil || !end.After(start) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid maintenance window (start_iso/end_iso must be RFC3339 and end > start)"})
+			return
+		}
+	}
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
 	}
@@ -293,6 +391,12 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 		// Update notifier webhooks at runtime.
 		s.scheduler.UpdateNotifier(s.buildNotifier(settings.Notifications.Webhooks))
+		s.scheduler.UpdateAlerting(scheduler.AlertingConfig{
+			Policies:           settings.Notifications.Policies,
+			QuietHours:         settings.Notifications.QuietHours,
+			MaintenanceWindows: settings.Notifications.MaintenanceWindows,
+			DefaultCooldownSec: settings.Notifications.DefaultCooldownSec,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, settings)

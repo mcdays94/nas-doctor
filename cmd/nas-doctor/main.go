@@ -388,4 +388,15 @@ func applySchedulerSettingsFromStore(sched *scheduler.Scheduler, settings *api.S
 		KeepCount: keepCount,
 		IntervalH: intervalH,
 	})
+
+	defaultCooldown := settings.Notifications.DefaultCooldownSec
+	if defaultCooldown <= 0 {
+		defaultCooldown = 900
+	}
+	sched.UpdateAlerting(scheduler.AlertingConfig{
+		Policies:           settings.Notifications.Policies,
+		QuietHours:         settings.Notifications.QuietHours,
+		MaintenanceWindows: settings.Notifications.MaintenanceWindows,
+		DefaultCooldownSec: defaultCooldown,
+	})
 }
