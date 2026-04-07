@@ -207,6 +207,7 @@ func (s *Scheduler) RunOnce() {
 
 	// Analyze
 	snap.Findings = analyzer.Analyze(snap)
+	snap.Findings = append(snap.Findings, s.buildSMARTTrendFindings(snap)...)
 	// Stamp findings with detection timestamp
 	ts := snap.Timestamp.Format(time.RFC3339)
 	for i := range snap.Findings {
@@ -515,6 +516,133 @@ func (s *Scheduler) checkBackup() {
 	s.mu.Lock()
 	s.backup.LastBackup = result.Timestamp
 	s.mu.Unlock()
+}
+
+func (s *Scheduler) buildSMARTTrendFindings(snap *internal.Snapshot) []internal.Finding {
+	if snap == nil || len(snap.SMART) == 0 {
+		return nil
+	}
+
+	findings := make([]internal.Finding, 0)
+	for _, drive := range snap.SMART {
+		if strings.TrimSpace(drive.Serial) == "" {
+			continue
+		}
+
+		history, err := s.store.GetDiskHistory(drive.Serial, 30)
+		if err != nil {
+			s.logger.Warn("failed to load disk history for trend analysis", "serial", drive.Serial, "error", err)
+			continue
+		}
+		if len(history) < 2 {
+			continue
+		}
+
+		first := history[0]
+		last := history[len(history)-1]
+		days := last.Timestamp.Sub(first.Timestamp).Hours() / 24.0
+		if days < 1 {
+			days = 1
+		}
+
+		reallocDelta := last.Reallocated - first.Reallocated
+		pendingDelta := last.Pending - first.Pending
+		crcDelta := last.UDMACRC - first.UDMACRC
+		tempDelta := last.Temperature - first.Temperature
+
+		worsening := reallocDelta > 0 || pendingDelta > 0 || crcDelta > 0 || (tempDelta >= 4 && last.Temperature >= 45)
+		if !worsening {
+			continue
+		}
+
+		riskScore := 0
+		if last.Pending > 0 {
+			riskScore += 40
+		}
+		if pendingDelta > 0 {
+			riskScore += 25
+		}
+		if reallocDelta > 0 {
+			riskScore += int(minInt64(reallocDelta, 20))
+		}
+		if crcDelta > 5 {
+			riskScore += 10
+		}
+		if last.Temperature >= 50 {
+			riskScore += 15
+		} else if last.Temperature >= 45 {
+			riskScore += 8
+		}
+		if tempDelta >= 4 {
+			riskScore += 10
+		}
+
+		severity := internal.SeverityInfo
+		urgency := "monitor"
+		if riskScore >= 70 {
+			severity = internal.SeverityCritical
+			urgency = "immediate"
+		} else if riskScore >= 40 {
+			severity = internal.SeverityWarning
+			urgency = "short-term"
+		}
+
+		confidence := "low"
+		if len(history) >= 10 && days >= 7 {
+			confidence = "high"
+		} else if len(history) >= 5 && days >= 3 {
+			confidence = "medium"
+		}
+
+		title := fmt.Sprintf("Worsening SMART Trend: %s (%s)", drive.Device, drive.Model)
+		description := fmt.Sprintf(
+			"SMART metrics are worsening over %.1f days (realloc %+d, pending %+d, CRC %+d, temp %+dC). Risk score %d/100.",
+			days, reallocDelta, pendingDelta, crcDelta, tempDelta, riskScore,
+		)
+		evidence := []string{
+			fmt.Sprintf("Current: temp=%dC realloc=%d pending=%d crc=%d", last.Temperature, last.Reallocated, last.Pending, last.UDMACRC),
+			fmt.Sprintf("Delta: realloc %+d (%.2f/day), pending %+d (%.2f/day), crc %+d (%.2f/day)", reallocDelta, float64(reallocDelta)/days, pendingDelta, float64(pendingDelta)/days, crcDelta, float64(crcDelta)/days),
+			fmt.Sprintf("Guidance: urgency=%s confidence=%s", urgency, confidence),
+		}
+
+		action := "Review trend trajectory, verify recent SMART test output, and plan replacement if counters continue rising."
+		if urgency == "immediate" {
+			action = "Prepare replacement immediately and verify backups now. Rising pending/reallocated trends indicate elevated near-term failure risk."
+		}
+
+		findings = append(findings, internal.Finding{
+			Severity:    severity,
+			Category:    internal.CategorySMART,
+			Title:       title,
+			Description: description,
+			Evidence:    evidence,
+			Impact:      "Increased probability of uncorrectable read/write failures if trend continues.",
+			Action:      action,
+			Priority:    urgency,
+			Cost:        estimateTrendCost(urgency),
+			RelatedDisk: drive.ArraySlot,
+		})
+	}
+
+	return findings
+}
+
+func estimateTrendCost(urgency string) string {
+	switch urgency {
+	case "immediate":
+		return "$80-350 for replacement drive"
+	case "short-term":
+		return "$5-15 (cable) or drive replacement planning"
+	default:
+		return "none"
+	}
+}
+
+func minInt64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (s *Scheduler) runServiceChecks(now time.Time) ([]internal.ServiceCheckResult, error) {
