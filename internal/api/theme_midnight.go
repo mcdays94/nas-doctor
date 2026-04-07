@@ -192,11 +192,14 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
   "use strict";
   var cachedSnapshot = null;
 
-  var REFRESH_MS = 30000;
+  var REFRESH_MS = 300000; // default 5min; updated dynamically from scan interval
+  var FAST_POLL_MS = 5000;
   var refreshTimer = null;
   var statusData = null;
   var snapshotData = null;
   var scanInProgress = false;
+  var _lastScanTime = null;
+  var _fastUntil = 0;
 
   function esc(s) {
     if (!s && s !== 0) return "";
@@ -216,12 +219,36 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     return Promise.all([
       fetchJSON("/api/v1/status").then(function(d) { statusData = d; }).catch(function() { statusData = null; }),
       fetchJSON("/api/v1/snapshot/latest").then(function(d) { snapshotData = d; }).catch(function() { snapshotData = null; })
-    ]).then(render);
+    ]).then(render).then(adjustRefreshRate);
+  }
+
+  function computeRefreshMs(secs) {
+    if (!secs || secs <= 0) return 300000;
+    return Math.max(Math.min(Math.floor(secs / 12) * 1000, 300000), 30000);
   }
 
   function startRefresh() {
     if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = setInterval(loadAll, REFRESH_MS);
+    var ms = (Date.now() < _fastUntil) ? FAST_POLL_MS : REFRESH_MS;
+    refreshTimer = setInterval(function() {
+      loadAll();
+      if (Date.now() >= _fastUntil && ms === FAST_POLL_MS) startRefresh();
+    }, ms);
+  }
+
+  function adjustRefreshRate() {
+    if (!statusData) return;
+    if (statusData.scan_interval_secs > 0) {
+      REFRESH_MS = computeRefreshMs(statusData.scan_interval_secs);
+    }
+    var scanTime = statusData.last_scan || null;
+    if (scanTime && scanTime !== _lastScanTime) {
+      if (_lastScanTime !== null) { _fastUntil = Date.now() + 30000; startRefresh(); }
+      _lastScanTime = scanTime;
+    }
+    if (statusData.scan_running && Date.now() >= _fastUntil) {
+      _fastUntil = Date.now() + 60000; startRefresh();
+    }
   }
 
   function triggerScan() {

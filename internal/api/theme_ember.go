@@ -964,10 +964,42 @@ td.mono {
 (function() {
   "use strict";
 
-  var REFRESH_INTERVAL = 30000;
+  var REFRESH_INTERVAL = 300000; // default 5min; updated dynamically from scan interval
+  var FAST_POLL_MS = 5000;
   var refreshTimer = null;
   var activeFindingId = null;
   var _cachedStatus = null;
+  var _lastScanTime = null;
+  var _fastUntil = 0;
+
+  function _computeRefreshMs(secs) {
+    if (!secs || secs <= 0) return 300000;
+    return Math.max(Math.min(Math.floor(secs / 12) * 1000, 300000), 30000);
+  }
+
+  function _startRefresh() {
+    if (refreshTimer) clearInterval(refreshTimer);
+    var ms = (Date.now() < _fastUntil) ? FAST_POLL_MS : REFRESH_INTERVAL;
+    refreshTimer = setInterval(function() {
+      loadData();
+      if (Date.now() >= _fastUntil && ms === FAST_POLL_MS) _startRefresh();
+    }, ms);
+  }
+
+  function _adjustRefreshRate() {
+    if (!_cachedStatus) return;
+    if (_cachedStatus.scan_interval_secs > 0) {
+      REFRESH_INTERVAL = _computeRefreshMs(_cachedStatus.scan_interval_secs);
+    }
+    var scanTime = _cachedStatus.last_scan || null;
+    if (scanTime && scanTime !== _lastScanTime) {
+      if (_lastScanTime !== null) { _fastUntil = Date.now() + 30000; _startRefresh(); }
+      _lastScanTime = scanTime;
+    }
+    if (_cachedStatus.scan_running && Date.now() >= _fastUntil) {
+      _fastUntil = Date.now() + 60000; _startRefresh();
+    }
+  }
   var prevStatValues = {};
 
   function esc(s) {
@@ -1524,6 +1556,7 @@ td.mono {
         _renderSparklines(snapshot);
         postRender(snapshot);
       }
+      _adjustRefreshRate();
     }).catch(function(err) {
       console.error("Failed to load dashboard data:", err);
       var app2 = document.getElementById("app");
@@ -1615,7 +1648,7 @@ td.mono {
   };
 
   loadData();
-  refreshTimer = setInterval(loadData, REFRESH_INTERVAL);
+  _startRefresh();
 })();
 </script>
 </body>

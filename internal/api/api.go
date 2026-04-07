@@ -147,6 +147,7 @@ type statusResponse struct {
 	Platform          string             `json:"platform"`
 	Uptime            string             `json:"uptime"`
 	LastScan          string             `json:"last_scan"`
+	ScanIntervalSecs  int                `json:"scan_interval_secs"`
 	ScanRunning       bool               `json:"scan_running"`
 	CriticalCount     int                `json:"critical_count"`
 	WarningCount      int                `json:"warning_count"`
@@ -160,6 +161,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp := statusResponse{}
 	if s.scheduler != nil {
 		resp.ScanRunning = s.scheduler.IsRunning()
+		resp.ScanIntervalSecs = int(s.scheduler.Interval().Seconds())
 	}
 
 	var snap *internal.Snapshot
