@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
@@ -144,6 +145,16 @@ func (d *DB) migrate() error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_notification_log_ts ON notification_log(created_at DESC)`,
+
+		// --- Notification dedup state ---
+		`CREATE TABLE IF NOT EXISTS notification_state (
+			fingerprint TEXT NOT NULL,
+			route_key TEXT NOT NULL,
+			last_sent_unix INTEGER,
+			last_status TEXT,
+			PRIMARY KEY (fingerprint, route_key)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_notification_state_route ON notification_state(route_key)`,
 	}
 
 	for _, m := range migrations {
@@ -151,7 +162,43 @@ func (d *DB) migrate() error {
 			return fmt.Errorf("migration failed: %w\nSQL: %s", err, m)
 		}
 	}
+
+	if err := d.ensureColumn("alerts", "fingerprint", "TEXT"); err != nil {
+		return fmt.Errorf("ensure alerts.fingerprint: %w", err)
+	}
+	if _, err := d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_alerts_fingerprint_open ON alerts(fingerprint, resolved_at)`); err != nil {
+		return fmt.Errorf("create alerts fingerprint index: %w", err)
+	}
+
 	return nil
+}
+
+func (d *DB) ensureColumn(table, column, definition string) error {
+	rows, err := d.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if strings.EqualFold(name, column) {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = d.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
 }
 
 // SaveSnapshot stores a complete diagnostic snapshot.
@@ -298,6 +345,158 @@ func (d *DB) ListSnapshots(limit int) ([]SnapshotSummary, error) {
 		summaries = append(summaries, s)
 	}
 	return summaries, nil
+}
+
+// AlertStateFinding is the minimum finding shape required to track alert lifecycle.
+type AlertStateFinding struct {
+	Fingerprint string
+	FindingID   string
+	Severity    string
+	Title       string
+}
+
+// SyncAlertStates updates open/resolved alert state based on current findings.
+func (d *DB) SyncAlertStates(snapshotID string, findings []AlertStateFinding, now time.Time) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	active := make(map[string]AlertStateFinding, len(findings))
+	for _, f := range findings {
+		if f.Fingerprint == "" {
+			continue
+		}
+		if _, exists := active[f.Fingerprint]; !exists {
+			active[f.Fingerprint] = f
+		}
+	}
+
+	rows, err := tx.Query(`
+		SELECT id, fingerprint
+		FROM alerts
+		WHERE resolved_at IS NULL AND COALESCE(fingerprint, '') != ''
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	openByFingerprint := make(map[string]int64)
+	var duplicateIDs []int64
+	for rows.Next() {
+		var id int64
+		var fp string
+		if err := rows.Scan(&id, &fp); err != nil {
+			return err
+		}
+		if _, exists := openByFingerprint[fp]; exists {
+			duplicateIDs = append(duplicateIDs, id)
+			continue
+		}
+		openByFingerprint[fp] = id
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, id := range duplicateIDs {
+		if _, err := tx.Exec("UPDATE alerts SET resolved_at = ? WHERE id = ?", now, id); err != nil {
+			return err
+		}
+	}
+
+	for fp, f := range active {
+		if id, exists := openByFingerprint[fp]; exists {
+			if _, err := tx.Exec(
+				"UPDATE alerts SET finding_id = ?, snapshot_id = ?, severity = ?, title = ? WHERE id = ?",
+				f.FindingID, snapshotID, f.Severity, f.Title, id,
+			); err != nil {
+				return err
+			}
+			delete(openByFingerprint, fp)
+			continue
+		}
+
+		if _, err := tx.Exec(
+			`INSERT INTO alerts (finding_id, snapshot_id, severity, title, fingerprint)
+			 VALUES (?, ?, ?, ?, ?)`,
+			f.FindingID, snapshotID, f.Severity, f.Title, fp,
+		); err != nil {
+			return err
+		}
+	}
+
+	for _, id := range openByFingerprint {
+		if _, err := tx.Exec("UPDATE alerts SET resolved_at = ? WHERE id = ?", now, id); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// MarkAlertsNotifiedByFingerprint updates open alerts as notified.
+func (d *DB) MarkAlertsNotifiedByFingerprint(fingerprints []string, notifiedAt time.Time) error {
+	fps := uniqueStrings(fingerprints)
+	if len(fps) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(fps))
+	args := make([]any, 0, len(fps)+1)
+	args = append(args, notifiedAt)
+	for i, fp := range fps {
+		placeholders[i] = "?"
+		args = append(args, fp)
+	}
+
+	query := fmt.Sprintf(
+		"UPDATE alerts SET notified_at = ? WHERE resolved_at IS NULL AND fingerprint IN (%s)",
+		strings.Join(placeholders, ","),
+	)
+	_, err := d.db.Exec(query, args...)
+	return err
+}
+
+// CanSendNotification reports whether a notification is allowed for route+fingerprint based on cooldown.
+func (d *DB) CanSendNotification(fingerprint, routeKey string, cooldown time.Duration, now time.Time) (bool, error) {
+	if fingerprint == "" || routeKey == "" || cooldown <= 0 {
+		return true, nil
+	}
+
+	row := d.db.QueryRow(
+		"SELECT last_sent_unix FROM notification_state WHERE fingerprint = ? AND route_key = ?",
+		fingerprint, routeKey,
+	)
+	var lastSent sql.NullInt64
+	if err := row.Scan(&lastSent); err != nil {
+		if err == sql.ErrNoRows {
+			return true, nil
+		}
+		return false, err
+	}
+	if !lastSent.Valid || lastSent.Int64 <= 0 {
+		return true, nil
+	}
+
+	return now.Unix()-lastSent.Int64 >= int64(cooldown.Seconds()), nil
+}
+
+// SaveNotificationState records the last delivery timestamp/status for route+fingerprint.
+func (d *DB) SaveNotificationState(fingerprint, routeKey, status string, sentAt time.Time) error {
+	if fingerprint == "" || routeKey == "" {
+		return nil
+	}
+	_, err := d.db.Exec(
+		`INSERT INTO notification_state (fingerprint, route_key, last_sent_unix, last_status)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(fingerprint, route_key)
+		 DO UPDATE SET last_sent_unix = excluded.last_sent_unix, last_status = excluded.last_status`,
+		fingerprint, routeKey, sentAt.Unix(), status,
+	)
+	return err
 }
 
 // GetFindingHistory returns how a specific finding category has changed over time.
@@ -795,4 +994,23 @@ func (d *DB) GetNotificationLog(limit int) ([]NotificationLogEntry, error) {
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+func uniqueStrings(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }
