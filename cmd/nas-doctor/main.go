@@ -99,6 +99,8 @@ func main() {
 	}
 	defer store.Close()
 
+	persistedSettings := loadPersistedSettings(store, logger)
+
 	// Create Prometheus metrics
 	metrics := notifier.NewMetrics()
 
@@ -174,30 +176,28 @@ func main() {
 	} else {
 		// Production mode: real collectors
 		col := collector.New(cfg.HostPaths, logger)
+		interval = intervalFromSettings(persistedSettings, interval, logger)
 
-		var notif *notifier.Notifier
-		if len(cfg.Notifications.Webhooks) > 0 {
-			notif = notifier.New(cfg.Notifications.Webhooks, logger)
+		webhooks := cfg.Notifications.Webhooks
+		if persistedSettings != nil && persistedSettings.Notifications.Webhooks != nil {
+			webhooks = persistedSettings.Notifications.Webhooks
 		}
+		notif := buildNotifier(webhooks, logger, store)
 
 		sched = scheduler.New(col, store, notif, metrics, logger, interval)
+		applySchedulerSettingsFromStore(sched, persistedSettings)
 		sched.Start()
 		defer sched.Stop()
 	}
 
 	// Fleet manager (multi-server monitoring)
 	fleetMgr := fleet.New(logger)
-	// Load fleet servers from settings
-	if raw, err := store.GetConfig("settings"); err == nil && raw != "" {
-		var settingsData struct {
-			Fleet []internal.RemoteServer `json:"fleet"`
-		}
-		if json.Unmarshal([]byte(raw), &settingsData) == nil && len(settingsData.Fleet) > 0 {
-			fleetMgr.SetServers(settingsData.Fleet)
-			fleetMgr.Start(60 * time.Second) // poll every 60s
-			logger.Info("fleet monitoring started", "servers", len(settingsData.Fleet))
-		}
+	if persistedSettings != nil && len(persistedSettings.Fleet) > 0 {
+		fleetMgr.SetServers(persistedSettings.Fleet)
+		logger.Info("fleet monitoring loaded", "servers", len(persistedSettings.Fleet))
 	}
+	fleetMgr.Start(60 * time.Second)
+	defer fleetMgr.Stop()
 
 	// Create API server
 	apiServer := api.New(store, sched, metrics, fleetMgr, logger, version)
@@ -311,4 +311,81 @@ func countSev(findings []internal.Finding, sev internal.Severity) int {
 		}
 	}
 	return n
+}
+
+func loadPersistedSettings(store *storage.DB, logger *slog.Logger) *api.Settings {
+	raw, err := store.GetConfig("settings")
+	if err != nil || raw == "" {
+		return nil
+	}
+	var settings api.Settings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		logger.Warn("failed to parse stored settings", "error", err)
+		return nil
+	}
+	return &settings
+}
+
+func intervalFromSettings(settings *api.Settings, fallback time.Duration, logger *slog.Logger) time.Duration {
+	if settings == nil || settings.ScanInterval == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(settings.ScanInterval)
+	if err != nil {
+		logger.Warn("ignoring invalid stored scan interval", "scan_interval", settings.ScanInterval, "error", err)
+		return fallback
+	}
+	return d
+}
+
+func buildNotifier(webhooks []internal.WebhookConfig, logger *slog.Logger, store *storage.DB) *notifier.Notifier {
+	if len(webhooks) == 0 {
+		return nil
+	}
+	n := notifier.New(webhooks, logger)
+	n.SetResultHook(func(name, webhookType, status string, findingsCount int, errMsg string) {
+		if err := store.SaveNotificationLog(name, webhookType, status, findingsCount, errMsg); err != nil {
+			logger.Warn("failed to save notification log", "error", err)
+		}
+	})
+	return n
+}
+
+func applySchedulerSettingsFromStore(sched *scheduler.Scheduler, settings *api.Settings) {
+	if sched == nil || settings == nil {
+		return
+	}
+
+	snapshotDays := settings.Retention.SnapshotDays
+	if snapshotDays < 7 {
+		snapshotDays = 90
+	}
+	maxDBSizeMB := settings.Retention.MaxDBSizeMB
+	if maxDBSizeMB < 50 {
+		maxDBSizeMB = 500
+	}
+	notifyLogDays := settings.Retention.NotifyLogDays
+	if notifyLogDays < 1 {
+		notifyLogDays = 30
+	}
+	sched.UpdateRetention(scheduler.RetentionConfig{
+		SnapshotDays:  snapshotDays,
+		MaxDBSizeMB:   maxDBSizeMB,
+		NotifyLogDays: notifyLogDays,
+	})
+
+	keepCount := settings.Backup.KeepCount
+	if keepCount <= 0 {
+		keepCount = 4
+	}
+	intervalH := settings.Backup.IntervalH
+	if intervalH <= 0 {
+		intervalH = 168
+	}
+	sched.UpdateBackup(scheduler.BackupConfig{
+		Enabled:   settings.Backup.Enabled,
+		Path:      settings.Backup.Path,
+		KeepCount: keepCount,
+		IntervalH: intervalH,
+	})
 }
