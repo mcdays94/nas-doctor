@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Disk Detail — NAS Doctor</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="/js/charts.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-base:#0f1011;--bg-surface:#191a1b;--bg-elevated:#242526;
+  --text-primary:#f7f8f8;--text-secondary:#d0d6e0;--text-tertiary:#8a8f98;
+  --accent:#5e6ad2;--accent-hover:#7170ff;
+  --green:#10b981;--green-bg:rgba(16,185,129,0.1);
+  --amber:#d97706;--amber-bg:rgba(217,119,6,0.1);
+  --red:#dc2626;--red-bg:rgba(220,38,38,0.1);
+  --border:rgba(255,255,255,0.08);
+  --radius:8px;--sp:8px;
+}
+html{background:var(--bg-base);color:var(--text-primary);font-family:"Inter",system-ui,-apple-system,sans-serif;font-feature-settings:"cv01","ss03";font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+body{min-height:100vh;padding:calc(var(--sp)*3)}
+a{color:var(--accent);text-decoration:none}
+a:hover{color:var(--accent-hover)}
+
+.container{max-width:1200px;margin:0 auto}
+
+/* ── Loading / Error ─────────────────────── */
+.loading{display:flex;align-items:center;justify-content:center;height:60vh;flex-direction:column;gap:16px}
+.loading-spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-state{text-align:center;color:var(--red);padding:80px 0}
+.error-state h2{margin-bottom:8px}
+
+/* ── Header ──────────────────────────────── */
+.page-header{display:flex;align-items:flex-start;justify-content:space-between;gap:32px;padding-bottom:calc(var(--sp)*3);margin-bottom:calc(var(--sp)*3);border-bottom:1px solid var(--border)}
+.header-left{flex:1;min-width:0}
+.back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-tertiary);margin-bottom:12px;transition:color 0.15s}
+.back-link:hover{color:var(--accent)}
+.drive-title{font-size:28px;font-weight:700;letter-spacing:-0.8px;margin-bottom:8px;color:var(--text-primary)}
+.badge-row{display:flex;flex-wrap:wrap;gap:8px}
+.badge{display:inline-flex;align-items:center;padding:4px 10px;font-size:12px;font-weight:500;color:var(--text-tertiary);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius)}
+.badge-accent{color:var(--accent);background:rgba(94,106,210,0.08);border-color:rgba(94,106,210,0.2)}
+
+/* ── Health Score Card ───────────────────── */
+.health-score-card{flex-shrink:0;width:200px;background:var(--bg-surface);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:20px;text-align:center}
+.health-gauge-wrap{width:160px;height:100px;margin:0 auto 8px}
+.health-gauge-wrap canvas{width:160px;height:100px}
+.health-status{font-size:14px;font-weight:700;letter-spacing:0.5px;margin-bottom:8px}
+.health-status.passed{color:var(--green)}
+.health-status.failed{color:var(--red)}
+.health-meta{font-size:12px;color:var(--text-tertiary);line-height:1.6}
+.drive-type-badge{display:inline-block;padding:2px 8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;border-radius:4px;margin-top:6px;color:var(--accent);background:rgba(94,106,210,0.1)}
+
+/* ── Section headings ────────────────────── */
+.section-heading{font-size:13px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:calc(var(--sp)*2);margin-top:calc(var(--sp)*5)}
+
+/* ── SMART Attributes Table ──────────────── */
+.smart-table-wrap{background:var(--bg-surface);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden;margin-bottom:calc(var(--sp)*4)}
+.smart-table{width:100%;border-collapse:collapse}
+.smart-table th{font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;padding:12px 16px;text-align:left;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.smart-table td{padding:12px 16px;border-bottom:1px solid var(--border);vertical-align:middle}
+.smart-table tr:last-child td{border-bottom:none}
+.smart-table tr:hover{background:rgba(255,255,255,0.02)}
+.attr-name{font-weight:500;color:var(--text-primary)}
+.attr-value{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.status-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:500}
+.status-good{color:var(--green);background:var(--green-bg)}
+.status-warn{color:var(--amber);background:var(--amber-bg)}
+.status-bad{color:var(--red);background:var(--red-bg)}
+.status-info{color:var(--accent);background:rgba(94,106,210,0.1)}
+.sparkline-cell{width:140px}
+.sparkline-cell canvas{display:block}
+
+/* ── Chart sections ──────────────────────── */
+.chart-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:20px;margin-bottom:calc(var(--sp)*3)}
+.chart-card-title{font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:16px}
+.chart-wrap{width:100%;position:relative}
+.chart-wrap canvas{width:100%;display:block}
+.chart-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--sp)*3);margin-bottom:calc(var(--sp)*4)}
+@media(max-width:768px){.chart-grid-2{grid-template-columns:1fr}}
+
+/* ── Findings ────────────────────────────── */
+.findings-section{margin-bottom:calc(var(--sp)*4)}
+.finding-card{border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:8px;transition:all 200ms ease}
+.finding-card:hover{border-color:rgba(255,255,255,0.12)}
+.finding-critical{background:rgba(220,38,38,0.06)}
+.finding-critical:hover{background:rgba(220,38,38,0.10)}
+.finding-warning{background:rgba(217,119,6,0.06)}
+.finding-warning:hover{background:rgba(217,119,6,0.10)}
+.finding-info{background:rgba(94,106,210,0.06)}
+.finding-info:hover{background:rgba(94,106,210,0.10)}
+.sev-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;flex-shrink:0}
+.sev-critical{background:var(--red)}
+.sev-warning{background:var(--amber)}
+.sev-info{background:var(--accent)}
+.finding-title-row{display:flex;align-items:center;margin-bottom:6px}
+.finding-title{font-size:14px;font-weight:600;color:var(--text-primary)}
+.finding-desc{font-size:13px;color:var(--text-secondary);margin-bottom:8px;line-height:1.5}
+.finding-action-text{font-size:13px;color:var(--accent);line-height:1.5}
+.finding-sev-tag{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:2px 8px;border-radius:4px;margin-left:auto}
+.finding-sev-tag.tag-critical{color:var(--red);background:var(--red-bg)}
+.finding-sev-tag.tag-warning{color:var(--amber);background:var(--amber-bg)}
+.finding-sev-tag.tag-info{color:var(--accent);background:rgba(94,106,210,0.1)}
+
+/* ── Drive Info Table ────────────────────── */
+.info-table-wrap{background:var(--bg-surface);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden;margin-bottom:calc(var(--sp)*6)}
+.info-table{width:100%;border-collapse:collapse}
+.info-table td{padding:10px 16px;border-bottom:1px solid var(--border);font-size:13px}
+.info-table tr:last-child td{border-bottom:none}
+.info-table tr:hover{background:rgba(255,255,255,0.02)}
+.info-table .label-cell{color:var(--text-tertiary);font-weight:500;width:200px}
+.info-table .value-cell{color:var(--text-primary);font-variant-numeric:tabular-nums}
+
+/* ── Empty states ────────────────────────── */
+.no-data{text-align:center;color:var(--text-tertiary);padding:40px;font-size:13px}
+
+/* ── Responsive ──────────────────────────── */
+@media(max-width:700px){
+  .page-header{flex-direction:column}
+  .health-score-card{width:100%}
+  .health-gauge-wrap{width:200px}
+  .drive-title{font-size:22px}
+}
+</style>
+</head>
+<body>
+
+<div class="container" id="app">
+  <div class="loading" id="loadingState">
+    <div class="loading-spinner"></div>
+    <div style="color:var(--text-tertiary);font-size:13px">Loading disk data...</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ── Extract serial from URL path ─────────────────────────────── */
+  var pathParts = window.location.pathname.split("/");
+  var serial = "";
+  for (var i = 0; i < pathParts.length; i++) {
+    if (pathParts[i] === "disk" && i + 1 < pathParts.length) {
+      serial = decodeURIComponent(pathParts[i + 1]);
+      break;
+    }
+  }
+
+  if (!serial) {
+    showError("No disk serial found in URL.");
+    return;
+  }
+
+  /* ── Fetch disk data ──────────────────────────────────────────── */
+  fetch("/api/v1/disks/" + encodeURIComponent(serial))
+    .then(function(resp) {
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      return resp.json();
+    })
+    .then(function(data) {
+      renderPage(data);
+    })
+    .catch(function(err) {
+      showError("Failed to load disk data: " + err.message);
+    });
+
+  /* ── Error state ──────────────────────────────────────────────── */
+  function showError(msg) {
+    var app = document.getElementById("app");
+    app.innerHTML = "<div class=\"error-state\">" +
+      "<h2>Error</h2>" +
+      "<p>" + escHtml(msg) + "</p>" +
+      "<p style=\"margin-top:16px\"><a href=\"/\">Back to Dashboard</a></p>" +
+      "</div>";
+  }
+
+  function escHtml(s) {
+    var d = document.createElement("div");
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
+  }
+
+  /* ── Compute health score ─────────────────────────────────────── */
+  function computeHealthScore(disk) {
+    var score = 100;
+    if (!disk) return 0;
+    /* SMART test failed = -40 */
+    if (disk.health_passed === false) score -= 40;
+    /* Reallocated sectors: -5 per sector, max -30 */
+    var realloc = disk.reallocated || 0;
+    if (realloc > 0) score -= Math.min(30, realloc * 5);
+    /* Pending sectors: -4 per sector, max -20 */
+    var pending = disk.pending || 0;
+    if (pending > 0) score -= Math.min(20, pending * 4);
+    /* UDMA CRC errors: -1 per 10, max -10 */
+    var crc = disk.udma_crc || 0;
+    if (crc > 0) score -= Math.min(10, Math.ceil(crc / 10));
+    /* Command timeout: -1 per 5, max -10 */
+    var ct = disk.command_timeout || 0;
+    if (ct > 5) score -= Math.min(10, Math.ceil((ct - 5) / 5));
+    /* High temperature: subtract if >= 50 */
+    var temp = disk.temperature || 0;
+    if (temp >= 55) score -= 15;
+    else if (temp >= 50) score -= 8;
+    else if (temp >= 45) score -= 3;
+    /* Offline uncorrectable */
+    var offline = disk.offline_uncorrectable || 0;
+    if (offline > 0) score -= Math.min(15, offline * 5);
+    return Math.max(0, Math.min(100, score));
+  }
+
+  /* ── Format helpers ───────────────────────────────────────────── */
+  function formatHours(h) {
+    if (!h && h !== 0) return "—";
+    var years = (h / 8766).toFixed(1);
+    return h.toLocaleString() + " hrs (" + years + " years)";
+  }
+
+  function formatSize(gb) {
+    if (!gb) return "—";
+    if (gb >= 1000) return (gb / 1000).toFixed(1) + " TB";
+    return gb + " GB";
+  }
+
+  function tempStatus(t) {
+    if (t < 40) return { cls: "status-good", label: "Normal" };
+    if (t < 50) return { cls: "status-warn", label: "Warm" };
+    return { cls: "status-bad", label: "Hot" };
+  }
+
+  function reallocStatus(v) {
+    if (v === 0) return { cls: "status-good", label: "OK" };
+    return { cls: "status-bad", label: "Bad" };
+  }
+
+  function pendingStatus(v) {
+    if (v === 0) return { cls: "status-good", label: "OK" };
+    return { cls: "status-warn", label: "Warning" };
+  }
+
+  function crcStatus(v) {
+    if (v === 0) return { cls: "status-good", label: "OK" };
+    return { cls: "status-warn", label: "Warning" };
+  }
+
+  function ctStatus(v) {
+    if (v <= 5) return { cls: "status-good", label: "OK" };
+    if (v <= 20) return { cls: "status-warn", label: "Warning" };
+    return { cls: "status-bad", label: "Bad" };
+  }
+
+  function formatTimestamp(ts) {
+    if (!ts) return "";
+    var d = new Date(ts);
+    var mo = d.getMonth() + 1;
+    var dy = d.getDate();
+    var hr = d.getHours();
+    var mn = d.getMinutes();
+    return mo + "/" + dy + " " + (hr < 10 ? "0" : "") + hr + ":" + (mn < 10 ? "0" : "") + mn;
+  }
+
+  function driveTypeLabel(dt) {
+    if (!dt) return "HDD";
+    var t = dt.toLowerCase();
+    if (t.indexOf("nvme") >= 0) return "NVMe";
+    if (t.indexOf("ssd") >= 0 || t.indexOf("solid") >= 0) return "SSD";
+    return "HDD";
+  }
+
+  /* ── Extract history arrays ───────────────────────────────────── */
+  function extractHistory(hist, key) {
+    var arr = [];
+    for (var i = 0; i < hist.length; i++) {
+      arr.push(hist[i][key] !== undefined && hist[i][key] !== null ? hist[i][key] : 0);
+    }
+    return arr;
+  }
+
+  function extractLabels(hist) {
+    var arr = [];
+    for (var i = 0; i < hist.length; i++) {
+      arr.push(formatTimestamp(hist[i].timestamp));
+    }
+    return arr;
+  }
+
+  /* ── Render the full page ─────────────────────────────────────── */
+  function renderPage(data) {
+    var disk = data.current || {};
+    var history = data.history || [];
+    var findings = data.findings || [];
+    var score = computeHealthScore(disk);
+
+    var html = "";
+
+    /* ── Header ────────────────────────────────────────────────── */
+    html += "<div class=\"page-header\">";
+    html += "<div class=\"header-left\">";
+    html += "<a href=\"/\" class=\"back-link\">";
+    html += "<svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">";
+    html += "<path d=\"M10 12L6 8L10 4\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>";
+    html += "</svg> Dashboard</a>";
+    html += "<h1 class=\"drive-title\">" + escHtml(disk.model || "Unknown Drive") + "</h1>";
+    html += "<div class=\"badge-row\">";
+    html += "<span class=\"badge\">" + escHtml(disk.serial || serial) + "</span>";
+    if (disk.device) html += "<span class=\"badge\">" + escHtml(disk.device) + "</span>";
+    if (disk.array_slot) html += "<span class=\"badge badge-accent\">" + escHtml(disk.array_slot) + "</span>";
+    if (disk.firmware) html += "<span class=\"badge\">FW: " + escHtml(disk.firmware) + "</span>";
+    if (disk.size_gb) html += "<span class=\"badge\">" + formatSize(disk.size_gb) + "</span>";
+    html += "</div>";
+    html += "</div>";
+
+    /* ── Health Score Card ─────────────────────────────────────── */
+    html += "<div class=\"health-score-card\">";
+    html += "<div class=\"health-gauge-wrap\"><canvas id=\"healthGauge\" width=\"160\" height=\"100\"></canvas></div>";
+    var passed = disk.health_passed !== false;
+    html += "<div class=\"health-status " + (passed ? "passed" : "failed") + "\">" + (passed ? "PASSED" : "FAILED") + "</div>";
+    html += "<div class=\"health-meta\">";
+    if (disk.power_on_hours !== undefined && disk.power_on_hours !== null) {
+      var ageYears = (disk.power_on_hours / 8766).toFixed(1);
+      html += "Age: " + ageYears + " years<br>";
+    }
+    html += "</div>";
+    html += "<div class=\"drive-type-badge\">" + driveTypeLabel(disk.disk_type) + "</div>";
+    html += "</div>";
+    html += "</div>"; /* end page-header */
+
+    /* ── SMART Attributes Table ────────────────────────────────── */
+    html += "<div class=\"section-heading\">SMART Attributes</div>";
+    html += "<div class=\"smart-table-wrap\">";
+    html += "<table class=\"smart-table\">";
+    html += "<thead><tr>";
+    html += "<th>Attribute</th><th>Current Value</th><th>Status</th><th>Trend</th>";
+    html += "</tr></thead>";
+    html += "<tbody>";
+
+    var tempVal = disk.temperature || 0;
+    var tempSt = tempStatus(tempVal);
+    html += "<tr>";
+    html += "<td class=\"attr-name\">Temperature</td>";
+    html += "<td class=\"attr-value\">" + tempVal + "&deg;C</td>";
+    html += "<td><span class=\"status-pill " + tempSt.cls + "\">" + tempSt.label + "</span></td>";
+    html += "<td class=\"sparkline-cell\"><canvas id=\"sparkTemp\"></canvas></td>";
+    html += "</tr>";
+
+    var reallocVal = disk.reallocated || 0;
+    var reallocSt = reallocStatus(reallocVal);
+    html += "<tr>";
+    html += "<td class=\"attr-name\">Reallocated Sectors</td>";
+    html += "<td class=\"attr-value\">" + reallocVal.toLocaleString() + "</td>";
+    html += "<td><span class=\"status-pill " + reallocSt.cls + "\">" + reallocSt.label + "</span></td>";
+    html += "<td class=\"sparkline-cell\"><canvas id=\"sparkRealloc\"></canvas></td>";
+    html += "</tr>";
+
+    var pendingVal = disk.pending || 0;
+    var pendingSt = pendingStatus(pendingVal);
+    html += "<tr>";
+    html += "<td class=\"attr-name\">Pending Sectors</td>";
+    html += "<td class=\"attr-value\">" + pendingVal.toLocaleString() + "</td>";
+    html += "<td><span class=\"status-pill " + pendingSt.cls + "\">" + pendingSt.label + "</span></td>";
+    html += "<td class=\"sparkline-cell\"><canvas id=\"sparkPending\"></canvas></td>";
+    html += "</tr>";
+
+    var crcVal = disk.udma_crc || 0;
+    var crcSt = crcStatus(crcVal);
+    html += "<tr>";
+    html += "<td class=\"attr-name\">UDMA CRC Errors</td>";
+    html += "<td class=\"attr-value\">" + crcVal.toLocaleString() + "</td>";
+    html += "<td><span class=\"status-pill " + crcSt.cls + "\">" + crcSt.label + "</span></td>";
+    html += "<td class=\"sparkline-cell\"><canvas id=\"sparkCrc\"></canvas></td>";
+    html += "</tr>";
+
+    var ctVal = disk.command_timeout || 0;
+    var ctSt = ctStatus(ctVal);
+    html += "<tr>";
+    html += "<td class=\"attr-name\">Command Timeout</td>";
+    html += "<td class=\"attr-value\">" + ctVal.toLocaleString() + "</td>";
+    html += "<td><span class=\"status-pill " + ctSt.cls + "\">" + ctSt.label + "</span></td>";
+    html += "<td class=\"sparkline-cell\"><canvas id=\"sparkCt\"></canvas></td>";
+    html += "</tr>";
+
+    var offlineVal = disk.offline_uncorrectable || 0;
+    var offlineSt = offlineVal === 0 ? { cls: "status-good", label: "OK" } : { cls: "status-bad", label: "Bad" };
+    html += "<tr>";
+    html += "<td class=\"attr-name\">Offline Uncorrectable</td>";
+    html += "<td class=\"attr-value\">" + offlineVal.toLocaleString() + "</td>";
+    html += "<td><span class=\"status-pill " + offlineSt.cls + "\">" + offlineSt.label + "</span></td>";
+    html += "<td class=\"sparkline-cell\">—</td>";
+    html += "</tr>";
+
+    var pohVal = disk.power_on_hours || 0;
+    var pohYears = (pohVal / 8766).toFixed(1);
+    html += "<tr>";
+    html += "<td class=\"attr-name\">Power On Hours</td>";
+    html += "<td class=\"attr-value\">" + pohVal.toLocaleString() + "</td>";
+    html += "<td><span class=\"status-pill status-info\">" + pohYears + " years</span></td>";
+    html += "<td class=\"sparkline-cell\">—</td>";
+    html += "</tr>";
+
+    html += "</tbody></table></div>";
+
+    /* ── Temperature History Chart ─────────────────────────────── */
+    html += "<div class=\"section-heading\">Temperature History</div>";
+    if (history.length > 1) {
+      html += "<div class=\"chart-card\">";
+      html += "<div class=\"chart-wrap\"><canvas id=\"chartTemp\" height=\"220\"></canvas></div>";
+      html += "</div>";
+    } else {
+      html += "<div class=\"chart-card\"><div class=\"no-data\">Not enough history data for temperature chart</div></div>";
+    }
+
+    /* ── SMART Trend Charts (2-col grid) ───────────────────────── */
+    html += "<div class=\"section-heading\">SMART Trends</div>";
+    if (history.length > 1) {
+      html += "<div class=\"chart-grid-2\">";
+      html += "<div class=\"chart-card\">";
+      html += "<div class=\"chart-card-title\">Reallocated Sectors</div>";
+      html += "<div class=\"chart-wrap\"><canvas id=\"chartRealloc\" height=\"180\"></canvas></div>";
+      html += "</div>";
+      html += "<div class=\"chart-card\">";
+      html += "<div class=\"chart-card-title\">Pending Sectors</div>";
+      html += "<div class=\"chart-wrap\"><canvas id=\"chartPending\" height=\"180\"></canvas></div>";
+      html += "</div>";
+      html += "<div class=\"chart-card\">";
+      html += "<div class=\"chart-card-title\">UDMA CRC Errors</div>";
+      html += "<div class=\"chart-wrap\"><canvas id=\"chartCrc\" height=\"180\"></canvas></div>";
+      html += "</div>";
+      html += "<div class=\"chart-card\">";
+      html += "<div class=\"chart-card-title\">Command Timeout</div>";
+      html += "<div class=\"chart-wrap\"><canvas id=\"chartCt\" height=\"180\"></canvas></div>";
+      html += "</div>";
+      html += "</div>";
+    } else {
+      html += "<div class=\"chart-card\"><div class=\"no-data\">Not enough history data for trend charts</div></div>";
+    }
+
+    /* ── Findings ──────────────────────────────────────────────── */
+    if (findings.length > 0) {
+      html += "<div class=\"section-heading\">Related Findings</div>";
+      html += "<div class=\"findings-section\">";
+      for (var fi = 0; fi < findings.length; fi++) {
+        var f = findings[fi];
+        var sev = f.severity || "info";
+        var cardCls = "finding-card finding-" + sev;
+        var dotCls = "sev-dot sev-" + sev;
+        var tagCls = "finding-sev-tag tag-" + sev;
+        html += "<div class=\"" + cardCls + "\">";
+        html += "<div class=\"finding-title-row\">";
+        html += "<span class=\"" + dotCls + "\"></span>";
+        html += "<span class=\"finding-title\">" + escHtml(f.title || "") + "</span>";
+        html += "<span class=\"" + tagCls + "\">" + escHtml(sev) + "</span>";
+        html += "</div>";
+        if (f.description) html += "<div class=\"finding-desc\">" + escHtml(f.description) + "</div>";
+        if (f.action) html += "<div class=\"finding-action-text\">" + escHtml(f.action) + "</div>";
+        html += "</div>";
+      }
+      html += "</div>";
+    }
+
+    /* ── Drive Identification ──────────────────────────────────── */
+    html += "<div class=\"section-heading\">Drive Identification</div>";
+    html += "<div class=\"info-table-wrap\"><table class=\"info-table\">";
+    var rows = [
+      ["Device", disk.device || "—"],
+      ["Model", disk.model || "—"],
+      ["Serial Number", disk.serial || serial],
+      ["Firmware", disk.firmware || "—"],
+      ["Size", formatSize(disk.size_gb)],
+      ["Type", driveTypeLabel(disk.disk_type)],
+      ["ATA Port", disk.ata_port || "—"],
+      ["Array Slot", disk.array_slot || "—"],
+      ["Power On Hours", pohVal.toLocaleString()],
+      ["Age", pohYears + " years"],
+      ["Temperature", tempVal + "\u00B0C"],
+      ["Max Temperature", (disk.temperature_max_c || "—") + (disk.temperature_max_c ? "\u00B0C" : "")]
+    ];
+    for (var ri = 0; ri < rows.length; ri++) {
+      html += "<tr><td class=\"label-cell\">" + escHtml(rows[ri][0]) + "</td><td class=\"value-cell\">" + escHtml(String(rows[ri][1])) + "</td></tr>";
+    }
+    html += "</table></div>";
+
+    /* ── Inject ────────────────────────────────────────────────── */
+    document.getElementById("app").innerHTML = html;
+    document.title = (disk.model || "Disk") + " — NAS Doctor";
+
+    /* ── Render charts after DOM update ────────────────────────── */
+    setTimeout(function() { renderCharts(disk, history); }, 50);
+  }
+
+  /* ── Render all charts ────────────────────────────────────────── */
+  function renderCharts(disk, history) {
+    var score = computeHealthScore(disk);
+
+    /* Health Gauge */
+    NasChart.gauge("healthGauge", {
+      value: score,
+      max: 100,
+      label: "Health Score",
+      width: 160,
+      height: 100,
+      thresholds: { good: 80, warn: 50 }
+    });
+
+    /* Sparklines */
+    if (history.length > 1) {
+      var tempData = extractHistory(history, "temperature");
+      var reallocData = extractHistory(history, "reallocated");
+      var pendingData = extractHistory(history, "pending");
+      var crcData = extractHistory(history, "udma_crc");
+      var ctData = extractHistory(history, "command_timeout");
+
+      var sparkColor = function(data, zeroGood) {
+        var mx = Math.max.apply(null, data);
+        if (zeroGood) return mx > 0 ? "#d97706" : "#10b981";
+        return "#5e6ad2";
+      };
+
+      NasChart.sparkline("sparkTemp", { data: tempData, color: disk.temperature >= 50 ? "#dc2626" : disk.temperature >= 40 ? "#d97706" : "#10b981", width: 120, height: 28 });
+      NasChart.sparkline("sparkRealloc", { data: reallocData, color: sparkColor(reallocData, true), width: 120, height: 28 });
+      NasChart.sparkline("sparkPending", { data: pendingData, color: sparkColor(pendingData, true), width: 120, height: 28 });
+      NasChart.sparkline("sparkCrc", { data: crcData, color: sparkColor(crcData, true), width: 120, height: 28 });
+      NasChart.sparkline("sparkCt", { data: ctData, color: sparkColor(ctData, true), width: 120, height: 28 });
+
+      /* ── Temperature Line Chart ────────────────────────────── */
+      var labels = extractLabels(history);
+
+      /* Build warning/critical threshold line arrays */
+      var warnLine = [];
+      var critLine = [];
+      for (var ti = 0; ti < tempData.length; ti++) {
+        warnLine.push(45);
+        critLine.push(55);
+      }
+
+      NasChart.line("chartTemp", {
+        datasets: [
+          { data: tempData, color: "#5e6ad2", label: "Temperature" },
+          { data: warnLine, color: "#d97706", label: "Warning (45\u00B0C)", dashed: true },
+          { data: critLine, color: "#dc2626", label: "Critical (55\u00B0C)", dashed: true }
+        ],
+        labels: labels,
+        yLabel: "\u00B0C"
+      });
+
+      /* ── Trend Charts ──────────────────────────────────────── */
+      var hasNonZeroRealloc = Math.max.apply(null, reallocData) > 0;
+      NasChart.area("chartRealloc", {
+        datasets: [{ data: reallocData, color: hasNonZeroRealloc ? "#dc2626" : "#10b981", label: "Reallocated" }],
+        labels: labels,
+        yLabel: "Sectors"
+      });
+
+      NasChart.area("chartPending", {
+        datasets: [{ data: pendingData, color: Math.max.apply(null, pendingData) > 0 ? "#d97706" : "#10b981", label: "Pending" }],
+        labels: labels,
+        yLabel: "Sectors"
+      });
+
+      NasChart.line("chartCrc", {
+        datasets: [{ data: crcData, color: "#d97706", label: "UDMA CRC Errors" }],
+        labels: labels,
+        yLabel: "Errors"
+      });
+
+      NasChart.line("chartCt", {
+        datasets: [{ data: ctData, color: "#d97706", label: "Command Timeout" }],
+        labels: labels,
+        yLabel: "Count"
+      });
+    }
+  }
+
+})();
+</script>
+</body>
+</html>
