@@ -197,7 +197,8 @@ type AgeTier struct {
 }
 
 var AgeTiers = []AgeTier{
-	{MinHours: 0, MaxHours: 13000, Severity: "info", Mult: 1.5, Label: "Infant period — slight elevated risk (burn-in)"},
+	{MinHours: 0, MaxHours: 8766, Severity: "ok", Mult: 1.0, Label: "New drive — within first year"},
+	{MinHours: 8767, MaxHours: 13000, Severity: "ok", Mult: 1.0, Label: "Early operating period"},
 	{MinHours: 13001, MaxHours: 35000, Severity: "ok", Mult: 1.0, Label: "Prime operating years"},
 	{MinHours: 35001, MaxHours: 44000, Severity: "info", Mult: 1.3, Label: "Entering higher-risk age bracket"},
 	{MinHours: 44001, MaxHours: 61000, Severity: "warning", Mult: 1.8, Label: "Aged — failure rate rising per Backblaze data"},

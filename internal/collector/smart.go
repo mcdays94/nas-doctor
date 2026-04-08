@@ -175,7 +175,16 @@ func parseSMARTJSON(device, out string) (internal.SMARTInfo, error) {
 	info.Model = data.ModelName
 	info.Serial = data.SerialNumber
 	info.Firmware = data.FirmwareVer
-	info.HealthPassed = data.SmartStatus.Passed
+	// Default to true if smart_status is not present in JSON output (some platforms
+	// like Synology DSM omit it). A drive without explicit failure is assumed healthy.
+	info.HealthPassed = true
+	if data.SmartStatus.Passed == false {
+		// Only mark as failed if smartctl explicitly included smart_status in the JSON.
+		// Check if the JSON actually contained the key by looking for it in the raw string.
+		if strings.Contains(jsonStr, "\"smart_status\"") {
+			info.HealthPassed = false
+		}
+	}
 	info.Temperature = data.Temperature.Current
 	info.PowerOnHours = data.PowerOnTime.Hours
 	info.SizeGB = float64(data.UserCapacity.Bytes) / (1024 * 1024 * 1024)
@@ -240,11 +249,15 @@ func parseSMARTText(device, out string) internal.SMARTInfo {
 		if strings.HasPrefix(line, "Firmware Version:") {
 			info.Firmware = extractValue(line)
 		}
-		if strings.Contains(line, "PASSED") {
-			info.HealthPassed = true
-		}
-		if strings.Contains(line, "FAILED") {
-			info.HealthPassed = false
+		// Only match the overall-health self-assessment line, not arbitrary lines
+		// that may contain "FAILED" in attribute thresholds or other contexts.
+		// Typical format: "SMART overall-health self-assessment test result: PASSED"
+		if strings.Contains(line, "self-assessment") || strings.Contains(line, "overall-health") || strings.Contains(line, "SMART Health Status") {
+			if strings.Contains(line, "PASSED") || strings.Contains(line, "OK") {
+				info.HealthPassed = true
+			} else if strings.Contains(line, "FAILED") {
+				info.HealthPassed = false
+			}
 		}
 
 		// Parse attribute lines (ID# ATTRIBUTE_NAME FLAGS VALUE WORST THRESH TYPE UPDATED RAW)
