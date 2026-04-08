@@ -29,8 +29,39 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.UPS = demoUPS()
 	snap.Update = demoUpdate(snap.System.Platform, snap.System.PlatformVer)
 	snap.Services = demoServiceChecks()
+	snap.Tunnels = demoTunnels()
 
 	return snap
+}
+
+func demoTunnels() *internal.TunnelInfo {
+	return &internal.TunnelInfo{
+		Cloudflared: &internal.CloudflaredInfo{
+			Installed: true,
+			Version:   "2025.2.1",
+			Tunnels: []internal.CloudflaredTunnel{
+				{ID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", Name: "nas-tunnel", Status: "healthy", CreatedAt: "2025-01-15T10:30:00Z", Connections: 4, Routes: []string{"nas.example.com", "plex.example.com", "hass.example.com"}, OriginIP: "192.168.1.100"},
+				{ID: "f9e8d7c6-b5a4-3210-fedc-ba0987654321", Name: "dev-tunnel", Status: "healthy", CreatedAt: "2025-06-01T08:00:00Z", Connections: 2, Routes: []string{"code.example.com"}, OriginIP: "192.168.1.100"},
+			},
+		},
+		Tailscale: &internal.TailscaleInfo{
+			Installed:    true,
+			Version:      "1.78.1",
+			BackendState: "Running",
+			MagicDNS:     true,
+			TailnetName:  "homelab.ts.net",
+			Self: &internal.TailscaleNode{
+				Name: "tower", DNSName: "tower.homelab.ts.net", IP: "100.64.0.1",
+				OS: "linux", Online: true, TxBytes: 15482880000, RxBytes: 8741529600,
+			},
+			Peers: []internal.TailscaleNode{
+				{Name: "macbook", DNSName: "macbook.homelab.ts.net", IP: "100.64.0.2", OS: "macOS", Online: true, Relay: "nyc", TxBytes: 5242880000, RxBytes: 3145728000, LastSeen: "2026-04-08T23:00:00Z"},
+				{Name: "phone", DNSName: "phone.homelab.ts.net", IP: "100.64.0.3", OS: "iOS", Online: true, Relay: "lhr", TxBytes: 1073741824, RxBytes: 536870912, LastSeen: "2026-04-08T22:55:00Z"},
+				{Name: "backup-nas", DNSName: "backup-nas.homelab.ts.net", IP: "100.64.0.4", OS: "linux", Online: true, TxBytes: 9437184000, RxBytes: 12884901888, LastSeen: "2026-04-08T23:01:00Z"},
+				{Name: "offsite-pi", DNSName: "offsite-pi.homelab.ts.net", IP: "100.64.0.5", OS: "linux", Online: false, ExitNode: true, Relay: "fra", TxBytes: 2147483648, RxBytes: 1073741824, LastSeen: "2026-04-07T14:30:00Z"},
+			},
+		},
+	}
 }
 
 // DemoFleetServers returns a set of mock remote servers for demo mode.
