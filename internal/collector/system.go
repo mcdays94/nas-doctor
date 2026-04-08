@@ -2,9 +2,7 @@ package collector
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -96,8 +94,10 @@ func collectSystem(hp internal.HostPaths) (internal.SystemInfo, error) {
 	// CPU usage and I/O wait from /proc/stat (two samples, 500ms apart)
 	info.CPUUsage, info.IOWait = readCPUStats()
 
-	// Detect platform
-	info.Platform, info.PlatformVer = detectPlatform(hp)
+	// Detect platform (uses cached singleton — safe to call multiple times)
+	plat := DetectPlatform(hp)
+	info.Platform = plat.Name
+	info.PlatformVer = plat.Version
 	info.OS = fmt.Sprintf("%s %s (kernel %s)", info.Platform, info.PlatformVer, info.Kernel)
 
 	// Motherboard (dmidecode)
@@ -192,107 +192,8 @@ func readCPUStats() (cpuUsage, ioWait float64) {
 	return totalCPU / float64(intervals), totalIOWait / float64(intervals)
 }
 
-func detectPlatform(hp internal.HostPaths) (platform, version string) {
-	// Check Unraid — multiple detection methods
-	unraidIdent := hp.Boot + "/config/ident.cfg"
-	if _, err := os.Stat(unraidIdent); err == nil {
-		platform = "unraid"
-	}
-	// Try /etc/unraid-version (host or bind-mounted)
-	for _, path := range []string{"/etc/unraid-version", "/host/etc/unraid-version"} {
-		if data, err := os.ReadFile(path); err == nil {
-			platform = "unraid"
-			raw := strings.TrimSpace(string(data))
-			if strings.Contains(raw, "=") {
-				parts := strings.SplitN(raw, "=", 2)
-				raw = parts[len(parts)-1]
-			}
-			version = strings.Trim(raw, "\"'")
-			break
-		}
-	}
-	// Note: /proc/version contains the KERNEL version (e.g. "6.12.24-Unraid"),
-	// NOT the Unraid OS version (e.g. "7.1.4"). We only use it to confirm
-	// the platform is Unraid, not to extract the version number.
-	if platform == "" {
-		if data, err := os.ReadFile("/proc/version"); err == nil {
-			if strings.Contains(string(data), "-Unraid") {
-				platform = "unraid"
-				// version stays empty — can't determine OS version from kernel
-			}
-		}
-	}
-	if platform != "" {
-		return
-	}
-
-	// Check TrueNAS SCALE — the host kernel contains "+truenas" in /proc/version
-	// (e.g. "Linux version 6.12.15-production+truenas"). /proc is shared from the
-	// host even inside a container, making this the most reliable detection method.
-	if procVer, err := os.ReadFile("/proc/version"); err == nil {
-		if strings.Contains(string(procVer), "+truenas") {
-			platform = "truenas"
-			// Try to read the TrueNAS version from /etc/version (host-mounted paths).
-			// Inside a Docker container, this requires a bind mount like:
-			//   -v /etc/version:/host/etc/version:ro
-			for _, path := range []string{"/host/etc/version", "/etc/version"} {
-				if data, err := os.ReadFile(path); err == nil {
-					ver := strings.TrimSpace(string(data))
-					if ver != "" {
-						version = ver
-						break
-					}
-				}
-			}
-			// Fallback: try the TrueNAS local API (available with --network host)
-			if version == "" {
-				version = fetchTrueNASVersion()
-			}
-			return
-		}
-	}
-
-	// Check /etc/os-release for others
-	if f, err := os.Open("/etc/os-release"); err == nil {
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "ID=") {
-				platform = strings.Trim(strings.TrimPrefix(line, "ID="), "\"")
-			}
-			if strings.HasPrefix(line, "VERSION_ID=") {
-				version = strings.Trim(strings.TrimPrefix(line, "VERSION_ID="), "\"")
-			}
-		}
-	}
-
-	if platform == "" {
-		platform = "linux"
-	}
-	return
-}
-
-// fetchTrueNASVersion queries the TrueNAS local API to get the system version.
-// This works when the container runs with --network host.
-func fetchTrueNASVersion() string {
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("http://localhost/api/v2.0/system/version")
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return ""
-	}
-	var ver string
-	if err := json.NewDecoder(resp.Body).Decode(&ver); err != nil {
-		return ""
-	}
-	// Response is like "TrueNAS-25.04.2.1" — strip the prefix
-	ver = strings.TrimPrefix(ver, "TrueNAS-")
-	return ver
-}
+// detectPlatform and fetchTrueNASVersion have been moved to platform.go
+// as the centralized Platform detection singleton.
 
 func collectTopProcesses(n int) []internal.ProcessInfo {
 	// Try GNU ps first (--sort flag), fall back to POSIX ps without sorting
