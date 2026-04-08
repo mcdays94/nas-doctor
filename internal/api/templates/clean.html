@@ -324,6 +324,7 @@ body {
 
 .finding-card {
   position: relative;
+  overflow: hidden;
   background: #ffffff;
   border-radius: 8px;
   border: none;
@@ -913,12 +914,24 @@ body {
     html += '<div class="section">';
     html += '<div class="section-title">Findings</div>';
     if (snapshot && snapshot.findings && snapshot.findings.length > 0) {
-      html += '<div class="findings-list">';
       var _dismissed = (_cachedStatus && _cachedStatus.dismissed_findings) ? _cachedStatus.dismissed_findings : [];
-      var findings = snapshot.findings.filter(function(f) { return _dismissed.indexOf(f.title) === -1; }).sort(function(a, b) {
-        var order = { critical: 0, warning: 1, info: 2, ok: 3 };
-        return (order[a.severity] || 3) - (order[b.severity] || 3);
-      });
+      var findings = snapshot.findings.filter(function(f) { return _dismissed.indexOf(f.title) === -1; });
+      var sortPref = (window.NasSort ? NasSort.getPrefs().findings : null) || "severity";
+      if (window.NasSort) NasSort.sortFindings(findings, sortPref);
+      else findings.sort(function(a, b) { var order = { critical: 0, warning: 1, info: 2, ok: 3 }; return (order[a.severity] || 3) - (order[b.severity] || 3); });
+
+      var sevCounts = { critical: 0, warning: 0, info: 0 };
+      for (var fc = 0; fc < findings.length; fc++) { var sv = findings[fc].severity; if (sevCounts[sv] !== undefined) sevCounts[sv]++; }
+      var _sevFilter = window._findingSevFilter || null;
+      if (_sevFilter) findings = findings.filter(function(f) { return f.severity === _sevFilter; });
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">';
+      html += '<div id="findings-sort-mount"></div>';
+      if (sevCounts.critical > 0) html += '<span onclick="window._filterFindings(\'critical\')" style="cursor:pointer;font-size:10px;font-weight:600;color:#dc2626;background:rgba(220,38,38,' + (_sevFilter === 'critical' ? '0.2' : '0.08') + ');padding:1px 6px;border-radius:4px;' + (_sevFilter === 'critical' ? 'box-shadow:0 0 0 1px #dc2626;' : '') + '">' + sevCounts.critical + ' critical</span>';
+      if (sevCounts.warning > 0) html += '<span onclick="window._filterFindings(\'warning\')" style="cursor:pointer;font-size:10px;font-weight:600;color:#d97706;background:rgba(217,119,6,' + (_sevFilter === 'warning' ? '0.2' : '0.08') + ');padding:1px 6px;border-radius:4px;' + (_sevFilter === 'warning' ? 'box-shadow:0 0 0 1px #d97706;' : '') + '">' + sevCounts.warning + ' warning</span>';
+      if (sevCounts.info > 0) html += '<span onclick="window._filterFindings(\'info\')" style="cursor:pointer;font-size:10px;font-weight:600;color:#0072f5;background:rgba(0,114,245,' + (_sevFilter === 'info' ? '0.2' : '0.08') + ');padding:1px 6px;border-radius:4px;' + (_sevFilter === 'info' ? 'box-shadow:0 0 0 1px #0072f5;' : '') + '">' + sevCounts.info + ' info</span>';
+      if (_sevFilter) html += '<span onclick="window._filterFindings(\'' + _sevFilter + '\')" style="cursor:pointer;font-size:10px;font-weight:500;color:#808080;padding:1px 6px;border-radius:4px;background:#f5f5f5">Clear</span>';
+      html += '</div>';
+      html += '<div class="findings-list">';
       for (var i = 0; i < findings.length; i++) {
         var f = findings[i];
         var sevKey = f.severity === "critical" ? "critical" : f.severity === "warning" ? "warning" : f.severity === "info" ? "info" : "ok";
@@ -963,9 +976,51 @@ body {
     // ==== Section: Drives (SMART-centric like Scrutiny) ====
     html += '<div class="section-block" data-section="drives">';
     html += '<div class="section">';
-    html += '<div class="section-title">Drives</div>';
     var _smart = (snapshot && snapshot.smart) ? snapshot.smart : [];
     var _disks = (snapshot && snapshot.disks) ? snapshot.disks : [];
+
+    // Drive health summary
+    var healthOk = 0, healthWarn = 0, healthCrit = 0;
+    for (var hc = 0; hc < _smart.length; hc++) {
+      if (!_smart[hc].health_passed) healthCrit++;
+      else if ((_smart[hc].temperature_c || 0) >= 50 || _smart[hc].reallocated_sectors > 0 || _smart[hc].pending_sectors > 0) healthWarn++;
+      else healthOk++;
+    }
+    html += '<div class="section-title">Drives (' + (_smart.length || _disks.length) + ')';
+    html += '<span class="health-summary">';
+    if (healthOk > 0) html += '<span><span class="dot dot-ok"></span>' + healthOk + ' ok</span>';
+    if (healthWarn > 0) html += '<span><span class="dot dot-warn"></span>' + healthWarn + ' warn</span>';
+    if (healthCrit > 0) html += '<span><span class="dot dot-crit"></span>' + healthCrit + ' fail</span>';
+    html += '</span></div>';
+
+    // Sort drives
+    var driveSortPref = (window.NasSort ? NasSort.getPrefs().drives : null) || "device";
+    if (window.NasSort) NasSort.sortDrives(_smart, driveSortPref);
+    html += '<div id="drives-sort-mount" style="margin-bottom:8px"></div>';
+
+    // Build slot-to-drive and device-to-storage maps for merged view
+    var slotToDrive2={};
+    if(_smart&&_smart.length){for(var si2=0;si2<_smart.length;si2++){if(_smart[si2].array_slot)slotToDrive2[_smart[si2].array_slot]=_smart[si2];}}
+    var deviceToStorage = {};
+    for (var dm = 0; dm < _disks.length; dm++) {
+      var dmp = _disks[dm].mount_point || "";
+      if (dmp.indexOf("/mnt/disk") === 0) {
+        var sn2 = dmp.replace("/mnt/disk", "");
+        var sdx = slotToDrive2["disk" + sn2];
+        if (sdx) deviceToStorage[sdx.device] = _disks[dm];
+      } else if (dmp.indexOf("/mnt/cache") === 0 && slotToDrive2["cache"]) {
+        deviceToStorage[slotToDrive2["cache"].device] = _disks[dm];
+      } else if (dmp.indexOf("/volume") === 0) {
+        for (var sx = 0; sx < _smart.length; sx++) {
+          if (!deviceToStorage[_smart[sx].device] && Math.abs((_smart[sx].size_gb || 0) - (_disks[dm].total_gb || 0)) < 100) {
+            deviceToStorage[_smart[sx].device] = _disks[dm];
+            break;
+          }
+        }
+      }
+    }
+    var mergedView = (_cachedStatus && _cachedStatus.sections && _cachedStatus.sections.merged_drives);
+
     if (_smart.length > 0) {
       for (var si = 0; si < _smart.length; si++) {
         var sm = _smart[si];
@@ -986,16 +1041,30 @@ body {
         if (!hlOk) html += '<span style="font-size:10px;font-weight:600;color:#dc2626;background:rgba(220,38,38,0.06);padding:1px 6px;border-radius:9999px">FAILED</span>';
         if (sm.reallocated_sectors>0) html += '<span style="font-size:10px;color:#d97706;background:rgba(217,119,6,0.06);padding:1px 6px;border-radius:9999px">'+sm.reallocated_sectors+' realloc</span>';
         if (sm.pending_sectors>0) html += '<span style="font-size:10px;color:#dc2626;background:rgba(220,38,38,0.06);padding:1px 6px;border-radius:9999px">'+sm.pending_sectors+' pending</span>';
-        html += '</div></div>';
+        html += '</div>';
+        // Merged view: show storage bar inline if this drive has a matching mount
+        if (mergedView && deviceToStorage[sm.device]) {
+          var mdk = deviceToStorage[sm.device];
+          var mpct = mdk.used_percent || 0;
+          html += '<div style="margin-top:6px;display:flex;align-items:center;gap:8px">';
+          html += '<div style="flex:1"><div class="disk-bar-track" style="height:4px"><div class="disk-bar-fill color-' + diskBarColor(mpct) + '" style="width:' + mpct.toFixed(1) + '%;height:4px"></div></div></div>';
+          html += '<span style="font-size:11px;color:#808080;white-space:nowrap">' + (mdk.used_gb || 0).toFixed(0) + '/' + (mdk.total_gb || 0).toFixed(0) + ' GB (' + mpct.toFixed(0) + '%)</span>';
+          html += '</div>';
+        }
+        html += '</div>';
       }
     }
-    var slotToDrive2={};
-    if(_smart&&_smart.length){for(var si2=0;si2<_smart.length;si2++){if(_smart[si2].array_slot)slotToDrive2[_smart[si2].array_slot]=_smart[si2];}}
-    if (_disks.length > 0) {
+    // Storage volumes — only show separately if NOT merged, or for disks without SMART match
+    var usedInMerge = {};
+    if (mergedView) {
+      for (var mk in deviceToStorage) { usedInMerge[deviceToStorage[mk].mount_point] = true; }
+    }
+    var unmatchedDisks = _disks.filter(function(d) { return !mergedView || !usedInMerge[d.mount_point]; });
+    if (unmatchedDisks.length > 0) {
       html += '<div style="margin-top:10px;font-size:11px;color:#808080;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Storage</div>';
-      for (var di=0;di<_disks.length;di++){var dk=_disks[di];var p=dk.used_percent||0;
+      for (var di=0;di<unmatchedDisks.length;di++){var dk=unmatchedDisks[di];var p=dk.used_percent||0;
         var sLabel=dk.label||dk.mount_point;var smp=dk.mount_point||"";
-        if(smp.indexOf("/mnt/disk")===0){var sn2=smp.replace("/mnt/disk","");var sd2=slotToDrive2["disk"+sn2];if(sd2)sLabel=escapeHTML(sd2.device||"")+" — "+escapeHTML(sd2.model||"");}
+        if(smp.indexOf("/mnt/disk")===0){var sn2b=smp.replace("/mnt/disk","");var sd2=slotToDrive2["disk"+sn2b];if(sd2)sLabel=escapeHTML(sd2.device||"")+" — "+escapeHTML(sd2.model||"");}
         else if(smp.indexOf("/mnt/cache")===0&&slotToDrive2["cache"]){var cd2=slotToDrive2["cache"];sLabel=escapeHTML(cd2.device||"")+" — "+escapeHTML(cd2.model||"");}
         html+='<div class="card" style="margin-bottom:4px;padding:8px 14px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px"><span style="font-weight:500">'+sLabel+'</span><span style="color:#808080">'+(dk.used_gb||0).toFixed(0)+' / '+(dk.total_gb||0).toFixed(0)+' GB ('+p.toFixed(0)+'%)</span></div>';
         html+='<div class="disk-bar-track" style="height:4px"><div class="disk-bar-fill color-'+diskBarColor(p)+'" style="width:'+p.toFixed(1)+'%;height:4px"></div></div></div>';
@@ -1104,16 +1173,17 @@ body {
     html += '<div class="section-block" data-section="network">';
     if (snapshot && snapshot.network && snapshot.network.interfaces && snapshot.network.interfaces.length > 0) {
       html += '<div class="section"><div class="section-title">Network</div>';
+      html += '<div style="background:var(--card-bg, #fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;overflow-x:auto">';
       html += '<table class="clean-table" style="width:100%;font-size:13px;border-collapse:collapse">';
-      html += '<tr style="color:#808080;font-size:11px"><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Interface</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">State</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Speed</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">IP</th></tr>';
+      html += '<tr style="color:#808080;font-size:11px"><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">Interface</th><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">State</th><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">Speed</th><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">IP</th></tr>';
       for (var ni = 0; ni < snapshot.network.interfaces.length; ni++) {
         var iface = snapshot.network.interfaces[ni];
-        html += '<tr><td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(iface.name) + '</td>';
-        html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04);color:' + (iface.state === "UP" ? "#16a34a" : "#d97706") + '">' + escapeHTML(iface.state) + '</td>';
-        html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(iface.speed || "—") + '</td>';
-        html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(iface.ipv4 || "—") + '</td></tr>';
+        html += '<tr><td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(iface.name) + '</td>';
+        html += '<td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04);color:' + (iface.state === "UP" ? "#16a34a" : "#d97706") + '">' + escapeHTML(iface.state) + '</td>';
+        html += '<td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(iface.speed || "—") + '</td>';
+        html += '<td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(iface.ipv4 || "—") + '</td></tr>';
       }
-      html += '</table></div>';
+      html += '</table></div></div>';
     }
     html += '</div>'; // end section-block network
 
@@ -1142,17 +1212,18 @@ body {
       var par = snapshot.parity;
       html += '<div class="section"><div class="section-title">Parity</div>';
       if (par.history && par.history.length > 0) {
+        html += '<div style="background:var(--card-bg, #fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;overflow-x:auto">';
         html += '<div style="max-height:200px;overflow-y:auto;scrollbar-width:thin">';
         html += '<table style="width:100%;font-size:13px;border-collapse:collapse">';
-        html += '<tr style="color:#808080;font-size:11px"><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Date</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Duration</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Speed</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Errors</th></tr>';
+        html += '<tr style="color:#808080;font-size:11px"><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">Date</th><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">Duration</th><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">Speed</th><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">Errors</th></tr>';
         for (var pi = 0; pi < par.history.length; pi++) {
           var pc = par.history[pi];
-          html += '<tr><td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(pc.date) + '</td>';
-          html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(pc.duration_human || "—") + '</td>';
-          html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + (pc.speed_mb_s || 0).toFixed(1) + ' MB/s</td>';
-          html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04);color:' + (pc.errors > 0 ? "#dc2626" : "#16a34a") + '">' + (pc.errors || 0) + '</td></tr>';
+          html += '<tr><td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(pc.date) + '</td>';
+          html += '<td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(pc.duration_human || "—") + '</td>';
+          html += '<td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04)">' + (pc.speed_mb_s || 0).toFixed(1) + ' MB/s</td>';
+          html += '<td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04);color:' + (pc.errors > 0 ? "#dc2626" : "#16a34a") + '">' + (pc.errors || 0) + '</td></tr>';
         }
-        html += '</table></div>';
+        html += '</table></div></div>';
       } else {
         html += '<div style="font-size:13px;color:#808080">Status: ' + escapeHTML(par.status || "idle") + '</div>';
       }
@@ -1231,6 +1302,8 @@ body {
     }
     staging.parentNode.removeChild(staging);
     if (window.NasDrag) NasDrag.init();
+    if (window.NasSwipe) NasSwipe.init();
+    initSortBars();
   }
 
   function _renderSparklines(snapshot) {
@@ -1261,9 +1334,15 @@ body {
       }).catch(function() {});
   }
 
-  window._dismissFinding = function(title) {
+  window._findingSevFilter = null;
+  window._filterFindings = function(sev) {
+    window._findingSevFilter = (window._findingSevFilter === sev) ? null : sev;
+    loadData();
+  };
+
+  window._dismissFinding = function(title, skipReload) {
     fetch("/api/v1/findings/dismiss", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({title: title}) })
-      .then(function() { location.reload(); })
+      .then(function() { if (!skipReload) loadData(); })
       .catch(function() {});
   };
 
@@ -1288,6 +1367,41 @@ body {
       if (btn) btn.disabled = false;
     });
   };
+
+  function initSortBars() {
+    if (!window.NasSort) return;
+    var prefs = NasSort.getPrefs();
+
+    var findingsMount = document.getElementById("findings-sort-mount");
+    if (findingsMount) {
+      NasSort.renderSortBar({
+        container: findingsMount,
+        options: [
+          { key: "severity", label: "Severity" },
+          { key: "date", label: "Newest" },
+          { key: "category", label: "Category" }
+        ],
+        active: prefs.findings || "severity",
+        onSort: function(key) { prefs.findings = key; NasSort.savePrefs(prefs); loadData(); }
+      });
+    }
+
+    var drivesMount = document.getElementById("drives-sort-mount");
+    if (drivesMount) {
+      NasSort.renderSortBar({
+        container: drivesMount,
+        options: [
+          { key: "device", label: "Device" },
+          { key: "temp", label: "Temp" },
+          { key: "age", label: "Age" },
+          { key: "size", label: "Size" },
+          { key: "health", label: "Health" }
+        ],
+        active: prefs.drives || "device",
+        onSort: function(key) { prefs.drives = key; NasSort.savePrefs(prefs); loadData(); }
+      });
+    }
+  }
 
   // Initial load
   loadData();

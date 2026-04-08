@@ -442,11 +442,54 @@ body.theme-clean .customize-item:hover { background:rgba(0,0,0,0.02) }
 .summary-stat.info .stat-count     { color:var(--accent) }
 
 /* ── Responsive ─────────────────────────────────────────────── */
+/* ── Sort Bar ───────────────────────────────────────────────── */
+.sort-bar {
+  display:inline-flex; gap:1px; padding:2px; border-radius:6px;
+  background:none; border:none; outline:none;
+  opacity:0; transition:opacity 0.2s ease;
+}
+.section-block:hover .sort-bar,
+.drives:hover .sort-bar,
+.stats-container .sort-bar { opacity:1 }
+.sort-pill {
+  padding:4px 10px; border:none !important; border-radius:4px;
+  font-size:10px; font-weight:600; font-family:inherit;
+  color:rgba(255,255,255,0.3); background:none !important; cursor:pointer;
+  transition:all 0.12s; text-transform:uppercase; letter-spacing:0.3px;
+  outline:none; -webkit-appearance:none; appearance:none;
+}
+.sort-pill:hover { color:rgba(255,255,255,0.5); background:rgba(255,255,255,0.06) !important }
+.sort-pill.active { color:rgba(255,255,255,0.7); background:rgba(255,255,255,0.08) !important }
+body.theme-clean .sort-pill { color:rgba(0,0,0,0.25) }
+body.theme-clean .sort-pill:hover { color:rgba(0,0,0,0.5); background:rgba(0,0,0,0.04) !important }
+body.theme-clean .sort-pill.active { color:rgba(0,0,0,0.7); background:rgba(0,0,0,0.06) !important }
+
+/* ── Swipe-to-dismiss (findings) ────────────────────────────── */
+.swipe-dismiss-bg {
+  position:absolute; top:0; right:0; bottom:0; width:100%;
+  display:flex; align-items:center; justify-content:flex-end; padding-right:20px;
+  background:rgba(220,38,38,0.12); color:var(--red);
+  font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;
+  opacity:0; pointer-events:none; z-index:-1; border-radius:inherit;
+}
+
+/* ── Drive Health Summary ───────────────────────────────────── */
+.health-summary {
+  display:inline-flex; gap:10px; align-items:center;
+  font-size:11px; color:var(--text2); margin-left:12px;
+}
+.health-summary span { display:flex; align-items:center; gap:3px }
+.health-summary .dot { width:6px; height:6px; border-radius:50%; flex-shrink:0 }
+.health-summary .dot-ok { background:var(--green) }
+.health-summary .dot-warn { background:var(--amber) }
+.health-summary .dot-crit { background:var(--red) }
+
 @media(max-width:768px) {
   .form-row { grid-template-columns:1fr }
   .header { flex-direction:column; gap:12px; align-items:flex-start }
   .nav-links { flex-wrap:wrap }
   .summary-bar { flex-direction:column }
+  .sort-bar { flex-wrap:wrap }
 }
 `
 

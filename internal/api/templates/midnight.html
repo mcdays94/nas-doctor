@@ -82,6 +82,13 @@ a:hover{color:var(--hover)}
 .col-left{min-width:0;display:flex;flex-direction:column;min-height:0}
 .col-right{min-width:0;display:flex;flex-direction:column;gap:calc(var(--sp)*3)}
 
+/* Sort bar */
+.sort-bar{display:inline-flex;gap:1px;padding:0;border-radius:6px;background:none;border:none;opacity:0;transition:opacity 0.2s ease}
+.section-block:hover .sort-bar{opacity:1}
+.sort-pill{padding:4px 10px;border:none;border-radius:4px;font-size:10px;font-weight:600;font-family:inherit;color:rgba(255,255,255,0.25);background:none;cursor:pointer;transition:all 0.12s;text-transform:uppercase;letter-spacing:0.3px;outline:none;-webkit-appearance:none;appearance:none}
+.sort-pill:hover{color:rgba(255,255,255,0.5);background:rgba(255,255,255,0.06)}
+.sort-pill.active{color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.08)}
+
 /* Section drag-to-reorder */
 .section-title-row{display:flex;align-items:center;gap:6px}
 .section-drag-handle{
@@ -105,7 +112,8 @@ a:hover{color:var(--hover)}
 .findings-list::-webkit-scrollbar-track{background:transparent}
 .findings-list::-webkit-scrollbar-thumb{background:var(--border-hover);border-radius:3px}
 .findings-list::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.12)}
-.finding{border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px;transition:all 200ms ease}
+.finding{border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px;transition:all 200ms ease;position:relative;overflow:hidden}
+.swipe-dismiss-bg{position:absolute;top:0;right:0;bottom:0;width:100%;display:flex;align-items:center;justify-content:flex-end;padding-right:20px;background:rgba(220,38,38,0.15);color:var(--red);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;opacity:0;pointer-events:none;z-index:-1;border-radius:8px}
 .finding:hover{border-color:rgba(255,255,255,0.10)}
 .finding-critical{background:rgba(220,38,38,0.06)}
 .finding-critical:hover{background:rgba(220,38,38,0.10)}
@@ -407,12 +415,38 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     if (findings.length === 0) {
       h += '<div class="empty"><div class="empty-icon">&#9989;</div>No findings yet. Run a scan to check your NAS health.</div>';
     } else {
-      h += '<div class="findings-list">';
-      var sevOrder = { critical: 0, warning: 1, info: 2, ok: 3 };
-      findings.sort(function(a, b) { return (sevOrder[a.severity] || 9) - (sevOrder[b.severity] || 9); });
-      // Filter dismissed findings
+      // Sort bar + findings list
       var dismissed = (statusData && statusData.dismissed_findings) ? statusData.dismissed_findings : [];
       var visibleFindings = findings.filter(function(f) { return dismissed.indexOf(f.title) === -1; });
+      var sortPref = (window.NasSort ? NasSort.getPrefs().findings : null) || "severity";
+      if (window.NasSort) NasSort.sortFindings(visibleFindings, sortPref);
+      else visibleFindings.sort(function(a, b) { return ({ critical:0,warning:1,info:2,ok:3 }[a.severity]||9) - ({ critical:0,warning:1,info:2,ok:3 }[b.severity]||9); });
+
+      // Severity badges (left) + sort pills (right, fade on hover)
+      var sevCounts = { critical: 0, warning: 0, info: 0 };
+      for (var fc = 0; fc < visibleFindings.length; fc++) { var sv = visibleFindings[fc].severity; if (sevCounts[sv] !== undefined) sevCounts[sv]++; }
+      var activeFilters = window._findingSevFilters || {};
+      var hasFilter = activeFilters.critical || activeFilters.warning || activeFilters.info;
+      h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">';
+      function sevBadge(sev, count, color, bg) {
+        if (count === 0) return '';
+        var isActive = activeFilters[sev];
+        var style = 'font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;cursor:pointer;transition:all 0.12s;border:1px solid transparent;';
+        if (isActive) style += 'color:#fff;background:' + color + ';border-color:' + color + ';';
+        else style += 'color:' + color + ';background:' + bg + ';';
+        return '<span style="' + style + '" onclick="window._toggleSevFilter(\'' + sev + '\')">' + count + ' ' + sev + '</span>';
+      }
+      h += sevBadge('critical', sevCounts.critical, 'var(--red)', 'var(--red-bg)');
+      h += sevBadge('warning', sevCounts.warning, 'var(--amber)', 'var(--amber-bg)');
+      h += sevBadge('info', sevCounts.info, 'var(--accent)', 'rgba(94,106,210,0.1)');
+      if (hasFilter) h += '<span style="font-size:10px;color:var(--text-quaternary);cursor:pointer;padding:2px 6px" onclick="window._clearSevFilters()">&times; Clear</span>';
+      h += '<div id="findings-sort-mount" style="margin-left:auto"></div>';
+      h += '</div>';
+      // Apply multi-select severity filter
+      if (hasFilter) {
+        visibleFindings = visibleFindings.filter(function(f) { return activeFilters[f.severity]; });
+      }
+      h += '<div class="findings-list">';
       for (var fi = 0; fi < visibleFindings.length; fi++) {
         var f = visibleFindings[fi];
         var sev = esc(f.severity);
@@ -456,7 +490,56 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     var disks = sn ? (sn.disks || []) : [];
     if (smart.length > 0 || disks.length > 0) {
       h += '<div>';
-      h += '<div class="section-title">Drives (' + (smart.length || disks.length) + ')</div>';
+
+      // Drive health summary
+      var healthOk = 0, healthWarn = 0, healthCrit = 0;
+      for (var hc = 0; hc < smart.length; hc++) {
+        if (!smart[hc].health_passed) healthCrit++;
+        else if ((smart[hc].temperature_c || 0) >= 50 || smart[hc].reallocated_sectors > 0 || smart[hc].pending_sectors > 0) healthWarn++;
+        else healthOk++;
+      }
+      h += '<div class="section-title" style="display:flex;align-items:center;gap:12px">Drives (' + (smart.length || disks.length) + ')';
+      h += '<span class="health-summary" style="display:inline-flex;gap:8px;font-size:11px;color:var(--text-quaternary);font-weight:400;text-transform:none;letter-spacing:0">';
+      if (healthOk > 0) h += '<span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green)"></span>' + healthOk + ' ok</span>';
+      if (healthWarn > 0) h += '<span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:var(--amber)"></span>' + healthWarn + ' warn</span>';
+      if (healthCrit > 0) h += '<span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:var(--red)"></span>' + healthCrit + ' fail</span>';
+      h += '</span></div>';
+
+      // Sort bar for drives
+      var driveSortPref = (window.NasSort ? NasSort.getPrefs().drives : null) || "device";
+      if (window.NasSort) NasSort.sortDrives(smart, driveSortPref);
+      h += '<div id="drives-sort-mount" style="margin-bottom:8px"></div>';
+
+      // Build slot-to-drive and slot-to-storage maps for cross-referencing
+      var slotToDrive = {};
+      if (smart && smart.length) {
+        for (var si2 = 0; si2 < smart.length; si2++) {
+          var sd = smart[si2];
+          if (sd.array_slot) slotToDrive[sd.array_slot] = sd;
+        }
+      }
+      // Map SMART device to its storage info
+      var deviceToStorage = {};
+      for (var dm = 0; dm < disks.length; dm++) {
+        var dmp = disks[dm].mount_point || "";
+        if (dmp.indexOf("/mnt/disk") === 0) {
+          var sn2 = dmp.replace("/mnt/disk", "");
+          var sdx = slotToDrive["disk" + sn2];
+          if (sdx) deviceToStorage[sdx.device] = disks[dm];
+        } else if (dmp.indexOf("/mnt/cache") === 0 && slotToDrive["cache"]) {
+          deviceToStorage[slotToDrive["cache"].device] = disks[dm];
+        } else if (dmp.indexOf("/volume") === 0) {
+          // Synology: try to match by size (rough heuristic)
+          for (var sx = 0; sx < smart.length; sx++) {
+            if (!deviceToStorage[smart[sx].device] && Math.abs((smart[sx].size_gb || 0) - (disks[dm].total_gb || 0)) < 100) {
+              deviceToStorage[smart[sx].device] = disks[dm];
+              break;
+            }
+          }
+        }
+      }
+
+      var mergedView = (statusData && statusData.sections && statusData.sections.merged_drives);
 
       if (smart.length > 0) {
         for (var si = 0; si < smart.length; si++) {
@@ -482,36 +565,41 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
           if (s.pending_sectors > 0) h += '<span style="font-size:10px;color:var(--red);background:rgba(220,38,38,0.1);padding:1px 6px;border-radius:9999px">' + s.pending_sectors + ' pending</span>';
           if (s.udma_crc_errors > 0) h += '<span style="font-size:10px;color:var(--amber);background:rgba(217,119,6,0.1);padding:1px 6px;border-radius:9999px">' + s.udma_crc_errors + ' CRC</span>';
           h += '</div>';
+
+          // Merged view: show storage bar inline if this drive has a matching mount
+          if (mergedView && deviceToStorage[s.device]) {
+            var mdk = deviceToStorage[s.device];
+            var mpct = mdk.used_percent || 0;
+            h += '<div style="margin-top:6px;display:flex;align-items:center;gap:8px">';
+            h += '<div style="flex:1"><div class="disk-bar-bg" style="height:4px"><div class="disk-bar-fill" style="height:4px;width:' + mpct.toFixed(1) + '%;background:' + colorForPct(mpct) + '"></div></div></div>';
+            h += '<span style="font-size:11px;color:var(--text-quaternary);white-space:nowrap">' + (mdk.used_gb || 0).toFixed(0) + '/' + (mdk.total_gb || 0).toFixed(0) + ' GB (' + mpct.toFixed(0) + '%)</span>';
+            h += '</div>';
+          }
+
           h += '</div>';
         }
       }
 
-      // Storage volumes (disk space from df)
-      // Build a map from Unraid array_slot ("disk1") to SMART drive info
-      var slotToDrive = {};
-      if (smart && smart.length) {
-        for (var si2 = 0; si2 < smart.length; si2++) {
-          var sd = smart[si2];
-          if (sd.array_slot) slotToDrive[sd.array_slot] = sd;
-        }
+      // Storage volumes — only show separately if NOT merged, or for disks without SMART match
+      var usedInMerge = {};
+      if (mergedView) {
+        for (var mk in deviceToStorage) { usedInMerge[deviceToStorage[mk].mount_point] = true; }
       }
-      if (disks.length > 0) {
+      var unmatchedDisks = disks.filter(function(d) { return !mergedView || !usedInMerge[d.mount_point]; });
+      if (unmatchedDisks.length > 0) {
         h += '<div style="margin-top:10px;font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Storage</div>';
-        for (var di = 0; di < disks.length; di++) {
-          var dk = disks[di];
+        for (var di = 0; di < unmatchedDisks.length; di++) {
+          var dk = unmatchedDisks[di];
           var pct = dk.used_percent || 0;
-          // Cross-reference SMART data for better labels
           var storageLabel = dk.label || dk.mount_point;
           var mp = dk.mount_point || "";
           if (mp.indexOf("/mnt/disk") === 0) {
             var slotNum = mp.replace("/mnt/disk", "");
             var slotDrive = slotToDrive["disk" + slotNum];
-            if (slotDrive) {
-              storageLabel = esc(slotDrive.device || "") + " — " + esc(slotDrive.model || "");
-            }
+            if (slotDrive) storageLabel = esc(slotDrive.device || "") + " \u2014 " + esc(slotDrive.model || "");
           } else if (mp.indexOf("/mnt/cache") === 0 && slotToDrive["cache"]) {
             var cacheDrive = slotToDrive["cache"];
-            storageLabel = esc(cacheDrive.device || "") + " — " + esc(cacheDrive.model || "");
+            storageLabel = esc(cacheDrive.device || "") + " \u2014 " + esc(cacheDrive.model || "");
           }
           h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:8px 12px;margin-bottom:4px">';
           h += '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">';
@@ -542,7 +630,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         var stateClass = c.state === "running" ? "running" : (c.state === "paused" ? "paused" : "exited");
         h += '<tr>';
         h += '<td><span class="status-dot ' + stateClass + '"></span>' + esc(c.name) + '</td>';
-        h += '<td style="color:var(--text-quaternary);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.image) + '</td>';
+        h += '<td style="color:var(--text-quaternary);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.image) + '</td>';
         h += '<td>' + esc(c.status) + '</td>';
         h += '<td>' + (c.cpu_percent || 0).toFixed(1) + '%</td>';
         h += '<td>' + (c.mem_mb || 0).toFixed(0) + ' MB (' + (c.mem_percent || 0).toFixed(1) + '%)</td>';
@@ -634,23 +722,25 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     if (net && net.interfaces && net.interfaces.length > 0) {
       h += '<div>';
       h += '<div class="section-title">Network</div>';
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow-x:auto">';
       h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
       h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Interface</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">State</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Speed</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">MTU</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">IP</th></tr>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Interface</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">State</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Speed</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">MTU</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">IP</th></tr>';
       for (var ni = 0; ni < net.interfaces.length; ni++) {
         var iface = net.interfaces[ni];
         var stateColor = iface.state === "UP" ? "td-healthy" : "td-warn";
-        h += '<tr><td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(iface.name) + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)" class="' + stateColor + '">' + esc(iface.state) + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(iface.speed || "—") + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + (iface.mtu || 0) + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(iface.ipv4 || "—") + '</td></tr>';
+        h += '<tr><td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(iface.name) + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)" class="' + stateColor + '">' + esc(iface.state) + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(iface.speed || "\u2014") + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + (iface.mtu || 0) + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(iface.ipv4 || "\u2014") + '</td></tr>';
       }
       h += '</table>';
+      h += '</div>';
       h += '</div>';
     }
     h += '</div>'; // end section-block network
@@ -693,20 +783,20 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '<div>';
       h += '<div class="section-title">Parity History</div>';
       h += '<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px">Status: ' + esc(parity.status || "idle") + '</div>';
-      h += '<div style="max-height:200px;overflow-y:auto;scrollbar-width:thin">';
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden;max-height:200px;overflow-y:auto;scrollbar-width:thin">';
       h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
       h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Date</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Duration</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Speed</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Errors</th></tr>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Date</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Duration</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Speed</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Errors</th></tr>';
       for (var pi = 0; pi < parity.history.length; pi++) {
         var pc = parity.history[pi];
         var errClass = pc.errors > 0 ? "td-crit" : "td-healthy";
-        h += '<tr><td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(pc.date) + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(pc.duration_human || "—") + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + (pc.speed_mb_s || 0).toFixed(1) + ' MB/s</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)" class="' + errClass + '">' + (pc.errors || 0) + '</td></tr>';
+        h += '<tr><td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(pc.date) + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(pc.duration_human || "\u2014") + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + (pc.speed_mb_s || 0).toFixed(1) + ' MB/s</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)" class="' + errClass + '">' + (pc.errors || 0) + '</td></tr>';
       }
       h += '</table>';
       h += '</div>'; // scroll container
@@ -813,13 +903,25 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
 
     staging.parentNode.removeChild(staging);
 
-    // Init pointer-based drag-to-reorder
+    // Init all interactive features after DOM update
     if (window.NasDrag) NasDrag.init();
+    if (window.NasSwipe) NasSwipe.init();
+    initSortBars();
   }
 
-  window._dismissFinding = function(title) {
+  window._findingSevFilters = {};
+  window._toggleSevFilter = function(sev) {
+    window._findingSevFilters[sev] = !window._findingSevFilters[sev];
+    render(); distributeSections();
+  };
+  window._clearSevFilters = function() {
+    window._findingSevFilters = {};
+    render(); distributeSections();
+  };
+
+  window._dismissFinding = function(title, skipReload) {
     fetch("/api/v1/findings/dismiss", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({title: title}) })
-      .then(function() { loadAll(); })
+      .then(function() { if (!skipReload) loadAll(); })
       .catch(function() {});
   };
 
@@ -833,7 +935,44 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
 
   window._triggerScan = triggerScan;
 
-  // Initial load
+  function initSortBars() {
+    if (!window.NasSort) return;
+    var prefs = NasSort.getPrefs();
+
+    // Findings sort bar
+    var findingsMount = document.getElementById("findings-sort-mount");
+    if (findingsMount) {
+      NasSort.renderSortBar({
+        container: findingsMount,
+        options: [
+          { key: "severity", label: "Severity" },
+          { key: "date", label: "Newest" },
+          { key: "category", label: "Category" }
+        ],
+        active: prefs.findings || "severity",
+        onSort: function(key) { prefs.findings = key; NasSort.savePrefs(prefs); loadAll(); }
+      });
+    }
+
+    // Drives sort bar
+    var drivesMount = document.getElementById("drives-sort-mount");
+    if (drivesMount) {
+      NasSort.renderSortBar({
+        container: drivesMount,
+        options: [
+          { key: "device", label: "Device" },
+          { key: "temp", label: "Temp" },
+          { key: "age", label: "Age" },
+          { key: "size", label: "Size" },
+          { key: "health", label: "Health" }
+        ],
+        active: prefs.drives || "device",
+        onSort: function(key) { prefs.drives = key; NasSort.savePrefs(prefs); loadAll(); }
+      });
+    }
+  }
+
+  // Initial load — sort bars and swipe are inited inside distributeSections()
   loadAll().then(startRefresh);
 })();
 </script>
