@@ -511,4 +511,211 @@ var NasChart={
 
 window.NasChart=NasChart;
 })();
+
+/* ================================================================
+   NasDrag — Pointer-based section reorder for dashboard columns.
+   Sections lift and follow the cursor; others animate to fill the gap.
+   ================================================================ */
+(function(){
+"use strict";
+
+var LAYOUT_KEY = "nas-doctor-dashboard-order";
+var dragging = null;   // { el, placeholder, startX, startY, offsetX, offsetY, col }
+var columns = [];
+
+function init() {
+  columns = [document.getElementById("col-left"), document.getElementById("col-right")];
+  if (!columns[0] || !columns[1]) return;
+
+  var sections = document.querySelectorAll(".section-block[data-section]");
+  var gripSVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="pointer-events:none"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>';
+
+  for (var i = 0; i < sections.length; i++) {
+    var sec = sections[i];
+    if (sec.querySelector(".section-drag-handle")) continue;
+    var title = sec.querySelector(".section-title");
+    if (!title) continue;
+    if (!title.parentElement.classList.contains("section-title-row")) {
+      var row = document.createElement("div");
+      row.className = "section-title-row";
+      var handle = document.createElement("div");
+      handle.className = "section-drag-handle";
+      handle.innerHTML = gripSVG;
+      title.parentNode.insertBefore(row, title);
+      row.appendChild(handle);
+      row.appendChild(title);
+    }
+  }
+
+  document.addEventListener("mousedown", onDown, false);
+  document.addEventListener("touchstart", onDown, { passive: false });
+}
+
+function onDown(e) {
+  var handle = (e.target.closest ? e.target.closest(".section-drag-handle") : null);
+  if (!handle) return;
+  var sec = handle.closest(".section-block[data-section]");
+  if (!sec) return;
+
+  e.preventDefault();
+  var pt = getPoint(e);
+  var rect = sec.getBoundingClientRect();
+
+  // Create placeholder
+  var ph = document.createElement("div");
+  ph.className = "section-drop-placeholder";
+  ph.style.height = rect.height + "px";
+  sec.parentNode.insertBefore(ph, sec);
+
+  // Lift section
+  sec.style.position = "fixed";
+  sec.style.zIndex = "9000";
+  sec.style.width = rect.width + "px";
+  sec.style.left = rect.left + "px";
+  sec.style.top = rect.top + "px";
+  sec.style.transition = "none";
+  sec.style.boxShadow = "0 12px 40px rgba(0,0,0,0.3)";
+  sec.style.opacity = "0.92";
+  sec.style.pointerEvents = "none";
+  sec.classList.add("dragging");
+  document.body.appendChild(sec);
+
+  dragging = {
+    el: sec,
+    placeholder: ph,
+    offsetX: pt.x - rect.left,
+    offsetY: pt.y - rect.top,
+    width: rect.width,
+    height: rect.height
+  };
+
+  document.addEventListener("mousemove", onMove, false);
+  document.addEventListener("touchmove", onMove, { passive: false });
+  document.addEventListener("mouseup", onUp, false);
+  document.addEventListener("touchend", onUp, false);
+}
+
+function onMove(e) {
+  if (!dragging) return;
+  e.preventDefault();
+  var pt = getPoint(e);
+
+  // Move the element with cursor
+  dragging.el.style.left = (pt.x - dragging.offsetX) + "px";
+  dragging.el.style.top = (pt.y - dragging.offsetY) + "px";
+
+  // Find which column the cursor is over
+  var targetCol = null;
+  for (var c = 0; c < columns.length; c++) {
+    var cr = columns[c].getBoundingClientRect();
+    if (pt.x >= cr.left && pt.x <= cr.right) {
+      targetCol = columns[c];
+      break;
+    }
+  }
+  if (!targetCol) return;
+
+  // Move placeholder to new position
+  var afterEl = getInsertAfter(targetCol, pt.y);
+  if (dragging.placeholder.parentNode !== targetCol || dragging.placeholder.nextElementSibling !== afterEl) {
+    if (afterEl) {
+      targetCol.insertBefore(dragging.placeholder, afterEl);
+    } else {
+      targetCol.appendChild(dragging.placeholder);
+    }
+  }
+}
+
+function onUp(e) {
+  if (!dragging) return;
+
+  var el = dragging.el;
+  var ph = dragging.placeholder;
+
+  // Animate to placeholder position
+  var phRect = ph.getBoundingClientRect();
+  el.style.transition = "left 0.2s ease, top 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease";
+  el.style.left = phRect.left + "px";
+  el.style.top = phRect.top + "px";
+  el.style.opacity = "1";
+  el.style.boxShadow = "none";
+
+  setTimeout(function() {
+    // Re-insert in DOM at placeholder position
+    el.style.position = "";
+    el.style.zIndex = "";
+    el.style.width = "";
+    el.style.left = "";
+    el.style.top = "";
+    el.style.transition = "";
+    el.style.boxShadow = "";
+    el.style.opacity = "";
+    el.style.pointerEvents = "";
+    el.classList.remove("dragging");
+
+    if (ph.parentNode) {
+      ph.parentNode.insertBefore(el, ph);
+      ph.remove();
+    }
+
+    saveOrder();
+  }, 220);
+
+  dragging = null;
+  document.removeEventListener("mousemove", onMove, false);
+  document.removeEventListener("touchmove", onMove, false);
+  document.removeEventListener("mouseup", onUp, false);
+  document.removeEventListener("touchend", onUp, false);
+}
+
+function getInsertAfter(col, y) {
+  var children = col.querySelectorAll(".section-block[data-section], .section-drop-placeholder");
+  var closest = null;
+  var closestDist = Number.NEGATIVE_INFINITY;
+  for (var i = 0; i < children.length; i++) {
+    var child = children[i];
+    if (child.classList.contains("dragging")) continue;
+    var box = child.getBoundingClientRect();
+    var mid = box.top + box.height / 2;
+    var dist = y - mid;
+    if (dist < 0 && dist > closestDist) {
+      closestDist = dist;
+      closest = child;
+    }
+  }
+  return closest;
+}
+
+function getPoint(e) {
+  if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  return { x: e.clientX, y: e.clientY };
+}
+
+function getSavedOrder() {
+  try { var r = localStorage.getItem(LAYOUT_KEY); return r ? JSON.parse(r) : null; } catch(e) { return null; }
+}
+
+function saveOrder() {
+  var order = { left: [], right: [] };
+  if (columns[0]) { var bs = columns[0].querySelectorAll(".section-block[data-section]"); for (var i=0;i<bs.length;i++) order.left.push(bs[i].getAttribute("data-section")); }
+  if (columns[1]) { var bs2 = columns[1].querySelectorAll(".section-block[data-section]"); for (var j=0;j<bs2.length;j++) order.right.push(bs2[j].getAttribute("data-section")); }
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(order)); } catch(e) {}
+}
+
+function applySavedOrder(blockMap, visibleItems, colL, colR) {
+  var saved = getSavedOrder();
+  if (!saved || !saved.left || !saved.right) return false;
+  var used = {};
+  for (var sl=0;sl<saved.left.length;sl++){if(blockMap[saved.left[sl]]&&!used[saved.left[sl]]){colL.appendChild(blockMap[saved.left[sl]]);used[saved.left[sl]]=true;}}
+  for (var sr=0;sr<saved.right.length;sr++){if(blockMap[saved.right[sr]]&&!used[saved.right[sr]]){colR.appendChild(blockMap[saved.right[sr]]);used[saved.right[sr]]=true;}}
+  for (var k=0;k<visibleItems.length;k++){if(!used[visibleItems[k].name]){if(colL.offsetHeight<=colR.offsetHeight)colL.appendChild(visibleItems[k].el);else colR.appendChild(visibleItems[k].el);}}
+  return true;
+}
+
+window.NasDrag = {
+  init: init,
+  getSavedOrder: getSavedOrder,
+  applySavedOrder: applySavedOrder
+};
+})();
 `
