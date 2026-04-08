@@ -24,11 +24,21 @@ func collectNetwork() (internal.NetworkInfo, error) {
 		if iface.Name == "" || iface.Name == "lo" {
 			continue
 		}
-		// Skip virtual interfaces
+		// Skip virtual/tunnel/container interfaces
 		if strings.HasPrefix(iface.Name, "veth") ||
 			strings.HasPrefix(iface.Name, "docker") ||
 			strings.HasPrefix(iface.Name, "br-") ||
-			strings.HasPrefix(iface.Name, "virbr") {
+			strings.HasPrefix(iface.Name, "virbr") ||
+			strings.HasPrefix(iface.Name, "sit") ||
+			strings.HasPrefix(iface.Name, "tunl") ||
+			strings.HasPrefix(iface.Name, "ip6tnl") ||
+			strings.HasPrefix(iface.Name, "ip6_vti") ||
+			strings.HasPrefix(iface.Name, "ip_vti") ||
+			strings.HasPrefix(iface.Name, "gre") ||
+			strings.HasPrefix(iface.Name, "erspan") ||
+			strings.HasPrefix(iface.Name, "ip6gre") ||
+			strings.HasPrefix(iface.Name, "dummy") ||
+			strings.Contains(iface.Name, "@NONE") {
 			continue
 		}
 
