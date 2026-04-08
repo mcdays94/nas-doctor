@@ -940,16 +940,16 @@ body {
       var _hasFilter = _sevFilters.critical || _sevFilters.warning || _sevFilters.info;
       if (_hasFilter) findings = findings.filter(function(f) { return _sevFilters[f.severity]; });
       html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">';
-      function _cleanBadge(sev, cnt, col) {
+      function _cleanBadge(sev, cnt, col, bg) {
         if (cnt === 0) return '';
         var act = _sevFilters[sev];
         var s = 'cursor:pointer;font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;transition:all 0.12s;border:1px solid transparent;';
-        s += act ? 'color:#fff;background:' + col + ';border-color:' + col + ';' : 'color:' + col + ';background:' + col + '14;';
+        s += act ? 'color:#fff;background:' + col + ';border-color:' + col + ';' : 'color:' + col + ';background:' + bg + ';';
         return '<span style="' + s + '" onclick="window._toggleSevFilter(\'' + sev + '\')">' + cnt + ' ' + sev + '</span>';
       }
-      html += _cleanBadge('critical', sevCounts.critical, '#dc2626');
-      html += _cleanBadge('warning', sevCounts.warning, '#d97706');
-      html += _cleanBadge('info', sevCounts.info, '#0072f5');
+      html += _cleanBadge('critical', sevCounts.critical, '#dc2626', 'rgba(220,38,38,0.08)');
+      html += _cleanBadge('warning', sevCounts.warning, '#d97706', 'rgba(217,119,6,0.08)');
+      html += _cleanBadge('info', sevCounts.info, '#0072f5', 'rgba(0,114,245,0.08)');
       if (_hasFilter) html += '<span style="font-size:10px;color:#808080;cursor:pointer;padding:2px 6px" onclick="window._clearSevFilters()">&times; Clear</span>';
       html += '<div id="findings-sort-mount" style="margin-left:auto"></div>';
       html += '</div>';
