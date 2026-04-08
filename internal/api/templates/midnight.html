@@ -392,11 +392,14 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     // Scan bar — compact
     h += '<div class="scan-bar fade-in">';
     h += '<div class="scan-info">Last scan: <strong>' + esc(lastScan) + '</strong></div>';
+    h += '<div style="display:flex;gap:8px;align-items:center">';
+    h += '<a href="/api/v1/report" target="_blank" class="ghost-btn" style="text-decoration:none;font-size:12px">Export Report</a>';
     if (scanInProgress || (st && st.scan_running)) {
       h += '<button class="ghost-btn scanning" disabled><span class="spinner"></span> Scanning...</button>';
     } else {
       h += '<button class="ghost-btn" onclick="window._triggerScan()">Run Scan</button>';
     }
+    h += '</div>';
     h += '</div>';
 
     // Two-column layout — sections auto-distributed by height
