@@ -444,18 +444,23 @@ body.theme-clean .customize-item:hover { background:rgba(0,0,0,0.02) }
 /* ── Responsive ─────────────────────────────────────────────── */
 /* ── Sort Bar ───────────────────────────────────────────────── */
 .sort-bar {
-  display:inline-flex; gap:2px; padding:2px; border-radius:6px;
+  display:inline-flex; gap:1px; padding:2px; border-radius:6px;
   background:var(--input-bg); border:1px solid var(--border);
+  opacity:0; transition:opacity 0.2s ease;
 }
+.section-block:hover .sort-bar { opacity:1 }
 .sort-pill {
-  padding:3px 10px; border:none; border-radius:4px;
-  font-size:11px; font-weight:500; font-family:inherit;
-  color:var(--text2); background:transparent; cursor:pointer;
-  transition:all 0.12s;
+  padding:4px 10px; border:none; border-radius:4px;
+  font-size:10px; font-weight:600; font-family:inherit;
+  color:var(--text3); background:transparent; cursor:pointer;
+  transition:all 0.12s; text-transform:uppercase; letter-spacing:0.3px;
 }
-.sort-pill:hover { color:var(--text); background:var(--btn-hover-bg) }
-.sort-pill.active { color:var(--text); background:var(--surface); box-shadow:0 1px 2px rgba(0,0,0,0.1) }
-body.theme-clean .sort-pill.active { box-shadow:0 1px 3px rgba(0,0,0,0.08) }
+.sort-pill:hover { color:var(--text2); background:var(--btn-hover-bg) }
+.sort-pill.active { color:var(--text); background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,0.15) }
+body.theme-clean .sort-pill.active { box-shadow:0 1px 2px rgba(0,0,0,0.06) }
+body.theme-clean .sort-pill { color:#b3b3b3 }
+body.theme-clean .sort-pill:hover { color:#808080 }
+body.theme-clean .sort-pill.active { color:#171717 }
 
 /* ── Swipe-to-dismiss (findings) ────────────────────────────── */
 .swipe-dismiss-bg {

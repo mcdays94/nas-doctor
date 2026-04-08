@@ -176,7 +176,47 @@ body.theme-clean .drive:hover{box-shadow:0 0 0 1px rgba(0,0,0,0.15)}
     h += '<div class="summary-box"><div class="summary-val">'+totalTB.toFixed(1)+' TB</div><div class="summary-label">Total Storage</div></div>';
     h += '<div class="summary-box"><div class="summary-val">'+avgTemp.toFixed(0)+'&deg;C</div><div class="summary-label">Avg Temp</div></div>';
     h += '</div>';
-    // Drive list (single column — no row-stretch)
+
+    // Sort & filter controls
+    var statsSortPref = (window.NasSort ? NasSort.getPrefs().statsDrives : null) || "health";
+    var statsFilter = window._statsFilter || null;
+    h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+    h += '<div id="stats-sort-mount"></div>';
+    // Filter pills
+    function statsFPill(key, label, count, color) {
+      if (count === 0) return '';
+      var isActive = statsFilter === key;
+      var s = 'font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;cursor:pointer;transition:all 0.12s;border:1px solid transparent;';
+      if (isActive) s += 'color:#fff;background:' + color + ';border-color:' + color + ';';
+      else s += 'color:' + color + ';background:' + color + '22;';
+      return '<span style="' + s + '" onclick="window._filterStatsDrives(\'' + key + '\')">' + count + ' ' + label + '</span>';
+    }
+    h += statsFPill('healthy', 'healthy', healthy, '#27a644');
+    h += statsFPill('warning', 'warning', warn, '#d97706');
+    h += statsFPill('critical', 'critical', crit, '#dc2626');
+    if (statsFilter) h += '<span style="font-size:10px;color:var(--text2);cursor:pointer;padding:2px 6px" onclick="window._filterStatsDrives(null)">Clear</span>';
+    h += '</div>';
+
+    // Apply sort
+    if (window.NasSort) {
+      if (statsSortPref === "health") sorted.sort(function(a,b){ return healthScore(a) - healthScore(b); });
+      else if (statsSortPref === "temp") sorted.sort(function(a,b){ return (b.temperature_c||0) - (a.temperature_c||0); });
+      else if (statsSortPref === "age") sorted.sort(function(a,b){ return (b.power_on_hours||0) - (a.power_on_hours||0); });
+      else if (statsSortPref === "size") sorted.sort(function(a,b){ return (b.size_gb||0) - (a.size_gb||0); });
+      else if (statsSortPref === "device") sorted.sort(function(a,b){ return (a.device||"").localeCompare(b.device||""); });
+    }
+    // Apply filter
+    if (statsFilter) {
+      sorted = sorted.filter(function(d) {
+        var sc = healthScore(d);
+        if (statsFilter === "healthy") return sc >= 80;
+        if (statsFilter === "warning") return sc >= 50 && sc < 80;
+        if (statsFilter === "critical") return sc < 50;
+        return true;
+      });
+    }
+
+    // Drive list
     h += '<div class="drives">';
     for (var i = 0; i < sorted.length; i++) {
       var d = sorted[i], score = healthScore(d), scCls = scoreClass(score);
@@ -342,10 +382,35 @@ body.theme-clean .drive:hover{box-shadow:0 0 0 1px rgba(0,0,0,0.15)}
     }).catch(function(){});
   })();
 
+  window._statsFilter = null;
+  window._filterStatsDrives = function(key) {
+    window._statsFilter = (window._statsFilter === key) ? null : key;
+    render();
+  };
+
+  function initStatsSortBar() {
+    if (!window.NasSort) return;
+    var prefs = NasSort.getPrefs();
+    var mount = document.getElementById("stats-sort-mount");
+    if (!mount) return;
+    NasSort.renderSortBar({
+      container: mount,
+      options: [
+        { key: "health", label: "Health" },
+        { key: "temp", label: "Temp" },
+        { key: "age", label: "Age" },
+        { key: "size", label: "Size" },
+        { key: "device", label: "Device" }
+      ],
+      active: prefs.statsDrives || "health",
+      onSort: function(key) { prefs.statsDrives = key; NasSort.savePrefs(prefs); render(); initStatsSortBar(); }
+    });
+  }
+
   Promise.all([
     fetch("/api/v1/snapshot/latest").then(function(r){return r.json()}).catch(function(){return null}),
     fetch("/api/v1/sparklines").then(function(r){return r.json()}).catch(function(){return null})
-  ]).then(function(r){ snapshot=r[0]; sparklines=r[1]; render(); });
+  ]).then(function(r){ snapshot=r[0]; sparklines=r[1]; render(); initStatsSortBar(); });
 })();
 </script>
 </body>
