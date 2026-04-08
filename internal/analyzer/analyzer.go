@@ -735,8 +735,10 @@ func correlate(findings []internal.Finding, snap *internal.Snapshot) []internal.
 		})
 	}
 
-	// No cache + high IO wait + Docker = I/O starvation
-	if hasNoCache && hasHighIOWait && snap.Docker.Available && len(snap.Docker.Containers) > 3 {
+	// No cache + high IO wait + Docker = I/O starvation (Unraid-specific —
+	// "cache" is an Unraid array concept; Synology/TrueNAS use different storage tiers)
+	if hasNoCache && hasHighIOWait && snap.Docker.Available && len(snap.Docker.Containers) > 3 &&
+		snap.System.Platform == "unraid" {
 		findings = append(findings, internal.Finding{
 			Severity:    internal.SeverityWarning,
 			Category:    internal.CategorySystem,
