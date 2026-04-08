@@ -14,11 +14,13 @@ var (
 
 // Page HTML loaded from embedded templates.
 var (
-	statsPageHTML  string
-	fleetPageHTML  string
-	alertsPageHTML string
-	SettingsPage   string
-	DiskDetailPage string
+	statsPageHTML         string
+	fleetPageHTML         string
+	alertsPageHTML        string
+	serviceChecksPageHTML string
+	parityPageHTML        string
+	SettingsPage          string
+	DiskDetailPage        string
 )
 
 func init() {
@@ -36,6 +38,8 @@ func init() {
 	statsPageHTML = read("stats.html")
 	fleetPageHTML = read("fleet.html")
 	alertsPageHTML = read("alerts.html")
+	serviceChecksPageHTML = read("service_checks.html")
+	parityPageHTML = read("parity.html")
 	SettingsPage = read("settings.html")
 	DiskDetailPage = read("disk_detail.html")
 }

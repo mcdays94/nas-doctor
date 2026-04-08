@@ -52,6 +52,16 @@ func (m *Manager) SetServers(servers []internal.RemoteServer) {
 	}
 }
 
+// InjectStatuses allows demo mode to set pre-built statuses directly.
+func (m *Manager) InjectStatuses(statuses []internal.RemoteServerStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range statuses {
+		s := statuses[i]
+		m.statuses[s.Server.ID] = &s
+	}
+}
+
 // Start begins periodic polling of remote servers.
 func (m *Manager) Start(interval time.Duration) {
 	go func() {

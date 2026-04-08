@@ -302,7 +302,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDashboardTheme(w http.ResponseWriter, r *http.Request) {
-	// Redirect to / — theme is now controlled by settings only
+	theme := chi.URLParam(r, "theme")
+	if theme == ThemeMidnight || theme == ThemeClean || theme == ThemeEmber {
+		settings := s.getSettings()
+		settings.Theme = theme
+		if data, err := json.Marshal(settings); err == nil {
+			s.store.SetConfig(settingsConfigKey, string(data))
+		}
+	}
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

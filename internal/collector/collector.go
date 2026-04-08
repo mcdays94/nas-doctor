@@ -120,6 +120,13 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 		}
 	}
 
+	// Tunnels (cloudflared / tailscale) — checks host binaries + Docker containers
+	c.logger.Info("collecting tunnel info")
+	tunnelInfo := collectTunnels(docker)
+	if tunnelInfo != nil {
+		snap.Tunnels = tunnelInfo
+	}
+
 	// ZFS (if available)
 	c.logger.Info("collecting ZFS info")
 	zfsInfo, err := collectZFS()

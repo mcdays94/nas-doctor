@@ -44,6 +44,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <div class="nav-links">
       <a href="/" class="nav-link">Dashboard</a>
       <a href="/alerts" class="nav-link">Alerts</a>
+      <a href="/service-checks" class="nav-link">Services</a>
       <a href="/stats" class="nav-link">Stats</a>
       <a href="/fleet" class="nav-link">Fleet</a>
       <a href="/settings" class="nav-link active" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
@@ -182,6 +183,51 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           <input type="password" id="wh-secret" placeholder="Leave blank if not needed">
         </div>
       </div>
+      <!-- Notification Filters (granular) -->
+      <div class="form-group" style="margin-top:12px">
+        <label style="cursor:pointer;user-select:none;font-weight:600" onclick="document.getElementById('wh-filters-panel').style.display=document.getElementById('wh-filters-panel').style.display==='none'?'block':'none'">Notification Filters &#9662;</label>
+        <p style="font-size:11px;color:var(--text2);margin-top:2px">Fine-tune exactly which events trigger this webhook.</p>
+        <div id="wh-filters-panel" style="display:none;margin-top:8px;padding:16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text)">Severity &amp; Category</div>
+          <div class="form-row">
+            <div><label for="wf-severities">Severities (comma-separated, empty = use Min Level)</label>
+              <input type="text" id="wf-severities" placeholder="e.g. critical,warning"></div>
+            <div><label for="wf-categories">Categories (comma-separated, empty = all)</label>
+              <input type="text" id="wf-categories" placeholder="e.g. smart,disk,parity,ups"></div>
+          </div>
+          <div style="font-size:12px;font-weight:600;margin:16px 0 8px;color:var(--text)">Threshold Triggers</div>
+          <div class="form-row">
+            <div><label for="wf-disk-space">Disk free space below (%)</label>
+              <input type="number" id="wf-disk-space" min="0" max="100" step="1" placeholder="0 = disabled"></div>
+            <div><label for="wf-disk-temp">Any disk temp above (&deg;C)</label>
+              <input type="number" id="wf-disk-temp" min="0" max="100" placeholder="0 = disabled"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="wf-avg-temp">Avg disk temp above (&deg;C)</label>
+              <input type="number" id="wf-avg-temp" min="0" max="100" placeholder="0 = disabled"></div>
+            <div><label for="wf-realloc">SMART reallocated sectors above</label>
+              <input type="number" id="wf-realloc" min="0" placeholder="0 = disabled"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="wf-ups-battery">UPS battery below (%)</label>
+              <input type="number" id="wf-ups-battery" min="0" max="100" step="1" placeholder="0 = disabled"></div>
+            <div></div>
+          </div>
+          <div style="font-size:12px;font-weight:600;margin:16px 0 8px;color:var(--text)">Event Triggers</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="wf-service-down"> Service check goes down</label>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="wf-parity-error"> Parity check has errors</label>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="wf-smart-fail"> SMART health fails</label>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="wf-ups-battery-mode"> UPS switches to battery</label>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="wf-update"> Platform update available</label>
+          </div>
+          <div style="margin-top:12px">
+            <label for="wf-service-names">Limit to specific service checks (comma-separated names, empty = all)</label>
+            <input type="text" id="wf-service-names" placeholder="e.g. Home Assistant,Gateway Ping">
+          </div>
+        </div>
+      </div>
+      <!-- Custom Headers -->
       <div class="form-group" style="margin-top:12px">
         <label style="cursor:pointer;user-select:none" onclick="document.getElementById('wh-headers-panel').style.display=document.getElementById('wh-headers-panel').style.display==='none'?'block':'none'">Custom Headers (optional) &#9662;</label>
         <div id="wh-headers-panel" style="display:none;margin-top:8px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
@@ -361,7 +407,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
   <!-- 3. Service Checks -->
   <div class="card" id="card-service-checks">
     <div class="card-title">Service Checks</div>
-    <div class="card-desc">Monitor service endpoints (HTTP, TCP, DNS, SMB, NFS) and trigger findings when they fail repeatedly.</div>
+    <div class="card-desc">Monitor service endpoints (HTTP, TCP, DNS, Ping/ICMP, SMB, NFS) and trigger findings when they fail repeatedly.</div>
     <div id="service-check-list"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
       <button class="btn btn-secondary" id="btn-add-service-check" onclick="toggleServiceCheckForm()">+ Add Service Check</button>
@@ -381,6 +427,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             <option value="http">HTTP</option>
             <option value="tcp">TCP</option>
             <option value="dns">DNS</option>
+            <option value="ping">Ping (ICMP)</option>
             <option value="smb">SMB</option>
             <option value="nfs">NFS</option>
           </select>
@@ -398,15 +445,28 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       </div>
       <div class="form-row">
         <div>
+          <label for="sc-interval">Check interval</label>
+          <select id="sc-interval">
+            <option value="30">30 seconds</option>
+            <option value="60">1 minute</option>
+            <option value="120">2 minutes</option>
+            <option value="300" selected>5 minutes</option>
+            <option value="600">10 minutes</option>
+            <option value="900">15 minutes</option>
+            <option value="1800">30 minutes</option>
+            <option value="3600">1 hour</option>
+          </select>
+        </div>
+        <div>
           <label for="sc-timeout">Timeout (seconds)</label>
           <input type="number" id="sc-timeout" min="1" max="30" value="5">
         </div>
+      </div>
+      <div class="form-row">
         <div>
           <label for="sc-threshold">Failure threshold</label>
           <input type="number" id="sc-threshold" min="1" max="20" value="1">
         </div>
-      </div>
-      <div class="form-row">
         <div>
           <label for="sc-severity">Failure severity</label>
           <select id="sc-severity">
@@ -415,7 +475,9 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             <option value="info">Info</option>
           </select>
         </div>
-        <div id="sc-http-expected-wrap">
+      </div>
+      <div class="form-row" id="sc-http-expected-wrap">
+        <div>
           <label for="sc-http-min">HTTP success range (status)</label>
           <div style="display:flex;gap:8px">
             <input type="number" id="sc-http-min" min="100" max="599" value="200" placeholder="Min">
@@ -439,19 +501,12 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       </div>
     </div>
 
-    <div style="margin-top:18px">
-      <label>Latest Status</label>
-      <div class="overflow-x" style="margin-top:6px">
-        <table class="log-table">
-          <thead>
-            <tr><th>Check</th><th>Type</th><th>Status</th><th>Latency</th><th>Failures</th><th>Checked</th><th>Actions</th></tr>
-          </thead>
-          <tbody id="service-check-results-body">
-            <tr><td colspan="7" class="log-empty">Loading...</td></tr>
-          </tbody>
-        </table>
+    <div style="margin-top:18px" id="sc-status-summary">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <label>Quick Status</label>
+        <a href="/service-checks" style="font-size:12px;color:var(--accent);text-decoration:none">View logs &amp; details &rarr;</a>
       </div>
-      <div id="service-check-history" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>
+      <div id="sc-status-pills" style="font-size:12px;color:var(--text2)">Loading...</div>
     </div>
   </div>
 
@@ -525,16 +580,17 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <div class="card-title">Dashboard Sections</div>
     <div class="card-desc">Toggle which sections appear on the dashboard. Disabled sections are hidden but data is still collected.</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;margin-top:12px">
-      <div class="toggle-wrap"><div class="toggle on" id="sec-findings" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Findings</span></div>
-      <div class="toggle-wrap"><div class="toggle on" id="sec-disk" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Disk Space</span></div>
-      <div class="toggle-wrap"><div class="toggle on" id="sec-smart" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">SMART Health</span></div>
-      <div class="toggle-wrap"><div class="toggle on" id="sec-docker" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Docker</span></div>
-      <div class="toggle-wrap"><div class="toggle on" id="sec-zfs" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">ZFS Pools</span></div>
-      <div class="toggle-wrap"><div class="toggle on" id="sec-ups" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">UPS / Power</span></div>
-      <div class="toggle-wrap"><div class="toggle on" id="sec-parity" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Parity (Unraid)</span></div>
-      <div class="toggle-wrap"><div class="toggle on" id="sec-network" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Network</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-findings" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Findings</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-disk" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Disk Space</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-smart" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">SMART Health</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-docker" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Docker</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-zfs" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">ZFS Pools</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-ups" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">UPS / Power</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-parity" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Parity (Unraid)</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-network" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Network</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-tunnels" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Tunnels (Cloudflared / Tailscale)</span></div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-        <div class="toggle-wrap"><div class="toggle" id="sec-merged-drives" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Drive View <span style="font-size:11px;color:var(--text2)">(combine SMART + storage into one card per drive)</span></span></div>
+        <div class="toggle-wrap"><div class="toggle on" id="sec-merged-drives" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Drive View <span style="font-size:11px;color:var(--text2)">(combine SMART + storage into one card per drive)</span></span></div>
       </div>
     </div>
   </div>
@@ -553,7 +609,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div>
         <label for="backup-path">Backup directory</label>
         <input type="text" id="backup-path" placeholder="Leave empty for default (data/backups/)">
-        <p style="font-size:11px;color:var(--text2);margin-top:4px">Set a path to a mounted share for off-server backups.</p>
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Supports local paths and mounted remote shares (NFS, SMB/CIFS). Examples: <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">/mnt/backup-nas/nas-doctor</code>, <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">/volume1/backups</code></p>
       </div>
       <div>
         <label for="backup-keep">Keep last N backups</label>
@@ -834,6 +890,7 @@ function loadSettings() {
       setSecToggle("sec-ups", sec.ups);
       setSecToggle("sec-parity", sec.parity);
       setSecToggle("sec-network", sec.network);
+      setSecToggle("sec-tunnels", sec.tunnels);
       setSecToggle("sec-merged-drives", sec.merged_drives);
       document.getElementById("backup-path").value = bk.path || "";
       document.getElementById("backup-keep").value = bk.keep_count || 4;
@@ -896,6 +953,7 @@ function buildSettingsPayload() {
       ups: document.getElementById("sec-ups").classList.contains("on"),
       parity: document.getElementById("sec-parity").classList.contains("on"),
       network: document.getElementById("sec-network").classList.contains("on"),
+      tunnels: document.getElementById("sec-tunnels").classList.contains("on"),
       merged_drives: document.getElementById("sec-merged-drives").classList.contains("on")
     },
     backup: {
@@ -970,6 +1028,20 @@ function renderWebhooks() {
     html += '  <div class="webhook-info">';
     html += '    <div class="webhook-name">' + escapeHtml(wh.name || "Unnamed") + '<span class="badge ' + badgeClass + '">' + typeName + '</span></div>';
     html += '    <div class="webhook-url">' + escapeHtml(maskUrl(wh.url)) + '</div>';
+    if (wh.filters) {
+      var tags = [];
+      if (wh.filters.severities && wh.filters.severities.length) tags.push("sev: " + wh.filters.severities.join(","));
+      if (wh.filters.categories && wh.filters.categories.length) tags.push("cat: " + wh.filters.categories.join(","));
+      if (wh.filters.on_service_down) tags.push("svc down");
+      if (wh.filters.on_parity_error) tags.push("parity err");
+      if (wh.filters.on_smart_failure) tags.push("SMART fail");
+      if (wh.filters.on_ups_on_battery) tags.push("UPS battery");
+      if (wh.filters.on_update_available) tags.push("updates");
+      if (wh.filters.disk_space_below_pct) tags.push("space <" + wh.filters.disk_space_below_pct + "%");
+      if (wh.filters.disk_temp_above_c) tags.push("temp >" + wh.filters.disk_temp_above_c + "\u00b0C");
+      if (wh.filters.ups_battery_below_pct) tags.push("UPS <" + wh.filters.ups_battery_below_pct + "%");
+      if (tags.length) html += '    <div class="inline-muted" style="margin-top:2px">Filters: ' + escapeHtml(tags.join(" \u00b7 ")) + '</div>';
+    }
     html += '  </div>';
     html += '  <div class="webhook-actions">';
     html += '    <div class="toggle-wrap" onclick="toggleWebhookEnabled(' + i + ')">';
@@ -989,6 +1061,45 @@ function toggleWebhookEnabled(idx) {
   saveSettings();
 }
 
+function resetWebhookFiltersUI(f) {
+  f = f || {};
+  document.getElementById("wf-severities").value = (f.severities || []).join(",");
+  document.getElementById("wf-categories").value = (f.categories || []).join(",");
+  document.getElementById("wf-disk-space").value = f.disk_space_below_pct || "";
+  document.getElementById("wf-disk-temp").value = f.disk_temp_above_c || "";
+  document.getElementById("wf-avg-temp").value = f.avg_disk_temp_above_c || "";
+  document.getElementById("wf-realloc").value = f.smart_realloc_above || "";
+  document.getElementById("wf-ups-battery").value = f.ups_battery_below_pct || "";
+  document.getElementById("wf-service-down").checked = !!f.on_service_down;
+  document.getElementById("wf-parity-error").checked = !!f.on_parity_error;
+  document.getElementById("wf-smart-fail").checked = !!f.on_smart_failure;
+  document.getElementById("wf-ups-battery-mode").checked = !!f.on_ups_on_battery;
+  document.getElementById("wf-update").checked = !!f.on_update_available;
+  document.getElementById("wf-service-names").value = (f.service_check_names || []).join(",");
+}
+function readWebhookFiltersUI() {
+  var sev = document.getElementById("wf-severities").value.trim();
+  var cat = document.getElementById("wf-categories").value.trim();
+  var svcNames = document.getElementById("wf-service-names").value.trim();
+  var f = {};
+  if (sev) f.severities = sev.split(",").map(function(s){return s.trim().toLowerCase();}).filter(Boolean);
+  if (cat) f.categories = cat.split(",").map(function(s){return s.trim().toLowerCase();}).filter(Boolean);
+  var ds = parseFloat(document.getElementById("wf-disk-space").value); if (ds > 0) f.disk_space_below_pct = ds;
+  var dt = parseInt(document.getElementById("wf-disk-temp").value,10); if (dt > 0) f.disk_temp_above_c = dt;
+  var at = parseInt(document.getElementById("wf-avg-temp").value,10); if (at > 0) f.avg_disk_temp_above_c = at;
+  var ra = parseInt(document.getElementById("wf-realloc").value,10); if (ra > 0) f.smart_realloc_above = ra;
+  var ub = parseFloat(document.getElementById("wf-ups-battery").value); if (ub > 0) f.ups_battery_below_pct = ub;
+  if (document.getElementById("wf-service-down").checked) f.on_service_down = true;
+  if (document.getElementById("wf-parity-error").checked) f.on_parity_error = true;
+  if (document.getElementById("wf-smart-fail").checked) f.on_smart_failure = true;
+  if (document.getElementById("wf-ups-battery-mode").checked) f.on_ups_on_battery = true;
+  if (document.getElementById("wf-update").checked) f.on_update_available = true;
+  if (svcNames) f.service_check_names = svcNames.split(",").map(function(s){return s.trim();}).filter(Boolean);
+  // Return null if no filters set (to avoid sending empty object)
+  if (Object.keys(f).length === 0) return null;
+  return f;
+}
+
 function toggleWebhookForm() {
   var form = document.getElementById("webhook-form");
   if (form.classList.contains("visible")) {
@@ -1001,6 +1112,8 @@ function toggleWebhookForm() {
   document.getElementById("wh-type").value = "discord";
   document.getElementById("wh-level").value = "info";
   document.getElementById("wh-secret").value = "";
+  resetWebhookFiltersUI({});
+  document.getElementById("wh-filters-panel").style.display = "none";
   form.classList.add("visible");
 }
 
@@ -1012,6 +1125,8 @@ function editWebhook(idx) {
   document.getElementById("wh-type").value = wh.type || "generic";
   document.getElementById("wh-level").value = wh.min_level || "info";
   document.getElementById("wh-secret").value = wh.secret || "";
+  resetWebhookFiltersUI(wh.filters || {});
+  document.getElementById("wh-filters-panel").style.display = wh.filters ? "block" : "none";
   document.getElementById("webhook-form").classList.add("visible");
 }
 
@@ -1034,6 +1149,8 @@ function saveWebhook() {
     min_level: document.getElementById("wh-level").value,
     secret: document.getElementById("wh-secret").value.trim() || ""
   };
+  var filters = readWebhookFiltersUI();
+  if (filters) wh.filters = filters;
   var editIdx = parseInt(document.getElementById("wh-edit-index").value, 10);
   if (editIdx >= 0 && editIdx < webhooks.length) {
     wh.enabled = webhooks[editIdx].enabled;
@@ -1088,6 +1205,7 @@ function normalizeServiceCheck(sc) {
     type: (sc && sc.type) ? String(sc.type).toLowerCase() : "http",
     target: (sc && sc.target) ? sc.target : "",
     enabled: !(sc && sc.enabled === false),
+    interval_sec: (sc && sc.interval_sec > 0) ? sc.interval_sec : 300,
     timeout_sec: (sc && sc.timeout_sec) ? sc.timeout_sec : 5,
     port: (sc && sc.port) ? sc.port : 0,
     failure_threshold: (sc && sc.failure_threshold) ? sc.failure_threshold : 1,
@@ -1099,12 +1217,18 @@ function normalizeServiceCheck(sc) {
   if (out.failure_threshold < 1) out.failure_threshold = 1;
   return out;
 }
+function formatInterval(sec) {
+  if (sec < 60) return sec + "s";
+  if (sec < 3600) return Math.floor(sec/60) + "m";
+  return Math.floor(sec/3600) + "h";
+}
 
 function serviceTypePillClass(t) {
   var type = (t || "").toLowerCase();
   if (type === "http") return "pill-http";
   if (type === "tcp") return "pill-tcp";
   if (type === "dns") return "pill-dns";
+  if (type === "ping") return "pill-ping";
   if (type === "smb") return "pill-smb";
   if (type === "nfs") return "pill-nfs";
   return "pill-http";
@@ -1125,7 +1249,7 @@ function renderServiceChecks() {
     html += '  <div class="mini-list-main">';
     html += '    <div class="mini-list-title">' + escapeHtml(sc.name) + ' <span class="pill ' + serviceTypePillClass(sc.type) + '">' + escapeHtml(t) + '</span></div>';
     html += '    <div class="mini-list-sub">' + escapeHtml(sc.target) + (sc.port ? (':' + sc.port) : '') + '</div>';
-    html += '    <div class="inline-muted">Threshold: ' + sc.failure_threshold + ' &middot; Severity: ' + escapeHtml(sc.failure_severity) + ' &middot; Timeout: ' + sc.timeout_sec + 's</div>';
+    html += '    <div class="inline-muted">Every ' + formatInterval(sc.interval_sec) + ' &middot; Threshold: ' + sc.failure_threshold + ' &middot; Severity: ' + escapeHtml(sc.failure_severity) + ' &middot; Timeout: ' + sc.timeout_sec + 's</div>';
     html += '  </div>';
     html += '  <div class="webhook-actions">';
     html += '    <div class="toggle-wrap" onclick="toggleServiceCheckEnabled(' + i + ')"><div class="toggle' + (sc.enabled ? ' on' : '') + '"><div class="toggle-knob"></div></div></div>';
@@ -1157,6 +1281,7 @@ function toggleServiceCheckForm() {
   document.getElementById("sc-type").value = "http";
   document.getElementById("sc-target").value = "";
   document.getElementById("sc-port").value = "";
+  document.getElementById("sc-interval").value = "300";
   document.getElementById("sc-timeout").value = "5";
   document.getElementById("sc-threshold").value = "1";
   document.getElementById("sc-severity").value = "warning";
@@ -1181,6 +1306,12 @@ function onServiceTypeChange() {
   var portWrap = document.getElementById("sc-port-wrap");
   if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
   if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
+  var targetInput = document.getElementById("sc-target");
+  if (targetInput) {
+    if (type === "ping") targetInput.placeholder = "e.g. 8.8.8.8 or gateway.local";
+    else if (type === "dns") targetInput.placeholder = "e.g. google.com";
+    else targetInput.placeholder = "https://nas.local/health, 192.168.1.10, or host:port";
+  }
 }
 
 function editServiceCheck(idx) {
@@ -1191,6 +1322,7 @@ function editServiceCheck(idx) {
   document.getElementById("sc-type").value = sc.type;
   document.getElementById("sc-target").value = sc.target;
   document.getElementById("sc-port").value = sc.port > 0 ? String(sc.port) : "";
+  document.getElementById("sc-interval").value = String(sc.interval_sec || 300);
   document.getElementById("sc-timeout").value = String(sc.timeout_sec || 5);
   document.getElementById("sc-threshold").value = String(sc.failure_threshold || 1);
   document.getElementById("sc-severity").value = sc.failure_severity || "warning";
@@ -1218,6 +1350,7 @@ function saveServiceCheck() {
     type: type,
     target: target,
     enabled: document.getElementById("sc-enabled").checked,
+    interval_sec: parseInt(document.getElementById("sc-interval").value, 10) || 300,
     timeout_sec: parseInt(document.getElementById("sc-timeout").value, 10) || 5,
     port: parseInt(document.getElementById("sc-port").value, 10) || 0,
     failure_threshold: parseInt(document.getElementById("sc-threshold").value, 10) || 1,
@@ -1277,70 +1410,41 @@ function runServiceChecksNow() {
 }
 
 function loadServiceCheckResults() {
+  var container = document.getElementById("sc-status-pills");
+  if (!container) return;
   fetch("/api/v1/service-checks")
     .then(function(r) { return r.json(); })
     .then(function(entries) {
-      var tbody = document.getElementById("service-check-results-body");
-      if (!tbody) return;
       if (!entries || entries.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="log-empty">No service check results yet.</td></tr>';
-        document.getElementById("service-check-history").innerHTML = "";
+        container.innerHTML = '<span style="color:var(--text3)">No checks running yet.</span>';
         return;
       }
-      var html = "";
+      // Deduplicate by key (API may return multiple entries per check)
+      var seen = {};
+      var unique = [];
       for (var i = 0; i < entries.length; i++) {
-        var e = entries[i];
-        var checked = e.checked_at ? new Date(e.checked_at).toLocaleString() : "—";
-        var statusCls = e.status === "up" ? "status-up" : "status-down";
-        var typePill = '<span class="pill ' + serviceTypePillClass(e.type) + '">' + escapeHtml((e.type || "").toUpperCase()) + '</span>';
-        html += '<tr>';
-        html += '<td><strong>' + escapeHtml(e.name || "—") + '</strong><div class="inline-muted">' + escapeHtml(e.target || "") + '</div></td>';
-        html += '<td>' + typePill + '</td>';
-        html += '<td><span class="status-badge ' + statusCls + '">' + escapeHtml(e.status || "unknown") + '</span></td>';
-        html += '<td>' + (e.response_ms != null ? e.response_ms + ' ms' : '—') + '</td>';
-        html += '<td>' + (e.consecutive_failures || 0) + ' / ' + (e.failure_threshold || 1) + '</td>';
-        html += '<td>' + escapeHtml(checked) + '</td>';
-        html += '<td><button class="btn btn-secondary btn-sm" onclick="viewServiceCheckHistory(\'' + escapeHtml(e.key).replace(/'/g, "\\'") + '\', \'' + escapeHtml(e.name).replace(/'/g, "\\'") + '\')">History</button></td>';
-        html += '</tr>';
+        if (!seen[entries[i].key]) { seen[entries[i].key] = true; unique.push(entries[i]); }
       }
-      tbody.innerHTML = html;
+      var up = 0;
+      for (var i = 0; i < unique.length; i++) { if (unique[i].status === "up") up++; }
+      var pct = unique.length > 0 ? Math.round(up / unique.length * 100) : 100;
+      var pctColor = pct >= 99 ? "var(--green)" : pct >= 90 ? "var(--amber)" : "var(--red)";
+      var html = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">';
+      for (var i = 0; i < unique.length; i++) {
+        var e = unique[i];
+        var isUp = e.status === "up";
+        html += '<div style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--input-bg);font-size:12px">';
+        html += '<span style="width:7px;height:7px;border-radius:50%;background:' + (isUp ? 'var(--green)' : 'var(--red)') + ';flex-shrink:0"></span>';
+        html += escapeHtml(e.name);
+        html += '<span class="pill ' + serviceTypePillClass(e.type) + '" style="font-size:9px;padding:1px 5px">' + escapeHtml((e.type || "").toUpperCase()) + '</span>';
+        html += '</div>';
+      }
+      html += '<span style="margin-left:auto;font-weight:600;color:' + pctColor + '">' + pct + '% up</span>';
+      html += '</div>';
+      container.innerHTML = html;
     })
     .catch(function() {
-      var tbody = document.getElementById("service-check-results-body");
-      if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="log-empty">Failed to load service checks.</td></tr>';
-    });
-}
-
-function viewServiceCheckHistory(key, name) {
-  var panel = document.getElementById("service-check-history");
-  if (!panel) return;
-  panel.innerHTML = "Loading history...";
-  fetch("/api/v1/service-checks/history?key=" + encodeURIComponent(key) + "&limit=30")
-    .then(function(r) { return r.json(); })
-    .then(function(rows) {
-      if (!rows || rows.length === 0) {
-        panel.innerHTML = "No history for this service check yet.";
-        return;
-      }
-      var html = '<div style="font-weight:600;color:var(--text);margin-bottom:6px">History: ' + escapeHtml(name) + '</div>';
-      html += '<div class="overflow-x"><table class="log-table"><thead><tr><th>Checked</th><th>Status</th><th>Latency</th><th>Failures</th><th>Error</th></tr></thead><tbody>';
-      for (var i = 0; i < rows.length; i++) {
-        var r = rows[i];
-        var ts = r.checked_at ? new Date(r.checked_at).toLocaleString() : "—";
-        var cls = r.status === "up" ? "status-up" : "status-down";
-        html += '<tr>';
-        html += '<td>' + escapeHtml(ts) + '</td>';
-        html += '<td><span class="status-badge ' + cls + '">' + escapeHtml(r.status || "unknown") + '</span></td>';
-        html += '<td>' + (r.response_ms != null ? r.response_ms + ' ms' : '—') + '</td>';
-        html += '<td>' + (r.consecutive_failures || 0) + ' / ' + (r.failure_threshold || 1) + '</td>';
-        html += '<td>' + escapeHtml(r.error || '—') + '</td>';
-        html += '</tr>';
-      }
-      html += '</tbody></table></div>';
-      panel.innerHTML = html;
-    })
-    .catch(function() {
-      panel.innerHTML = "Failed to load history.";
+      container.innerHTML = '<span style="color:var(--red)">Failed to load status</span>';
     });
 }
 

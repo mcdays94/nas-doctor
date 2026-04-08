@@ -217,14 +217,14 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
   "use strict";
   var cachedSnapshot = null;
 
-  var REFRESH_MS = 300000; // default 5min; updated dynamically from scan interval
-  var FAST_POLL_MS = 5000;
-  var refreshTimer = null;
+  var POLL_MS = 60000;          // status-only poll interval (60s)
+  var SCAN_POLL_MS = 15000;     // faster status poll while scan is running (15s)
+  var pollTimer = null;
   var statusData = null;
   var snapshotData = null;
   var scanInProgress = false;
   var _lastScanTime = null;
-  var _fastUntil = 0;
+  var _wasScanRunning = false;
 
   function esc(s) {
     if (!s && s !== 0) return "";
@@ -244,36 +244,39 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     return Promise.all([
       fetchJSON("/api/v1/status").then(function(d) { statusData = d; }).catch(function() { statusData = null; }),
       fetchJSON("/api/v1/snapshot/latest").then(function(d) { snapshotData = d; }).catch(function() { snapshotData = null; })
-    ]).then(render).then(adjustRefreshRate);
+    ]).then(render);
   }
 
-  function computeRefreshMs(secs) {
-    if (!secs || secs <= 0) return 300000;
-    return Math.max(Math.min(Math.floor(secs / 12) * 1000, 300000), 30000);
+  // Lightweight status-only poll — only fetches full snapshot when data changes
+  function pollStatus() {
+    fetchJSON("/api/v1/status").then(function(d) {
+      statusData = d;
+      var scanTime = d.last_scan || null;
+      var scanRunning = !!d.scan_running;
+
+      // New scan data available — fetch full snapshot and re-render
+      if (scanTime && scanTime !== _lastScanTime && _lastScanTime !== null) {
+        _lastScanTime = scanTime;
+        fetchJSON("/api/v1/snapshot/latest").then(function(snap) {
+          snapshotData = snap;
+          render();
+        }).catch(function() {});
+      } else {
+        if (!_lastScanTime) _lastScanTime = scanTime;
+      }
+
+      // Adjust poll speed based on scan state
+      if (scanRunning !== _wasScanRunning) {
+        _wasScanRunning = scanRunning;
+        startPoll();
+      }
+    }).catch(function() {});
   }
 
-  function startRefresh() {
-    if (refreshTimer) clearInterval(refreshTimer);
-    var ms = (Date.now() < _fastUntil) ? FAST_POLL_MS : REFRESH_MS;
-    refreshTimer = setInterval(function() {
-      loadAll();
-      if (Date.now() >= _fastUntil && ms === FAST_POLL_MS) startRefresh();
-    }, ms);
-  }
-
-  function adjustRefreshRate() {
-    if (!statusData) return;
-    if (statusData.scan_interval_secs > 0) {
-      REFRESH_MS = computeRefreshMs(statusData.scan_interval_secs);
-    }
-    var scanTime = statusData.last_scan || null;
-    if (scanTime && scanTime !== _lastScanTime) {
-      if (_lastScanTime !== null) { _fastUntil = Date.now() + 30000; startRefresh(); }
-      _lastScanTime = scanTime;
-    }
-    if (statusData.scan_running && Date.now() >= _fastUntil) {
-      _fastUntil = Date.now() + 60000; startRefresh();
-    }
+  function startPoll() {
+    if (pollTimer) clearInterval(pollTimer);
+    var ms = _wasScanRunning ? SCAN_POLL_MS : POLL_MS;
+    pollTimer = setInterval(pollStatus, ms);
   }
 
   function triggerScan() {
@@ -340,6 +343,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     h += '<div class="header-right">';
     h += '<div class="nav-links">';
     h += '<a href="/alerts" class="nav-link">Alerts</a>';
+    h += '<a href="/service-checks" class="nav-link">Services</a>';
     h += '<a href="/stats" class="nav-link">Stats</a>';
     h += '<a href="/fleet" class="nav-link">Fleet</a>';
     h += '<a href="/settings" class="nav-link" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>';
@@ -782,30 +786,68 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     }
     h += '</div>'; // end section-block services
 
+    // ======= Section: Tunnels =======
+    h += '<div class="section-block" data-section="tunnels">';
+    var tunnels = sn ? sn.tunnels : null;
+    if (tunnels && (tunnels.cloudflared || tunnels.tailscale)) {
+      h += '<div>';
+      h += '<div class="section-title">Tunnels</div>';
+      if (tunnels.cloudflared && tunnels.cloudflared.tunnels && tunnels.cloudflared.tunnels.length > 0) {
+        h += '<div style="font-size:11px;color:var(--text-quaternary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Cloudflared ' + esc(tunnels.cloudflared.version || '') + '</div>';
+        for (var ti = 0; ti < tunnels.cloudflared.tunnels.length; ti++) {
+          var ct = tunnels.cloudflared.tunnels[ti];
+          var ctColor = ct.status === 'healthy' ? 'var(--green)' : ct.status === 'degraded' ? 'var(--amber)' : 'var(--red)';
+          h += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">';
+          h += '<span style="width:8px;height:8px;border-radius:50%;background:' + ctColor + ';flex-shrink:0"></span>';
+          h += '<span style="font-weight:600;font-size:13px">' + esc(ct.name) + '</span>';
+          h += '<span style="font-size:11px;color:var(--text-tertiary)">' + ct.connections + ' conn</span>';
+          if (ct.routes && ct.routes.length > 0) h += '<span style="font-size:11px;color:var(--text-quaternary)">' + esc(ct.routes.join(', ')) + '</span>';
+          h += '</div>';
+        }
+      }
+      if (tunnels.tailscale && tunnels.tailscale.self) {
+        var ts = tunnels.tailscale;
+        var tsState = ts.backend_state === 'Running' ? 'var(--green)' : 'var(--red)';
+        h += '<div style="font-size:11px;color:var(--text-quaternary);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.5px">Tailscale ' + esc(ts.version || '') + (ts.tailnet_name ? ' &middot; ' + esc(ts.tailnet_name) : '') + '</div>';
+        var allNodes = [ts.self].concat(ts.peers || []);
+        for (var ni = 0; ni < allNodes.length; ni++) {
+          var nd = allNodes[ni];
+          var ndColor = nd.online ? 'var(--green)' : 'var(--text-quaternary)';
+          h += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">';
+          h += '<span style="width:8px;height:8px;border-radius:50%;background:' + ndColor + ';flex-shrink:0"></span>';
+          h += '<span style="font-weight:600;min-width:80px">' + esc(nd.name) + '</span>';
+          h += '<span style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);min-width:90px">' + esc(nd.ip || '') + '</span>';
+          h += '<span style="font-size:11px;color:var(--text-quaternary)">' + esc(nd.os || '') + '</span>';
+          if (ni === 0) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.15);color:var(--accent)">self</span>';
+          if (nd.exit_node) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(217,119,6,0.15);color:var(--amber)">exit node</span>';
+          h += '</div>';
+        }
+      }
+      h += '</div>';
+    }
+    h += '</div>'; // end section-block tunnels
+
     // ======= Section: Parity =======
     h += '<div class="section-block" data-section="parity">';
     var parity = sn ? sn.parity : null;
     if (parity && parity.history && parity.history.length > 0) {
       h += '<div>';
-      h += '<div class="section-title">Parity History</div>';
+      h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between"><span>Parity History</span><a href="/parity" style="font-size:11px;color:var(--text-quaternary);text-decoration:none;font-weight:400;margin-left:16px;white-space:nowrap">View all &rarr;</a></div>';
       h += '<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px">Status: ' + esc(parity.status || "idle") + '</div>';
-      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden;max-height:200px;overflow-y:auto;scrollbar-width:thin">';
-      h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
-      h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
-      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Date</th>';
-      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Duration</th>';
-      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Speed</th>';
-      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Errors</th></tr>';
-      for (var pi = 0; pi < parity.history.length; pi++) {
-        var pc = parity.history[pi];
-        var errClass = pc.errors > 0 ? "td-crit" : "td-healthy";
-        h += '<tr><td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(pc.date) + '</td>';
-        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(pc.duration_human || "\u2014") + '</td>';
-        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + (pc.speed_mb_s || 0).toFixed(1) + ' MB/s</td>';
-        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)" class="' + errClass + '">' + (pc.errors || 0) + '</td></tr>';
+      h += '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin">';
+      var sorted = parity.history.slice().sort(function(a,b){ return (b.date||"").localeCompare(a.date||""); });
+      for (var pi = 0; pi < sorted.length; pi++) {
+        var pc = sorted[pi];
+        var hasErr = pc.errors > 0;
+        var dur = pc.duration_seconds > 0 ? (pc.duration_seconds >= 3600 ? Math.floor(pc.duration_seconds/3600)+'h '+Math.round((pc.duration_seconds%3600)/60)+'m' : Math.round(pc.duration_seconds/60)+'m') : '\u2014';
+        h += '<a href="/parity" style="text-decoration:none;flex-shrink:0">';
+        h += '<div style="background:var(--bg-panel);border:1px solid '+(hasErr?'var(--red)':'var(--border)')+';border-radius:10px;padding:8px 14px;min-width:120px;cursor:pointer;transition:border-color 0.15s">';
+        h += '<div style="font-size:12px;font-weight:600;color:var(--text-primary)">' + esc(pc.date) + '</div>';
+        h += '<div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">' + dur + ' &middot; ' + (pc.speed_mb_s||0).toFixed(0) + ' MB/s</div>';
+        h += '<div style="font-size:11px;margin-top:2px;font-weight:600;color:'+(hasErr?'var(--red)':'var(--green)')+'">'+( hasErr ? pc.errors+' errors' : 'Clean' )+'</div>';
+        h += '</div></a>';
       }
-      h += '</table>';
-      h += '</div>'; // scroll container
+      h += '</div>';
       h += '</div>';
     } else if (parity && parity.status) {
       h += '<div>';
@@ -819,7 +861,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
 
     // Footer
     h += '<div style="text-align:center;padding:' + 'calc(var(--sp)*4) 0;color:var(--text-quaternary);font-size:12px" class="fade-in">';
-    h += 'NAS Doctor &middot; Auto-refreshes every 30s';
+    h += 'NAS Doctor &middot; Updates when new scan data is available';
     h += '</div>';
 
     document.getElementById("app").innerHTML = h;
@@ -992,6 +1034,11 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       }
     });
   };
+  var _origPollStatus = pollStatus;
+  pollStatus = function() {
+    _origPollStatus();
+    _lastFetchTime = Date.now();
+  };
   setInterval(function() {
     var el = document.getElementById("refresh-ago");
     if (!el || !_lastFetchTime) return;
@@ -1002,7 +1049,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
   }, 1000);
 
   // Initial load — sort bars and swipe are inited inside distributeSections()
-  loadAll().then(startRefresh);
+  loadAll().then(startPoll);
 })();
 </script>
 </body>

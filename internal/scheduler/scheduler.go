@@ -10,7 +10,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -85,6 +88,7 @@ type Scheduler struct {
 	retention     RetentionConfig
 	alerting      AlertingConfig
 	serviceChecks []internal.ServiceCheckConfig
+	lastCheckRun  map[string]time.Time // per-check last execution time
 
 	mu      sync.RWMutex
 	latest  *internal.Snapshot
@@ -121,6 +125,7 @@ func New(
 			DefaultCooldownSec: 900,
 		},
 		serviceChecks: []internal.ServiceCheckConfig{},
+		lastCheckRun:  make(map[string]time.Time),
 		stop:          make(chan struct{}),
 		restart:       make(chan time.Duration, 1),
 	}
@@ -128,15 +133,15 @@ func New(
 
 // Start begins the periodic collection loop. It runs the first collection
 // immediately, then repeats at the configured interval.
+// Also starts an independent service check loop (30s tick) that respects
+// per-check intervals.
 func (s *Scheduler) Start() {
 	s.logger.Info("scheduler starting", "interval", s.interval)
+	// Main diagnostic collection loop
 	go func() {
-		// Run immediately on startup
 		s.RunOnce()
-
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ticker.C:
@@ -150,6 +155,19 @@ func (s *Scheduler) Start() {
 				s.logger.Info("scheduler interval updated", "new_interval", newInterval)
 			case <-s.stop:
 				s.logger.Info("scheduler stopped")
+				return
+			}
+		}
+	}()
+	// Independent service check loop — ticks every 30s, runs due checks
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.runDueServiceChecks()
+			case <-s.stop:
 				return
 			}
 		}
@@ -256,7 +274,7 @@ func (s *Scheduler) RunOnce() {
 		if hostname == "" {
 			hostname = "Unknown"
 		}
-		s.dispatchNotifications(notif, snap.Findings, hostname, snap.Timestamp)
+		s.dispatchNotifications(notif, snap, hostname, snap.Timestamp)
 	}
 
 	// Data lifecycle: prune old data
@@ -687,6 +705,67 @@ func (s *Scheduler) runServiceChecks(now time.Time) ([]internal.ServiceCheckResu
 	return results, nil
 }
 
+const defaultCheckIntervalSec = 300 // 5 minutes
+
+// runDueServiceChecks is called every 30s by the independent service check
+// loop. It checks each configured check's per-check interval and only
+// executes those whose interval has elapsed since their last run.
+func (s *Scheduler) runDueServiceChecks() {
+	s.mu.RLock()
+	checks := make([]internal.ServiceCheckConfig, len(s.serviceChecks))
+	copy(checks, s.serviceChecks)
+	s.mu.RUnlock()
+
+	now := time.Now()
+	var due []internal.ServiceCheckConfig
+	for _, check := range checks {
+		if !check.Enabled {
+			continue
+		}
+		key := serviceCheckKey(check)
+		interval := check.IntervalSec
+		if interval <= 0 {
+			interval = defaultCheckIntervalSec
+		}
+		s.mu.RLock()
+		last, exists := s.lastCheckRun[key]
+		s.mu.RUnlock()
+		if !exists || now.Sub(last) >= time.Duration(interval)*time.Second {
+			due = append(due, check)
+		}
+	}
+	if len(due) == 0 {
+		return
+	}
+
+	results := make([]internal.ServiceCheckResult, 0, len(due))
+	for _, check := range due {
+		result := executeServiceCheck(check, now)
+		key := result.Key
+
+		state, ok, err := s.store.GetLatestServiceCheckState(key)
+		if err != nil {
+			s.logger.Warn("service check state read failed", "check", result.Name, "error", err)
+		}
+		if result.Status == "down" {
+			if ok && state.Status == "down" {
+				result.ConsecutiveFailures = state.ConsecutiveFailures + 1
+			} else {
+				result.ConsecutiveFailures = 1
+			}
+		}
+		results = append(results, result)
+
+		s.mu.Lock()
+		s.lastCheckRun[key] = now
+		s.mu.Unlock()
+	}
+
+	if err := s.store.SaveServiceCheckResults(results); err != nil {
+		s.logger.Warn("failed to save service check results", "error", err)
+	}
+}
+
 func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) internal.ServiceCheckResult {
 	typeName := strings.ToLower(strings.TrimSpace(check.Type))
 	timeoutSec := check.TimeoutSec
@@ -783,6 +862,37 @@ func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) inter
 		_ = conn.Close()
 		result.Status = "up"
 
+	case internal.ServiceCheckPing:
+		host := normalizeDNSHost(check.Target)
+		if host == "" {
+			result.Error = "empty ping target"
+			break
+		}
+		countArg := "-c"
+		timeoutArg := "-W"
+		timeoutVal := fmt.Sprintf("%d", timeoutSec)
+		if runtime.GOOS == "darwin" {
+			timeoutArg = "-t"
+		}
+		cmd := exec.CommandContext(ctx, "ping", countArg, "1", timeoutArg, timeoutVal, host)
+		out, err := cmd.CombinedOutput()
+		result.ResponseMS = time.Since(start).Milliseconds()
+		if err != nil {
+			result.Error = "host unreachable"
+			break
+		}
+		// Parse round-trip time from ping output if available
+		outStr := string(out)
+		if idx := strings.Index(outStr, "time="); idx >= 0 {
+			sub := outStr[idx+5:]
+			if sp := strings.IndexAny(sub, " m\n"); sp > 0 {
+				if ms, parseErr := strconv.ParseFloat(sub[:sp], 64); parseErr == nil {
+					result.ResponseMS = int64(ms)
+				}
+			}
+		}
+		result.Status = "up"
+
 	default:
 		result.Error = "unsupported service check type"
 	}
@@ -798,7 +908,7 @@ func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) inter
 
 func isSupportedServiceCheckType(checkType string) bool {
 	switch strings.ToLower(strings.TrimSpace(checkType)) {
-	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS:
+	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing:
 		return true
 	default:
 		return false
@@ -872,7 +982,8 @@ func serviceCheckKey(check internal.ServiceCheckConfig) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, findings []internal.Finding, hostname string, now time.Time) {
+func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, snap *internal.Snapshot, hostname string, now time.Time) {
+	findings := snap.Findings
 	if notif == nil || len(findings) == 0 {
 		return
 	}
@@ -895,7 +1006,7 @@ func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, findings []i
 	}
 
 	if len(cfg.Policies) == 0 {
-		s.dispatchLegacyNotifications(notif, findings, hostname, now, cfg.DefaultCooldownSec)
+		s.dispatchLegacyNotifications(notif, snap, hostname, now, cfg.DefaultCooldownSec)
 		return
 	}
 
@@ -959,11 +1070,11 @@ func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, findings []i
 	}
 
 	if !matchedPolicy {
-		s.dispatchLegacyNotifications(notif, findings, hostname, now, cfg.DefaultCooldownSec)
+		s.dispatchLegacyNotifications(notif, snap, hostname, now, cfg.DefaultCooldownSec)
 	}
 }
 
-func (s *Scheduler) dispatchLegacyNotifications(notif *notifier.Notifier, findings []internal.Finding, hostname string, now time.Time, defaultCooldownSec int) {
+func (s *Scheduler) dispatchLegacyNotifications(notif *notifier.Notifier, snap *internal.Snapshot, hostname string, now time.Time, defaultCooldownSec int) {
 	if defaultCooldownSec <= 0 {
 		defaultCooldownSec = 900
 	}
@@ -971,7 +1082,7 @@ func (s *Scheduler) dispatchLegacyNotifications(notif *notifier.Notifier, findin
 		if !wh.Enabled {
 			continue
 		}
-		filtered := filterBySeverity(findings, wh.MinLevel)
+		filtered := applyWebhookFilters(wh, snap)
 		if len(filtered) == 0 {
 			continue
 		}
@@ -996,6 +1107,177 @@ func (s *Scheduler) dispatchLegacyNotifications(notif *notifier.Notifier, findin
 			s.logger.Warn("failed to mark alerts notified", "error", err)
 		}
 	}
+}
+
+// applyWebhookFilters evaluates a webhook's filter configuration against the
+// full snapshot. If the webhook has no filters, falls back to legacy MinLevel
+// severity filtering. When filters are set, they control both which findings
+// pass through AND generate synthetic trigger findings from threshold breaches.
+func applyWebhookFilters(wh internal.WebhookConfig, snap *internal.Snapshot) []internal.Finding {
+	if wh.Filters == nil {
+		return filterBySeverity(snap.Findings, wh.MinLevel)
+	}
+	f := wh.Filters
+	var out []internal.Finding
+
+	// ── 1. Filter existing findings by severity + category ──
+	for _, finding := range snap.Findings {
+		if !matchesSeverityFilter(finding.Severity, f.Severities, wh.MinLevel) {
+			continue
+		}
+		if len(f.Categories) > 0 && !containsCategory(f.Categories, finding.Category) {
+			continue
+		}
+		out = append(out, finding)
+	}
+
+	// ── 2. Threshold triggers → synthetic findings ──
+	if f.DiskSpaceBelowPct > 0 {
+		for _, d := range snap.Disks {
+			free := 100.0 - d.UsedPct
+			if free < f.DiskSpaceBelowPct {
+				out = append(out, internal.Finding{
+					ID: "trigger:disk-space:" + d.MountPoint, Severity: internal.SeverityWarning,
+					Category: internal.CategoryDisk, Title: "Disk space low: " + d.MountPoint,
+					Description: fmt.Sprintf("Free space %.1f%% is below threshold %.0f%%", free, f.DiskSpaceBelowPct),
+				})
+			}
+		}
+	}
+	if f.DiskTempAboveC > 0 {
+		for _, s := range snap.SMART {
+			if s.Temperature > f.DiskTempAboveC {
+				out = append(out, internal.Finding{
+					ID: "trigger:disk-temp:" + s.Serial, Severity: internal.SeverityWarning,
+					Category: internal.CategoryThermal, Title: "Disk temperature high: " + s.Device,
+					Description: fmt.Sprintf("%d°C exceeds threshold %d°C", s.Temperature, f.DiskTempAboveC),
+					RelatedDisk: s.Serial,
+				})
+			}
+		}
+	}
+	if f.AvgDiskTempAboveC > 0 && len(snap.SMART) > 0 {
+		var sum int
+		for _, s := range snap.SMART {
+			sum += s.Temperature
+		}
+		avg := sum / len(snap.SMART)
+		if avg > f.AvgDiskTempAboveC {
+			out = append(out, internal.Finding{
+				ID: "trigger:avg-disk-temp", Severity: internal.SeverityWarning,
+				Category: internal.CategoryThermal, Title: "Average disk temperature high",
+				Description: fmt.Sprintf("Average %d°C exceeds threshold %d°C", avg, f.AvgDiskTempAboveC),
+			})
+		}
+	}
+	if f.SmartReallocAbove > 0 {
+		for _, s := range snap.SMART {
+			if s.Reallocated > f.SmartReallocAbove {
+				out = append(out, internal.Finding{
+					ID: "trigger:smart-realloc:" + s.Serial, Severity: internal.SeverityCritical,
+					Category: internal.CategorySMART, Title: "Reallocated sectors high: " + s.Device,
+					Description: fmt.Sprintf("%d reallocated sectors exceeds threshold %d", s.Reallocated, f.SmartReallocAbove),
+					RelatedDisk: s.Serial,
+				})
+			}
+		}
+	}
+
+	// ── 3. Boolean event triggers ──
+	if f.OnSmartFailure {
+		for _, s := range snap.SMART {
+			if !s.HealthPassed {
+				out = append(out, internal.Finding{
+					ID: "trigger:smart-fail:" + s.Serial, Severity: internal.SeverityCritical,
+					Category: internal.CategorySMART, Title: "SMART health check failed: " + s.Device,
+					Description: s.Model + " (S/N: " + s.Serial + ") reports SMART failure",
+					RelatedDisk: s.Serial,
+				})
+			}
+		}
+	}
+	if f.OnServiceDown {
+		for _, sc := range snap.Services {
+			if sc.Status == "down" {
+				if len(f.ServiceCheckNames) > 0 && !containsString(f.ServiceCheckNames, sc.Name) {
+					continue
+				}
+				out = append(out, internal.Finding{
+					ID: "trigger:service-down:" + sc.Key, Severity: internal.SeverityWarning,
+					Category: internal.CategoryService, Title: "Service check down: " + sc.Name,
+					Description: fmt.Sprintf("%s (%s) is down — %s", sc.Target, sc.Type, sc.Error),
+				})
+			}
+		}
+	}
+	if f.OnParityError && snap.Parity != nil {
+		for _, pc := range snap.Parity.History {
+			if pc.Errors > 0 {
+				out = append(out, internal.Finding{
+					ID: "trigger:parity-error:" + pc.Date, Severity: internal.SeverityCritical,
+					Category: internal.CategoryParity, Title: "Parity check errors: " + pc.Date,
+					Description: fmt.Sprintf("%d errors found during parity check", pc.Errors),
+				})
+				break // only trigger for the most recent error
+			}
+		}
+	}
+	if f.OnUPSOnBattery && snap.UPS != nil && snap.UPS.Available && snap.UPS.OnBattery {
+		out = append(out, internal.Finding{
+			ID: "trigger:ups-battery", Severity: internal.SeverityCritical,
+			Category: internal.CategoryUPS, Title: "UPS running on battery",
+			Description: fmt.Sprintf("Battery at %.0f%%, estimated runtime %.0f minutes", snap.UPS.BatteryPct, snap.UPS.RuntimeMins),
+		})
+	}
+	if f.UPSBatteryBelowPct > 0 && snap.UPS != nil && snap.UPS.Available {
+		if snap.UPS.BatteryPct < f.UPSBatteryBelowPct {
+			out = append(out, internal.Finding{
+				ID: "trigger:ups-low-battery", Severity: internal.SeverityCritical,
+				Category: internal.CategoryUPS, Title: "UPS battery critically low",
+				Description: fmt.Sprintf("Battery %.0f%% is below threshold %.0f%%", snap.UPS.BatteryPct, f.UPSBatteryBelowPct),
+			})
+		}
+	}
+	if f.OnUpdateAvailable && snap.Update != nil && snap.Update.UpdateAvailable {
+		out = append(out, internal.Finding{
+			ID: "trigger:update-available", Severity: internal.SeverityInfo,
+			Category: internal.CategorySystem, Title: "Platform update available",
+			Description: fmt.Sprintf("%s → %s", snap.Update.InstalledVersion, snap.Update.LatestVersion),
+		})
+	}
+
+	return out
+}
+
+func matchesSeverityFilter(sev internal.Severity, allowed []internal.Severity, fallback internal.Severity) bool {
+	if len(allowed) == 0 {
+		return severityRank(sev) >= severityRank(fallback)
+	}
+	for _, a := range allowed {
+		if strings.EqualFold(string(sev), string(a)) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsCategory(list []internal.Category, cat internal.Category) bool {
+	for _, c := range list {
+		if strings.EqualFold(string(c), string(cat)) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(list []string, s string) bool {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	for _, item := range list {
+		if strings.ToLower(strings.TrimSpace(item)) == lower {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Scheduler) logSuppressed(notif *notifier.Notifier, findings []internal.Finding, hostname string, cfg AlertingConfig, status string) {

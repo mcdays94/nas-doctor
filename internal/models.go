@@ -48,8 +48,56 @@ type Snapshot struct {
 	ZFS       *ZFSInfo             `json:"zfs,omitempty"`
 	UPS       *UPSInfo             `json:"ups,omitempty"`
 	Update    *UpdateInfo          `json:"update,omitempty"`
+	Tunnels   *TunnelInfo          `json:"tunnels,omitempty"`
 	Services  []ServiceCheckResult `json:"service_checks,omitempty"`
 	Findings  []Finding            `json:"findings"`
+}
+
+// ---------- Tunnels (Cloudflared / Tailscale) ----------
+
+type TunnelInfo struct {
+	Cloudflared *CloudflaredInfo `json:"cloudflared,omitempty"`
+	Tailscale   *TailscaleInfo   `json:"tailscale,omitempty"`
+}
+
+type CloudflaredInfo struct {
+	Installed bool                `json:"installed"`
+	Version   string              `json:"version,omitempty"`
+	Tunnels   []CloudflaredTunnel `json:"tunnels,omitempty"`
+}
+
+type CloudflaredTunnel struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Status      string   `json:"status"` // healthy, degraded, down, inactive
+	CreatedAt   string   `json:"created_at,omitempty"`
+	Connections int      `json:"connections"`
+	Routes      []string `json:"routes,omitempty"` // ingress hostnames
+	OriginIP    string   `json:"origin_ip,omitempty"`
+}
+
+type TailscaleInfo struct {
+	Installed    bool            `json:"installed"`
+	Version      string          `json:"version,omitempty"`
+	BackendState string          `json:"backend_state,omitempty"` // Running, Stopped, NeedsLogin
+	Self         *TailscaleNode  `json:"self,omitempty"`
+	Peers        []TailscaleNode `json:"peers,omitempty"`
+	MagicDNS     bool            `json:"magic_dns,omitempty"`
+	TailnetName  string          `json:"tailnet_name,omitempty"`
+}
+
+type TailscaleNode struct {
+	Name     string   `json:"name"`
+	DNSName  string   `json:"dns_name,omitempty"`
+	IP       string   `json:"ip"`
+	OS       string   `json:"os,omitempty"`
+	Online   bool     `json:"online"`
+	ExitNode bool     `json:"exit_node,omitempty"`
+	Relay    string   `json:"relay,omitempty"` // DERP relay region
+	TxBytes  int64    `json:"tx_bytes,omitempty"`
+	RxBytes  int64    `json:"rx_bytes,omitempty"`
+	LastSeen string   `json:"last_seen,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
 }
 
 // ---------- Service Checks ----------
@@ -60,6 +108,7 @@ const (
 	ServiceCheckDNS  = "dns"
 	ServiceCheckSMB  = "smb"
 	ServiceCheckNFS  = "nfs"
+	ServiceCheckPing = "ping"
 )
 
 type ServiceCheckConfig struct {
@@ -67,6 +116,7 @@ type ServiceCheckConfig struct {
 	Type             string   `json:"type"`
 	Target           string   `json:"target"`
 	Enabled          bool     `json:"enabled"`
+	IntervalSec      int      `json:"interval_sec,omitempty"` // Per-check interval in seconds (default 300 = 5min)
 	TimeoutSec       int      `json:"timeout_sec,omitempty"`
 	Port             int      `json:"port,omitempty"`
 	FailureThreshold int      `json:"failure_threshold,omitempty"`
@@ -400,9 +450,36 @@ type WebhookConfig struct {
 	URL      string            `json:"url"`
 	Type     string            `json:"type"` // discord, slack, gotify, ntfy, generic
 	Enabled  bool              `json:"enabled"`
-	MinLevel Severity          `json:"min_level"` // minimum severity to notify
+	MinLevel Severity          `json:"min_level"` // minimum severity to notify (legacy; overridden by Filters)
 	Headers  map[string]string `json:"headers,omitempty"`
 	Secret   string            `json:"secret,omitempty"` // for HMAC signing
+	Filters  *WebhookFilters   `json:"filters,omitempty"`
+}
+
+// WebhookFilters provides per-webhook granular control over which events
+// trigger a notification. When set, these override MinLevel.
+// Empty slices/zero values mean "disabled" (not "match everything").
+type WebhookFilters struct {
+	// ── Finding filters ──
+	Severities []Severity `json:"severities,omitempty"` // only fire on these severities (empty = use MinLevel fallback)
+	Categories []Category `json:"categories,omitempty"` // only fire on these categories (empty = all)
+
+	// ── Threshold triggers (evaluated against snapshot, 0 = disabled) ──
+	DiskSpaceBelowPct  float64 `json:"disk_space_below_pct,omitempty"`  // any disk free < X%
+	DiskTempAboveC     int     `json:"disk_temp_above_c,omitempty"`     // any single disk > X°C
+	AvgDiskTempAboveC  int     `json:"avg_disk_temp_above_c,omitempty"` // mean of all disks > X°C
+	SmartReallocAbove  int64   `json:"smart_realloc_above,omitempty"`   // any drive reallocated > X
+	UPSBatteryBelowPct float64 `json:"ups_battery_below_pct,omitempty"` // UPS battery < X%
+
+	// ── Boolean event triggers ──
+	OnServiceDown     bool `json:"on_service_down,omitempty"`     // any service check status=down
+	OnParityError     bool `json:"on_parity_error,omitempty"`     // parity check with errors > 0
+	OnSmartFailure    bool `json:"on_smart_failure,omitempty"`    // any drive health_passed=false
+	OnUPSOnBattery    bool `json:"on_ups_on_battery,omitempty"`   // UPS switched to battery
+	OnUpdateAvailable bool `json:"on_update_available,omitempty"` // platform update detected
+
+	// ── Scoped service check filter ──
+	ServiceCheckNames []string `json:"service_check_names,omitempty"` // only these checks (empty = all)
 }
 
 type PrometheusConfig struct {
