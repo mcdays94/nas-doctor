@@ -972,10 +972,15 @@ body {
         html += '</div></div>';
       }
     }
+    var slotToDrive2={};
+    if(_smart&&_smart.length){for(var si2=0;si2<_smart.length;si2++){if(_smart[si2].array_slot)slotToDrive2[_smart[si2].array_slot]=_smart[si2];}}
     if (_disks.length > 0) {
       html += '<div style="margin-top:10px;font-size:11px;color:#808080;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Storage</div>';
       for (var di=0;di<_disks.length;di++){var dk=_disks[di];var p=dk.used_percent||0;
-        html+='<div class="card" style="margin-bottom:4px;padding:8px 14px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px"><span style="font-weight:500">'+escapeHTML(dk.label||dk.mount_point)+'</span><span style="color:#808080">'+(dk.used_gb||0).toFixed(0)+' / '+(dk.total_gb||0).toFixed(0)+' GB ('+p.toFixed(0)+'%)</span></div>';
+        var sLabel=dk.label||dk.mount_point;var smp=dk.mount_point||"";
+        if(smp.indexOf("/mnt/disk")===0){var sn2=smp.replace("/mnt/disk","");var sd2=slotToDrive2["disk"+sn2];if(sd2)sLabel=escapeHTML(sd2.device||"")+" — "+escapeHTML(sd2.model||"");}
+        else if(smp.indexOf("/mnt/cache")===0&&slotToDrive2["cache"]){var cd2=slotToDrive2["cache"];sLabel=escapeHTML(cd2.device||"")+" — "+escapeHTML(cd2.model||"");}
+        html+='<div class="card" style="margin-bottom:4px;padding:8px 14px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px"><span style="font-weight:500">'+sLabel+'</span><span style="color:#808080">'+(dk.used_gb||0).toFixed(0)+' / '+(dk.total_gb||0).toFixed(0)+' GB ('+p.toFixed(0)+'%)</span></div>';
         html+='<div class="disk-bar-track" style="height:4px"><div class="disk-bar-fill color-'+diskBarColor(p)+'" style="width:'+p.toFixed(1)+'%;height:4px"></div></div></div>';
       }
     }
