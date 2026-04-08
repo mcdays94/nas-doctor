@@ -847,21 +847,31 @@ function savePrefs(p) {
   try { localStorage.setItem(SORT_KEY, JSON.stringify(p)); } catch(e) {}
 }
 
-/* Render a pill-bar sort control. opts: { container, options: [{key,label}], active, onSort } */
+/* Parse sort key — "severity" or "severity-rev" */
+function parseSort(s) {
+  if (!s) return { key: "", rev: false };
+  if (s.indexOf("-rev") === s.length - 4) return { key: s.slice(0, -4), rev: true };
+  return { key: s, rev: false };
+}
+
+/* Render a pill-bar sort control. active can be "key" or "key-rev". */
 function renderSortBar(opts) {
+  if (opts.container) opts.container.innerHTML = "";
   var bar = document.createElement("div");
   bar.className = "sort-bar";
+  var parsed = parseSort(opts.active);
   for (var i = 0; i < opts.options.length; i++) {
     var o = opts.options[i];
+    var isActive = o.key === parsed.key;
     var pill = document.createElement("button");
-    pill.className = "sort-pill" + (o.key === opts.active ? " active" : "");
-    pill.textContent = o.label;
+    pill.className = "sort-pill" + (isActive ? " active" : "");
+    var arrow = isActive ? (parsed.rev ? " \u2191" : " \u2193") : "";
+    pill.textContent = o.label + arrow;
     pill.setAttribute("data-sort-key", o.key);
     pill.onclick = (function(key) { return function() {
-      var pills = bar.querySelectorAll(".sort-pill");
-      for (var j = 0; j < pills.length; j++) pills[j].classList.remove("active");
-      this.classList.add("active");
-      opts.onSort(key);
+      var cur = parseSort(opts.active);
+      var next = (cur.key === key && !cur.rev) ? key + "-rev" : key;
+      opts.onSort(next);
     }; })(o.key);
     bar.appendChild(pill);
   }
@@ -869,46 +879,42 @@ function renderSortBar(opts) {
   return bar;
 }
 
-/* Sort findings array in place. Returns sorted array. */
-function sortFindings(findings, key) {
-  if (key === "severity") {
-    findings.sort(function(a, b) { return (SEV_ORDER[a.severity] || 9) - (SEV_ORDER[b.severity] || 9); });
-  } else if (key === "date") {
+/* Sort findings array in place. key can be "severity", "severity-rev", etc. */
+function sortFindings(findings, sortKey) {
+  var p = parseSort(sortKey);
+  var dir = p.rev ? -1 : 1;
+  if (p.key === "severity") {
+    findings.sort(function(a, b) { return dir * ((SEV_ORDER[a.severity] || 9) - (SEV_ORDER[b.severity] || 9)); });
+  } else if (p.key === "date") {
     findings.sort(function(a, b) {
       var da = a.detected_at ? new Date(a.detected_at).getTime() : 0;
       var db = b.detected_at ? new Date(b.detected_at).getTime() : 0;
-      return db - da; // newest first
+      return dir * (db - da);
     });
-  } else if (key === "category") {
+  } else if (p.key === "category") {
     findings.sort(function(a, b) {
       var ca = (a.category || "").toLowerCase();
       var cb = (b.category || "").toLowerCase();
-      return ca < cb ? -1 : ca > cb ? 1 : 0;
+      return dir * (ca < cb ? -1 : ca > cb ? 1 : 0);
     });
   }
   return findings;
 }
 
-/* Sort SMART drives array in place. Returns sorted array. */
-function sortDrives(drives, key) {
-  if (key === "health") {
-    drives.sort(function(a, b) {
-      var ha = a.health_passed ? 1 : 0;
-      var hb = b.health_passed ? 1 : 0;
-      return ha - hb; // failed first
-    });
-  } else if (key === "temp") {
-    drives.sort(function(a, b) { return (b.temperature_c || 0) - (a.temperature_c || 0); }); // hottest first
-  } else if (key === "age") {
-    drives.sort(function(a, b) { return (b.power_on_hours || 0) - (a.power_on_hours || 0); }); // oldest first
-  } else if (key === "size") {
-    drives.sort(function(a, b) { return (b.size_gb || 0) - (a.size_gb || 0); }); // largest first
-  } else if (key === "device") {
-    drives.sort(function(a, b) {
-      var da = (a.device || "").toLowerCase();
-      var db = (b.device || "").toLowerCase();
-      return da < db ? -1 : da > db ? 1 : 0;
-    });
+/* Sort SMART drives array in place. */
+function sortDrives(drives, sortKey) {
+  var p = parseSort(sortKey);
+  var dir = p.rev ? -1 : 1;
+  if (p.key === "health") {
+    drives.sort(function(a, b) { return dir * ((a.health_passed ? 1 : 0) - (b.health_passed ? 1 : 0)); });
+  } else if (p.key === "temp") {
+    drives.sort(function(a, b) { return dir * ((b.temperature_c || 0) - (a.temperature_c || 0)); });
+  } else if (p.key === "age") {
+    drives.sort(function(a, b) { return dir * ((b.power_on_hours || 0) - (a.power_on_hours || 0)); });
+  } else if (p.key === "size") {
+    drives.sort(function(a, b) { return dir * ((b.size_gb || 0) - (a.size_gb || 0)); });
+  } else if (p.key === "device") {
+    drives.sort(function(a, b) { return dir * ((a.device || "").localeCompare(b.device || "")); });
   }
   return drives;
 }
