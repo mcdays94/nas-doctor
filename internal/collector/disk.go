@@ -50,10 +50,13 @@ func collectHostMountDisks() []internal.DiskInfo {
 		}
 		mount := fields[6]
 
-		// Include host-mounted paths under /host/mnt/
-		// Unraid: /host/mnt/disk1, /host/mnt/cache, /host/mnt/user
-		// TrueNAS: /host/mnt/apps, /host/mnt/media, /host/mnt/poolname/dataset
-		if !strings.HasPrefix(mount, "/host/mnt/") {
+		// Include host-mounted paths — platform-aware prefixes:
+		//   Unraid:   /host/mnt/disk1, /host/mnt/cache, /host/mnt/user
+		//   TrueNAS:  /host/mnt/apps, /host/mnt/media, /host/mnt/poolname/dataset
+		//   Synology: /host/volume1, /host/volume2
+		isHostMount := strings.HasPrefix(mount, "/host/mnt/") ||
+			strings.HasPrefix(mount, "/host/volume")
+		if !isHostMount {
 			continue
 		}
 

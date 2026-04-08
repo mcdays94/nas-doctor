@@ -331,8 +331,12 @@ func resolveATAPort(device string) string {
 	return ""
 }
 
-// resolveArraySlot maps /dev/sdX to its Unraid array slot via mdstat or emhttp.
+// resolveArraySlot maps /dev/sdX to its Unraid array slot via emhttp.
+// Only reads Unraid-specific files when running on Unraid.
 func resolveArraySlot(device string) string {
+	if !GetPlatform().IsUnraid() {
+		return ""
+	}
 	// Check Unraid's emhttp disk assignments
 	data, err := os.ReadFile("/var/local/emhttp/disks.ini")
 	if err != nil {
