@@ -1222,9 +1222,12 @@ td.mono {
       html += " &middot; <strong>Scan in progress...</strong>";
     }
     html += "</div>";
+    html += "<div style=\"display:flex;gap:8px;align-items:center\">";
+    html += "<a href=\"/api/v1/report\" target=\"_blank\" class=\"btn btn-secondary\" style=\"text-decoration:none;font-size:12px\">Export Report</a>";
     html += "<button class=\"btn btn-primary" + (status.scan_running ? " scanning" : "") + "\" id=\"scanBtn\" onclick=\"window._triggerScan()\"";
     if (status.scan_running) html += " disabled";
     html += ">" + (status.scan_running ? "Scanning..." : "Run Scan") + "</button>";
+    html += "</div>";
     html += "</div>";
     html += "</div>";
 
