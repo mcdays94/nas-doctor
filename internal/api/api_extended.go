@@ -40,14 +40,15 @@ type Settings struct {
 // DashboardSections controls which sections appear on the dashboard.
 // All default to true (visible). Users can hide sections they don't use.
 type DashboardSections struct {
-	Findings  bool `json:"findings"`
-	DiskSpace bool `json:"disk_space"`
-	SMART     bool `json:"smart"`
-	Docker    bool `json:"docker"`
-	ZFS       bool `json:"zfs"`
-	UPS       bool `json:"ups"`
-	Parity    bool `json:"parity"`
-	Network   bool `json:"network"`
+	Findings     bool `json:"findings"`
+	DiskSpace    bool `json:"disk_space"`
+	SMART        bool `json:"smart"`
+	Docker       bool `json:"docker"`
+	ZFS          bool `json:"zfs"`
+	UPS          bool `json:"ups"`
+	Parity       bool `json:"parity"`
+	Network      bool `json:"network"`
+	MergedDrives bool `json:"merged_drives"` // Combine SMART + storage into one card per drive
 }
 
 // BackupSettings controls automatic backup of the application database.
@@ -132,14 +133,15 @@ func defaultSettings() Settings {
 			IntervalH: 168, // weekly
 		},
 		Sections: DashboardSections{
-			Findings:  true,
-			DiskSpace: true,
-			SMART:     true,
-			Docker:    true,
-			ZFS:       true,
-			UPS:       true,
-			Parity:    true,
-			Network:   true,
+			Findings:     true,
+			DiskSpace:    true,
+			SMART:        true,
+			Docker:       true,
+			ZFS:          true,
+			UPS:          true,
+			Parity:       true,
+			Network:      true,
+			MergedDrives: false,
 		},
 	}
 }

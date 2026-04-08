@@ -533,6 +533,9 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div class="toggle-wrap"><div class="toggle on" id="sec-ups" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">UPS / Power</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-parity" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Parity (Unraid)</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-network" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Network</span></div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div class="toggle-wrap"><div class="toggle" id="sec-merged-drives" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Drive View <span style="font-size:11px;color:var(--text2)">(combine SMART + storage into one card per drive)</span></span></div>
+      </div>
     </div>
   </div>
 
@@ -831,6 +834,7 @@ function loadSettings() {
       setSecToggle("sec-ups", sec.ups);
       setSecToggle("sec-parity", sec.parity);
       setSecToggle("sec-network", sec.network);
+      setSecToggle("sec-merged-drives", sec.merged_drives);
       document.getElementById("backup-path").value = bk.path || "";
       document.getElementById("backup-keep").value = bk.keep_count || 4;
       setBackupIntervalUI(bk.interval_hours || 168);
@@ -891,7 +895,8 @@ function buildSettingsPayload() {
       zfs: document.getElementById("sec-zfs").classList.contains("on"),
       ups: document.getElementById("sec-ups").classList.contains("on"),
       parity: document.getElementById("sec-parity").classList.contains("on"),
-      network: document.getElementById("sec-network").classList.contains("on")
+      network: document.getElementById("sec-network").classList.contains("on"),
+      merged_drives: document.getElementById("sec-merged-drives").classList.contains("on")
     },
     backup: {
       enabled: document.getElementById("backup-toggle").classList.contains("on"),
