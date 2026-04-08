@@ -31,7 +31,7 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 - **System**: CPU, memory, load average, I/O wait, uptime, platform detection
 - **Docker**: Container listing with status and uptime
 - **ZFS Pool Health**: Pool state, vdev tree, scrub/resilver status, ARC hit rate, fragmentation, dataset listing with compression ratios
-- **UPS / Power**: Battery level, load, runtime, wattage via NUT or apcupsd — with critical alerts for on-battery and low-battery events
+- **UPS / Power**: Battery level, load, runtime, wattage via NUT or apcupsd (local or remote) — with critical alerts for on-battery and low-battery events
 - **Network**: Interface speed negotiation, state, MTU
 - **Logs**: Filtered dmesg and syslog errors (ATA errors, I/O errors, medium errors)
 - **Parity** (Unraid): Historical parity check speed trend analysis, error tracking
@@ -53,15 +53,43 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 
 ### Export Reports
 
-Click **Export Report** in the dashboard to generate a professional, print-ready diagnostic report styled after the CF Workers Design System. Open in your browser and Print → Save as PDF.
+Click **Export Report** on the dashboard to generate a professional, print-ready diagnostic report. Open in your browser and Print -> Save as PDF.
 
 <p>
   <img src="screenshots/report-cover.jpg" alt="Report Cover Page" width="420">
 </p>
 
+### Alerts & Incident Management
+
+Dedicated `/alerts` page with:
+- **Active Alerts** — acknowledge, snooze, unsnooze with full lifecycle timeline per alert
+- **Incident Timeline & Correlation** — correlate alerts against CPU, memory, I/O wait, and disk temperature over selectable windows (24h/7d/30d)
+- **Predictive Trend Intelligence** — worsening-pattern detection for SMART counters with urgency scoring, confidence levels, and parity risk markers
+- **Notification History** — webhook delivery log with status, error details, and auto-refresh
+- **Draggable cards** — reorder, collapse, and toggle card visibility with layout persistence
+
+### Service Checks
+
+Built-in uptime monitoring for your infrastructure:
+- **HTTP/HTTPS** checks with status code and response time
+- **TCP** port checks
+- **DNS** resolution checks
+- **SMB/NFS** share availability checks
+- Configurable intervals, timeouts, and expected responses
+- Historical results with latency tracking
+
+### Notification Policies
+
+Fine-grained alert routing configured from the Settings UI:
+- **Notification Policies** — route alerts to specific webhooks by severity, category, and hostname with per-policy cooldowns
+- **Quiet Hours** — suppress notifications during a daily time window (alerts still recorded)
+- **Maintenance Windows** — scheduled suppression periods per hostname
+- **Default Cooldown** — global deduplication window for repeated alerts
+- **Webhook Custom Headers** — add custom HTTP headers to any webhook
+
 ### Multi-Server Fleet Monitoring
 
-Monitor all your NAS Doctor instances from one dashboard. Go to `/fleet` to see an aggregated view of all servers with health status, finding counts, and direct links.
+Monitor all your NAS Doctor instances from one dashboard. Go to `/fleet` to see an aggregated view of all servers with health status, finding counts, and direct links. Supports optional API key authentication per server.
 
 ### Integrations
 
@@ -181,7 +209,7 @@ go build -o nas-doctor ./cmd/nas-doctor
 
 ## Themes
 
-NAS Doctor ships with 3 dashboard themes. Switch between them from the nav bar.
+NAS Doctor ships with 3 dashboard themes. Switch between them from Settings.
 
 | Theme | Description |
 |---|---|
@@ -201,15 +229,16 @@ NAS Doctor ships with 3 dashboard themes. Switch between them from the nav bar.
 
 ## Settings
 
-All configurable from the web UI at `/settings`:
+All configurable from the web UI at `/settings`, organized with a sticky section nav:
 
-- **Scan Interval**: Preset frequencies or custom (days/hours/minutes/seconds with cron preview)
-- **Theme**: Midnight, Clean, or Ember — settings page inherits the active theme
-- **Webhooks**: Add/remove/test Discord, Slack, Gotify, Ntfy, or generic HTTP webhooks
-- **Data Lifecycle**: Snapshot retention days, max DB size cap, notification log retention
-- **Automatic Backup**: Scheduled DB backups with configurable location and retention
-- **Dashboard Sections**: Toggle visibility of individual sections (SMART, Docker, ZFS, UPS, etc.)
-- **Fleet Monitoring**: Add/remove remote NAS Doctor instances for multi-server monitoring
+- **General**: Scan interval (preset or custom with cron preview), theme selection, app icon
+- **Webhooks**: Add/remove/test Discord, Slack, Gotify, Ntfy, or generic HTTP webhooks with optional custom headers and HMAC signing
+- **Notification Behavior**: Default cooldown, quiet hours (timezone-aware), maintenance windows, notification policies with per-webhook routing rules
+- **Service Checks**: HTTP, TCP, DNS, SMB/NFS uptime monitoring with configurable intervals
+- **Fleet**: Add/remove remote NAS Doctor instances with optional API key auth
+- **Dashboard Sections**: Toggle visibility of individual sections (SMART, Docker, ZFS, UPS, Parity, Network, etc.)
+- **Data & Retention**: Snapshot retention days, max DB size cap, notification log retention
+- **Backup**: Scheduled DB backups with configurable location, interval, and retention count
 - **Log Forwarding**: Forward scan results to external logging endpoints (coming soon)
 
 ### Environment Variables
@@ -219,6 +248,9 @@ All configurable from the web UI at `/settings`:
 | `NAS_DOCTOR_LISTEN` | `:8060` | HTTP listen address |
 | `NAS_DOCTOR_DATA` | `/data` | SQLite database directory |
 | `NAS_DOCTOR_INTERVAL` | `6h` | Diagnostic scan interval |
+| `NAS_DOCTOR_UPS_NAME` | (auto-detect) | NUT UPS name (skip auto-detect from `upsc -l`) |
+| `NAS_DOCTOR_NUT_HOST` | (local) | Remote NUT server host (queries `upsname@host`) |
+| `NAS_DOCTOR_APCUPSD_HOST` | (local) | Remote apcupsd daemon `host:port` |
 | `TZ` | `UTC` | Timezone |
 
 ---
@@ -235,11 +267,32 @@ All configurable from the web UI at `/settings`:
 | `/api/v1/scan` | POST | Trigger immediate diagnostic scan |
 | `/api/v1/report` | GET | Generate print-ready HTML diagnostic report |
 | `/api/v1/settings` | GET/PUT | Read/write application settings |
+| `/api/v1/settings/test-webhook` | POST | Send test notification to a webhook |
 | `/api/v1/sparklines` | GET | Condensed system + SMART history for charts |
+| `/api/v1/history/system` | GET | System metrics history (CPU, memory, I/O) |
+| `/api/v1/disks` | GET | List all drives with SMART data |
+| `/api/v1/disks/{serial}` | GET | Per-drive detail with full SMART history |
+| `/api/v1/alerts` | GET | List alerts (filterable by status) |
+| `/api/v1/alerts/{id}` | GET | Get single alert detail |
+| `/api/v1/alerts/{id}/events` | GET | Alert lifecycle timeline events |
+| `/api/v1/alerts/{id}/ack` | POST | Acknowledge an alert |
+| `/api/v1/alerts/{id}/unack` | POST | Unacknowledge an alert |
+| `/api/v1/alerts/{id}/snooze` | POST | Snooze an alert (with `until` timestamp) |
+| `/api/v1/alerts/{id}/unsnooze` | POST | Unsnooze an alert |
+| `/api/v1/incidents/timeline` | GET | Incident timeline with system metrics overlay |
+| `/api/v1/incidents/correlation` | GET | Alert correlation (before/during/after metrics) |
+| `/api/v1/smart/trends` | GET | SMART degradation trends with risk scoring |
+| `/api/v1/notifications/log` | GET | Webhook delivery history |
+| `/api/v1/service-checks` | GET | Latest service check results |
+| `/api/v1/service-checks/history` | GET | Service check result history |
+| `/api/v1/service-checks/run` | POST | Trigger service checks immediately |
+| `/api/v1/findings/dismiss` | POST | Dismiss a finding from the dashboard |
+| `/api/v1/findings/restore` | POST | Restore a dismissed finding |
 | `/api/v1/db/stats` | GET | Database size and row counts |
 | `/api/v1/backup` | GET/POST | List or trigger database backup |
 | `/api/v1/fleet` | GET | Aggregated status of all remote servers |
 | `/api/v1/fleet/servers` | GET/PUT | Manage remote server list |
+| `/api/v1/fleet/test` | POST | Test connectivity to a remote server |
 | `/metrics` | GET | Prometheus metrics endpoint |
 
 ---
