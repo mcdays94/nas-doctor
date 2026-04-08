@@ -225,6 +225,17 @@ NAS Doctor ships with 3 dashboard themes. Switch between them from Settings.
   <img src="screenshots/ember-top.jpg" alt="Ember" width="380">
 </p>
 
+### More Pages
+
+<p>
+  <img src="screenshots/alerts-page.jpg" alt="Alerts Page" width="380">
+  <img src="screenshots/settings-page.jpg" alt="Settings Page" width="380">
+</p>
+<p>
+  <img src="screenshots/stats-page.jpg" alt="Stats Page" width="380">
+  <img src="screenshots/fleet-page.jpg" alt="Fleet Page" width="380">
+</p>
+
 ---
 
 ## Settings
