@@ -250,6 +250,23 @@ body {
   min-height: 0;
 }
 
+/* Section drag-to-reorder */
+.section-title-row{display:flex;align-items:center;gap:6px}
+.section-drag-handle{
+  width:16px;height:16px;display:flex;align-items:center;justify-content:center;
+  cursor:grab;opacity:0;transition:opacity 0.15s;color:#b3b3b3;
+  border-radius:3px;flex-shrink:0;margin-left:-2px;
+}
+.section-block:hover .section-drag-handle{opacity:0.35}
+.section-drag-handle:hover{opacity:1 !important;background:rgba(0,0,0,0.04)}
+.section-drag-handle:active{cursor:grabbing}
+.section-block.dragging{opacity:0.35;transition:opacity 0.15s}
+.section-drop-placeholder{
+  border:2px dashed #171717;border-radius:8px;
+  margin-bottom:20px;opacity:0.2;background:rgba(0,0,0,0.02);
+  transition:height 0.15s ease;
+}
+
 @media (max-width: 900px) {
   .two-col {
     grid-template-columns: 1fr;
@@ -1206,19 +1223,14 @@ body {
     var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "parity": sec.parity !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
-    var items = [];
-    for (var i = 0; i < blocks.length; i++) {
-      var name = blocks[i].getAttribute("data-section");
-      if (sectionMap[name] === false) continue;
-      if (blocks[i].offsetHeight < 10) continue;
-      items.push({ el: blocks[i], h: blocks[i].offsetHeight });
-    }
-    var leftH = 0, rightH = 0;
-    for (var j = 0; j < items.length; j++) {
-      if (leftH <= rightH) { colL.appendChild(items[j].el); leftH += items[j].h; }
-      else { colR.appendChild(items[j].el); rightH += items[j].h; }
+    var blockMap={};var visibleItems=[];
+    for(var i=0;i<blocks.length;i++){var name=blocks[i].getAttribute("data-section");if(sectionMap[name]===false)continue;if(blocks[i].offsetHeight<10)continue;blockMap[name]=blocks[i];visibleItems.push({el:blocks[i],name:name,h:blocks[i].offsetHeight});}
+    if (!window.NasDrag || !NasDrag.applySavedOrder(blockMap, visibleItems, colL, colR)) {
+      var leftH=0,rightH=0;
+      for(var j=0;j<visibleItems.length;j++){if(leftH<=rightH){colL.appendChild(visibleItems[j].el);leftH+=visibleItems[j].h;}else{colR.appendChild(visibleItems[j].el);rightH+=visibleItems[j].h;}}
     }
     staging.parentNode.removeChild(staging);
+    if (window.NasDrag) NasDrag.init();
   }
 
   function _renderSparklines(snapshot) {
