@@ -718,4 +718,233 @@ window.NasDrag = {
   applySavedOrder: applySavedOrder
 };
 })();
+
+/* ================================================================
+   NasSwipe — Swipe-to-dismiss for finding cards (touch + mouse).
+   Swipe left to reveal dismiss action; release past threshold to dismiss.
+   ================================================================ */
+(function(){
+"use strict";
+
+var THRESHOLD = 0.3;
+var active = null;
+
+function init() {
+  var list = document.querySelector(".findings-list");
+  if (!list) return;
+  list.addEventListener("touchstart", onStart, { passive: true });
+  list.addEventListener("mousedown", onStart, false);
+}
+
+function onStart(e) {
+  var finding = e.target.closest(".finding");
+  if (!finding) return;
+  if (e.target.closest("a") || e.target.closest("button")) return;
+
+  var pt = getPoint(e);
+  var rect = finding.getBoundingClientRect();
+
+  active = { el: finding, startX: pt.x, startY: pt.y, width: rect.width, dismissed: false, locked: false };
+
+  if (!finding.querySelector(".swipe-dismiss-bg")) {
+    var bg = document.createElement("div");
+    bg.className = "swipe-dismiss-bg";
+    bg.textContent = "Dismiss";
+    finding.appendChild(bg);
+  }
+  finding.style.transition = "none";
+
+  document.addEventListener("touchmove", onMove, { passive: false });
+  document.addEventListener("mousemove", onMove, false);
+  document.addEventListener("touchend", onEnd, false);
+  document.addEventListener("mouseup", onEnd, false);
+}
+
+function onMove(e) {
+  if (!active) return;
+  var pt = getPoint(e);
+  var dx = pt.x - active.startX;
+  var dy = pt.y - active.startY;
+
+  if (!active.locked && Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 8) {
+    resetCard(); cleanup(); return;
+  }
+  active.locked = true;
+  if (dx > 0) dx = 0;
+  if (dx === 0) return;
+  e.preventDefault();
+
+  var pct = Math.abs(dx) / active.width;
+  active.el.style.transform = "translateX(" + dx + "px)";
+  var bg = active.el.querySelector(".swipe-dismiss-bg");
+  if (bg) bg.style.opacity = String(Math.min(1, pct / THRESHOLD));
+  active.dismissed = pct >= THRESHOLD;
+}
+
+function onEnd() {
+  if (!active) return;
+  var el = active.el;
+
+  if (active.dismissed) {
+    el.style.transition = "transform 0.25s ease, opacity 0.25s ease";
+    el.style.transform = "translateX(-100%)";
+    el.style.opacity = "0";
+    var title = "";
+    var titleEl = el.querySelector(".finding-title");
+    if (titleEl) title = titleEl.textContent;
+    setTimeout(function() {
+      el.style.height = el.offsetHeight + "px";
+      el.offsetHeight; /* force reflow */
+      el.style.transition = "height 0.2s ease, margin 0.2s ease, padding 0.2s ease, opacity 0.2s ease";
+      el.style.height = "0"; el.style.marginBottom = "0"; el.style.paddingTop = "0"; el.style.paddingBottom = "0";
+      setTimeout(function() { el.remove(); }, 220);
+      if (title && window._dismissFinding) window._dismissFinding(title, true);
+    }, 260);
+  } else {
+    resetCard();
+  }
+  cleanup();
+}
+
+function resetCard() {
+  if (!active) return;
+  active.el.style.transition = "transform 0.2s ease";
+  active.el.style.transform = "";
+  var bg = active.el.querySelector(".swipe-dismiss-bg");
+  if (bg) bg.style.opacity = "0";
+}
+
+function cleanup() {
+  document.removeEventListener("touchmove", onMove, false);
+  document.removeEventListener("mousemove", onMove, false);
+  document.removeEventListener("touchend", onEnd, false);
+  document.removeEventListener("mouseup", onEnd, false);
+  active = null;
+}
+
+function getPoint(e) {
+  if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  return { x: e.clientX, y: e.clientY };
+}
+
+window.NasSwipe = { init: init };
+})();
+
+/* ================================================================
+   NasSort — Sort controls for findings and drives.
+   Renders a compact pill-bar of sort options that re-sort DOM elements.
+   ================================================================ */
+(function(){
+"use strict";
+
+var SEV_ORDER = { critical: 0, warning: 1, info: 2, ok: 3 };
+var SORT_KEY = "nas-doctor-sort-prefs";
+
+function getPrefs() {
+  try { var r = localStorage.getItem(SORT_KEY); return r ? JSON.parse(r) : {}; } catch(e) { return {}; }
+}
+function savePrefs(p) {
+  try { localStorage.setItem(SORT_KEY, JSON.stringify(p)); } catch(e) {}
+}
+
+/* Parse sort key — "severity" or "severity-rev" */
+function parseSort(s) {
+  if (!s) return { key: "", rev: false };
+  if (s.indexOf("-rev") === s.length - 4) return { key: s.slice(0, -4), rev: true };
+  return { key: s, rev: false };
+}
+
+/* Render a pill-bar sort control. active can be "key" or "key-rev". */
+function renderSortBar(opts) {
+  if (opts.container) opts.container.innerHTML = "";
+  var bar = document.createElement("div");
+  bar.className = "sort-bar";
+  var parsed = parseSort(opts.active);
+  for (var i = 0; i < opts.options.length; i++) {
+    var o = opts.options[i];
+    var isActive = o.key === parsed.key;
+    var pill = document.createElement("button");
+    pill.className = "sort-pill" + (isActive ? " active" : "");
+    var arrow = isActive ? (parsed.rev ? " \u2191" : " \u2193") : "";
+    pill.textContent = o.label + arrow;
+    pill.setAttribute("data-sort-key", o.key);
+    pill.onclick = (function(key) { return function() {
+      var cur = parseSort(opts.active);
+      var next = (cur.key === key && !cur.rev) ? key + "-rev" : key;
+      opts.onSort(next);
+    }; })(o.key);
+    bar.appendChild(pill);
+  }
+  if (opts.container) opts.container.appendChild(bar);
+  return bar;
+}
+
+/* Sort findings array in place. key can be "severity", "severity-rev", etc. */
+function sortFindings(findings, sortKey) {
+  var p = parseSort(sortKey);
+  var dir = p.rev ? -1 : 1;
+  if (p.key === "severity") {
+    findings.sort(function(a, b) { return dir * ((SEV_ORDER[a.severity] || 9) - (SEV_ORDER[b.severity] || 9)); });
+  } else if (p.key === "date") {
+    findings.sort(function(a, b) {
+      var da = a.detected_at ? new Date(a.detected_at).getTime() : 0;
+      var db = b.detected_at ? new Date(b.detected_at).getTime() : 0;
+      return dir * (db - da);
+    });
+  } else if (p.key === "category") {
+    findings.sort(function(a, b) {
+      var ca = (a.category || "").toLowerCase();
+      var cb = (b.category || "").toLowerCase();
+      return dir * (ca < cb ? -1 : ca > cb ? 1 : 0);
+    });
+  }
+  return findings;
+}
+
+/* Sort SMART drives array in place. */
+function sortDrives(drives, sortKey) {
+  var p = parseSort(sortKey);
+  var dir = p.rev ? -1 : 1;
+  if (p.key === "health") {
+    drives.sort(function(a, b) { return dir * ((a.health_passed ? 1 : 0) - (b.health_passed ? 1 : 0)); });
+  } else if (p.key === "temp") {
+    drives.sort(function(a, b) { return dir * ((b.temperature_c || 0) - (a.temperature_c || 0)); });
+  } else if (p.key === "age") {
+    drives.sort(function(a, b) { return dir * ((b.power_on_hours || 0) - (a.power_on_hours || 0)); });
+  } else if (p.key === "size") {
+    drives.sort(function(a, b) { return dir * ((b.size_gb || 0) - (a.size_gb || 0)); });
+  } else if (p.key === "device") {
+    drives.sort(function(a, b) { return dir * ((a.device || "").localeCompare(b.device || "")); });
+  }
+  return drives;
+}
+
+/* Sort storage disks. */
+function sortStorage(disks, key) {
+  if (key === "usage") {
+    disks.sort(function(a, b) { return (b.used_percent || 0) - (a.used_percent || 0); }); // fullest first
+  } else if (key === "free") {
+    disks.sort(function(a, b) { return (a.free_gb || 0) - (b.free_gb || 0); }); // least free first
+  } else if (key === "size") {
+    disks.sort(function(a, b) { return (b.total_gb || 0) - (a.total_gb || 0); }); // largest first
+  } else if (key === "name") {
+    disks.sort(function(a, b) {
+      var na = (a.label || a.mount_point || "").toLowerCase();
+      var nb = (b.label || b.mount_point || "").toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+  }
+  return disks;
+}
+
+window.NasSort = {
+  renderSortBar: renderSortBar,
+  sortFindings: sortFindings,
+  sortDrives: sortDrives,
+  sortStorage: sortStorage,
+  getPrefs: getPrefs,
+  savePrefs: savePrefs,
+  SEV_ORDER: SEV_ORDER
+};
+})();
 `

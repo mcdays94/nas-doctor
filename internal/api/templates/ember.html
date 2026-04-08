@@ -986,6 +986,7 @@ td.mono {
   var _cachedStatus = null;
   var _lastScanTime = null;
   var _fastUntil = 0;
+  window._findingSevFilter = null;
 
   function _computeRefreshMs(secs) {
     if (!secs || secs <= 0) return 300000;
@@ -1256,12 +1257,31 @@ td.mono {
     html += "<div class=\"section\" style=\"margin-top:0\">";
     html += "<div class=\"section-title\">Findings</div>";
     if (snapshot && snapshot.findings && snapshot.findings.length > 0) {
-      html += "<div class=\"findings-list\">";
       var _dismissed = (_cachedStatus && _cachedStatus.dismissed_findings) ? _cachedStatus.dismissed_findings : [];
-      var findings = snapshot.findings.filter(function(f) { return _dismissed.indexOf(f.title) === -1; }).sort(function(a, b) {
+      var findings = snapshot.findings.filter(function(f) { return _dismissed.indexOf(f.title) === -1; });
+      var sortPref = (window.NasSort ? NasSort.getPrefs().findings : null) || "severity";
+      if (window.NasSort) NasSort.sortFindings(findings, sortPref);
+      else findings.sort(function(a, b) {
         var order = { critical: 0, warning: 1, info: 2, ok: 3 };
         return (order[a.severity] || 3) - (order[b.severity] || 3);
       });
+
+      /* Severity count badges (clickable to filter) */
+      var sevCounts = { critical: 0, warning: 0, info: 0 };
+      for (var fc = 0; fc < findings.length; fc++) { var sv = findings[fc].severity; if (sevCounts[sv] !== undefined) sevCounts[sv]++; }
+      var _activeSevF = window._findingSevFilter;
+      html += "<div style=\"display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap\">";
+      html += "<div id=\"findings-sort-mount\"></div>";
+      if (sevCounts.critical > 0) html += "<span onclick=\"window._filterFindings('critical')\" style=\"cursor:pointer;font-size:10px;font-weight:600;color:var(--red);background:rgba(255,99,99," + (_activeSevF === "critical" ? "0.3" : "0.12") + ");padding:1px 6px;border-radius:4px" + (_activeSevF === "critical" ? ";box-shadow:0 0 0 1px var(--red)" : "") + "\">" + sevCounts.critical + " critical</span>";
+      if (sevCounts.warning > 0) html += "<span onclick=\"window._filterFindings('warning')\" style=\"cursor:pointer;font-size:10px;font-weight:600;color:var(--yellow);background:rgba(255,188,51," + (_activeSevF === "warning" ? "0.3" : "0.12") + ");padding:1px 6px;border-radius:4px" + (_activeSevF === "warning" ? ";box-shadow:0 0 0 1px var(--yellow)" : "") + "\">" + sevCounts.warning + " warning</span>";
+      if (sevCounts.info > 0) html += "<span onclick=\"window._filterFindings('info')\" style=\"cursor:pointer;font-size:10px;font-weight:600;color:var(--blue);background:rgba(85,179,255," + (_activeSevF === "info" ? "0.3" : "0.12") + ");padding:1px 6px;border-radius:4px" + (_activeSevF === "info" ? ";box-shadow:0 0 0 1px var(--blue)" : "") + "\">" + sevCounts.info + " info</span>";
+      if (_activeSevF) html += "<span onclick=\"window._filterFindings(null)\" style=\"cursor:pointer;font-size:10px;font-weight:500;color:var(--text-tertiary);background:var(--surface-200);padding:1px 6px;border-radius:4px\">Clear</span>";
+      html += "</div>";
+
+      /* Apply severity filter */
+      if (_activeSevF) { findings = findings.filter(function(ff) { return ff.severity === _activeSevF; }); }
+
+      html += "<div class=\"findings-list\">";
       for (var i = 0; i < findings.length; i++) {
         var f = findings[i];
         var fid = "finding-" + i;
@@ -1328,9 +1348,50 @@ td.mono {
     /* ==== Section: Drives (SMART-centric like Scrutiny) ==== */
     html += "<div class=\"section-block\" data-section=\"drives\">";
     html += "<div class=\"section\" style=\"margin-top:0\">";
-    html += "<div class=\"section-title\">Drives</div>";
     var _sm = (snapshot && snapshot.smart) ? snapshot.smart : [];
     var _dk = (snapshot && snapshot.disks) ? snapshot.disks : [];
+
+    /* Drive health summary */
+    var _hlOkC = 0, _hlWarnC = 0, _hlCritC = 0;
+    for (var hc = 0; hc < _sm.length; hc++) {
+      if (!_sm[hc].health_passed) _hlCritC++;
+      else if ((_sm[hc].temperature_c || 0) >= 50 || _sm[hc].reallocated_sectors > 0 || _sm[hc].pending_sectors > 0) _hlWarnC++;
+      else _hlOkC++;
+    }
+    html += "<div class=\"section-title\">Drives (" + (_sm.length || _dk.length) + ")";
+    if (_hlOkC > 0) html += " <span style=\"font-size:10px;font-weight:600;color:var(--green);background:rgba(95,201,146,0.12);padding:1px 6px;border-radius:4px;margin-left:4px\">" + _hlOkC + " ok</span>";
+    if (_hlWarnC > 0) html += " <span style=\"font-size:10px;font-weight:600;color:var(--yellow);background:rgba(255,188,51,0.12);padding:1px 6px;border-radius:4px;margin-left:4px\">" + _hlWarnC + " warn</span>";
+    if (_hlCritC > 0) html += " <span style=\"font-size:10px;font-weight:600;color:var(--red);background:rgba(255,99,99,0.12);padding:1px 6px;border-radius:4px;margin-left:4px\">" + _hlCritC + " fail</span>";
+    html += "</div>";
+
+    /* Sort drives */
+    var _driveSortPref = (window.NasSort ? NasSort.getPrefs().drives : null) || "device";
+    if (window.NasSort) NasSort.sortDrives(_sm, _driveSortPref);
+    html += "<div id=\"drives-sort-mount\" style=\"margin-bottom:8px\"></div>";
+
+    /* Build slot-to-drive and device-to-storage maps */
+    var slotToDrive2 = {};
+    if (_sm && _sm.length) { for (var si2 = 0; si2 < _sm.length; si2++) { if (_sm[si2].array_slot) slotToDrive2[_sm[si2].array_slot] = _sm[si2]; } }
+    var deviceToStorage = {};
+    for (var dm = 0; dm < _dk.length; dm++) {
+      var dmp = _dk[dm].mount_point || "";
+      if (dmp.indexOf("/mnt/disk") === 0) {
+        var sn2 = dmp.replace("/mnt/disk", "");
+        var sdx = slotToDrive2["disk" + sn2];
+        if (sdx) deviceToStorage[sdx.device] = _dk[dm];
+      } else if (dmp.indexOf("/mnt/cache") === 0 && slotToDrive2["cache"]) {
+        deviceToStorage[slotToDrive2["cache"].device] = _dk[dm];
+      } else if (dmp.indexOf("/volume") === 0) {
+        for (var sx = 0; sx < _sm.length; sx++) {
+          if (!deviceToStorage[_sm[sx].device] && Math.abs((_sm[sx].size_gb || 0) - (_dk[dm].total_gb || 0)) < 100) {
+            deviceToStorage[_sm[sx].device] = _dk[dm];
+            break;
+          }
+        }
+      }
+    }
+    var mergedView = (_cachedStatus && _cachedStatus.sections && _cachedStatus.sections.merged_drives);
+
     if (_sm.length > 0) {
       for (var si=0;si<_sm.length;si++) {
         var sm = _sm[si];
@@ -1351,17 +1412,31 @@ td.mono {
         if(!hlOk)html+="<span style=\"font-size:10px;font-weight:600;color:var(--red);background:rgba(255,99,99,0.1);padding:1px 6px;border-radius:9999px\">FAIL</span>";
         if(sm.reallocated_sectors>0)html+="<span style=\"font-size:10px;color:#FACC15;background:rgba(250,204,21,0.1);padding:1px 6px;border-radius:9999px\">"+sm.reallocated_sectors+" realloc</span>";
         if(sm.pending_sectors>0)html+="<span style=\"font-size:10px;color:var(--red);background:rgba(255,99,99,0.1);padding:1px 6px;border-radius:9999px\">"+sm.pending_sectors+" pending</span>";
-        html+="</div></div>";
+        html+="</div>";
+
+        /* Merged view: show storage bar inline */
+        if (mergedView && deviceToStorage[sm.device]) {
+          var mdk = deviceToStorage[sm.device];
+          var mpct = mdk.used_percent || 0;
+          html += "<div style=\"margin-top:6px;display:flex;align-items:center;gap:8px\">";
+          html += "<div style=\"flex:1\"><div class=\"disk-bar-track\" style=\"height:4px\"><div class=\"disk-bar-fill c-" + diskBarColor(mpct) + "\" style=\"width:" + mpct.toFixed(1) + "%;height:4px\"></div></div></div>";
+          html += "<span style=\"font-size:11px;color:var(--text-dim);white-space:nowrap\">" + (mdk.used_gb || 0).toFixed(0) + "/" + (mdk.total_gb || 0).toFixed(0) + " GB (" + mpct.toFixed(0) + "%)</span>";
+          html += "</div>";
+        }
+
+        html+="</div>";
       }
     }
-    var slotToDrive3={};
-    if(_sm&&_sm.length){for(var si3=0;si3<_sm.length;si3++){if(_sm[si3].array_slot)slotToDrive3[_sm[si3].array_slot]=_sm[si3];}}
-    if (_dk.length > 0) {
+    /* Storage volumes — only show separately if NOT merged, or for disks without SMART match */
+    var usedInMerge = {};
+    if (mergedView) { for (var mk in deviceToStorage) { usedInMerge[deviceToStorage[mk].mount_point] = true; } }
+    var unmatchedDisks = _dk.filter(function(d) { return !mergedView || !usedInMerge[d.mount_point]; });
+    if (unmatchedDisks.length > 0) {
       html+="<div style=\"margin-top:10px;font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px\">Storage</div>";
-      for(var di=0;di<_dk.length;di++){var dk=_dk[di];var p=dk.used_percent||0;var c=diskBarColor(p);
+      for(var di=0;di<unmatchedDisks.length;di++){var dk=unmatchedDisks[di];var p=dk.used_percent||0;var c=diskBarColor(p);
         var sLbl=dk.label||dk.mount_point;var smp3=dk.mount_point||"";
-        if(smp3.indexOf("/mnt/disk")===0){var sn3=smp3.replace("/mnt/disk","");var sd3=slotToDrive3["disk"+sn3];if(sd3)sLbl=esc(sd3.device||"")+" — "+esc(sd3.model||"");}
-        else if(smp3.indexOf("/mnt/cache")===0&&slotToDrive3["cache"]){var cd3=slotToDrive3["cache"];sLbl=esc(cd3.device||"")+" — "+esc(cd3.model||"");}
+        if(smp3.indexOf("/mnt/disk")===0){var sn3=smp3.replace("/mnt/disk","");var sd3=slotToDrive2["disk"+sn3];if(sd3)sLbl=esc(sd3.device||"")+" — "+esc(sd3.model||"");}
+        else if(smp3.indexOf("/mnt/cache")===0&&slotToDrive2["cache"]){var cd3=slotToDrive2["cache"];sLbl=esc(cd3.device||"")+" — "+esc(cd3.model||"");}
         html+="<div class=\"card-static\" style=\"margin-bottom:4px;padding:8px 12px\"><div style=\"display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px\"><span style=\"font-weight:500\">"+sLbl+"</span><span style=\"color:var(--text-dim)\">"+(dk.used_gb||0).toFixed(0)+" / "+(dk.total_gb||0).toFixed(0)+" GB ("+p.toFixed(0)+"%)</span></div>";
         html+="<div class=\"disk-bar-track\" style=\"height:4px\"><div class=\"disk-bar-fill c-"+c+"\" style=\"width:"+p.toFixed(1)+"%;height:4px\"></div></div></div>";
       }
@@ -1469,6 +1544,7 @@ td.mono {
     html += "<div class=\"section-block\" data-section=\"network\">";
     if (snapshot && snapshot.network && snapshot.network.interfaces && snapshot.network.interfaces.length > 0) {
       html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Network</div>";
+      html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);overflow-x:auto\">";
       html += "<table style=\"width:100%;font-size:12px;border-collapse:collapse\">";
       html += "<tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Interface</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">State</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Speed</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">IP</th></tr>";
       for (var ni = 0; ni < snapshot.network.interfaces.length; ni++) {
@@ -1479,7 +1555,7 @@ td.mono {
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc(iface.speed || "\u2014") + "</td>";
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc(iface.ipv4 || "\u2014") + "</td></tr>";
       }
-      html += "</table></div>";
+      html += "</table></div></div>";
     }
     html += "</div>"; /* section-block network */
 
@@ -1508,7 +1584,7 @@ td.mono {
       var par = snapshot.parity;
       html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Parity</div>";
       if (par.history && par.history.length > 0) {
-        html += "<div style=\"max-height:200px;overflow-y:auto;scrollbar-width:thin\">";
+        html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);overflow-x:auto;max-height:200px;overflow-y:auto;scrollbar-width:thin\">";
         html += "<table style=\"width:100%;font-size:12px;border-collapse:collapse\">";
         html += "<tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Date</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Duration</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Speed</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Errors</th></tr>";
         for (var pi = 0; pi < par.history.length; pi++) {
@@ -1570,6 +1646,11 @@ td.mono {
     activeFindingId = isNowActive ? fid : null;
   };
 
+  window._filterFindings = function(sev) {
+    window._findingSevFilter = (window._findingSevFilter === sev) ? null : sev;
+    loadData();
+  };
+
   function loadData() {
     Promise.all([
       fetchJSON("/api/v1/status"),
@@ -1625,6 +1706,8 @@ td.mono {
     }
     staging.parentNode.removeChild(staging);
     if(window.NasDrag)NasDrag.init();
+    if(window.NasSwipe)NasSwipe.init();
+    initSortBars();
   }
 
   function _renderSparklines(snapshot) {
@@ -1655,9 +1738,9 @@ td.mono {
       }).catch(function() {});
   }
 
-  window._dismissFinding = function(title) {
+  window._dismissFinding = function(title, skipReload) {
     fetch("/api/v1/findings/dismiss", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({title: title}) })
-      .then(function() { location.reload(); })
+      .then(function() { if (!skipReload) loadData(); })
       .catch(function() {});
   };
 
@@ -1680,6 +1763,41 @@ td.mono {
       }
     });
   };
+
+  function initSortBars() {
+    if (!window.NasSort) return;
+    var prefs = NasSort.getPrefs();
+
+    var findingsMount = document.getElementById("findings-sort-mount");
+    if (findingsMount) {
+      NasSort.renderSortBar({
+        container: findingsMount,
+        options: [
+          { key: "severity", label: "Severity" },
+          { key: "date", label: "Newest" },
+          { key: "category", label: "Category" }
+        ],
+        active: prefs.findings || "severity",
+        onSort: function(key) { prefs.findings = key; NasSort.savePrefs(prefs); loadData(); }
+      });
+    }
+
+    var drivesMount = document.getElementById("drives-sort-mount");
+    if (drivesMount) {
+      NasSort.renderSortBar({
+        container: drivesMount,
+        options: [
+          { key: "device", label: "Device" },
+          { key: "temp", label: "Temp" },
+          { key: "age", label: "Age" },
+          { key: "size", label: "Size" },
+          { key: "health", label: "Health" }
+        ],
+        active: prefs.drives || "device",
+        onSort: function(key) { prefs.drives = key; NasSort.savePrefs(prefs); loadData(); }
+      });
+    }
+  }
 
   loadData();
   _startRefresh();
