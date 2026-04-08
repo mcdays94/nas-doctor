@@ -35,6 +35,7 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 - **Network**: Interface speed negotiation, state, MTU
 - **Logs**: Filtered dmesg and syslog errors (ATA errors, I/O errors, medium errors)
 - **Parity** (Unraid): Historical parity check speed trend analysis, error tracking
+- **Tunnels**: Cloudflared tunnel status (connections, routes) and Tailscale peer graph (IPs, online/offline, relay, exit nodes) — detects host binaries and Docker containers
 - **OS Update Check**: Compares installed version against latest GitHub release for Unraid and TrueNAS
 
 ### Analysis Engine
@@ -70,17 +71,35 @@ Dedicated `/alerts` page with:
 
 ### Service Checks
 
-Built-in uptime monitoring for your infrastructure:
-- **HTTP/HTTPS** checks with status code and response time
-- **TCP** port checks
-- **DNS** resolution checks
-- **SMB/NFS** share availability checks
-- Configurable intervals, timeouts, and expected responses
-- Historical results with latency tracking
+Dedicated `/service-checks` page with Uptime Kuma-style monitoring:
+- **HTTP/HTTPS**, **TCP**, **DNS**, **Ping/ICMP**, **SMB**, **NFS** check types
+- **Per-check configurable intervals** (30s to 1h) with independent scheduling loop
+- **Heartbeat badge cards** — Kuma-style colored dots showing recent check status per service
+- **Paginated log table** with filters (check name, status, time range) — like Cloudflare Analytics
+- Historical response time tracking and uptime percentages
 
-### Notification Policies
+### Tunnel Monitoring
 
-Fine-grained alert routing configured from the Settings UI:
+Automatic detection and monitoring of remote access tunnels:
+- **Cloudflared**: Tunnel status, connection count, ingress routes — detects both host binary and Docker containers
+- **Tailscale**: Full peer graph with online status, IPs, OS, relay regions, TX/RX bytes, exit node status
+- Dashboard section in all themes with status dots per tunnel/peer
+
+### Parity Detail
+
+Dedicated `/parity` page with full parity check history:
+- **Speed trend chart** across all historical checks
+- **Expandable detail cards** per check (duration, speed, errors, action, array size, exit code)
+- Dashboard shows **scrollable badge pills** sorted newest-first (replaces the old table)
+
+### Notification Policies & Per-Webhook Filters
+
+Fine-grained alert routing with full granularity configured from Settings:
+- **Per-webhook notification filters** — control exactly which events trigger each webhook:
+  - **Severity/category filters** — e.g., only critical findings in the "smart" category
+  - **Threshold triggers** — disk free space below X%, any disk temp above X°C, average disk temp, SMART reallocated sectors above N, UPS battery below X%
+  - **Event triggers** — service check down, parity errors, SMART health failure, UPS on battery, platform update available
+  - **Scoped service checks** — limit to specific check names
 - **Notification Policies** — route alerts to specific webhooks by severity, category, and hostname with per-policy cooldowns
 - **Quiet Hours** — suppress notifications during a daily time window (alerts still recorded)
 - **Maintenance Windows** — scheduled suppression periods per hostname
@@ -89,7 +108,10 @@ Fine-grained alert routing configured from the Settings UI:
 
 ### Multi-Server Fleet Monitoring
 
-Monitor all your NAS Doctor instances from one dashboard. Go to `/fleet` to see an aggregated view of all servers with health status, finding counts, and direct links. Supports optional API key authentication per server.
+Monitor all your NAS Doctor instances from a UniFi-inspired topology view at `/fleet`:
+- **Visual topology** with central primary node and connected remote servers
+- Per-server: platform icon, hostname, IP, uptime, health status, finding counts
+- Supports optional API key authentication per server
 
 ### Integrations
 
@@ -273,12 +295,16 @@ NAS Doctor ships with 3 dashboard themes. Switch between them from Settings.
 ### More Pages
 
 <p>
+  <img src="screenshots/service-checks-page.jpg" alt="Service Checks Page" width="380">
   <img src="screenshots/alerts-page.jpg" alt="Alerts Page" width="380">
-  <img src="screenshots/settings-page.jpg" alt="Settings Page" width="380">
+</p>
+<p>
+  <img src="screenshots/fleet-page.jpg" alt="Fleet Topology" width="380">
+  <img src="screenshots/parity-page.jpg" alt="Parity History" width="380">
 </p>
 <p>
   <img src="screenshots/stats-page.jpg" alt="Stats Page" width="380">
-  <img src="screenshots/fleet-page.jpg" alt="Fleet Page" width="380">
+  <img src="screenshots/settings-page.jpg" alt="Settings Page" width="380">
 </p>
 
 ---
@@ -288,11 +314,11 @@ NAS Doctor ships with 3 dashboard themes. Switch between them from Settings.
 All configurable from the web UI at `/settings`, organized with a sticky section nav:
 
 - **General**: Scan interval (preset or custom with cron preview), theme selection, app icon
-- **Webhooks**: Add/remove/test Discord, Slack, Gotify, Ntfy, or generic HTTP webhooks with optional custom headers and HMAC signing
+- **Webhooks**: Add/remove/test Discord, Slack, Gotify, Ntfy, or generic HTTP webhooks with optional custom headers, HMAC signing, and **per-webhook notification filters** (severity, category, thresholds, event triggers)
 - **Notification Behavior**: Default cooldown, quiet hours (timezone-aware), maintenance windows, notification policies with per-webhook routing rules
-- **Service Checks**: HTTP, TCP, DNS, SMB/NFS uptime monitoring with configurable intervals
+- **Service Checks**: HTTP, TCP, DNS, Ping/ICMP, SMB/NFS uptime monitoring with per-check configurable intervals (30s–1h)
 - **Fleet**: Add/remove remote NAS Doctor instances with optional API key auth
-- **Dashboard Sections**: Toggle visibility of individual sections (SMART, Docker, ZFS, UPS, Parity, Network, etc.)
+- **Dashboard Sections**: Toggle visibility of individual sections (SMART, Docker, ZFS, UPS, Parity, Network, Tunnels, etc.)
 - **Data & Retention**: Snapshot retention days, max DB size cap, notification log retention
 - **Backup**: Scheduled DB backups with configurable location, interval, and retention count
 - **Log Forwarding**: Forward scan results to external logging endpoints (coming soon)
@@ -347,6 +373,8 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `/api/v1/db/stats` | GET | Database size and row counts |
 | `/api/v1/backup` | GET/POST | List or trigger database backup |
 | `/api/v1/fleet` | GET | Aggregated status of all remote servers |
+| `/service-checks` | GET | Service checks dashboard (HTML) |
+| `/parity` | GET | Parity history detail page (HTML) |
 | `/api/v1/fleet/servers` | GET/PUT | Manage remote server list |
 | `/api/v1/fleet/test` | POST | Test connectivity to a remote server |
 | `/metrics` | GET | Prometheus metrics endpoint |
@@ -433,7 +461,7 @@ go build -o nas-doctor ./cmd/nas-doctor
 ./nas-doctor -demo -listen :8060
 ```
 
-Demo includes: 7 SMART drives (with Backblaze-informed findings), 14 Docker containers, 2 ZFS pools (one DEGRADED), UPS monitoring, OS update notification, 30 days of historical sparkline data.
+Demo includes: 7 SMART drives (with Backblaze-informed findings), 14 Docker containers, 2 ZFS pools (one DEGRADED), UPS monitoring, OS update notification, 30 days of historical sparkline data, 6 service checks with 7 days of history, 4 fleet servers, 2 cloudflared tunnels, and a tailscale network with 5 nodes.
 
 ---
 
