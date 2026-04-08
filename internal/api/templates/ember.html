@@ -1218,8 +1218,24 @@ td.mono {
     html += "</div>"; /* .top-bar */
     html += "</div>"; /* .section */
 
+    /* OS version banner — above scan bar */
+    var sysP = (snapshot && snapshot.system) ? snapshot.system.platform : null;
+    var sysV = (snapshot && snapshot.system) ? snapshot.system.platform_version : null;
+    if (sysP && sysV) {
+      var hasUpd = snapshot && snapshot.update && snapshot.update.update_available;
+      var bgS = hasUpd ? "background:rgba(85,179,255,0.06);border:1px solid rgba(85,179,255,0.15)" : "background:var(--surface-200);border:1px solid var(--border)";
+      html += "<div style=\"display:flex;align-items:center;gap:8px;padding:10px 14px;" + bgS + ";border-radius:8px;margin-bottom:8px;font-size:12px\">";
+      html += "<span style=\"color:var(--text-primary);font-weight:600\">" + esc(sysP) + "</span>";
+      html += "<span style=\"color:var(--text-tertiary)\">v" + esc(sysV) + "</span>";
+      if (hasUpd) {
+        html += "<span style=\"color:var(--blue);font-weight:600;margin-left:8px\">Update &rarr; " + esc(snapshot.update.latest_version) + "</span>";
+        if (snapshot.update.release_url) html += "<a href=\"" + esc(snapshot.update.release_url) + "\" target=\"_blank\" style=\"color:var(--blue);text-decoration:underline;margin-left:auto\">Release notes</a>";
+      }
+      html += "</div>";
+    }
+
     /* ---- Scan bar (compact) ---- */
-    html += "<div class=\"section\">";
+    html += "<div class=\"section\" style=\"margin-bottom:12px\">";
     html += "<div class=\"scan-bar\">";
     html += "<div class=\"scan-info\">";
     html += "<span class=\"refresh-dot\" id=\"refresh-dot\"></span>";
@@ -1241,23 +1257,6 @@ td.mono {
     html += "</div>";
     html += "</div>";
     html += "</div>";
-
-    /* ---- Two-Column Grid ---- */
-    /* OS version banner */
-    var sysP = (snapshot && snapshot.system) ? snapshot.system.platform : null;
-    var sysV = (snapshot && snapshot.system) ? snapshot.system.platform_version : null;
-    if (sysP && sysV) {
-      var hasUpd = snapshot && snapshot.update && snapshot.update.update_available;
-      var bgS = hasUpd ? "background:rgba(85,179,255,0.06);border:1px solid rgba(85,179,255,0.15)" : "background:var(--surface-200);border:1px solid var(--border)";
-      html += "<div style=\"display:flex;align-items:center;gap:8px;padding:10px 14px;" + bgS + ";border-radius:8px;margin-bottom:12px;font-size:12px\">";
-      html += "<span style=\"color:var(--text-primary);font-weight:600\">" + esc(sysP) + "</span>";
-      html += "<span style=\"color:var(--text-tertiary)\">v" + esc(sysV) + "</span>";
-      if (hasUpd) {
-        html += "<span style=\"color:var(--blue);font-weight:600;margin-left:8px\">Update → " + esc(snapshot.update.latest_version) + "</span>";
-        if (snapshot.update.release_url) html += "<a href=\"" + esc(snapshot.update.release_url) + "\" target=\"_blank\" style=\"color:var(--blue);text-decoration:underline;margin-left:auto\">Release notes</a>";
-      }
-      html += "</div>";
-    }
 
     html += "<div class=\"two-col\" id=\"two-col\">";
     html += "<div class=\"col-left\" id=\"col-left\"></div>";
