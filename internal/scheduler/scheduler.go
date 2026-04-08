@@ -274,7 +274,7 @@ func (s *Scheduler) RunOnce() {
 		if hostname == "" {
 			hostname = "Unknown"
 		}
-		s.dispatchNotifications(notif, snap.Findings, hostname, snap.Timestamp)
+		s.dispatchNotifications(notif, snap, hostname, snap.Timestamp)
 	}
 
 	// Data lifecycle: prune old data
@@ -982,7 +982,8 @@ func serviceCheckKey(check internal.ServiceCheckConfig) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, findings []internal.Finding, hostname string, now time.Time) {
+func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, snap *internal.Snapshot, hostname string, now time.Time) {
+	findings := snap.Findings
 	if notif == nil || len(findings) == 0 {
 		return
 	}
@@ -1005,7 +1006,7 @@ func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, findings []i
 	}
 
 	if len(cfg.Policies) == 0 {
-		s.dispatchLegacyNotifications(notif, findings, hostname, now, cfg.DefaultCooldownSec)
+		s.dispatchLegacyNotifications(notif, snap, hostname, now, cfg.DefaultCooldownSec)
 		return
 	}
 
@@ -1069,11 +1070,11 @@ func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, findings []i
 	}
 
 	if !matchedPolicy {
-		s.dispatchLegacyNotifications(notif, findings, hostname, now, cfg.DefaultCooldownSec)
+		s.dispatchLegacyNotifications(notif, snap, hostname, now, cfg.DefaultCooldownSec)
 	}
 }
 
-func (s *Scheduler) dispatchLegacyNotifications(notif *notifier.Notifier, findings []internal.Finding, hostname string, now time.Time, defaultCooldownSec int) {
+func (s *Scheduler) dispatchLegacyNotifications(notif *notifier.Notifier, snap *internal.Snapshot, hostname string, now time.Time, defaultCooldownSec int) {
 	if defaultCooldownSec <= 0 {
 		defaultCooldownSec = 900
 	}
@@ -1081,7 +1082,7 @@ func (s *Scheduler) dispatchLegacyNotifications(notif *notifier.Notifier, findin
 		if !wh.Enabled {
 			continue
 		}
-		filtered := filterBySeverity(findings, wh.MinLevel)
+		filtered := applyWebhookFilters(wh, snap)
 		if len(filtered) == 0 {
 			continue
 		}
@@ -1106,6 +1107,177 @@ func (s *Scheduler) dispatchLegacyNotifications(notif *notifier.Notifier, findin
 			s.logger.Warn("failed to mark alerts notified", "error", err)
 		}
 	}
+}
+
+// applyWebhookFilters evaluates a webhook's filter configuration against the
+// full snapshot. If the webhook has no filters, falls back to legacy MinLevel
+// severity filtering. When filters are set, they control both which findings
+// pass through AND generate synthetic trigger findings from threshold breaches.
+func applyWebhookFilters(wh internal.WebhookConfig, snap *internal.Snapshot) []internal.Finding {
+	if wh.Filters == nil {
+		return filterBySeverity(snap.Findings, wh.MinLevel)
+	}
+	f := wh.Filters
+	var out []internal.Finding
+
+	// ── 1. Filter existing findings by severity + category ──
+	for _, finding := range snap.Findings {
+		if !matchesSeverityFilter(finding.Severity, f.Severities, wh.MinLevel) {
+			continue
+		}
+		if len(f.Categories) > 0 && !containsCategory(f.Categories, finding.Category) {
+			continue
+		}
+		out = append(out, finding)
+	}
+
+	// ── 2. Threshold triggers → synthetic findings ──
+	if f.DiskSpaceBelowPct > 0 {
+		for _, d := range snap.Disks {
+			free := 100.0 - d.UsedPct
+			if free < f.DiskSpaceBelowPct {
+				out = append(out, internal.Finding{
+					ID: "trigger:disk-space:" + d.MountPoint, Severity: internal.SeverityWarning,
+					Category: internal.CategoryDisk, Title: "Disk space low: " + d.MountPoint,
+					Description: fmt.Sprintf("Free space %.1f%% is below threshold %.0f%%", free, f.DiskSpaceBelowPct),
+				})
+			}
+		}
+	}
+	if f.DiskTempAboveC > 0 {
+		for _, s := range snap.SMART {
+			if s.Temperature > f.DiskTempAboveC {
+				out = append(out, internal.Finding{
+					ID: "trigger:disk-temp:" + s.Serial, Severity: internal.SeverityWarning,
+					Category: internal.CategoryThermal, Title: "Disk temperature high: " + s.Device,
+					Description: fmt.Sprintf("%d°C exceeds threshold %d°C", s.Temperature, f.DiskTempAboveC),
+					RelatedDisk: s.Serial,
+				})
+			}
+		}
+	}
+	if f.AvgDiskTempAboveC > 0 && len(snap.SMART) > 0 {
+		var sum int
+		for _, s := range snap.SMART {
+			sum += s.Temperature
+		}
+		avg := sum / len(snap.SMART)
+		if avg > f.AvgDiskTempAboveC {
+			out = append(out, internal.Finding{
+				ID: "trigger:avg-disk-temp", Severity: internal.SeverityWarning,
+				Category: internal.CategoryThermal, Title: "Average disk temperature high",
+				Description: fmt.Sprintf("Average %d°C exceeds threshold %d°C", avg, f.AvgDiskTempAboveC),
+			})
+		}
+	}
+	if f.SmartReallocAbove > 0 {
+		for _, s := range snap.SMART {
+			if s.Reallocated > f.SmartReallocAbove {
+				out = append(out, internal.Finding{
+					ID: "trigger:smart-realloc:" + s.Serial, Severity: internal.SeverityCritical,
+					Category: internal.CategorySMART, Title: "Reallocated sectors high: " + s.Device,
+					Description: fmt.Sprintf("%d reallocated sectors exceeds threshold %d", s.Reallocated, f.SmartReallocAbove),
+					RelatedDisk: s.Serial,
+				})
+			}
+		}
+	}
+
+	// ── 3. Boolean event triggers ──
+	if f.OnSmartFailure {
+		for _, s := range snap.SMART {
+			if !s.HealthPassed {
+				out = append(out, internal.Finding{
+					ID: "trigger:smart-fail:" + s.Serial, Severity: internal.SeverityCritical,
+					Category: internal.CategorySMART, Title: "SMART health check failed: " + s.Device,
+					Description: s.Model + " (S/N: " + s.Serial + ") reports SMART failure",
+					RelatedDisk: s.Serial,
+				})
+			}
+		}
+	}
+	if f.OnServiceDown {
+		for _, sc := range snap.Services {
+			if sc.Status == "down" {
+				if len(f.ServiceCheckNames) > 0 && !containsString(f.ServiceCheckNames, sc.Name) {
+					continue
+				}
+				out = append(out, internal.Finding{
+					ID: "trigger:service-down:" + sc.Key, Severity: internal.SeverityWarning,
+					Category: internal.CategoryService, Title: "Service check down: " + sc.Name,
+					Description: fmt.Sprintf("%s (%s) is down — %s", sc.Target, sc.Type, sc.Error),
+				})
+			}
+		}
+	}
+	if f.OnParityError && snap.Parity != nil {
+		for _, pc := range snap.Parity.History {
+			if pc.Errors > 0 {
+				out = append(out, internal.Finding{
+					ID: "trigger:parity-error:" + pc.Date, Severity: internal.SeverityCritical,
+					Category: internal.CategoryParity, Title: "Parity check errors: " + pc.Date,
+					Description: fmt.Sprintf("%d errors found during parity check", pc.Errors),
+				})
+				break // only trigger for the most recent error
+			}
+		}
+	}
+	if f.OnUPSOnBattery && snap.UPS != nil && snap.UPS.Available && snap.UPS.OnBattery {
+		out = append(out, internal.Finding{
+			ID: "trigger:ups-battery", Severity: internal.SeverityCritical,
+			Category: internal.CategoryUPS, Title: "UPS running on battery",
+			Description: fmt.Sprintf("Battery at %.0f%%, estimated runtime %.0f minutes", snap.UPS.BatteryPct, snap.UPS.RuntimeMins),
+		})
+	}
+	if f.UPSBatteryBelowPct > 0 && snap.UPS != nil && snap.UPS.Available {
+		if snap.UPS.BatteryPct < f.UPSBatteryBelowPct {
+			out = append(out, internal.Finding{
+				ID: "trigger:ups-low-battery", Severity: internal.SeverityCritical,
+				Category: internal.CategoryUPS, Title: "UPS battery critically low",
+				Description: fmt.Sprintf("Battery %.0f%% is below threshold %.0f%%", snap.UPS.BatteryPct, f.UPSBatteryBelowPct),
+			})
+		}
+	}
+	if f.OnUpdateAvailable && snap.Update != nil && snap.Update.UpdateAvailable {
+		out = append(out, internal.Finding{
+			ID: "trigger:update-available", Severity: internal.SeverityInfo,
+			Category: internal.CategorySystem, Title: "Platform update available",
+			Description: fmt.Sprintf("%s → %s", snap.Update.InstalledVersion, snap.Update.LatestVersion),
+		})
+	}
+
+	return out
+}
+
+func matchesSeverityFilter(sev internal.Severity, allowed []internal.Severity, fallback internal.Severity) bool {
+	if len(allowed) == 0 {
+		return severityRank(sev) >= severityRank(fallback)
+	}
+	for _, a := range allowed {
+		if strings.EqualFold(string(sev), string(a)) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsCategory(list []internal.Category, cat internal.Category) bool {
+	for _, c := range list {
+		if strings.EqualFold(string(c), string(cat)) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(list []string, s string) bool {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	for _, item := range list {
+		if strings.ToLower(strings.TrimSpace(item)) == lower {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Scheduler) logSuppressed(notif *notifier.Notifier, findings []internal.Finding, hostname string, cfg AlertingConfig, status string) {
