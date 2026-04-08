@@ -228,6 +228,9 @@ body {
   color: #808080;
   font-weight: 400;
 }
+.refresh-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:#16a34a;margin-right:4px;opacity:0.5;vertical-align:middle}
+.refresh-dot.pulse{animation:refresh-pulse 0.6s ease}
+@keyframes refresh-pulse{0%{opacity:1;transform:scale(1.6)}100%{opacity:0.5;transform:scale(1)}}
 
 /* ---- Two-column grid ---- */
 .two-col {
@@ -872,11 +875,13 @@ body {
     // ---- Scan bar ----
     html += '<div class="scan-bar">';
     html += '<div class="scan-info">';
+    html += '<span class="refresh-dot" id="refresh-dot"></span>';
     if (status.last_scan) {
       html += 'Last scan: ' + escapeHTML(new Date(status.last_scan).toLocaleString());
     } else {
       html += 'No scans yet';
     }
+    html += ' <span id="refresh-ago" style="opacity:0.6"></span>';
     if (status.scan_running) {
       html += ' &middot; <strong style="color:#d97706">Scan in progress...</strong>';
     }
@@ -1406,10 +1411,31 @@ body {
     }
   }
 
+  // Refresh indicator
+  var _lastFetchTime = 0;
+  var _origLoadData = loadData;
+  loadData = function() {
+    var result = _origLoadData();
+    _lastFetchTime = Date.now();
+    setTimeout(function() {
+      var dot = document.getElementById("refresh-dot");
+      if (dot) { dot.classList.remove("pulse"); void dot.offsetWidth; dot.classList.add("pulse"); }
+    }, 100);
+    return result;
+  };
+  setInterval(function() {
+    var el = document.getElementById("refresh-ago");
+    if (!el || !_lastFetchTime) return;
+    var secs = Math.round((Date.now() - _lastFetchTime) / 1000);
+    if (secs < 5) el.textContent = "just now";
+    else if (secs < 60) el.textContent = secs + "s ago";
+    else el.textContent = Math.floor(secs / 60) + "m ago";
+  }, 1000);
+
   // Initial load
   loadData();
 
-  // Auto-refresh (rate adjusts dynamically after first status fetch)
+  // Auto-refresh
   _startRefresh();
 })();
 </script>
