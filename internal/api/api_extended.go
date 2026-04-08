@@ -51,6 +51,7 @@ type DashboardSections struct {
 	UPS          bool `json:"ups"`
 	Parity       bool `json:"parity"`
 	Network      bool `json:"network"`
+	Tunnels      bool `json:"tunnels"`
 	MergedDrives bool `json:"merged_drives"` // Combine SMART + storage into one card per drive
 }
 
@@ -145,6 +146,7 @@ func defaultSettings() Settings {
 			UPS:          true,
 			Parity:       true,
 			Network:      true,
+			Tunnels:      true,
 			MergedDrives: true,
 		},
 	}
@@ -269,7 +271,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		settings.Sections = DashboardSections{
 			Findings: true, DiskSpace: true, SMART: true, Docker: true,
 			ZFS: true, UPS: true, Parity: true, Network: true,
-			MergedDrives: true,
+			Tunnels: true, MergedDrives: true,
 		}
 	}
 

@@ -1601,6 +1601,45 @@ td.mono {
     }
     html += "</div>"; /* section-block services */
 
+    /* ==== Section: Tunnels ==== */
+    html += "<div class=\"section-block\" data-section=\"tunnels\">";
+    var tunnels = snapshot ? snapshot.tunnels : null;
+    if (tunnels && (tunnels.cloudflared || tunnels.tailscale)) {
+      html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Tunnels</div>";
+      if (tunnels.cloudflared && tunnels.cloudflared.tunnels && tunnels.cloudflared.tunnels.length > 0) {
+        html += "<div style=\"font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px\">Cloudflared " + esc(tunnels.cloudflared.version || "") + "</div>";
+        for (var ti = 0; ti < tunnels.cloudflared.tunnels.length; ti++) {
+          var ct = tunnels.cloudflared.tunnels[ti];
+          var ctColor = ct.status === "healthy" ? "var(--green)" : ct.status === "degraded" ? "var(--amber)" : "var(--red)";
+          html += "<div style=\"display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)\">";
+          html += "<span style=\"width:8px;height:8px;border-radius:50%;background:" + ctColor + "\"></span>";
+          html += "<span style=\"font-weight:600;font-size:13px\">" + esc(ct.name) + "</span>";
+          html += "<span style=\"font-size:11px;color:var(--text-dim)\">" + ct.connections + " conn</span>";
+          if (ct.routes && ct.routes.length) html += "<span style=\"font-size:11px;color:var(--text-dim)\">" + esc(ct.routes.join(", ")) + "</span>";
+          html += "</div>";
+        }
+      }
+      if (tunnels.tailscale && tunnels.tailscale.self) {
+        var ts = tunnels.tailscale;
+        html += "<div style=\"font-size:11px;color:var(--text-dim);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.5px\">Tailscale " + esc(ts.version || "") + (ts.tailnet_name ? " &middot; " + esc(ts.tailnet_name) : "") + "</div>";
+        var allNodes = [ts.self].concat(ts.peers || []);
+        for (var ni = 0; ni < allNodes.length; ni++) {
+          var nd = allNodes[ni];
+          var ndColor = nd.online ? "var(--green)" : "var(--text-dim)";
+          html += "<div style=\"display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px\">";
+          html += "<span style=\"width:8px;height:8px;border-radius:50%;background:" + ndColor + "\"></span>";
+          html += "<span style=\"font-weight:600;min-width:80px\">" + esc(nd.name) + "</span>";
+          html += "<span style=\"font-family:var(--font-mono);font-size:11px;color:var(--text-dim);min-width:90px\">" + esc(nd.ip || "") + "</span>";
+          html += "<span style=\"font-size:11px;color:var(--text-dim)\">" + esc(nd.os || "") + "</span>";
+          if (ni === 0) html += "<span style=\"font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.15);color:var(--accent)\">self</span>";
+          if (nd.exit_node) html += "<span style=\"font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(217,119,6,0.15);color:var(--amber)\">exit node</span>";
+          html += "</div>";
+        }
+      }
+      html += "</div>";
+    }
+    html += "</div>"; /* section-block tunnels */
+
     /* ==== Section: Parity ==== */
     html += "<div class=\"section-block\" data-section=\"parity\">";
     if (snapshot && snapshot.parity) {

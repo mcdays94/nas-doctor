@@ -48,8 +48,56 @@ type Snapshot struct {
 	ZFS       *ZFSInfo             `json:"zfs,omitempty"`
 	UPS       *UPSInfo             `json:"ups,omitempty"`
 	Update    *UpdateInfo          `json:"update,omitempty"`
+	Tunnels   *TunnelInfo          `json:"tunnels,omitempty"`
 	Services  []ServiceCheckResult `json:"service_checks,omitempty"`
 	Findings  []Finding            `json:"findings"`
+}
+
+// ---------- Tunnels (Cloudflared / Tailscale) ----------
+
+type TunnelInfo struct {
+	Cloudflared *CloudflaredInfo `json:"cloudflared,omitempty"`
+	Tailscale   *TailscaleInfo   `json:"tailscale,omitempty"`
+}
+
+type CloudflaredInfo struct {
+	Installed bool                `json:"installed"`
+	Version   string              `json:"version,omitempty"`
+	Tunnels   []CloudflaredTunnel `json:"tunnels,omitempty"`
+}
+
+type CloudflaredTunnel struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Status      string   `json:"status"` // healthy, degraded, down, inactive
+	CreatedAt   string   `json:"created_at,omitempty"`
+	Connections int      `json:"connections"`
+	Routes      []string `json:"routes,omitempty"` // ingress hostnames
+	OriginIP    string   `json:"origin_ip,omitempty"`
+}
+
+type TailscaleInfo struct {
+	Installed    bool            `json:"installed"`
+	Version      string          `json:"version,omitempty"`
+	BackendState string          `json:"backend_state,omitempty"` // Running, Stopped, NeedsLogin
+	Self         *TailscaleNode  `json:"self,omitempty"`
+	Peers        []TailscaleNode `json:"peers,omitempty"`
+	MagicDNS     bool            `json:"magic_dns,omitempty"`
+	TailnetName  string          `json:"tailnet_name,omitempty"`
+}
+
+type TailscaleNode struct {
+	Name     string   `json:"name"`
+	DNSName  string   `json:"dns_name,omitempty"`
+	IP       string   `json:"ip"`
+	OS       string   `json:"os,omitempty"`
+	Online   bool     `json:"online"`
+	ExitNode bool     `json:"exit_node,omitempty"`
+	Relay    string   `json:"relay,omitempty"` // DERP relay region
+	TxBytes  int64    `json:"tx_bytes,omitempty"`
+	RxBytes  int64    `json:"rx_bytes,omitempty"`
+	LastSeen string   `json:"last_seen,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
 }
 
 // ---------- Service Checks ----------
