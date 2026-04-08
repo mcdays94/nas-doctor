@@ -41,6 +41,7 @@ The Docker CI workflow on `.github/workflows/docker.yml` publishes to GHCR on ev
 
 ## Key Files
 
+- `internal/collector/platform.go` — **centralized platform detection singleton** (Unraid, Synology, TrueNAS, QNAP, Proxmox, Linux). Detected once, cached for process lifetime. All collectors use `GetPlatform().IsUnraid()` etc.
 - `internal/collector/` — data collection (SMART, disk, docker, network, UPS, system, parity)
 - `internal/analyzer/` — diagnostic rules engine, Backblaze thresholds
 - `internal/api/` — HTTP handlers, embedded templates, chart library
