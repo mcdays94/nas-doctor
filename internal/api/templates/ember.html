@@ -511,6 +511,12 @@ body {
   font-weight: 400;
 }
 
+/* Sort pills */
+.sort-bar{display:inline-flex;gap:1px;padding:0;border-radius:6px;background:none;border:none;opacity:0;transition:opacity 0.2s ease}
+.section-block:hover .sort-bar{opacity:1}
+.sort-pill{padding:4px 10px;border:none;border-radius:4px;font-size:10px;font-weight:600;font-family:inherit;color:rgba(255,255,255,0.25);background:none;cursor:pointer;transition:all 0.12s;text-transform:uppercase;letter-spacing:0.3px;outline:none;-webkit-appearance:none;appearance:none}
+.sort-pill:hover{color:rgba(255,255,255,0.5);background:rgba(255,255,255,0.06)}
+.sort-pill.active{color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.08)}
 .refresh-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--green);margin-right:4px;opacity:0.5;vertical-align:middle}
 .refresh-dot.pulse{animation:refresh-pulse 0.6s ease}
 @keyframes refresh-pulse{0%{opacity:1;transform:scale(1.6)}100%{opacity:0.5;transform:scale(1)}}
@@ -989,7 +995,7 @@ td.mono {
   var _cachedStatus = null;
   var _lastScanTime = null;
   var _fastUntil = 0;
-  window._findingSevFilter = null;
+  window._findingSevFilters = {};
 
   function _computeRefreshMs(secs) {
     if (!secs || secs <= 0) return 300000;
@@ -1277,13 +1283,22 @@ td.mono {
       /* Severity count badges (clickable to filter) */
       var sevCounts = { critical: 0, warning: 0, info: 0 };
       for (var fc = 0; fc < findings.length; fc++) { var sv = findings[fc].severity; if (sevCounts[sv] !== undefined) sevCounts[sv]++; }
-      var _activeSevF = window._findingSevFilter;
-      html += "<div style=\"display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap\">";
-      html += "<div id=\"findings-sort-mount\"></div>";
-      if (sevCounts.critical > 0) html += "<span onclick=\"window._filterFindings('critical')\" style=\"cursor:pointer;font-size:10px;font-weight:600;color:var(--red);background:rgba(255,99,99," + (_activeSevF === "critical" ? "0.3" : "0.12") + ");padding:1px 6px;border-radius:4px" + (_activeSevF === "critical" ? ";box-shadow:0 0 0 1px var(--red)" : "") + "\">" + sevCounts.critical + " critical</span>";
-      if (sevCounts.warning > 0) html += "<span onclick=\"window._filterFindings('warning')\" style=\"cursor:pointer;font-size:10px;font-weight:600;color:var(--yellow);background:rgba(255,188,51," + (_activeSevF === "warning" ? "0.3" : "0.12") + ");padding:1px 6px;border-radius:4px" + (_activeSevF === "warning" ? ";box-shadow:0 0 0 1px var(--yellow)" : "") + "\">" + sevCounts.warning + " warning</span>";
-      if (sevCounts.info > 0) html += "<span onclick=\"window._filterFindings('info')\" style=\"cursor:pointer;font-size:10px;font-weight:600;color:var(--blue);background:rgba(85,179,255," + (_activeSevF === "info" ? "0.3" : "0.12") + ");padding:1px 6px;border-radius:4px" + (_activeSevF === "info" ? ";box-shadow:0 0 0 1px var(--blue)" : "") + "\">" + sevCounts.info + " info</span>";
-      if (_activeSevF) html += "<span onclick=\"window._filterFindings(null)\" style=\"cursor:pointer;font-size:10px;font-weight:500;color:var(--text-tertiary);background:var(--surface-200);padding:1px 6px;border-radius:4px\">Clear</span>";
+      var _sevFilters = window._findingSevFilters || {};
+      var _hasFilter = _sevFilters.critical || _sevFilters.warning || _sevFilters.info;
+      if (_hasFilter) findings = findings.filter(function(f) { return _sevFilters[f.severity]; });
+      html += "<div style=\"display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap\">";
+      function _eBadge(sev, cnt, col) {
+        if (cnt === 0) return "";
+        var act = _sevFilters[sev];
+        var s = "cursor:pointer;font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;transition:all 0.12s;border:1px solid transparent;";
+        s += act ? "color:#fff;background:" + col + ";border-color:" + col + ";" : "color:" + col + ";background:" + col + "1f;";
+        return "<span style=\"" + s + "\" onclick=\"window._toggleSevFilter('" + sev + "')\">" + cnt + " " + sev + "</span>";
+      }
+      html += _eBadge("critical", sevCounts.critical, "var(--red)");
+      html += _eBadge("warning", sevCounts.warning, "var(--yellow)");
+      html += _eBadge("info", sevCounts.info, "var(--blue)");
+      if (_hasFilter) html += "<span style=\"font-size:10px;color:var(--text-tertiary);cursor:pointer;padding:2px 6px\" onclick=\"window._clearSevFilters()\">&times; Clear</span>";
+      html += "<div id=\"findings-sort-mount\" style=\"margin-left:auto\"></div>";
       html += "</div>";
 
       /* Apply severity filter */
@@ -1366,11 +1381,12 @@ td.mono {
       else if ((_sm[hc].temperature_c || 0) >= 50 || _sm[hc].reallocated_sectors > 0 || _sm[hc].pending_sectors > 0) _hlWarnC++;
       else _hlOkC++;
     }
-    html += "<div class=\"section-title\">Drives (" + (_sm.length || _dk.length) + ")";
-    if (_hlOkC > 0) html += " <span style=\"font-size:10px;font-weight:600;color:var(--green);background:rgba(95,201,146,0.12);padding:1px 6px;border-radius:4px;margin-left:4px\">" + _hlOkC + " ok</span>";
-    if (_hlWarnC > 0) html += " <span style=\"font-size:10px;font-weight:600;color:var(--yellow);background:rgba(255,188,51,0.12);padding:1px 6px;border-radius:4px;margin-left:4px\">" + _hlWarnC + " warn</span>";
-    if (_hlCritC > 0) html += " <span style=\"font-size:10px;font-weight:600;color:var(--red);background:rgba(255,99,99,0.12);padding:1px 6px;border-radius:4px;margin-left:4px\">" + _hlCritC + " fail</span>";
-    html += "</div>";
+    html += "<div class=\"section-title\" style=\"display:flex;align-items:center;gap:12px\">Drives (" + (_sm.length || _dk.length) + ")";
+    html += "<span style=\"display:inline-flex;gap:8px;font-size:11px;color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0\">";
+    if (_hlOkC > 0) html += "<span style=\"display:flex;align-items:center;gap:3px\"><span style=\"width:6px;height:6px;border-radius:50%;background:var(--green)\"></span>" + _hlOkC + " ok</span>";
+    if (_hlWarnC > 0) html += "<span style=\"display:flex;align-items:center;gap:3px\"><span style=\"width:6px;height:6px;border-radius:50%;background:var(--yellow)\"></span>" + _hlWarnC + " warn</span>";
+    if (_hlCritC > 0) html += "<span style=\"display:flex;align-items:center;gap:3px\"><span style=\"width:6px;height:6px;border-radius:50%;background:var(--red)\"></span>" + _hlCritC + " fail</span>";
+    html += "</span></div>";
 
     /* Sort drives */
     var _driveSortPref = (window.NasSort ? NasSort.getPrefs().drives : null) || "device";
@@ -1654,8 +1670,12 @@ td.mono {
     activeFindingId = isNowActive ? fid : null;
   };
 
-  window._filterFindings = function(sev) {
-    window._findingSevFilter = (window._findingSevFilter === sev) ? null : sev;
+  window._toggleSevFilter = function(sev) {
+    window._findingSevFilters[sev] = !window._findingSevFilters[sev];
+    loadData();
+  };
+  window._clearSevFilters = function() {
+    window._findingSevFilters = {};
     loadData();
   };
 
