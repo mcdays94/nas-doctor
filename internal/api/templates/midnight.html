@@ -82,6 +82,23 @@ a:hover{color:var(--hover)}
 .col-left{min-width:0;display:flex;flex-direction:column;min-height:0}
 .col-right{min-width:0;display:flex;flex-direction:column;gap:calc(var(--sp)*3)}
 
+/* Section drag-to-reorder */
+.section-title-row{display:flex;align-items:center;gap:6px}
+.section-drag-handle{
+  width:16px;height:16px;display:flex;align-items:center;justify-content:center;
+  cursor:grab;opacity:0;transition:opacity 0.15s;color:var(--text-quaternary);
+  border-radius:3px;flex-shrink:0;margin-left:-2px;
+}
+.section-block:hover .section-drag-handle{opacity:0.35}
+.section-drag-handle:hover{opacity:1 !important;background:rgba(255,255,255,0.06)}
+.section-drag-handle:active{cursor:grabbing}
+.section-block.dragging{opacity:0.35;transition:opacity 0.15s}
+.section-drop-placeholder{
+  border:2px dashed var(--accent);border-radius:calc(var(--radius)*1.5);
+  margin-bottom:calc(var(--sp)*3);opacity:0.3;background:rgba(94,106,210,0.04);
+  transition:height 0.15s ease;
+}
+
 /* Findings — compact */
 .findings-list{display:flex;flex-direction:column;gap:6px;flex:1;overflow-y:auto;min-height:0;scrollbar-width:thin;scrollbar-color:var(--border-hover) transparent}
 .findings-list::-webkit-scrollbar{width:5px}
@@ -774,26 +791,30 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
 
-    var items = [];
+    // Build a map of section name → element
+    var blockMap = {};
+    var visibleItems = [];
     for (var i = 0; i < blocks.length; i++) {
       var name = blocks[i].getAttribute("data-section");
-      if (sectionMap[name] === false) continue; // skip hidden sections
-      if (blocks[i].offsetHeight < 10) continue; // skip empty sections
-      items.push({ el: blocks[i], h: blocks[i].offsetHeight });
+      if (sectionMap[name] === false) continue;
+      if (blocks[i].offsetHeight < 10) continue;
+      blockMap[name] = blocks[i];
+      visibleItems.push({ el: blocks[i], name: name, h: blocks[i].offsetHeight });
     }
 
-    var leftH = 0, rightH = 0;
-    for (var j = 0; j < items.length; j++) {
-      if (leftH <= rightH) {
-        colL.appendChild(items[j].el);
-        leftH += items[j].h;
-      } else {
-        colR.appendChild(items[j].el);
-        rightH += items[j].h;
+    // Apply saved order or default height-balanced distribution
+    if (!window.NasDrag || !NasDrag.applySavedOrder(blockMap, visibleItems, colL, colR)) {
+      var leftH = 0, rightH = 0;
+      for (var j = 0; j < visibleItems.length; j++) {
+        if (leftH <= rightH) { colL.appendChild(visibleItems[j].el); leftH += visibleItems[j].h; }
+        else { colR.appendChild(visibleItems[j].el); rightH += visibleItems[j].h; }
       }
     }
 
     staging.parentNode.removeChild(staging);
+
+    // Init pointer-based drag-to-reorder
+    if (window.NasDrag) NasDrag.init();
   }
 
   window._dismissFinding = function(title) {
