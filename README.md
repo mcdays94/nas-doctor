@@ -114,20 +114,22 @@ services:
   nas-doctor:
     image: ghcr.io/mcdays94/nas-doctor:latest
     container_name: nas-doctor
-    privileged: true
+    privileged: true          # Required for SMART access
     network_mode: host
     volumes:
       - nas-doctor-data:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /boot:/host/boot:ro
       - /var/log:/host/log:ro
-      - /mnt:/host/mnt:ro
+      # Mount your storage volumes (platform-specific):
+      - /mnt:/host/mnt:ro              # Unraid, TrueNAS
+      # - /volume1:/host/volume1:ro    # Synology (add each volume)
+      # - /volume2:/host/volume2:ro    # Synology
+      # Unraid-specific (optional, omit on other platforms):
+      - /boot:/host/boot:ro
       - /etc/unraid-version:/etc/unraid-version:ro
     environment:
       - TZ=Europe/Lisbon
       - NAS_DOCTOR_INTERVAL=6h
-    ports:
-      - "8080:8060"
     restart: unless-stopped
 
 volumes:
@@ -138,26 +140,7 @@ volumes:
 docker compose up -d
 ```
 
-Then open `http://your-nas:8060`.
-
-### Docker Run
-
-```bash
-docker run -d \
-  --name nas-doctor \
-  --privileged \
-  --network host \
-  -v nas-doctor-data:/data \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -v /boot:/host/boot:ro \
-  -v /var/log:/host/log:ro \
-  -v /mnt:/host/mnt:ro \
-  -v /etc/unraid-version:/etc/unraid-version:ro \
-  -e TZ=Europe/Lisbon \
-  -p 8080:8060 \
-  --restart unless-stopped \
-  ghcr.io/mcdays94/nas-doctor:latest
-```
+Then open `http://your-nas:8060`. See platform-specific sections below for Unraid, Synology, and TrueNAS configurations.
 
 ### Unraid — Docker UI Setup
 
@@ -195,6 +178,68 @@ docker run -d \
 Then open `http://your-unraid-ip:8060`.
 
 > **Important**: Privileged mode and the Host Mounts volume (`/mnt:/host/mnt:ro`) are required. Without privileged, SMART data won't work. Without `/mnt`, per-disk space won't show.
+
+### Synology DSM — Container Manager
+
+Deploy via **Container Manager** (or Docker via SSH).
+
+```yaml
+services:
+  nas-doctor:
+    image: ghcr.io/mcdays94/nas-doctor:latest
+    container_name: nas-doctor
+    privileged: true
+    network_mode: host
+    volumes:
+      - /volume1/docker/nas-doctor:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/host/log:ro
+      - /volume1:/host/volume1:ro
+      - /volume2:/host/volume2:ro          # add more volumes as needed
+    environment:
+      - TZ=Europe/Lisbon
+      - NAS_DOCTOR_INTERVAL=6h
+    restart: unless-stopped
+```
+
+Then open `http://your-synology-ip:8060`.
+
+> **Synology notes**:
+> - **Privileged mode is required** for SMART access (`smartctl` needs raw device access)
+> - Mount each `/volume<#>` you want monitored — Synology uses `/volume1`, `/volume2`, etc. instead of `/mnt`
+> - There is no `/boot` or `/etc/unraid-version` on Synology — omit those mounts
+> - Parity analysis is Unraid-specific and will be skipped automatically
+
+### TrueNAS SCALE
+
+Deploy via **Apps** or via SSH with Docker Compose.
+
+```yaml
+services:
+  nas-doctor:
+    image: ghcr.io/mcdays94/nas-doctor:latest
+    container_name: nas-doctor
+    privileged: true
+    network_mode: host
+    volumes:
+      - /mnt/pool/appdata/nas-doctor:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/host/log:ro
+      - /mnt:/host/mnt:ro
+    environment:
+      - TZ=America/New_York
+      - NAS_DOCTOR_INTERVAL=6h
+    restart: unless-stopped
+```
+
+Then open `http://your-truenas-ip:8060`.
+
+> **TrueNAS notes**:
+> - **Privileged mode is required** for SMART access
+> - ZFS pool health, scrub status, ARC hit rate, and dataset listing work automatically
+> - Mount `/mnt` to see all pool/dataset storage usage
+> - Parity analysis is Unraid-specific and will be skipped automatically
+> - UPS monitoring works if NUT is configured (TrueNAS has built-in NUT support)
 
 ### Build from Source
 
@@ -356,13 +401,13 @@ nasdoctor_last_collection_timestamp
 | Platform | Status | Notes |
 |---|---|---|
 | **Unraid** | ✅ Tested | Parity analysis, array status, disk labels, OS update check |
+| **Synology DSM** | ✅ Tested | `/volume<#>` detection, `/dev/mapper/cachedev_*` support, SMART health parsing |
 | **TrueNAS SCALE** | ⚠️ Untested | ZFS pool health support built-in, but not yet validated on real hardware |
-| **Synology DSM** | ⚠️ Untested | Should work via Docker / Container Manager |
 | **QNAP QTS** | ⚠️ Untested | Should work via Container Station |
 | **Proxmox** | ⚠️ Untested | ZFS pool health support built-in |
 | **Generic Linux** | ⚠️ Untested | Any distro with Docker |
 
-> NAS Doctor has only been tested on **Unraid** so far. Other platforms should work but may have issues with disk detection, SMART access, or platform-specific features. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
+> Tested on **Unraid** and **Synology DSM**. Other platforms should work but may have issues with disk detection, SMART access, or platform-specific features. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
 ---
 
