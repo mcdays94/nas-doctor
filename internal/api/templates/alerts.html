@@ -37,8 +37,12 @@
     <div class="summary-stat healthy"><span class="stat-count" id="sum-resolved">-</span><span>Resolved</span></div>
   </div>
 
-  <!-- Customize button -->
-  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+  <!-- Action buttons -->
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:16px">
+    <button class="btn btn-secondary btn-sm" onclick="sendTestNotification()" id="test-notif-btn">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      Test Notification
+    </button>
     <button class="customize-btn" onclick="openCustomizePanel()">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7m-4 8h8m-8 4h6"/></svg>
       Customize Layout
@@ -857,6 +861,43 @@ function loadNotificationLog() {
     })
     .catch(function() {
       document.getElementById("log-body").innerHTML = '<tr><td colspan="6" class="log-empty">Failed to load log.</td></tr>';
+    });
+}
+
+/* ========== Test Notification ========== */
+function sendTestNotification() {
+  var btn = document.getElementById("test-notif-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Sending..."; }
+  fetch("/api/v1/settings")
+    .then(function(r) { return r.json(); })
+    .then(function(settings) {
+      var webhooks = (settings.notifications && settings.notifications.webhooks) ? settings.notifications.webhooks : [];
+      var enabled = webhooks.filter(function(w) { return w.enabled !== false; });
+      if (enabled.length === 0) {
+        showToast("No enabled webhooks configured. Add one in Settings.", "error");
+        if (btn) { btn.disabled = false; btn.textContent = "Test Notification"; }
+        return;
+      }
+      // Send test to first enabled webhook
+      var wh = enabled[0];
+      return fetch("/api/v1/settings/test-webhook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: wh.name, type: wh.type, url: wh.url })
+      });
+    })
+    .then(function(r) {
+      if (!r) return;
+      if (r.ok) {
+        showToast("Test notification sent", "success");
+        setTimeout(loadNotificationLog, 1500);
+      } else {
+        return r.json().then(function(e) { showToast("Failed: " + (e.error || "unknown error"), "error"); });
+      }
+    })
+    .catch(function(e) { showToast("Failed to send: " + e.message, "error"); })
+    .finally(function() {
+      if (btn) { btn.disabled = false; btn.textContent = "Test Notification"; }
     });
 }
 
