@@ -510,27 +510,54 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     </div>
   </div>
 
-  <!-- 4. Log Forwarding (coming soon) -->
-  <div class="card coming-soon" id="card-logfwd">
+  <!-- 4. Log Forwarding -->
+  <div class="card" id="card-logfwd">
     <div class="card-title">Log Forwarding</div>
-    <div class="card-desc">Forward scan results and metrics to external logging or observability endpoints (e.g. Grafana via Prometheus).</div>
-    <div class="form-group">
-      <div class="toggle-wrap" style="margin-bottom:16px">
-        <div class="toggle" id="logfwd-toggle"><div class="toggle-knob"></div></div>
-        <span class="toggle-label">Enable Log Forwarding</span>
-      </div>
-      <label for="logfwd-url">Destination URL</label>
-      <input type="url" id="logfwd-url" placeholder="https://..." disabled>
+    <div class="card-desc">Forward scan results to Loki, syslog, or any HTTP JSON endpoint after each diagnostic scan.</div>
+    <div class="toggle-wrap" style="margin-bottom:16px">
+      <div class="toggle" id="logfwd-toggle" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
+      <span class="toggle-label">Enable Log Forwarding</span>
     </div>
-    <div class="form-group">
-      <label for="logfwd-format">Format</label>
-      <select id="logfwd-format" disabled>
-        <option value="json">JSON</option>
-        <option value="syslog">Syslog</option>
-      </select>
+    <div id="logfwd-dest-list" style="margin-bottom:12px"></div>
+    <button class="btn btn-secondary btn-sm" onclick="toggleLogFwdForm()">+ Add Destination</button>
+    <div class="webhook-form" id="logfwd-form">
+      <input type="hidden" id="lf-edit-index" value="-1">
+      <div class="form-row">
+        <div><label for="lf-name">Name</label>
+          <input type="text" id="lf-name" placeholder="e.g. Grafana Loki"></div>
+        <div><label for="lf-type">Type</label>
+          <select id="lf-type" onchange="onLogFwdTypeChange()">
+            <option value="loki">Loki</option>
+            <option value="http_json">HTTP JSON</option>
+            <option value="syslog">Syslog</option>
+          </select></div>
+      </div>
+      <div class="form-group">
+        <label for="lf-url">URL</label>
+        <input type="text" id="lf-url" placeholder="http://loki:3100">
+        <p id="lf-url-hint" style="font-size:11px;color:var(--text2);margin-top:4px">Loki: base URL (e.g. http://loki:3100). /loki/api/v1/push is appended automatically.</p>
+      </div>
+      <div class="form-row">
+        <div><label for="lf-format">Payload format</label>
+          <select id="lf-format">
+            <option value="full">Full (findings + summary)</option>
+            <option value="findings_only">Findings only</option>
+            <option value="summary">Summary line only</option>
+          </select></div>
+        <div><label for="lf-labels">Labels / Tags (key=val, comma-sep)</label>
+          <input type="text" id="lf-labels" placeholder="e.g. env=prod,dc=home"></div>
+      </div>
+      <div class="form-group" id="lf-headers-wrap">
+        <label for="lf-headers">Auth header (optional, e.g. X-Scope-OrgID=tenant1)</label>
+        <input type="text" id="lf-headers" placeholder="Header-Name=value">
+      </div>
+      <div class="webhook-form-actions">
+        <button class="btn btn-primary" onclick="saveLogFwdDest()">Save Destination</button>
+        <button class="btn btn-secondary" onclick="cancelLogFwdForm()">Cancel</button>
+      </div>
     </div>
     <div class="form-group" style="margin-top:12px">
-      <p style="font-size:12px;color:var(--text2);line-height:1.6">Prometheus metrics are already available at <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:11px">/metrics</code> for Grafana integration. Configure your Prometheus scraper to target this endpoint.</p>
+      <p style="font-size:12px;color:var(--text2);line-height:1.6">Prometheus metrics (80+ gauges) are available at <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:11px">/metrics</code> for Grafana scraping.</p>
     </div>
   </div>
 
@@ -879,6 +906,12 @@ function loadSettings() {
       var bk = data.backup || {};
       var bkToggle = document.getElementById("backup-toggle");
       if (bk.enabled === false) { bkToggle.classList.remove("on"); } else { bkToggle.classList.add("on"); }
+      /* Log forwarding */
+      var lp = data.log_push || {};
+      var lfToggle = document.getElementById("logfwd-toggle");
+      if (lp.enabled) lfToggle.classList.add("on"); else lfToggle.classList.remove("on");
+      logFwdDests = lp.destinations || [];
+      renderLogFwdDests();
       /* Sections */
       var sec = data.sections || {};
       function setSecToggle(id, val) { var el = document.getElementById(id); if (el) { if (val === false) el.classList.remove("on"); else el.classList.add("on"); } }
@@ -938,7 +971,7 @@ function buildSettingsPayload() {
     icon: getSelectedIcon(),
     notifications: notifications,
     service_checks: { checks: serviceChecks },
-    log_push: base.log_push || { enabled: false, destinations: [] },
+    log_push: { enabled: document.getElementById("logfwd-toggle").classList.contains("on"), destinations: logFwdDests },
     retention: {
       snapshot_days: parseInt(document.getElementById("ret-snapshot-days").value, 10) || 90,
       max_db_size_mb: parseInt(document.getElementById("ret-max-db").value, 10) || 500,
@@ -1469,6 +1502,87 @@ function applyTheme(theme) {
 }
 
 /* Load theme before anything else to avoid flash */
+/* ---------- Log Forwarding ---------- */
+var logFwdDests = [];
+function renderLogFwdDests() {
+  var c = document.getElementById("logfwd-dest-list");
+  if (!logFwdDests || logFwdDests.length === 0) {
+    c.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:8px 0">No destinations configured.</div>';
+    return;
+  }
+  var h = "";
+  for (var i = 0; i < logFwdDests.length; i++) {
+    var d = logFwdDests[i];
+    var t = (d.type || "http_json").toUpperCase().replace("_", " ");
+    h += '<div class="webhook-item">';
+    h += '<div class="webhook-info">';
+    h += '<div class="webhook-name">' + escapeHtml(d.name || "Unnamed") + ' <span class="badge" style="font-size:10px">' + t + '</span></div>';
+    h += '<div class="webhook-url">' + escapeHtml(d.url || "") + '</div>';
+    if (d.format && d.format !== "full") h += '<div class="inline-muted">Format: ' + escapeHtml(d.format) + '</div>';
+    h += '</div><div class="webhook-actions">';
+    h += '<div class="toggle-wrap" onclick="toggleLogFwdEnabled(' + i + ')">';
+    h += '<div class="toggle' + (d.enabled ? " on" : "") + '"><div class="toggle-knob"></div></div></div>';
+    h += '<button class="btn btn-secondary btn-sm" onclick="editLogFwdDest(' + i + ')">Edit</button>';
+    h += '<button class="btn btn-danger btn-sm" onclick="removeLogFwdDest(' + i + ')">Remove</button>';
+    h += '</div></div>';
+  }
+  c.innerHTML = h;
+}
+function toggleLogFwdEnabled(idx) { logFwdDests[idx].enabled = !logFwdDests[idx].enabled; renderLogFwdDests(); saveSettings(); }
+function removeLogFwdDest(idx) { logFwdDests.splice(idx, 1); renderLogFwdDests(); saveSettings(); }
+function toggleLogFwdForm() {
+  var f = document.getElementById("logfwd-form");
+  if (f.classList.contains("visible")) { cancelLogFwdForm(); return; }
+  document.getElementById("lf-edit-index").value = "-1";
+  document.getElementById("lf-name").value = "";
+  document.getElementById("lf-type").value = "loki";
+  document.getElementById("lf-url").value = "";
+  document.getElementById("lf-format").value = "full";
+  document.getElementById("lf-labels").value = "";
+  document.getElementById("lf-headers").value = "";
+  onLogFwdTypeChange();
+  f.classList.add("visible");
+}
+function editLogFwdDest(idx) {
+  var d = logFwdDests[idx];
+  document.getElementById("lf-edit-index").value = String(idx);
+  document.getElementById("lf-name").value = d.name || "";
+  document.getElementById("lf-type").value = d.type || "loki";
+  document.getElementById("lf-url").value = d.url || "";
+  document.getElementById("lf-format").value = d.format || "full";
+  var lbls = []; for (var k in (d.labels||{})) lbls.push(k + "=" + d.labels[k]);
+  document.getElementById("lf-labels").value = lbls.join(",");
+  var hdrs = []; for (var k in (d.headers||{})) hdrs.push(k + "=" + d.headers[k]);
+  document.getElementById("lf-headers").value = hdrs.join(",");
+  onLogFwdTypeChange();
+  document.getElementById("logfwd-form").classList.add("visible");
+}
+function cancelLogFwdForm() { document.getElementById("logfwd-form").classList.remove("visible"); }
+function onLogFwdTypeChange() {
+  var t = document.getElementById("lf-type").value;
+  var hint = document.getElementById("lf-url-hint");
+  if (hint) {
+    if (t === "loki") hint.textContent = "Loki: base URL (e.g. http://loki:3100). /loki/api/v1/push is appended automatically.";
+    else if (t === "syslog") hint.textContent = "Syslog: host:port (e.g. 192.168.1.5:514). Prefix with tcp:// for TCP, default is UDP.";
+    else hint.textContent = "HTTP endpoint that accepts POST with JSON body.";
+  }
+}
+function saveLogFwdDest() {
+  var name = document.getElementById("lf-name").value.trim();
+  var url = document.getElementById("lf-url").value.trim();
+  if (!name || !url) { showToast("Name and URL are required", "error"); return; }
+  var d = { name: name, type: document.getElementById("lf-type").value, url: url, enabled: true,
+    format: document.getElementById("lf-format").value };
+  var labelsRaw = document.getElementById("lf-labels").value.trim();
+  if (labelsRaw) { d.labels = {}; labelsRaw.split(",").forEach(function(p) { var kv = p.split("="); if (kv.length === 2) d.labels[kv[0].trim()] = kv[1].trim(); }); }
+  var headersRaw = document.getElementById("lf-headers").value.trim();
+  if (headersRaw) { d.headers = {}; headersRaw.split(",").forEach(function(p) { var kv = p.split("="); if (kv.length === 2) d.headers[kv[0].trim()] = kv[1].trim(); }); }
+  var idx = parseInt(document.getElementById("lf-edit-index").value, 10);
+  if (idx >= 0 && idx < logFwdDests.length) { d.enabled = logFwdDests[idx].enabled; logFwdDests[idx] = d; }
+  else logFwdDests.push(d);
+  renderLogFwdDests(); cancelLogFwdForm(); saveSettings();
+}
+
 (function() {
   try {
     var stored = localStorage.getItem("nas-doctor-theme");

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 
 	"github.com/mcdays94/nas-doctor/internal"
+	"github.com/mcdays94/nas-doctor/internal/logfwd"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/scheduler"
 	"github.com/mcdays94/nas-doctor/internal/storage"
@@ -93,10 +94,13 @@ type SettingsLogForward struct {
 
 // LogForwardDestination represents a single log-forwarding target.
 type LogForwardDestination struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	URL     string `json:"url"`
-	Enabled bool   `json:"enabled"`
+	Name    string            `json:"name"`
+	Type    string            `json:"type"` // loki, http_json, syslog
+	URL     string            `json:"url"`  // endpoint URL (Loki push, HTTP endpoint, syslog host:port)
+	Enabled bool              `json:"enabled"`
+	Headers map[string]string `json:"headers,omitempty"` // custom HTTP headers (auth tokens, etc.)
+	Labels  map[string]string `json:"labels,omitempty"`  // Loki labels / metadata tags
+	Format  string            `json:"format,omitempty"`  // full (default), findings_only, summary
 }
 
 const settingsConfigKey = "settings"
@@ -513,6 +517,25 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			DefaultCooldownSec: settings.Notifications.DefaultCooldownSec,
 		})
 		s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
+
+		// Update log forwarding
+		if settings.LogPush.Enabled && len(settings.LogPush.Destinations) > 0 {
+			var dests []logfwd.Destination
+			for _, d := range settings.LogPush.Destinations {
+				dests = append(dests, logfwd.Destination{
+					Name:    d.Name,
+					Type:    d.Type,
+					URL:     d.URL,
+					Enabled: d.Enabled,
+					Headers: d.Headers,
+					Labels:  d.Labels,
+					Format:  d.Format,
+				})
+			}
+			s.scheduler.UpdateLogForwarder(dests)
+		} else {
+			s.scheduler.UpdateLogForwarder(nil)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, settings)
