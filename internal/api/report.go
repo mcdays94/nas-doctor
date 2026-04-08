@@ -264,6 +264,34 @@ func GenerateReport(snap *internal.Snapshot) string {
 	writeDocker(&b, snap)
 	b.WriteString("</div>\n")
 
+	// ── ZFS Pools ───────────────────────────────────────────────────
+	if snap.ZFS != nil && snap.ZFS.Available && len(snap.ZFS.Pools) > 0 {
+		b.WriteString("<div class=\"page\">\n")
+		writeZFS(&b, snap)
+		b.WriteString("</div>\n")
+	}
+
+	// ── UPS / Power ─────────────────────────────────────────────────
+	if snap.UPS != nil && snap.UPS.Available {
+		b.WriteString("<div class=\"page\">\n")
+		writeUPS(&b, snap)
+		b.WriteString("</div>\n")
+	}
+
+	// ── Network Detail ──────────────────────────────────────────────
+	if snap.Network.Interfaces != nil && len(snap.Network.Interfaces) > 0 {
+		b.WriteString("<div class=\"page\">\n")
+		writeNetwork(&b, snap)
+		b.WriteString("</div>\n")
+	}
+
+	// ── Service Checks ──────────────────────────────────────────────
+	if len(snap.Services) > 0 {
+		b.WriteString("<div class=\"page\">\n")
+		writeServiceChecks(&b, snap)
+		b.WriteString("</div>\n")
+	}
+
 	// ── Parity Analysis ──────────────────────────────────────────────
 	b.WriteString("<div class=\"page\">\n")
 	writeParity(&b, snap)
@@ -598,8 +626,12 @@ func writeTOC(b *strings.Builder, snap *internal.Snapshot) {
 		{2, "Findings", highestSev, len(snap.Findings) > 0},
 		{3, "Drive Health & SMART Analysis", internal.SeverityOK, len(snap.SMART) > 0},
 		{4, "Docker & Application Analysis", internal.SeverityOK, snap.Docker.Available},
-		{5, "Parity Analysis", internal.SeverityOK, snap.Parity != nil && len(snap.Parity.History) > 0},
-		{6, "Recommended Actions", internal.SeverityOK, len(snap.Findings) > 0},
+		{5, "ZFS Pool Analysis", internal.SeverityOK, snap.ZFS != nil && snap.ZFS.Available && len(snap.ZFS.Pools) > 0},
+		{6, "UPS / Power", internal.SeverityOK, snap.UPS != nil && snap.UPS.Available},
+		{7, "Network Interfaces", internal.SeverityOK, len(snap.Network.Interfaces) > 0},
+		{8, "Service Checks", internal.SeverityOK, len(snap.Services) > 0},
+		{9, "Parity Analysis", internal.SeverityOK, snap.Parity != nil && len(snap.Parity.History) > 0},
+		{10, "Recommended Actions", internal.SeverityOK, len(snap.Findings) > 0},
 	}
 
 	b.WriteString("<div class=\"toc\">\n")
@@ -832,9 +864,22 @@ func writeFindings(b *strings.Builder, snap *internal.Snapshot) {
 		b.WriteString("  </div>\n")
 	}
 
+	// OS Update banner
+	if snap.Update != nil && snap.Update.UpdateAvailable {
+		b.WriteString("  <div class=\"info-card\" style=\"margin-top:16px;border-left:3px solid var(--amber)\">\n")
+		b.WriteString(fmt.Sprintf("    <strong>OS Update Available:</strong> %s %s &rarr; %s",
+			escHTML(snap.Update.Platform), escHTML(snap.Update.InstalledVersion), escHTML(snap.Update.LatestVersion)))
+		if snap.Update.ReleaseURL != "" {
+			b.WriteString(fmt.Sprintf(" &mdash; <a href=\"%s\" target=\"_blank\" style=\"color:var(--blue)\">Release notes</a>", escHTML(snap.Update.ReleaseURL)))
+		}
+		b.WriteString("\n  </div>\n")
+	}
+
 	b.WriteString("</div>\n")
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Stat Card + Component Row
 // ─────────────────────────────────────────────────────────────────────
 // SMART Analysis
 // ─────────────────────────────────────────────────────────────────────
@@ -953,16 +998,25 @@ func writeDocker(b *strings.Builder, snap *internal.Snapshot) {
 	if len(snap.Docker.Containers) > 0 {
 		b.WriteString("  <h3 class=\"sub-heading\" style=\"margin-top: 0;\">Running Containers</h3>\n")
 		b.WriteString("  <div class=\"table-wrap\"><table>\n")
-		b.WriteString("    <thead><tr><th>Container</th><th>Status</th><th>Uptime</th></tr></thead>\n")
+		b.WriteString("    <thead><tr><th>Container</th><th>Image</th><th>Status</th><th>CPU</th><th>Memory</th><th>Uptime</th></tr></thead>\n")
 		b.WriteString("    <tbody>\n")
 		for _, c := range snap.Docker.Containers {
 			stateClass := "val-good"
 			if c.State != "running" {
 				stateClass = "val-warn"
 			}
+			cpuClass := ""
+			if c.CPU > 50 {
+				cpuClass = "val-bad"
+			} else if c.CPU > 10 {
+				cpuClass = "val-warn"
+			}
 			b.WriteString("      <tr>")
 			b.WriteString(fmt.Sprintf("<td><strong>%s</strong></td>", escHTML(c.Name)))
+			b.WriteString(fmt.Sprintf("<td style=\"max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)\">%s</td>", escHTML(c.Image)))
 			b.WriteString(fmt.Sprintf("<td class=\"%s\">%s</td>", stateClass, escHTML(c.Status)))
+			b.WriteString(fmt.Sprintf("<td class=\"%s\">%.1f%%</td>", cpuClass, c.CPU))
+			b.WriteString(fmt.Sprintf("<td>%.0f MB (%.1f%%)</td>", c.MemMB, c.MemPct))
 			b.WriteString(fmt.Sprintf("<td>%s</td>", escHTML(c.Uptime)))
 			b.WriteString("</tr>\n")
 		}
@@ -999,6 +1053,229 @@ func writeDocker(b *strings.Builder, snap *internal.Snapshot) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// ZFS Pools
+// ─────────────────────────────────────────────────────────────────────
+
+func writeZFS(b *strings.Builder, snap *internal.Snapshot) {
+	b.WriteString("<div class=\"section\">\n")
+	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">5</span>ZFS Pool Analysis</h2>\n")
+
+	for _, pool := range snap.ZFS.Pools {
+		stateClass := "val-good"
+		if pool.State == "DEGRADED" {
+			stateClass = "val-warn"
+		} else if pool.State == "FAULTED" || pool.State == "UNAVAIL" {
+			stateClass = "val-bad"
+		}
+
+		b.WriteString("  <div class=\"info-card\">\n")
+		b.WriteString(fmt.Sprintf("    <h3 class=\"sub-heading\" style=\"margin-top:0\">Pool: %s</h3>\n", escHTML(pool.Name)))
+
+		b.WriteString("    <div class=\"component-grid\">\n")
+		writeComponentRow(b, "State", pool.State, stateClass, stateClass)
+		writeComponentRow(b, "Size", fmt.Sprintf("%.1f GB total, %.1f GB used (%.0f%%)", pool.TotalGB, pool.UsedGB, pool.UsedPct), "", "")
+		if pool.Fragmentation > 0 {
+			fragClass := ""
+			if pool.Fragmentation > 50 {
+				fragClass = "val-warn"
+			}
+			writeComponentRow(b, "Fragmentation", fmt.Sprintf("%d%%", pool.Fragmentation), fragClass, fragClass)
+		}
+		if pool.ScanType != "none" && pool.ScanType != "" {
+			scanClass := "val-good"
+			if pool.ScanErrors > 0 {
+				scanClass = "val-bad"
+			}
+			writeComponentRow(b, "Last Scrub", fmt.Sprintf("%s — %s (%d errors)", pool.ScanType, pool.ScanDate, pool.ScanErrors), "", scanClass)
+		}
+		if pool.Status != "" {
+			writeComponentRow(b, "Status", pool.Status, "", "")
+		}
+		b.WriteString("    </div>\n")
+
+		// VDev tree
+		if len(pool.VDevs) > 0 {
+			b.WriteString("    <h4 style=\"margin-top:10px;font-size:9pt;color:var(--cf-text-muted)\">VDev Layout</h4>\n")
+			b.WriteString("    <div class=\"table-wrap\"><table>\n")
+			b.WriteString("      <thead><tr><th>Device</th><th>Type</th><th>State</th><th>Read Err</th><th>Write Err</th><th>Cksum Err</th></tr></thead>\n")
+			b.WriteString("      <tbody>\n")
+			for _, vdev := range pool.VDevs {
+				writeVDevRow(b, vdev, 0)
+			}
+			b.WriteString("      </tbody>\n")
+			b.WriteString("    </table></div>\n")
+		}
+
+		b.WriteString("  </div>\n")
+	}
+
+	// ARC stats
+	if snap.ZFS.ARC != nil {
+		b.WriteString("  <h3 class=\"sub-heading\">ARC Cache Statistics</h3>\n")
+		b.WriteString("  <div class=\"component-grid\">\n")
+		writeComponentRow(b, "ARC Size", fmt.Sprintf("%.0f MB / %.0f MB max", snap.ZFS.ARC.SizeMB, snap.ZFS.ARC.MaxSizeMB), "", "")
+		hitClass := "val-good"
+		if snap.ZFS.ARC.HitRate < 80 {
+			hitClass = "val-warn"
+		}
+		writeComponentRow(b, "Hit Rate", fmt.Sprintf("%.1f%%", snap.ZFS.ARC.HitRate), hitClass, hitClass)
+		b.WriteString("  </div>\n")
+	}
+
+	b.WriteString("</div>\n")
+}
+
+func writeVDevRow(b *strings.Builder, vdev internal.ZVDev, depth int) {
+	indent := ""
+	for i := 0; i < depth; i++ {
+		indent += "&nbsp;&nbsp;&nbsp;"
+	}
+	stateClass := "val-good"
+	if vdev.State == "DEGRADED" {
+		stateClass = "val-warn"
+	} else if vdev.State != "ONLINE" {
+		stateClass = "val-bad"
+	}
+	errClass := ""
+	if vdev.ReadErr+vdev.WriteErr+vdev.CksumErr > 0 {
+		errClass = "val-bad"
+	}
+	b.WriteString("      <tr>")
+	b.WriteString(fmt.Sprintf("<td>%s%s</td>", indent, escHTML(vdev.Name)))
+	b.WriteString(fmt.Sprintf("<td>%s</td>", escHTML(vdev.Type)))
+	b.WriteString(fmt.Sprintf("<td class=\"%s\">%s</td>", stateClass, escHTML(vdev.State)))
+	b.WriteString(fmt.Sprintf("<td class=\"%s\">%d</td>", errClass, vdev.ReadErr))
+	b.WriteString(fmt.Sprintf("<td class=\"%s\">%d</td>", errClass, vdev.WriteErr))
+	b.WriteString(fmt.Sprintf("<td class=\"%s\">%d</td>", errClass, vdev.CksumErr))
+	b.WriteString("</tr>\n")
+	for _, child := range vdev.Children {
+		writeVDevRow(b, child, depth+1)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// UPS / Power
+// ─────────────────────────────────────────────────────────────────────
+
+func writeUPS(b *strings.Builder, snap *internal.Snapshot) {
+	ups := snap.UPS
+	b.WriteString("<div class=\"section\">\n")
+	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">6</span>UPS / Power</h2>\n")
+
+	statusClass := "val-good"
+	if ups.OnBattery {
+		statusClass = "val-bad"
+	} else if ups.LowBattery {
+		statusClass = "val-bad"
+	}
+
+	b.WriteString("  <div class=\"info-card\">\n")
+	b.WriteString(fmt.Sprintf("    <h3 class=\"sub-heading\" style=\"margin-top:0\">%s</h3>\n", escHTML(ups.Name)))
+	if ups.Model != "" && ups.Model != ups.Name {
+		b.WriteString(fmt.Sprintf("    <p style=\"color:var(--cf-text-muted);font-size:9pt;margin-bottom:8px\">%s</p>\n", escHTML(ups.Model)))
+	}
+	b.WriteString("    <div class=\"component-grid\">\n")
+	writeComponentRow(b, "Status", ups.StatusHuman, statusClass, statusClass)
+	writeComponentRow(b, "Battery", fmt.Sprintf("%.0f%%", ups.BatteryPct), "", "")
+	writeComponentRow(b, "Load", fmt.Sprintf("%.0f%%", ups.LoadPct), "", "")
+	writeComponentRow(b, "Runtime", fmt.Sprintf("%.0f min", ups.RuntimeMins), "", "")
+	if ups.WattageW > 0 {
+		writeComponentRow(b, "Power Draw", fmt.Sprintf("%.0fW / %.0fW nominal", ups.WattageW, ups.NominalW), "", "")
+	}
+	if ups.InputV > 0 {
+		writeComponentRow(b, "Input Voltage", fmt.Sprintf("%.0fV", ups.InputV), "", "")
+	}
+	if ups.Temperature > 0 {
+		writeComponentRow(b, "Temperature", fmt.Sprintf("%.0f°C", ups.Temperature), "", "")
+	}
+	if ups.LastTransfer != "" {
+		writeComponentRow(b, "Last Transfer", ups.LastTransfer, "", "")
+	}
+	b.WriteString("    </div>\n")
+	b.WriteString("  </div>\n")
+	b.WriteString("</div>\n")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Network Detail
+// ─────────────────────────────────────────────────────────────────────
+
+func writeNetwork(b *strings.Builder, snap *internal.Snapshot) {
+	b.WriteString("<div class=\"section\">\n")
+	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">7</span>Network Interfaces</h2>\n")
+
+	b.WriteString("  <div class=\"table-wrap\"><table>\n")
+	b.WriteString("    <thead><tr><th>Interface</th><th>State</th><th>Speed</th><th>MTU</th><th>IPv4 Address</th></tr></thead>\n")
+	b.WriteString("    <tbody>\n")
+	for _, iface := range snap.Network.Interfaces {
+		stateClass := "val-good"
+		if iface.State != "UP" {
+			stateClass = "val-warn"
+		}
+		speed := iface.Speed
+		if speed == "" {
+			speed = "—"
+		}
+		ip := iface.IPv4
+		if ip == "" {
+			ip = "—"
+		}
+		b.WriteString("      <tr>")
+		b.WriteString(fmt.Sprintf("<td><strong>%s</strong></td>", escHTML(iface.Name)))
+		b.WriteString(fmt.Sprintf("<td class=\"%s\">%s</td>", stateClass, escHTML(iface.State)))
+		b.WriteString(fmt.Sprintf("<td>%s</td>", escHTML(speed)))
+		b.WriteString(fmt.Sprintf("<td>%d</td>", iface.MTU))
+		b.WriteString(fmt.Sprintf("<td>%s</td>", escHTML(ip)))
+		b.WriteString("</tr>\n")
+	}
+	b.WriteString("    </tbody>\n")
+	b.WriteString("  </table></div>\n")
+	b.WriteString("</div>\n")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Service Checks
+// ─────────────────────────────────────────────────────────────────────
+
+func writeServiceChecks(b *strings.Builder, snap *internal.Snapshot) {
+	b.WriteString("<div class=\"section\">\n")
+	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">8</span>Service Checks</h2>\n")
+
+	b.WriteString("  <div class=\"table-wrap\"><table>\n")
+	b.WriteString("    <thead><tr><th>Service</th><th>Type</th><th>Target</th><th>Status</th><th>Response</th><th>Failures</th></tr></thead>\n")
+	b.WriteString("    <tbody>\n")
+	for _, sc := range snap.Services {
+		statusClass := "val-good"
+		statusLabel := "UP"
+		if sc.Status == "down" {
+			statusClass = "val-bad"
+			statusLabel = "DOWN"
+		}
+		responseStr := fmt.Sprintf("%dms", sc.ResponseMS)
+		if sc.Status == "down" {
+			responseStr = "—"
+		}
+		failStr := "0"
+		failClass := ""
+		if sc.ConsecutiveFailures > 0 {
+			failStr = fmt.Sprintf("%d", sc.ConsecutiveFailures)
+			failClass = "val-bad"
+		}
+		b.WriteString("      <tr>")
+		b.WriteString(fmt.Sprintf("<td><strong>%s</strong></td>", escHTML(sc.Name)))
+		b.WriteString(fmt.Sprintf("<td style=\"text-transform:uppercase;font-size:8pt\">%s</td>", escHTML(sc.Type)))
+		b.WriteString(fmt.Sprintf("<td style=\"max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)\">%s</td>", escHTML(sc.Target)))
+		b.WriteString(fmt.Sprintf("<td class=\"%s\"><strong>%s</strong></td>", statusClass, statusLabel))
+		b.WriteString(fmt.Sprintf("<td>%s</td>", responseStr))
+		b.WriteString(fmt.Sprintf("<td class=\"%s\">%s</td>", failClass, failStr))
+		b.WriteString("</tr>\n")
+	}
+	b.WriteString("    </tbody>\n")
+	b.WriteString("  </table></div>\n")
+	b.WriteString("</div>\n")
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Parity Analysis
 // ─────────────────────────────────────────────────────────────────────
 
@@ -1008,7 +1285,7 @@ func writeParity(b *strings.Builder, snap *internal.Snapshot) {
 	}
 
 	b.WriteString("<div class=\"section\">\n")
-	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">5</span>Parity Analysis</h2>\n")
+	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">9</span>Parity Analysis</h2>\n")
 
 	b.WriteString("  <div class=\"table-wrap\"><table>\n")
 	b.WriteString("    <thead><tr><th>Period</th><th>Duration</th><th>Speed</th><th>Errors</th><th>Action</th></tr></thead>\n")
@@ -1058,7 +1335,7 @@ func writeActions(b *strings.Builder, snap *internal.Snapshot) {
 	actionFindings = groupFindings(actionFindings)
 
 	b.WriteString("<div class=\"section\">\n")
-	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">6</span>Recommended Actions</h2>\n")
+	b.WriteString("  <h2 class=\"section-heading\"><span class=\"section-num\">10</span>Recommended Actions</h2>\n")
 
 	b.WriteString("  <div class=\"table-wrap\"><table>\n")
 	b.WriteString("    <thead><tr><th>Action</th><th>Priority</th><th>Estimated Impact</th><th>Cost</th></tr></thead>\n")
