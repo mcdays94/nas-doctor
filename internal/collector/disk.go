@@ -211,6 +211,10 @@ func isVirtualMount(mount string) bool {
 			return true
 		}
 	}
+	// Unraid: /mnt/user0 is a non-cached view of the same array as /mnt/user — skip it
+	if mount == "/mnt/user0" || strings.HasPrefix(mount, "/host/mnt/user0") {
+		return true
+	}
 	return false
 }
 
@@ -274,8 +278,11 @@ func guessLabel(mount, device string) string {
 	if strings.HasPrefix(mount, "/mnt/cache") {
 		return "Cache (" + device + ")"
 	}
-	if mount == "/mnt/user" || mount == "/mnt/user0" {
-		return "User Share"
+	if mount == "/mnt/user" {
+		return "Array (User Share)"
+	}
+	if mount == "/mnt/user0" {
+		return "Array (User Share, no cache)"
 	}
 	// ZFS dataset patterns (TrueNAS, Proxmox, generic ZFS)
 	// Device looks like "pool/dataset" or "tank/media/movies"
