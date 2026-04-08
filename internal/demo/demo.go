@@ -28,8 +28,105 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.ZFS = demoZFS()
 	snap.UPS = demoUPS()
 	snap.Update = demoUpdate(snap.System.Platform, snap.System.PlatformVer)
+	snap.Services = demoServiceChecks()
+	snap.Tunnels = demoTunnels()
 
 	return snap
+}
+
+func demoTunnels() *internal.TunnelInfo {
+	return &internal.TunnelInfo{
+		Cloudflared: &internal.CloudflaredInfo{
+			Installed: true,
+			Version:   "2025.2.1",
+			Tunnels: []internal.CloudflaredTunnel{
+				{ID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", Name: "nas-tunnel", Status: "healthy", CreatedAt: "2025-01-15T10:30:00Z", Connections: 4, Routes: []string{"nas.example.com", "plex.example.com", "hass.example.com"}, OriginIP: "192.168.1.100"},
+				{ID: "f9e8d7c6-b5a4-3210-fedc-ba0987654321", Name: "dev-tunnel", Status: "healthy", CreatedAt: "2025-06-01T08:00:00Z", Connections: 2, Routes: []string{"code.example.com"}, OriginIP: "192.168.1.100"},
+			},
+		},
+		Tailscale: &internal.TailscaleInfo{
+			Installed:    true,
+			Version:      "1.78.1",
+			BackendState: "Running",
+			MagicDNS:     true,
+			TailnetName:  "homelab.ts.net",
+			Self: &internal.TailscaleNode{
+				Name: "tower", DNSName: "tower.homelab.ts.net", IP: "100.64.0.1",
+				OS: "linux", Online: true, TxBytes: 15482880000, RxBytes: 8741529600,
+			},
+			Peers: []internal.TailscaleNode{
+				{Name: "macbook", DNSName: "macbook.homelab.ts.net", IP: "100.64.0.2", OS: "macOS", Online: true, Relay: "nyc", TxBytes: 5242880000, RxBytes: 3145728000, LastSeen: "2026-04-08T23:00:00Z"},
+				{Name: "phone", DNSName: "phone.homelab.ts.net", IP: "100.64.0.3", OS: "iOS", Online: true, Relay: "lhr", TxBytes: 1073741824, RxBytes: 536870912, LastSeen: "2026-04-08T22:55:00Z"},
+				{Name: "backup-nas", DNSName: "backup-nas.homelab.ts.net", IP: "100.64.0.4", OS: "linux", Online: true, TxBytes: 9437184000, RxBytes: 12884901888, LastSeen: "2026-04-08T23:01:00Z"},
+				{Name: "offsite-pi", DNSName: "offsite-pi.homelab.ts.net", IP: "100.64.0.5", OS: "linux", Online: false, ExitNode: true, Relay: "fra", TxBytes: 2147483648, RxBytes: 1073741824, LastSeen: "2026-04-07T14:30:00Z"},
+			},
+		},
+	}
+}
+
+// DemoFleetServers returns a set of mock remote servers for demo mode.
+func DemoFleetServers() []internal.RemoteServer {
+	return []internal.RemoteServer{
+		{ID: "fleet-1", Name: "Backup NAS", URL: "http://192.168.1.50:8060", Enabled: true},
+		{ID: "fleet-2", Name: "Media Server", URL: "http://192.168.1.51:8060", Enabled: true},
+		{ID: "fleet-3", Name: "Proxmox Node 1", URL: "http://10.0.0.10:8060", Enabled: true},
+		{ID: "fleet-4", Name: "Remote Offsite", URL: "http://vpn.offsite.local:8060", Enabled: true},
+	}
+}
+
+// DemoFleetStatuses returns mock statuses for demo fleet servers.
+func DemoFleetStatuses() []internal.RemoteServerStatus {
+	servers := DemoFleetServers()
+	return []internal.RemoteServerStatus{
+		{
+			Server: servers[0], Online: true, Hostname: "backup-nas",
+			Platform: "synology", Uptime: "142d 8h", OverallHealth: "healthy",
+			CriticalCount: 0, WarningCount: 1, InfoCount: 3,
+			LastPoll: time.Now().Add(-30 * time.Second).Format(time.RFC3339),
+		},
+		{
+			Server: servers[1], Online: true, Hostname: "plex-tower",
+			Platform: "unraid", Uptime: "30d 14h", OverallHealth: "warning",
+			CriticalCount: 0, WarningCount: 4, InfoCount: 2,
+			LastPoll: time.Now().Add(-25 * time.Second).Format(time.RFC3339),
+		},
+		{
+			Server: servers[2], Online: true, Hostname: "pve-node1",
+			Platform: "linux", Uptime: "89d 2h", OverallHealth: "healthy",
+			CriticalCount: 0, WarningCount: 0, InfoCount: 1,
+			LastPoll: time.Now().Add(-20 * time.Second).Format(time.RFC3339),
+		},
+		{
+			Server: servers[3], Online: false, Hostname: "",
+			Platform: "", Uptime: "", OverallHealth: "",
+			Error:    "connection timed out after 10s",
+			LastPoll: time.Now().Add(-60 * time.Second).Format(time.RFC3339),
+		},
+	}
+}
+
+// DemoServiceCheckConfigs returns service check configs for demo mode.
+func DemoServiceCheckConfigs() []internal.ServiceCheckConfig {
+	return []internal.ServiceCheckConfig{
+		{Name: "Home Assistant", Type: "http", Target: "http://192.168.1.10:8123", Enabled: true, IntervalSec: 60, TimeoutSec: 5, FailureThreshold: 3, FailureSeverity: "critical"},
+		{Name: "Pi-hole DNS", Type: "dns", Target: "pi.hole", Enabled: true, IntervalSec: 120, TimeoutSec: 5, FailureThreshold: 2, FailureSeverity: "warning"},
+		{Name: "Gateway Ping", Type: "ping", Target: "192.168.1.1", Enabled: true, IntervalSec: 30, TimeoutSec: 3, FailureThreshold: 5, FailureSeverity: "critical"},
+		{Name: "Plex Media Server", Type: "http", Target: "http://192.168.1.51:32400/web", Enabled: true, IntervalSec: 300, TimeoutSec: 10, FailureThreshold: 2, FailureSeverity: "warning"},
+		{Name: "NFS Share", Type: "nfs", Target: "192.168.1.50", Enabled: true, IntervalSec: 300, TimeoutSec: 5, FailureThreshold: 3, FailureSeverity: "warning"},
+		{Name: "SMB Share", Type: "smb", Target: "192.168.1.50", Enabled: true, IntervalSec: 300, TimeoutSec: 5, FailureThreshold: 3, FailureSeverity: "warning"},
+	}
+}
+
+func demoServiceChecks() []internal.ServiceCheckResult {
+	now := time.Now()
+	return []internal.ServiceCheckResult{
+		{Key: "demo-ha", Name: "Home Assistant", Type: "http", Target: "http://192.168.1.10:8123", Status: "up", ResponseMS: 42, CheckedAt: now.Add(-30 * time.Second).Format(time.RFC3339), FailureThreshold: 3, FailureSeverity: "critical"},
+		{Key: "demo-dns", Name: "Pi-hole DNS", Type: "dns", Target: "pi.hole", Status: "up", ResponseMS: 3, CheckedAt: now.Add(-45 * time.Second).Format(time.RFC3339), FailureThreshold: 2, FailureSeverity: "warning"},
+		{Key: "demo-gw", Name: "Gateway Ping", Type: "ping", Target: "192.168.1.1", Status: "up", ResponseMS: 1, CheckedAt: now.Add(-15 * time.Second).Format(time.RFC3339), FailureThreshold: 5, FailureSeverity: "critical"},
+		{Key: "demo-plex", Name: "Plex Media Server", Type: "http", Target: "http://192.168.1.51:32400/web", Status: "up", ResponseMS: 185, CheckedAt: now.Add(-120 * time.Second).Format(time.RFC3339), FailureThreshold: 2, FailureSeverity: "warning"},
+		{Key: "demo-nfs", Name: "NFS Share", Type: "nfs", Target: "192.168.1.50", Status: "down", ResponseMS: 5000, Error: "connection refused", CheckedAt: now.Add(-90 * time.Second).Format(time.RFC3339), ConsecutiveFailures: 2, FailureThreshold: 3, FailureSeverity: "warning"},
+		{Key: "demo-smb", Name: "SMB Share", Type: "smb", Target: "192.168.1.50", Status: "up", ResponseMS: 8, CheckedAt: now.Add(-90 * time.Second).Format(time.RFC3339), FailureThreshold: 3, FailureSeverity: "warning"},
+	}
 }
 
 func demoSystem() internal.SystemInfo {

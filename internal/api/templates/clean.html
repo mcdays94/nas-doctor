@@ -717,6 +717,7 @@ body {
   <div class="header-right">
     <div class="nav-links">
       <a href="/alerts" class="nav-link">Alerts</a>
+      <a href="/service-checks" class="nav-link">Services</a>
       <a href="/stats" class="nav-link">Stats</a>
       <a href="/fleet" class="nav-link">Fleet</a>
       <a href="/settings" class="nav-link" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
@@ -736,41 +737,42 @@ body {
 (function() {
   "use strict";
 
-  var REFRESH_INTERVAL = 300000; // default 5min; updated dynamically from scan interval
-  var FAST_POLL_MS = 5000;
+  var POLL_MS = 60000;          // status-only poll interval (60s)
+  var SCAN_POLL_MS = 15000;     // faster status poll while scan is running (15s)
   var _cachedStatus = null;
-  var refreshTimer = null;
-  var refreshCountdown = null;
+  var pollTimer = null;
   var _lastScanTime = null;
-  var _fastUntil = 0;
+  var _wasScanRunning = false;
 
-  function _computeRefreshMs(secs) {
-    if (!secs || secs <= 0) return 300000;
-    return Math.max(Math.min(Math.floor(secs / 12) * 1000, 300000), 30000);
+  // Lightweight status-only poll — only fetches full snapshot when data changes
+  function _pollStatus() {
+    fetchJSON("/api/v1/status").then(function(d) {
+      _cachedStatus = d;
+      var scanTime = d.last_scan || null;
+      var scanRunning = !!d.scan_running;
+
+      // New scan data available — fetch full snapshot and re-render
+      if (scanTime && scanTime !== _lastScanTime && _lastScanTime !== null) {
+        _lastScanTime = scanTime;
+        fetchJSON("/api/v1/snapshot/latest").then(function(snap) {
+          _renderFull(_cachedStatus, snap);
+        }).catch(function() {});
+      } else {
+        if (!_lastScanTime) _lastScanTime = scanTime;
+      }
+
+      // Adjust poll speed based on scan state
+      if (scanRunning !== _wasScanRunning) {
+        _wasScanRunning = scanRunning;
+        _startPoll();
+      }
+    }).catch(function() {});
   }
 
-  function _startRefresh() {
-    if (refreshTimer) clearInterval(refreshTimer);
-    var ms = (Date.now() < _fastUntil) ? FAST_POLL_MS : REFRESH_INTERVAL;
-    refreshTimer = setInterval(function() {
-      loadData();
-      if (Date.now() >= _fastUntil && ms === FAST_POLL_MS) _startRefresh();
-    }, ms);
-  }
-
-  function _adjustRefreshRate() {
-    if (!_cachedStatus) return;
-    if (_cachedStatus.scan_interval_secs > 0) {
-      REFRESH_INTERVAL = _computeRefreshMs(_cachedStatus.scan_interval_secs);
-    }
-    var scanTime = _cachedStatus.last_scan || null;
-    if (scanTime && scanTime !== _lastScanTime) {
-      if (_lastScanTime !== null) { _fastUntil = Date.now() + 30000; _startRefresh(); }
-      _lastScanTime = scanTime;
-    }
-    if (_cachedStatus.scan_running && Date.now() >= _fastUntil) {
-      _fastUntil = Date.now() + 60000; _startRefresh();
-    }
+  function _startPoll() {
+    if (pollTimer) clearInterval(pollTimer);
+    var ms = _wasScanRunning ? SCAN_POLL_MS : POLL_MS;
+    pollTimer = setInterval(_pollStatus, ms);
   }
 
   function escapeHTML(str) {
@@ -1228,24 +1230,65 @@ body {
     }
     html += '</div>'; // end section-block services
 
+    // ==== Section: Tunnels ====
+    html += '<div class="section-block" data-section="tunnels">';
+    var tunnels = snapshot ? snapshot.tunnels : null;
+    if (tunnels && (tunnels.cloudflared || tunnels.tailscale)) {
+      html += '<div class="section"><div class="section-title">Tunnels</div>';
+      if (tunnels.cloudflared && tunnels.cloudflared.tunnels && tunnels.cloudflared.tunnels.length > 0) {
+        html += '<div style="font-size:11px;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Cloudflared ' + escapeHTML(tunnels.cloudflared.version || '') + '</div>';
+        for (var ti = 0; ti < tunnels.cloudflared.tunnels.length; ti++) {
+          var ct = tunnels.cloudflared.tunnels[ti];
+          var ctColor = ct.status === 'healthy' ? 'var(--green)' : ct.status === 'degraded' ? 'var(--amber)' : 'var(--red)';
+          html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">';
+          html += '<span style="width:8px;height:8px;border-radius:50%;background:' + ctColor + '"></span>';
+          html += '<span style="font-weight:600;font-size:13px">' + escapeHTML(ct.name) + '</span>';
+          html += '<span style="font-size:11px;color:var(--text2)">' + ct.connections + ' conn</span>';
+          if (ct.routes && ct.routes.length) html += '<span style="font-size:11px;color:var(--text3)">' + escapeHTML(ct.routes.join(', ')) + '</span>';
+          html += '</div>';
+        }
+      }
+      if (tunnels.tailscale && tunnels.tailscale.self) {
+        var ts = tunnels.tailscale;
+        html += '<div style="font-size:11px;color:var(--text2);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.5px">Tailscale ' + escapeHTML(ts.version || '') + (ts.tailnet_name ? ' &middot; ' + escapeHTML(ts.tailnet_name) : '') + '</div>';
+        var allNodes = [ts.self].concat(ts.peers || []);
+        for (var ni = 0; ni < allNodes.length; ni++) {
+          var nd = allNodes[ni];
+          var ndColor = nd.online ? 'var(--green)' : 'var(--text3)';
+          html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">';
+          html += '<span style="width:8px;height:8px;border-radius:50%;background:' + ndColor + '"></span>';
+          html += '<span style="font-weight:600;min-width:80px">' + escapeHTML(nd.name) + '</span>';
+          html += '<span style="font-family:var(--font-mono);font-size:11px;color:var(--text2);min-width:90px">' + escapeHTML(nd.ip || '') + '</span>';
+          html += '<span style="font-size:11px;color:var(--text3)">' + escapeHTML(nd.os || '') + '</span>';
+          if (ni === 0) html += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.15);color:var(--accent)">self</span>';
+          if (nd.exit_node) html += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(217,119,6,0.15);color:var(--amber)">exit node</span>';
+          html += '</div>';
+        }
+      }
+      html += '</div>';
+    }
+    html += '</div>'; // end section-block tunnels
+
     // ==== Section: Parity ====
     html += '<div class="section-block" data-section="parity">';
     if (snapshot && snapshot.parity) {
       var par = snapshot.parity;
-      html += '<div class="section"><div class="section-title">Parity</div>';
+      html += '<div class="section"><div class="section-title" style="display:flex;align-items:center;justify-content:space-between"><span>Parity</span><a href="/parity" style="font-size:11px;color:var(--text2);text-decoration:none;font-weight:400;margin-left:16px;white-space:nowrap">View all &rarr;</a></div>';
       if (par.history && par.history.length > 0) {
-        html += '<div style="background:var(--card-bg, #fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;overflow-x:auto">';
-        html += '<div style="max-height:200px;overflow-y:auto;scrollbar-width:thin">';
-        html += '<table style="width:100%;font-size:13px;border-collapse:collapse">';
-        html += '<tr style="color:#808080;font-size:11px"><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">Date</th><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">Duration</th><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">Speed</th><th style="text-align:left;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,0.08)">Errors</th></tr>';
-        for (var pi = 0; pi < par.history.length; pi++) {
-          var pc = par.history[pi];
-          html += '<tr><td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(pc.date) + '</td>';
-          html += '<td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML(pc.duration_human || "—") + '</td>';
-          html += '<td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04)">' + (pc.speed_mb_s || 0).toFixed(1) + ' MB/s</td>';
-          html += '<td style="padding:5px 12px;border-bottom:1px solid rgba(0,0,0,0.04);color:' + (pc.errors > 0 ? "#dc2626" : "#16a34a") + '">' + (pc.errors || 0) + '</td></tr>';
+        html += '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin">';
+        var sorted = par.history.slice().sort(function(a,b){ return (b.date||"").localeCompare(a.date||""); });
+        for (var pi = 0; pi < sorted.length; pi++) {
+          var pc = sorted[pi];
+          var hasErr = pc.errors > 0;
+          var dur = pc.duration_seconds > 0 ? (pc.duration_seconds >= 3600 ? Math.floor(pc.duration_seconds/3600)+'h '+Math.round((pc.duration_seconds%3600)/60)+'m' : Math.round(pc.duration_seconds/60)+'m') : '\u2014';
+          html += '<a href="/parity" style="text-decoration:none;flex-shrink:0">';
+          html += '<div style="background:var(--card-bg,#fff);border:1px solid '+(hasErr?'#dc2626':'rgba(0,0,0,0.08)')+';border-radius:10px;padding:8px 14px;min-width:120px;cursor:pointer">';
+          html += '<div style="font-size:12px;font-weight:600">' + escapeHTML(pc.date) + '</div>';
+          html += '<div style="font-size:11px;color:#808080;margin-top:2px">' + dur + ' &middot; ' + (pc.speed_mb_s||0).toFixed(0) + ' MB/s</div>';
+          html += '<div style="font-size:11px;margin-top:2px;font-weight:600;color:'+(hasErr?'#dc2626':'#16a34a')+'">'+( hasErr ? pc.errors+' errors' : 'Clean' )+'</div>';
+          html += '</div></a>';
         }
-        html += '</table></div></div>';
+        html += '</div>';
       } else {
         html += '<div style="font-size:13px;color:#808080">Status: ' + escapeHTML(par.status || "idle") + '</div>';
       }
@@ -1256,6 +1299,20 @@ body {
     html += '</div>'; // end section-staging
 
     return html;
+  }
+
+  function _renderFull(status, snapshot) {
+    var bar = document.getElementById("refreshBar");
+    if (bar) { bar.style.width = "100%"; setTimeout(function() { bar.style.width = "0%"; }, 400); }
+    var hostnameEl = document.getElementById("hostname");
+    if (hostnameEl && status.hostname) hostnameEl.textContent = status.hostname;
+    if (status.hostname) document.title = "NAS Doctor - " + status.hostname;
+    var app = document.getElementById("app");
+    if (app) {
+      app.innerHTML = renderDashboard(status, snapshot);
+      _distributeSections();
+      _renderSparklines(snapshot);
+    }
   }
 
   function loadData() {
@@ -1269,40 +1326,12 @@ body {
       var status = results[0];
       var snapshot = results[1];
       _cachedStatus = status;
-
-      if (bar) bar.style.width = "100%";
-      setTimeout(function() { if (bar) bar.style.width = "0%"; }, 400);
-
-      // Update hostname
-      var hostnameEl = document.getElementById("hostname");
-      if (hostnameEl && status.hostname) {
-        hostnameEl.textContent = status.hostname;
-      }
-
-      // Update page title
-      if (status.hostname) {
-        document.title = "NAS Doctor - " + status.hostname;
-      }
-
-      // Render
-      var app = document.getElementById("app");
-      if (app) {
-        app.innerHTML = renderDashboard(status, snapshot);
-        _distributeSections();
-        _renderSparklines(snapshot);
-      }
-      _adjustRefreshRate();
+      _renderFull(status, snapshot);
     }).catch(function(err) {
       var bar2 = document.getElementById("refreshBar");
       if (bar2) bar2.style.width = "0%";
-
-      var app2 = document.getElementById("app");
-      if (app2) {
-        var loadEl = document.getElementById("loadingState");
-        if (loadEl) {
-          loadEl.textContent = "Failed to load data. Retrying...";
-        }
-      }
+      var loadEl = document.getElementById("loadingState");
+      if (loadEl) loadEl.textContent = "Failed to load data. Retrying...";
       console.error("Failed to load dashboard data:", err);
     });
   }
@@ -1441,6 +1470,11 @@ body {
     }, 100);
     return result;
   };
+  var _origPollStatus = _pollStatus;
+  _pollStatus = function() {
+    _origPollStatus();
+    _lastFetchTime = Date.now();
+  };
   setInterval(function() {
     var el = document.getElementById("refresh-ago");
     if (!el || !_lastFetchTime) return;
@@ -1450,11 +1484,9 @@ body {
     else el.textContent = Math.floor(secs / 60) + "m ago";
   }, 1000);
 
-  // Initial load
+  // Initial load — full fetch, then switch to lightweight polling
   loadData();
-
-  // Auto-refresh
-  _startRefresh();
+  _startPoll();
 })();
 </script>
 </body>

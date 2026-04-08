@@ -24,6 +24,7 @@ import (
 
 // Settings represents the user-configurable application settings stored in the DB.
 type Settings struct {
+	SettingsVersion   int                     `json:"settings_version"`
 	ScanInterval      string                  `json:"scan_interval"`
 	Theme             string                  `json:"theme"`
 	Icon              string                  `json:"icon"`
@@ -37,6 +38,8 @@ type Settings struct {
 	DismissedFindings []string                `json:"dismissed_findings,omitempty"`
 }
 
+const currentSettingsVersion = 1
+
 // DashboardSections controls which sections appear on the dashboard.
 // All default to true (visible). Users can hide sections they don't use.
 type DashboardSections struct {
@@ -48,6 +51,7 @@ type DashboardSections struct {
 	UPS          bool `json:"ups"`
 	Parity       bool `json:"parity"`
 	Network      bool `json:"network"`
+	Tunnels      bool `json:"tunnels"`
 	MergedDrives bool `json:"merged_drives"` // Combine SMART + storage into one card per drive
 }
 
@@ -100,9 +104,10 @@ const settingsConfigKey = "settings"
 // defaultSettings returns the default settings used when none are persisted.
 func defaultSettings() Settings {
 	return Settings{
-		ScanInterval: "6h",
-		Theme:        ThemeMidnight,
-		Icon:         "icon3",
+		SettingsVersion: currentSettingsVersion,
+		ScanInterval:    "6h",
+		Theme:           ThemeMidnight,
+		Icon:            "icon3",
 		Notifications: SettingsNotifications{
 			Webhooks:           []internal.WebhookConfig{},
 			Policies:           []scheduler.AlertPolicy{},
@@ -141,7 +146,8 @@ func defaultSettings() Settings {
 			UPS:          true,
 			Parity:       true,
 			Network:      true,
-			MergedDrives: false,
+			Tunnels:      true,
+			MergedDrives: true,
 		},
 	}
 }
@@ -183,6 +189,12 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 
 	// Alerts page
 	r.Get("/alerts", s.handleAlertsPage)
+
+	// Service Checks page
+	r.Get("/service-checks", s.handleServiceChecksPage)
+
+	// Parity page
+	r.Get("/parity", s.handleParityPage)
 
 	// Stats page
 	r.Get("/stats", s.handleStatsPage)
@@ -259,6 +271,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		settings.Sections = DashboardSections{
 			Findings: true, DiskSpace: true, SMART: true, Docker: true,
 			ZFS: true, UPS: true, Parity: true, Network: true,
+			Tunnels: true, MergedDrives: true,
 		}
 	}
 
@@ -392,11 +405,17 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		serviceNames[strings.ToLower(check.Name)] = struct{}{}
 		switch check.Type {
-		case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS:
+		case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing:
 			// valid
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid service check type: " + check.Type})
 			return
+		}
+		if check.IntervalSec <= 0 {
+			check.IntervalSec = 300 // default 5 minutes
+		}
+		if check.IntervalSec < 30 {
+			check.IntervalSec = 30 // minimum 30 seconds
 		}
 		if check.TimeoutSec <= 0 {
 			check.TimeoutSec = 5
@@ -683,10 +702,21 @@ func (s *Server) handleListBackups(w http.ResponseWriter, r *http.Request) {
 }
 
 // getSettings loads and returns the current settings with defaults applied.
+// Runs one-time migrations when settings_version is behind currentSettingsVersion.
 func (s *Server) getSettings() Settings {
 	settings := defaultSettings()
 	if raw, err := s.store.GetConfig(settingsConfigKey); err == nil && raw != "" {
 		json.Unmarshal([]byte(raw), &settings)
+		if settings.SettingsVersion < currentSettingsVersion {
+			// v0 → v1: merged_drives defaults to true
+			if settings.SettingsVersion < 1 {
+				settings.Sections.MergedDrives = true
+			}
+			settings.SettingsVersion = currentSettingsVersion
+			if data, err := json.Marshal(settings); err == nil {
+				s.store.SetConfig(settingsConfigKey, string(data))
+			}
+		}
 	}
 	return settings
 }
@@ -1670,6 +1700,20 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(alertsPageHTML))
+}
+
+// handleServiceChecksPage serves the service checks HTML page.
+// GET /service-checks
+func (s *Server) handleServiceChecksPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(serviceChecksPageHTML))
+}
+
+// handleParityPage serves the parity history HTML page.
+// GET /parity
+func (s *Server) handleParityPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(parityPageHTML))
 }
 
 // handleDiskPage serves the disk detail HTML page.
