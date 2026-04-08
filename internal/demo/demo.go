@@ -28,8 +28,74 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.ZFS = demoZFS()
 	snap.UPS = demoUPS()
 	snap.Update = demoUpdate(snap.System.Platform, snap.System.PlatformVer)
+	snap.Services = demoServiceChecks()
 
 	return snap
+}
+
+// DemoFleetServers returns a set of mock remote servers for demo mode.
+func DemoFleetServers() []internal.RemoteServer {
+	return []internal.RemoteServer{
+		{ID: "fleet-1", Name: "Backup NAS", URL: "http://192.168.1.50:8060", Enabled: true},
+		{ID: "fleet-2", Name: "Media Server", URL: "http://192.168.1.51:8060", Enabled: true},
+		{ID: "fleet-3", Name: "Proxmox Node 1", URL: "http://10.0.0.10:8060", Enabled: true},
+		{ID: "fleet-4", Name: "Remote Offsite", URL: "http://vpn.offsite.local:8060", Enabled: true},
+	}
+}
+
+// DemoFleetStatuses returns mock statuses for demo fleet servers.
+func DemoFleetStatuses() []internal.RemoteServerStatus {
+	servers := DemoFleetServers()
+	return []internal.RemoteServerStatus{
+		{
+			Server: servers[0], Online: true, Hostname: "backup-nas",
+			Platform: "synology", Uptime: "142d 8h", OverallHealth: "healthy",
+			CriticalCount: 0, WarningCount: 1, InfoCount: 3,
+			LastPoll: time.Now().Add(-30 * time.Second).Format(time.RFC3339),
+		},
+		{
+			Server: servers[1], Online: true, Hostname: "plex-tower",
+			Platform: "unraid", Uptime: "30d 14h", OverallHealth: "warning",
+			CriticalCount: 0, WarningCount: 4, InfoCount: 2,
+			LastPoll: time.Now().Add(-25 * time.Second).Format(time.RFC3339),
+		},
+		{
+			Server: servers[2], Online: true, Hostname: "pve-node1",
+			Platform: "linux", Uptime: "89d 2h", OverallHealth: "healthy",
+			CriticalCount: 0, WarningCount: 0, InfoCount: 1,
+			LastPoll: time.Now().Add(-20 * time.Second).Format(time.RFC3339),
+		},
+		{
+			Server: servers[3], Online: false, Hostname: "",
+			Platform: "", Uptime: "", OverallHealth: "",
+			Error:    "connection timed out after 10s",
+			LastPoll: time.Now().Add(-60 * time.Second).Format(time.RFC3339),
+		},
+	}
+}
+
+// DemoServiceCheckConfigs returns service check configs for demo mode.
+func DemoServiceCheckConfigs() []internal.ServiceCheckConfig {
+	return []internal.ServiceCheckConfig{
+		{Name: "Home Assistant", Type: "http", Target: "http://192.168.1.10:8123", Enabled: true, IntervalSec: 60, TimeoutSec: 5, FailureThreshold: 3, FailureSeverity: "critical"},
+		{Name: "Pi-hole DNS", Type: "dns", Target: "pi.hole", Enabled: true, IntervalSec: 120, TimeoutSec: 5, FailureThreshold: 2, FailureSeverity: "warning"},
+		{Name: "Gateway Ping", Type: "ping", Target: "192.168.1.1", Enabled: true, IntervalSec: 30, TimeoutSec: 3, FailureThreshold: 5, FailureSeverity: "critical"},
+		{Name: "Plex Media Server", Type: "http", Target: "http://192.168.1.51:32400/web", Enabled: true, IntervalSec: 300, TimeoutSec: 10, FailureThreshold: 2, FailureSeverity: "warning"},
+		{Name: "NFS Share", Type: "nfs", Target: "192.168.1.50", Enabled: true, IntervalSec: 300, TimeoutSec: 5, FailureThreshold: 3, FailureSeverity: "warning"},
+		{Name: "SMB Share", Type: "smb", Target: "192.168.1.50", Enabled: true, IntervalSec: 300, TimeoutSec: 5, FailureThreshold: 3, FailureSeverity: "warning"},
+	}
+}
+
+func demoServiceChecks() []internal.ServiceCheckResult {
+	now := time.Now()
+	return []internal.ServiceCheckResult{
+		{Key: "demo-ha", Name: "Home Assistant", Type: "http", Target: "http://192.168.1.10:8123", Status: "up", ResponseMS: 42, CheckedAt: now.Add(-30 * time.Second).Format(time.RFC3339), FailureThreshold: 3, FailureSeverity: "critical"},
+		{Key: "demo-dns", Name: "Pi-hole DNS", Type: "dns", Target: "pi.hole", Status: "up", ResponseMS: 3, CheckedAt: now.Add(-45 * time.Second).Format(time.RFC3339), FailureThreshold: 2, FailureSeverity: "warning"},
+		{Key: "demo-gw", Name: "Gateway Ping", Type: "ping", Target: "192.168.1.1", Status: "up", ResponseMS: 1, CheckedAt: now.Add(-15 * time.Second).Format(time.RFC3339), FailureThreshold: 5, FailureSeverity: "critical"},
+		{Key: "demo-plex", Name: "Plex Media Server", Type: "http", Target: "http://192.168.1.51:32400/web", Status: "up", ResponseMS: 185, CheckedAt: now.Add(-120 * time.Second).Format(time.RFC3339), FailureThreshold: 2, FailureSeverity: "warning"},
+		{Key: "demo-nfs", Name: "NFS Share", Type: "nfs", Target: "192.168.1.50", Status: "down", ResponseMS: 5000, Error: "connection refused", CheckedAt: now.Add(-90 * time.Second).Format(time.RFC3339), ConsecutiveFailures: 2, FailureThreshold: 3, FailureSeverity: "warning"},
+		{Key: "demo-smb", Name: "SMB Share", Type: "smb", Target: "192.168.1.50", Status: "up", ResponseMS: 8, CheckedAt: now.Add(-90 * time.Second).Format(time.RFC3339), FailureThreshold: 3, FailureSeverity: "warning"},
+	}
 }
 
 func demoSystem() internal.SystemInfo {

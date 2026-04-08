@@ -168,6 +168,33 @@ func main() {
 		// Inject the demo snapshot into the scheduler's in-memory cache
 		// so that Latest() returns it for the report and status endpoints.
 		sched.SetLatest(snap)
+
+		// Demo service check configs — enable the independent check loop
+		sched.UpdateServiceChecks(demo.DemoServiceCheckConfigs())
+
+		// Generate demo service check history (7 days of data)
+		for i := 7 * 24 * 12; i >= 0; i-- { // every 5 minutes for 7 days
+			ts := time.Now().Add(-time.Duration(i) * 5 * time.Minute)
+			for _, sc := range snap.Services {
+				sc.CheckedAt = ts.Format(time.RFC3339)
+				sc.ResponseMS = int64(demo.Jitter(float64(sc.ResponseMS), 40))
+				if sc.ResponseMS < 1 {
+					sc.ResponseMS = 1
+				}
+				// Simulate occasional failures
+				if sc.Status == "down" || (i > 0 && i%97 == 0 && sc.Name == "NFS Share") {
+					sc.Status = "down"
+					sc.Error = "connection refused"
+					sc.ConsecutiveFailures++
+				} else {
+					sc.Status = "up"
+					sc.Error = ""
+					sc.ConsecutiveFailures = 0
+				}
+			}
+			_ = store.SaveServiceCheckResults(snap.Services)
+		}
+
 		logger.Info("demo data loaded",
 			"findings", len(snap.Findings),
 			"critical", countSev(snap.Findings, internal.SeverityCritical),
@@ -192,12 +219,19 @@ func main() {
 
 	// Fleet manager (multi-server monitoring)
 	fleetMgr := fleet.New(logger)
-	if persistedSettings != nil && len(persistedSettings.Fleet) > 0 {
-		fleetMgr.SetServers(persistedSettings.Fleet)
-		logger.Info("fleet monitoring loaded", "servers", len(persistedSettings.Fleet))
+	if *demoMode {
+		fleetMgr.SetServers(demo.DemoFleetServers())
+		fleetMgr.InjectStatuses(demo.DemoFleetStatuses())
+		logger.Info("demo fleet data loaded", "servers", len(demo.DemoFleetServers()))
+		// Don't start polling in demo mode — injected statuses are static
+	} else {
+		if persistedSettings != nil && len(persistedSettings.Fleet) > 0 {
+			fleetMgr.SetServers(persistedSettings.Fleet)
+			logger.Info("fleet monitoring loaded", "servers", len(persistedSettings.Fleet))
+		}
+		fleetMgr.Start(60 * time.Second)
+		defer fleetMgr.Stop()
 	}
-	fleetMgr.Start(60 * time.Second)
-	defer fleetMgr.Stop()
 
 	// Create API server
 	apiServer := api.New(store, sched, metrics, fleetMgr, logger, version)

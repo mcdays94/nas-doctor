@@ -218,19 +218,19 @@ a:hover{color:var(--accent-hover)}
     /* SMART test failed = -40 */
     if (disk.health_passed === false) score -= 40;
     /* Reallocated sectors: -5 per sector, max -30 */
-    var realloc = disk.reallocated || 0;
+    var realloc = disk.reallocated_sectors || 0;
     if (realloc > 0) score -= Math.min(30, realloc * 5);
     /* Pending sectors: -4 per sector, max -20 */
-    var pending = disk.pending || 0;
+    var pending = disk.pending_sectors || 0;
     if (pending > 0) score -= Math.min(20, pending * 4);
     /* UDMA CRC errors: -1 per 10, max -10 */
-    var crc = disk.udma_crc || 0;
+    var crc = disk.udma_crc_errors || 0;
     if (crc > 0) score -= Math.min(10, Math.ceil(crc / 10));
     /* Command timeout: -1 per 5, max -10 */
     var ct = disk.command_timeout || 0;
     if (ct > 5) score -= Math.min(10, Math.ceil((ct - 5) / 5));
     /* High temperature: subtract if >= 50 */
-    var temp = disk.temperature || 0;
+    var temp = disk.temperature_c || 0;
     if (temp >= 55) score -= 15;
     else if (temp >= 50) score -= 8;
     else if (temp >= 45) score -= 3;
@@ -367,7 +367,7 @@ a:hover{color:var(--accent-hover)}
     html += "</tr></thead>";
     html += "<tbody>";
 
-    var tempVal = disk.temperature || 0;
+    var tempVal = disk.temperature_c || 0;
     var tempSt = tempStatus(tempVal);
     html += "<tr>";
     html += "<td class=\"attr-name\">Temperature</td>";
@@ -376,7 +376,7 @@ a:hover{color:var(--accent-hover)}
     html += "<td class=\"sparkline-cell\"><canvas id=\"sparkTemp\"></canvas></td>";
     html += "</tr>";
 
-    var reallocVal = disk.reallocated || 0;
+    var reallocVal = disk.reallocated_sectors || 0;
     var reallocSt = reallocStatus(reallocVal);
     html += "<tr>";
     html += "<td class=\"attr-name\">Reallocated Sectors</td>";
@@ -385,7 +385,7 @@ a:hover{color:var(--accent-hover)}
     html += "<td class=\"sparkline-cell\"><canvas id=\"sparkRealloc\"></canvas></td>";
     html += "</tr>";
 
-    var pendingVal = disk.pending || 0;
+    var pendingVal = disk.pending_sectors || 0;
     var pendingSt = pendingStatus(pendingVal);
     html += "<tr>";
     html += "<td class=\"attr-name\">Pending Sectors</td>";
@@ -394,7 +394,7 @@ a:hover{color:var(--accent-hover)}
     html += "<td class=\"sparkline-cell\"><canvas id=\"sparkPending\"></canvas></td>";
     html += "</tr>";
 
-    var crcVal = disk.udma_crc || 0;
+    var crcVal = disk.udma_crc_errors || 0;
     var crcSt = crcStatus(crcVal);
     html += "<tr>";
     html += "<td class=\"attr-name\">UDMA CRC Errors</td>";
@@ -548,7 +548,7 @@ a:hover{color:var(--accent-hover)}
         return "#5e6ad2";
       };
 
-      NasChart.sparkline("sparkTemp", { data: tempData, color: disk.temperature >= 50 ? "#dc2626" : disk.temperature >= 40 ? "#d97706" : "#27a644", width: 120, height: 28 });
+      NasChart.sparkline("sparkTemp", { data: tempData, color: disk.temperature_c >= 50 ? "#dc2626" : disk.temperature_c >= 40 ? "#d97706" : "#27a644", width: 120, height: 28 });
       NasChart.sparkline("sparkRealloc", { data: reallocData, color: sparkColor(reallocData, true), width: 120, height: 28 });
       NasChart.sparkline("sparkPending", { data: pendingData, color: sparkColor(pendingData, true), width: 120, height: 28 });
       NasChart.sparkline("sparkCrc", { data: crcData, color: sparkColor(crcData, true), width: 120, height: 28 });

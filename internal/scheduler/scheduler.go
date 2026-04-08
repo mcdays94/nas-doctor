@@ -10,7 +10,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -85,6 +88,7 @@ type Scheduler struct {
 	retention     RetentionConfig
 	alerting      AlertingConfig
 	serviceChecks []internal.ServiceCheckConfig
+	lastCheckRun  map[string]time.Time // per-check last execution time
 
 	mu      sync.RWMutex
 	latest  *internal.Snapshot
@@ -121,6 +125,7 @@ func New(
 			DefaultCooldownSec: 900,
 		},
 		serviceChecks: []internal.ServiceCheckConfig{},
+		lastCheckRun:  make(map[string]time.Time),
 		stop:          make(chan struct{}),
 		restart:       make(chan time.Duration, 1),
 	}
@@ -128,15 +133,15 @@ func New(
 
 // Start begins the periodic collection loop. It runs the first collection
 // immediately, then repeats at the configured interval.
+// Also starts an independent service check loop (30s tick) that respects
+// per-check intervals.
 func (s *Scheduler) Start() {
 	s.logger.Info("scheduler starting", "interval", s.interval)
+	// Main diagnostic collection loop
 	go func() {
-		// Run immediately on startup
 		s.RunOnce()
-
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ticker.C:
@@ -150,6 +155,19 @@ func (s *Scheduler) Start() {
 				s.logger.Info("scheduler interval updated", "new_interval", newInterval)
 			case <-s.stop:
 				s.logger.Info("scheduler stopped")
+				return
+			}
+		}
+	}()
+	// Independent service check loop — ticks every 30s, runs due checks
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.runDueServiceChecks()
+			case <-s.stop:
 				return
 			}
 		}
@@ -687,6 +705,67 @@ func (s *Scheduler) runServiceChecks(now time.Time) ([]internal.ServiceCheckResu
 	return results, nil
 }
 
+const defaultCheckIntervalSec = 300 // 5 minutes
+
+// runDueServiceChecks is called every 30s by the independent service check
+// loop. It checks each configured check's per-check interval and only
+// executes those whose interval has elapsed since their last run.
+func (s *Scheduler) runDueServiceChecks() {
+	s.mu.RLock()
+	checks := make([]internal.ServiceCheckConfig, len(s.serviceChecks))
+	copy(checks, s.serviceChecks)
+	s.mu.RUnlock()
+
+	now := time.Now()
+	var due []internal.ServiceCheckConfig
+	for _, check := range checks {
+		if !check.Enabled {
+			continue
+		}
+		key := serviceCheckKey(check)
+		interval := check.IntervalSec
+		if interval <= 0 {
+			interval = defaultCheckIntervalSec
+		}
+		s.mu.RLock()
+		last, exists := s.lastCheckRun[key]
+		s.mu.RUnlock()
+		if !exists || now.Sub(last) >= time.Duration(interval)*time.Second {
+			due = append(due, check)
+		}
+	}
+	if len(due) == 0 {
+		return
+	}
+
+	results := make([]internal.ServiceCheckResult, 0, len(due))
+	for _, check := range due {
+		result := executeServiceCheck(check, now)
+		key := result.Key
+
+		state, ok, err := s.store.GetLatestServiceCheckState(key)
+		if err != nil {
+			s.logger.Warn("service check state read failed", "check", result.Name, "error", err)
+		}
+		if result.Status == "down" {
+			if ok && state.Status == "down" {
+				result.ConsecutiveFailures = state.ConsecutiveFailures + 1
+			} else {
+				result.ConsecutiveFailures = 1
+			}
+		}
+		results = append(results, result)
+
+		s.mu.Lock()
+		s.lastCheckRun[key] = now
+		s.mu.Unlock()
+	}
+
+	if err := s.store.SaveServiceCheckResults(results); err != nil {
+		s.logger.Warn("failed to save service check results", "error", err)
+	}
+}
+
 func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) internal.ServiceCheckResult {
 	typeName := strings.ToLower(strings.TrimSpace(check.Type))
 	timeoutSec := check.TimeoutSec
@@ -783,6 +862,37 @@ func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) inter
 		_ = conn.Close()
 		result.Status = "up"
 
+	case internal.ServiceCheckPing:
+		host := normalizeDNSHost(check.Target)
+		if host == "" {
+			result.Error = "empty ping target"
+			break
+		}
+		countArg := "-c"
+		timeoutArg := "-W"
+		timeoutVal := fmt.Sprintf("%d", timeoutSec)
+		if runtime.GOOS == "darwin" {
+			timeoutArg = "-t"
+		}
+		cmd := exec.CommandContext(ctx, "ping", countArg, "1", timeoutArg, timeoutVal, host)
+		out, err := cmd.CombinedOutput()
+		result.ResponseMS = time.Since(start).Milliseconds()
+		if err != nil {
+			result.Error = "host unreachable"
+			break
+		}
+		// Parse round-trip time from ping output if available
+		outStr := string(out)
+		if idx := strings.Index(outStr, "time="); idx >= 0 {
+			sub := outStr[idx+5:]
+			if sp := strings.IndexAny(sub, " m\n"); sp > 0 {
+				if ms, parseErr := strconv.ParseFloat(sub[:sp], 64); parseErr == nil {
+					result.ResponseMS = int64(ms)
+				}
+			}
+		}
+		result.Status = "up"
+
 	default:
 		result.Error = "unsupported service check type"
 	}
@@ -798,7 +908,7 @@ func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) inter
 
 func isSupportedServiceCheckType(checkType string) bool {
 	switch strings.ToLower(strings.TrimSpace(checkType)) {
-	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS:
+	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing:
 		return true
 	default:
 		return false

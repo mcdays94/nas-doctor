@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NAS Doctor — Parity History</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="stylesheet" href="/css/shared.css">
+<style>
+.summary-bar{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.summary-stat{padding:12px 20px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--border);font-size:13px;display:flex;align-items:center;gap:8px;flex:1;min-width:120px}
+.summary-stat .stat-count{font-size:22px;font-weight:700}
+.summary-stat.clean .stat-count{color:var(--green)}
+.summary-stat.errors .stat-count{color:var(--red)}
+.summary-stat.total .stat-count{color:var(--accent)}
+.parity-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-bottom:12px;overflow:hidden;transition:border-color 0.15s}
+.parity-card.has-errors{border-color:var(--red)}
+.parity-header{display:flex;align-items:center;gap:12px;padding:16px 20px;cursor:pointer;user-select:none}
+.parity-date{font-weight:700;font-size:15px;min-width:110px}
+.parity-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px}
+.parity-badge.clean{background:rgba(39,166,68,0.12);color:var(--green)}
+.parity-badge.error{background:rgba(220,38,38,0.1);color:var(--red)}
+.parity-stats{display:flex;gap:16px;flex:1;font-size:12px;color:var(--text2)}
+.parity-stats span{display:flex;align-items:center;gap:4px}
+.parity-stats .label{color:var(--text3);font-size:11px}
+.parity-detail{display:none;padding:0 20px 20px;border-top:1px solid var(--border)}
+.parity-detail.open{display:block}
+.detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:12px}
+.detail-item{background:var(--bg-elevated);border-radius:var(--radius);padding:12px}
+.detail-item .dl{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
+.detail-item .dv{font-size:18px;font-weight:700;margin-top:4px}
+.chart-wrap{margin-top:20px;height:140px;background:var(--bg-elevated);border-radius:var(--radius);overflow:hidden}
+.chart-label{font-size:11px;color:var(--text3);margin-bottom:4px;margin-top:16px}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="header-left">
+      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a>
+      <span class="page-title">Parity History</span>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link">Dashboard</a>
+      <a href="/alerts" class="nav-link">Alerts</a>
+      <a href="/service-checks" class="nav-link">Services</a>
+      <a href="/stats" class="nav-link">Stats</a>
+      <a href="/fleet" class="nav-link">Fleet</a>
+      <a href="/settings" class="nav-link" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
+      <a href="https://github.com/mcdays94/nas-doctor" class="nav-link" target="_blank" title="GitHub"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.02 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.82.58C20.56 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
+    </div>
+  </div>
+
+  <div class="summary-bar" id="summary"></div>
+
+  <!-- Speed trend chart -->
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:20px">
+    <div class="chart-label">Speed Trend (MB/s over time)</div>
+    <div class="chart-wrap"><canvas id="speed-chart" style="width:100%;height:100%"></canvas></div>
+  </div>
+
+  <div id="parity-list"><div style="padding:40px;text-align:center;color:var(--text2)">Loading...</div></div>
+</div>
+
+<script src="/js/charts.js"></script>
+<script>
+(function(){
+  function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
+  try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
+  fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
+})();
+(function(){
+  "use strict";
+  function esc(s){var d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
+  function fmtDur(sec){
+    if(!sec||sec<=0)return "\u2014";
+    if(sec>=3600)return Math.floor(sec/3600)+"h "+Math.round((sec%3600)/60)+"m";
+    return Math.round(sec/60)+"m";
+  }
+  function fmtSize(gb){
+    if(!gb)return "\u2014";
+    return gb>=1000?(gb/1000).toFixed(1)+" TB":gb.toFixed(0)+" GB";
+  }
+
+  window.toggleParity=function(idx){
+    var el=document.getElementById("pd-"+idx);
+    if(el)el.classList.toggle("open");
+  };
+
+  function render(parity){
+    if(!parity||!parity.history||parity.history.length===0){
+      document.getElementById("parity-list").innerHTML='<div style="padding:60px 20px;text-align:center;color:var(--text2)"><div style="font-size:16px;font-weight:600;margin-bottom:8px">No parity check history</div><p>Parity checks will appear here once they have been detected.</p></div>';
+      document.getElementById("summary").innerHTML="";
+      return;
+    }
+    var hist=parity.history.slice().sort(function(a,b){return(b.date||"").localeCompare(a.date||"");});
+    var totalErr=0,cleanCount=0;
+    for(var i=0;i<hist.length;i++){
+      if(hist[i].errors>0)totalErr+=hist[i].errors;else cleanCount++;
+    }
+
+    // Summary bar
+    var sh='<div class="summary-stat total"><span class="stat-count">'+hist.length+'</span><span>Total Checks</span></div>';
+    sh+='<div class="summary-stat clean"><span class="stat-count">'+cleanCount+'</span><span>Clean</span></div>';
+    sh+='<div class="summary-stat errors"><span class="stat-count">'+totalErr+'</span><span>Total Errors</span></div>';
+    sh+='<div class="summary-stat"><span class="stat-count" style="color:var(--text)">'+esc(parity.status||"idle")+'</span><span>Current Status</span></div>';
+    document.getElementById("summary").innerHTML=sh;
+
+    // Speed trend chart (oldest to newest)
+    var speedData=[];
+    for(var i=hist.length-1;i>=0;i--)speedData.push(hist[i].speed_mb_s||0);
+    var canvas=document.getElementById("speed-chart");
+    if(canvas&&window.NasChart){
+      canvas.width=canvas.parentElement.offsetWidth;
+      canvas.height=canvas.parentElement.offsetHeight;
+      NasChart.sparkline("speed-chart",{data:speedData,color:"#5e6ad2",width:canvas.width,height:canvas.height,fill:true});
+    }
+
+    // Parity cards (newest first)
+    var h="";
+    for(var i=0;i<hist.length;i++){
+      var pc=hist[i];
+      var hasErr=pc.errors>0;
+      h+='<div class="parity-card'+(hasErr?" has-errors":"")+'">';
+      h+='<div class="parity-header" onclick="toggleParity('+i+')">';
+      h+='<div class="parity-date">'+esc(pc.date)+'</div>';
+      h+='<span class="parity-badge '+(hasErr?"error":"clean")+'">'+(hasErr?pc.errors+" errors":"Clean")+'</span>';
+      h+='<div class="parity-stats">';
+      h+='<span><span class="label">Duration</span> '+fmtDur(pc.duration_seconds)+'</span>';
+      h+='<span><span class="label">Speed</span> '+(pc.speed_mb_s||0).toFixed(1)+' MB/s</span>';
+      if(pc.size_gb)h+='<span><span class="label">Size</span> '+fmtSize(pc.size_gb)+'</span>';
+      h+='</div>';
+      h+='</div>';
+      // Expandable detail
+      h+='<div class="parity-detail" id="pd-'+i+'">';
+      h+='<div class="detail-grid">';
+      h+='<div class="detail-item"><div class="dl">Date</div><div class="dv" style="font-size:15px">'+esc(pc.date)+'</div></div>';
+      h+='<div class="detail-item"><div class="dl">Duration</div><div class="dv">'+fmtDur(pc.duration_seconds)+'</div></div>';
+      h+='<div class="detail-item"><div class="dl">Speed</div><div class="dv">'+(pc.speed_mb_s||0).toFixed(1)+' <span style="font-size:12px;font-weight:400">MB/s</span></div></div>';
+      h+='<div class="detail-item"><div class="dl">Errors</div><div class="dv" style="color:'+(hasErr?"var(--red)":"var(--green)")+'">'+pc.errors+'</div></div>';
+      h+='<div class="detail-item"><div class="dl">Action</div><div class="dv" style="font-size:15px;text-transform:capitalize">'+esc(pc.action||"check")+'</div></div>';
+      h+='<div class="detail-item"><div class="dl">Array Size</div><div class="dv" style="font-size:15px">'+fmtSize(pc.size_gb)+'</div></div>';
+      h+='<div class="detail-item"><div class="dl">Exit Code</div><div class="dv" style="font-size:15px;color:'+(pc.exit_code?"var(--red)":"var(--green)")+'">'+(pc.exit_code||0)+'</div></div>';
+      h+='<div class="detail-item"><div class="dl">Duration (raw)</div><div class="dv" style="font-size:15px">'+(pc.duration_seconds||0).toLocaleString()+'s</div></div>';
+      h+='</div>';
+      h+='</div>';
+      h+='</div>';
+    }
+    document.getElementById("parity-list").innerHTML=h;
+  }
+
+  fetch("/api/v1/snapshot/latest")
+    .then(function(r){return r.json()})
+    .then(function(snap){render(snap.parity||null);})
+    .catch(function(){
+      document.getElementById("parity-list").innerHTML='<div style="padding:40px;text-align:center;color:var(--red)">Failed to load parity data</div>';
+    });
+})();
+</script>
+</body>
+</html>
