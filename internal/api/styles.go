@@ -280,6 +280,7 @@ body.theme-clean .badge-generic { background:rgba(0,0,0,0.06) }
 .pill-tcp  { background:rgba(16,185,129,0.14); color:#34d399 }
 .pill-dns  { background:rgba(236,72,153,0.14); color:#f472b6 }
 .pill-smb,.pill-nfs { background:rgba(245,158,11,0.14); color:#fbbf24 }
+.pill-ping { background:rgba(139,92,246,0.14); color:#a78bfa }
 
 /* ── Webhook Items ──────────────────────────────────────────── */
 .webhook-item {

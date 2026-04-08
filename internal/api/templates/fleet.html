@@ -7,119 +7,178 @@
 <link rel="icon" href="/icon.png">
 <link rel="stylesheet" href="/css/shared.css">
 <style>
-/* Fleet-specific styles */
 body{padding:0}
-.fleet-container{max-width:1100px;margin:0 auto;padding:24px}
-.container{max-width:1100px;margin:0 auto;padding:24px}
-/* Fleet-specific: header sizing, grid, fleet cards, health dots */
-.header-left img{width:28px;height:28px;border-radius:6px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
-.fleet-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;transition:border-color 0.15s}
-.fleet-card:hover{border-color:var(--border-hover)}
-.fleet-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-.card-name{font-size:15px;font-weight:600}
-.card-hostname{font-size:12px;color:var(--text2);margin-top:2px;font-family:var(--font-mono)}
+.container{max-width:1200px;margin:0 auto;padding:24px}
+/* Topology layout */
+.topo-container{margin-top:24px}
+.topo-center{display:flex;flex-direction:column;align-items:center;margin-bottom:0}
+.topo-self{background:var(--surface);border:2px solid var(--accent);border-radius:16px;padding:20px 32px;text-align:center;position:relative;z-index:2}
+.topo-self .node-name{font-size:18px;font-weight:700;margin-bottom:4px}
+.topo-self .node-role{font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;font-weight:600}
+.topo-spine{width:2px;height:32px;background:var(--border);margin:0 auto}
+/* Remote nodes grid */
+.topo-nodes{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0 20px}
+.topo-node-wrap{display:flex;flex-direction:column;align-items:center}
+.topo-drop{width:2px;height:28px;background:var(--border)}
+.node-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;width:100%;transition:border-color 0.15s,transform 0.15s;margin-bottom:16px}
+.node-card:hover{border-color:var(--border-hover);transform:translateY(-2px)}
+.node-card a{text-decoration:none;color:inherit;display:block}
+.node-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.node-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.node-icon.unraid{background:rgba(229,69,11,0.12);color:#e5450b}
+.node-icon.synology{background:rgba(0,114,198,0.12);color:#0072c6}
+.node-icon.linux{background:rgba(255,204,0,0.12);color:#ffcc00}
+.node-icon.proxmox{background:rgba(230,112,36,0.12);color:#e67024}
+.node-icon.unknown{background:rgba(255,255,255,0.06);color:var(--text3)}
+.node-name{font-size:14px;font-weight:600;flex:1}
 .health-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 .health-dot.healthy{background:var(--green)}
 .health-dot.warning{background:var(--amber)}
 .health-dot.critical{background:var(--red)}
-.health-dot.offline{background:var(--text3)}
-.stats{display:flex;gap:16px;margin-top:12px;font-size:12px;color:var(--text2)}
-.stat-val{font-weight:600;color:var(--text)}
-.findings-row{display:flex;gap:10px;margin-top:10px}
-.pill-crit{background:rgba(220,38,38,0.1);color:var(--red)}
-.pill-warn{background:rgba(217,119,6,0.1);color:var(--amber)}
-.pill-info{background:rgba(94,106,210,0.1);color:var(--accent)}
-.error-msg{font-size:12px;color:var(--red);margin-top:8px}
+.health-dot.offline{background:var(--text3);opacity:0.5}
+.node-meta{font-size:12px;color:var(--text2);display:flex;flex-direction:column;gap:4px;margin-top:8px}
+.node-meta-row{display:flex;align-items:center;gap:6px}
+.meta-label{color:var(--text3);min-width:45px;font-size:11px}
+.meta-val{font-family:var(--font-mono);font-size:11px;color:var(--text)}
+.node-findings{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.pill-sm{font-size:10px;padding:2px 6px;border-radius:999px;font-weight:600}
+.pill-sm.crit{background:rgba(220,38,38,0.1);color:var(--red)}
+.pill-sm.warn{background:rgba(217,119,6,0.1);color:var(--amber)}
+.pill-sm.info{background:rgba(94,106,210,0.1);color:var(--accent)}
+.node-error{font-size:12px;color:var(--red);margin-top:8px;font-style:italic}
 .empty{text-align:center;padding:60px 20px;color:var(--text2)}
 .empty-title{font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px}
-.add-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:background 0.15s}
-.add-btn:hover{background:var(--accent-hover)}
-a.card-link{text-decoration:none;color:inherit;display:block}
 </style>
 </head>
 <body>
-<div class="fleet-container">
+<div class="container">
   <div class="header">
     <div class="header-left">
-      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a>
+      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="" style="width:28px;height:28px;border-radius:6px">NAS Doctor</a>
       <span class="page-title">Fleet</span>
     </div>
     <div class="nav-links">
       <a href="/" class="nav-link">Dashboard</a>
       <a href="/alerts" class="nav-link">Alerts</a>
+      <a href="/service-checks" class="nav-link">Services</a>
       <a href="/stats" class="nav-link">Stats</a>
       <a href="/fleet" class="nav-link active">Fleet</a>
       <a href="/settings" class="nav-link" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
       <a href="https://github.com/mcdays94/nas-doctor" class="nav-link" target="_blank" title="GitHub"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.02 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.82.58C20.56 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
     </div>
   </div>
-  <div id="app"></div>
+  <div id="app"><div style="padding:40px;text-align:center;color:var(--text2)">Loading fleet...</div></div>
 </div>
 <script>
-/* Theme detection */
 (function(){
   function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
   try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
   fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
 })();
 (function() {
-  function esc(s) { var d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+  "use strict";
+  function esc(s){var d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
 
-  function render(statuses) {
-    var app = document.getElementById("app");
-    if (!statuses || statuses.length === 0) {
-      app.innerHTML = '<div class="empty"><div class="empty-title">No remote servers configured</div><p>Add remote NAS Doctor instances in <a href="/settings" style="color:#5e6ad2">Settings</a> to monitor your fleet from here.</p></div>';
-      return;
-    }
-
-    var h = '<div class="grid">';
-    for (var i = 0; i < statuses.length; i++) {
-      var s = statuses[i];
-      var healthClass = s.online ? (s.overall_health || "healthy") : "offline";
-      var healthLabel = s.online ? (s.overall_health || "unknown") : "offline";
-      var url = s.server.url || "#";
-
-      h += '<a class="card-link" href="' + esc(url) + '" target="_blank">';
-      h += '<div class="fleet-card">';
-      h += '<div class="fleet-card-header">';
-      h += '<div><div class="card-name">' + esc(s.server.name || s.hostname || "Unknown") + '</div>';
-      if (s.hostname && s.hostname !== s.server.name) h += '<div class="card-hostname">' + esc(s.hostname) + '</div>';
-      h += '</div>';
-      h += '<div class="health-dot ' + healthClass + '" title="' + esc(healthLabel) + '"></div>';
-      h += '</div>';
-
-      if (s.online) {
-        h += '<div class="stats">';
-        h += '<span>Platform: <span class="stat-val">' + esc(s.platform) + '</span></span>';
-        h += '<span>Uptime: <span class="stat-val">' + esc(s.uptime) + '</span></span>';
-        h += '</div>';
-        if (s.critical_count > 0 || s.warning_count > 0 || s.info_count > 0) {
-          h += '<div class="findings-row">';
-          if (s.critical_count > 0) h += '<span class="pill pill-crit">' + s.critical_count + ' critical</span>';
-          if (s.warning_count > 0) h += '<span class="pill pill-warn">' + s.warning_count + ' warning</span>';
-          if (s.info_count > 0) h += '<span class="pill pill-info">' + s.info_count + ' info</span>';
-          h += '</div>';
-        }
-      } else {
-        h += '<div class="error-msg">' + esc(s.error || "Offline") + '</div>';
-      }
-
-      h += '</div></a>';
-    }
-    h += '</div>';
-    app.innerHTML = h;
+  function platformIcon(p){
+    p=(p||"").toLowerCase();
+    if(p.indexOf("unraid")>=0)return{cls:"unraid",icon:"U"};
+    if(p.indexOf("synology")>=0)return{cls:"synology",icon:"S"};
+    if(p.indexOf("proxmox")>=0||p.indexOf("pve")>=0)return{cls:"proxmox",icon:"P"};
+    if(p.indexOf("truenas")>=0||p.indexOf("freenas")>=0)return{cls:"linux",icon:"T"};
+    if(p.indexOf("linux")>=0)return{cls:"linux",icon:"L"};
+    return{cls:"unknown",icon:"?"};
   }
 
-  function load() {
-    fetch("/api/v1/fleet")
-      .then(function(r) { return r.json(); })
-      .then(function(data) { render(data); })
-      .catch(function() { render([]); });
+  function extractIP(url){
+    try{var u=new URL(url);return u.hostname+":"+u.port;}catch(e){return url;}
+  }
+
+  function renderNode(s){
+    var healthClass=s.online?(s.overall_health||"healthy"):"offline";
+    var p=platformIcon(s.platform||"");
+    var url=s.server.url||"#";
+    var ip=extractIP(url);
+    var h='<div class="node-branch"></div>';
+    h+='<div class="node-card">';
+    h+='<a href="'+esc(url)+'" target="_blank">';
+    h+='<div class="node-header">';
+    h+='<div class="node-icon '+p.cls+'">'+p.icon+'</div>';
+    h+='<div class="node-name">'+esc(s.server.name||s.hostname||"Unknown")+'</div>';
+    h+='<div class="health-dot '+healthClass+'" title="'+esc(healthClass)+'"></div>';
+    h+='</div>';
+    if(s.online){
+      h+='<div class="node-meta">';
+      if(s.hostname&&s.hostname!==s.server.name){
+        h+='<div class="node-meta-row"><span class="meta-label">Host</span><span class="meta-val">'+esc(s.hostname)+'</span></div>';
+      }
+      h+='<div class="node-meta-row"><span class="meta-label">IP</span><span class="meta-val">'+esc(ip)+'</span></div>';
+      h+='<div class="node-meta-row"><span class="meta-label">OS</span><span class="meta-val">'+esc(s.platform||"unknown")+'</span></div>';
+      h+='<div class="node-meta-row"><span class="meta-label">Up</span><span class="meta-val">'+esc(s.uptime||"—")+'</span></div>';
+      h+='</div>';
+      if(s.critical_count>0||s.warning_count>0||s.info_count>0){
+        h+='<div class="node-findings">';
+        if(s.critical_count>0)h+='<span class="pill-sm crit">'+s.critical_count+' crit</span>';
+        if(s.warning_count>0)h+='<span class="pill-sm warn">'+s.warning_count+' warn</span>';
+        if(s.info_count>0)h+='<span class="pill-sm info">'+s.info_count+' info</span>';
+        h+='</div>';
+      }
+    } else {
+      h+='<div class="node-meta"><div class="node-meta-row"><span class="meta-label">IP</span><span class="meta-val">'+esc(ip)+'</span></div></div>';
+      h+='<div class="node-error">'+esc(s.error||"Offline")+'</div>';
+    }
+    h+='</a></div>';
+    return h;
+  }
+
+  function render(statuses, selfStatus){
+    var app=document.getElementById("app");
+    if(!statuses||statuses.length===0){
+      app.innerHTML='<div class="empty"><div class="empty-title">No remote servers configured</div><p>Add remote NAS Doctor instances in <a href="/settings" style="color:var(--accent)">Settings</a> to monitor your fleet from here.</p></div>';
+      return;
+    }
+    var selfName=selfStatus?selfStatus.hostname:"This Server";
+    var selfPlatform=selfStatus?selfStatus.platform:"";
+    var selfP=platformIcon(selfPlatform);
+    var h='<div class="topo-container">';
+    // Center node (this server)
+    h+='<div class="topo-center">';
+    h+='<div class="topo-self">';
+    h+='<div class="node-icon '+selfP.cls+'" style="margin:0 auto 8px;width:44px;height:44px;font-size:22px">'+selfP.icon+'</div>';
+    h+='<div class="node-name">'+esc(selfName)+'</div>';
+    h+='<div class="node-role">Primary &middot; Fleet Controller</div>';
+    if(selfStatus){
+      h+='<div style="font-size:11px;color:var(--text2);margin-top:6px">'+esc(selfPlatform)+' &middot; Up '+esc(selfStatus.uptime||"—")+'</div>';
+    }
+    h+='</div>';
+    h+='<div class="topo-spine"></div>';
+    // Horizontal bus bar rendered via SVG for clean connections
+    var cols=Math.min(statuses.length,4);
+    h+='<div style="width:100%;display:flex;justify-content:center"><div style="width:'+(cols>1?'80':'0')+'%;height:2px;background:var(--border)"></div></div>';
+    h+='</div>';
+    // Remote nodes
+    h+='<div class="topo-nodes">';
+    for(var i=0;i<statuses.length;i++){
+      h+='<div class="topo-node-wrap">';
+      h+='<div class="topo-drop"></div>';
+      h+=renderNode(statuses[i]);
+      h+='</div>';
+    }
+    h+='</div>';
+    h+='</div>';
+    app.innerHTML=h;
+  }
+
+  function load(){
+    Promise.all([
+      fetch("/api/v1/fleet").then(function(r){return r.json()}).catch(function(){return[];}),
+      fetch("/api/v1/status").then(function(r){return r.json()}).catch(function(){return null;})
+    ]).then(function(results){
+      render(results[0],results[1]);
+    });
   }
 
   load();
-  setInterval(load, 60000);
+  setInterval(load,60000);
 })();
 </script>
 </body>

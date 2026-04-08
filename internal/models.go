@@ -60,6 +60,7 @@ const (
 	ServiceCheckDNS  = "dns"
 	ServiceCheckSMB  = "smb"
 	ServiceCheckNFS  = "nfs"
+	ServiceCheckPing = "ping"
 )
 
 type ServiceCheckConfig struct {
@@ -67,6 +68,7 @@ type ServiceCheckConfig struct {
 	Type             string   `json:"type"`
 	Target           string   `json:"target"`
 	Enabled          bool     `json:"enabled"`
+	IntervalSec      int      `json:"interval_sec,omitempty"` // Per-check interval in seconds (default 300 = 5min)
 	TimeoutSec       int      `json:"timeout_sec,omitempty"`
 	Port             int      `json:"port,omitempty"`
 	FailureThreshold int      `json:"failure_threshold,omitempty"`

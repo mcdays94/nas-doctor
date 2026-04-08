@@ -46,6 +46,7 @@ unraid-diagnostic-report.pdf
 node_modules/
 package.json
 package-lock.json
+take-screenshots.mjs
 
 # Empty dirs
 web/
