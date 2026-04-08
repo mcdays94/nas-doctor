@@ -71,8 +71,11 @@ func collectHostMountDisks() []internal.DiskInfo {
 		pctStr := strings.TrimSuffix(fields[5], "%")
 		pct, _ := strconv.ParseFloat(pctStr, 64)
 
-		// Clean up mount path: /host/mnt/disk1 → /mnt/disk1
-		displayMount := strings.Replace(mount, "/host/mnt", "/mnt", 1)
+		// Clean up mount path: /host/mnt/disk1 → /mnt/disk1, /host/volume1 → /volume1
+		displayMount := mount
+		if strings.HasPrefix(mount, "/host/") {
+			displayMount = "/" + strings.TrimPrefix(mount, "/host/")
+		}
 
 		disks = append(disks, internal.DiskInfo{
 			Device:     device,
@@ -227,6 +230,14 @@ func isContainerRootOrBind(device, mount string) bool {
 	if mount == "/data" {
 		return true
 	}
+	// Synology: filter duplicate @appdata/ContainerManager sub-mounts (same device as /volume*)
+	if strings.Contains(mount, "@appdata") || strings.Contains(mount, "@docker") {
+		return true
+	}
+	// Filter /tmp mounts inside container
+	if strings.HasPrefix(mount, "/tmp") {
+		return true
+	}
 	return false
 }
 
@@ -285,6 +296,13 @@ func guessLabel(mount, device string) string {
 			if l != "" {
 				return l
 			}
+		}
+	}
+	// Synology DSM patterns — /volume1, /volume2
+	if strings.HasPrefix(mount, "/volume") {
+		num := strings.TrimPrefix(mount, "/volume")
+		if num != "" {
+			return "Volume " + num + " (" + device + ")"
 		}
 	}
 	if mount == "/" {
