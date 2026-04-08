@@ -279,7 +279,17 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no snapshot available for report"})
 		return
 	}
-	html := GenerateReport(snap)
+	// Fetch sparkline data for inline SVG charts
+	var sparks ReportSparklines
+	if s.store != nil {
+		if sysH, err := s.store.GetSystemSparkline(60); err == nil {
+			sparks.System = sysH
+		}
+		if diskH, err := s.store.GetAllDiskSparklines(60); err == nil {
+			sparks.Disks = diskH
+		}
+	}
+	html := GenerateReport(snap, sparks)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Disposition", "inline; filename=\"nas-doctor-report.html\"")
 	w.Write([]byte(html))
