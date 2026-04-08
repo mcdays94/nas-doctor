@@ -255,12 +255,13 @@ func buildMDToPhysicalMap() map[string]string {
 
 // guessLabel tries to derive a friendly label from mount and device.
 func guessLabel(mount, device string) string {
-	// Unraid patterns
+	// Unraid patterns — include device for cross-reference
 	if strings.HasPrefix(mount, "/mnt/disk") {
-		return "Disk " + strings.TrimPrefix(mount, "/mnt/disk")
+		num := strings.TrimPrefix(mount, "/mnt/disk")
+		return "Disk " + num + " (" + device + ")"
 	}
 	if strings.HasPrefix(mount, "/mnt/cache") {
-		return "Cache"
+		return "Cache (" + device + ")"
 	}
 	if mount == "/mnt/user" || mount == "/mnt/user0" {
 		return "User Share"
