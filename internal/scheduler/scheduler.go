@@ -21,6 +21,7 @@ import (
 	"github.com/mcdays94/nas-doctor/internal"
 	"github.com/mcdays94/nas-doctor/internal/analyzer"
 	"github.com/mcdays94/nas-doctor/internal/collector"
+	"github.com/mcdays94/nas-doctor/internal/logfwd"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/storage"
 )
@@ -89,6 +90,8 @@ type Scheduler struct {
 	alerting      AlertingConfig
 	serviceChecks []internal.ServiceCheckConfig
 	lastCheckRun  map[string]time.Time // per-check last execution time
+
+	logForwarder *logfwd.Forwarder
 
 	mu      sync.RWMutex
 	latest  *internal.Snapshot
@@ -277,6 +280,18 @@ func (s *Scheduler) RunOnce() {
 		s.dispatchNotifications(notif, snap, hostname, snap.Timestamp)
 	}
 
+	// Log forwarding
+	s.mu.RLock()
+	fwd := s.logForwarder
+	s.mu.RUnlock()
+	if fwd != nil {
+		hostname := snap.System.Hostname
+		if hostname == "" {
+			hostname = "Unknown"
+		}
+		fwd.Forward(snap, hostname)
+	}
+
 	// Data lifecycle: prune old data
 	s.pruneData()
 
@@ -412,6 +427,17 @@ func (s *Scheduler) UpdateBackup(cfg BackupConfig) {
 		"keep", cfg.KeepCount,
 		"interval_h", cfg.IntervalH,
 	)
+}
+
+// UpdateLogForwarder sets the log forwarding destinations.
+func (s *Scheduler) UpdateLogForwarder(dests []logfwd.Destination) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.logForwarder == nil {
+		s.logForwarder = logfwd.New(s.logger)
+	}
+	s.logForwarder.SetDestinations(dests)
+	s.logger.Info("log forwarder updated", "destinations", len(dests))
 }
 
 // UpdateAlerting updates policy routing and suppression configuration.
