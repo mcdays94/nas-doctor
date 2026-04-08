@@ -83,17 +83,16 @@ a:hover{color:var(--hover)}
 .col-right{min-width:0;display:flex;flex-direction:column;gap:calc(var(--sp)*3)}
 
 /* Section drag-to-reorder */
-.section-block{position:relative}
+.section-title-row{display:flex;align-items:center;gap:6px}
 .section-drag-handle{
-  position:absolute;top:8px;left:-4px;width:20px;height:20px;
-  display:flex;align-items:center;justify-content:center;
-  cursor:grab;opacity:0;transition:opacity 0.15s;color:var(--text-quaternary);z-index:10;
-  border-radius:4px;
+  width:16px;height:16px;display:flex;align-items:center;justify-content:center;
+  cursor:grab;opacity:0;transition:opacity 0.15s;color:var(--text-quaternary);
+  border-radius:3px;flex-shrink:0;margin-left:-2px;
 }
-.section-block:hover .section-drag-handle{opacity:0.5}
+.section-block:hover .section-drag-handle{opacity:0.35}
 .section-drag-handle:hover{opacity:1 !important;background:rgba(255,255,255,0.06)}
 .section-drag-handle:active{cursor:grabbing}
-.section-block.dragging{opacity:0.4;transform:scale(0.98);transition:opacity 0.15s,transform 0.15s}
+.section-block.dragging{opacity:0.35;transition:opacity 0.15s}
 .section-drop-placeholder{
   border:2px dashed var(--accent);border-radius:calc(var(--radius)*1.5);
   margin-bottom:calc(var(--sp)*3);opacity:0.3;background:rgba(94,106,210,0.04);
@@ -770,19 +769,6 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       .catch(function() {});
   }
 
-  var LAYOUT_KEY = "nas-doctor-dashboard-order";
-
-  function getSavedOrder() {
-    try { var raw = localStorage.getItem(LAYOUT_KEY); return raw ? JSON.parse(raw) : null; } catch(e) { return null; }
-  }
-  function saveOrder() {
-    var cols = [document.getElementById("col-left"), document.getElementById("col-right")];
-    var order = { left: [], right: [] };
-    if (cols[0]) { var bs = cols[0].querySelectorAll(".section-block"); for (var i=0;i<bs.length;i++) order.left.push(bs[i].getAttribute("data-section")); }
-    if (cols[1]) { var bs2 = cols[1].querySelectorAll(".section-block"); for (var j=0;j<bs2.length;j++) order.right.push(bs2[j].getAttribute("data-section")); }
-    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(order)); } catch(e) {}
-  }
-
   function distributeSections() {
     var staging = document.getElementById("section-staging");
     var colL = document.getElementById("col-left");
@@ -816,154 +802,19 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       visibleItems.push({ el: blocks[i], name: name, h: blocks[i].offsetHeight });
     }
 
-    // Check for saved order
-    var saved = getSavedOrder();
-    if (saved && saved.left && saved.right) {
-      var used = {};
-      // Place saved left-column sections
-      for (var sl = 0; sl < saved.left.length; sl++) {
-        if (blockMap[saved.left[sl]] && !used[saved.left[sl]]) {
-          colL.appendChild(blockMap[saved.left[sl]]);
-          used[saved.left[sl]] = true;
-        }
-      }
-      // Place saved right-column sections
-      for (var sr = 0; sr < saved.right.length; sr++) {
-        if (blockMap[saved.right[sr]] && !used[saved.right[sr]]) {
-          colR.appendChild(blockMap[saved.right[sr]]);
-          used[saved.right[sr]] = true;
-        }
-      }
-      // Any new sections not in saved order go to the shorter column
-      for (var k = 0; k < visibleItems.length; k++) {
-        if (!used[visibleItems[k].name]) {
-          if (colL.offsetHeight <= colR.offsetHeight) colL.appendChild(visibleItems[k].el);
-          else colR.appendChild(visibleItems[k].el);
-        }
-      }
-    } else {
-      // Default: height-balanced distribution
+    // Apply saved order or default height-balanced distribution
+    if (!window.NasDrag || !NasDrag.applySavedOrder(blockMap, visibleItems, colL, colR)) {
       var leftH = 0, rightH = 0;
       for (var j = 0; j < visibleItems.length; j++) {
-        if (leftH <= rightH) {
-          colL.appendChild(visibleItems[j].el);
-          leftH += visibleItems[j].h;
-        } else {
-          colR.appendChild(visibleItems[j].el);
-          rightH += visibleItems[j].h;
-        }
+        if (leftH <= rightH) { colL.appendChild(visibleItems[j].el); leftH += visibleItems[j].h; }
+        else { colR.appendChild(visibleItems[j].el); rightH += visibleItems[j].h; }
       }
     }
 
     staging.parentNode.removeChild(staging);
 
-    // Add drag handles and init drag-and-drop
-    initSectionDrag();
-  }
-
-  /* ── Section drag-and-drop ────────────────────────────────────── */
-  function initSectionDrag() {
-    var allSections = document.querySelectorAll(".section-block[data-section]");
-    var gripSVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="10" r="1.5"/><circle cx="15" cy="10" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/><circle cx="9" cy="20" r="1.5"/><circle cx="15" cy="20" r="1.5"/></svg>';
-
-    for (var i = 0; i < allSections.length; i++) {
-      var sec = allSections[i];
-      if (sec.querySelector(".section-drag-handle")) continue; // already has one
-      var handle = document.createElement("div");
-      handle.className = "section-drag-handle";
-      handle.innerHTML = gripSVG;
-      handle.setAttribute("title", "Drag to reorder");
-      sec.insertBefore(handle, sec.firstChild);
-      sec.setAttribute("draggable", "true");
-    }
-
-    var dragSrc = null;
-
-    document.addEventListener("dragstart", function(e) {
-      var sec = e.target.closest(".section-block[data-section]");
-      if (!sec) return;
-      if (!e.target.closest(".section-drag-handle")) { e.preventDefault(); return; }
-      dragSrc = sec;
-      sec.classList.add("dragging");
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", sec.getAttribute("data-section"));
-    });
-
-    document.addEventListener("dragover", function(e) {
-      if (!dragSrc) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-
-      // Find which column we're over
-      var col = e.target.closest("#col-left, #col-right");
-      if (!col) return;
-
-      // Remove existing placeholder
-      removePlaceholder();
-
-      // Find insertion point
-      var afterEl = getDragAfterElement(col, e.clientY);
-      var ph = document.createElement("div");
-      ph.className = "section-drop-placeholder";
-      ph.style.height = dragSrc.offsetHeight + "px";
-
-      if (afterEl == null) {
-        col.appendChild(ph);
-      } else {
-        col.insertBefore(ph, afterEl);
-      }
-    });
-
-    document.addEventListener("drop", function(e) {
-      e.preventDefault();
-      if (!dragSrc) return;
-
-      var col = e.target.closest("#col-left, #col-right");
-      if (!col) { cleanup(); return; }
-
-      removePlaceholder();
-      var afterEl = getDragAfterElement(col, e.clientY);
-      if (afterEl == null) {
-        col.appendChild(dragSrc);
-      } else {
-        col.insertBefore(dragSrc, afterEl);
-      }
-
-      cleanup();
-      saveOrder();
-    });
-
-    document.addEventListener("dragend", function() {
-      removePlaceholder();
-      cleanup();
-    });
-
-    function cleanup() {
-      if (dragSrc) {
-        dragSrc.classList.remove("dragging");
-        dragSrc = null;
-      }
-    }
-
-    function removePlaceholder() {
-      var phs = document.querySelectorAll(".section-drop-placeholder");
-      for (var p = 0; p < phs.length; p++) phs[p].remove();
-    }
-
-    function getDragAfterElement(col, y) {
-      var els = Array.prototype.slice.call(col.querySelectorAll(".section-block[data-section]:not(.dragging)"));
-      var closest = null;
-      var closestOffset = Number.NEGATIVE_INFINITY;
-      for (var i = 0; i < els.length; i++) {
-        var box = els[i].getBoundingClientRect();
-        var offset = y - box.top - box.height / 2;
-        if (offset < 0 && offset > closestOffset) {
-          closestOffset = offset;
-          closest = els[i];
-        }
-      }
-      return closest;
-    }
+    // Init pointer-based drag-to-reorder
+    if (window.NasDrag) NasDrag.init();
   }
 
   window._dismissFinding = function(title) {
