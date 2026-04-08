@@ -798,7 +798,7 @@ function onEnd() {
       el.style.transition = "height 0.2s ease, margin 0.2s ease, padding 0.2s ease, opacity 0.2s ease";
       el.style.height = "0"; el.style.marginBottom = "0"; el.style.paddingTop = "0"; el.style.paddingBottom = "0";
       setTimeout(function() { el.remove(); }, 220);
-      if (title && window._dismissFinding) window._dismissFinding(title);
+      if (title && window._dismissFinding) window._dismissFinding(title, true);
     }, 260);
   } else {
     resetCard();

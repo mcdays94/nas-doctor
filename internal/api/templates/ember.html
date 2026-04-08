@@ -986,6 +986,7 @@ td.mono {
   var _cachedStatus = null;
   var _lastScanTime = null;
   var _fastUntil = 0;
+  window._findingSevFilter = null;
 
   function _computeRefreshMs(secs) {
     if (!secs || secs <= 0) return 300000;
@@ -1265,15 +1266,20 @@ td.mono {
         return (order[a.severity] || 3) - (order[b.severity] || 3);
       });
 
-      /* Severity count badges */
+      /* Severity count badges (clickable to filter) */
       var sevCounts = { critical: 0, warning: 0, info: 0 };
       for (var fc = 0; fc < findings.length; fc++) { var sv = findings[fc].severity; if (sevCounts[sv] !== undefined) sevCounts[sv]++; }
+      var _activeSevF = window._findingSevFilter;
       html += "<div style=\"display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap\">";
       html += "<div id=\"findings-sort-mount\"></div>";
-      if (sevCounts.critical > 0) html += "<span style=\"font-size:10px;font-weight:600;color:var(--red);background:rgba(255,99,99,0.12);padding:1px 6px;border-radius:4px\">" + sevCounts.critical + " critical</span>";
-      if (sevCounts.warning > 0) html += "<span style=\"font-size:10px;font-weight:600;color:var(--yellow);background:rgba(255,188,51,0.12);padding:1px 6px;border-radius:4px\">" + sevCounts.warning + " warning</span>";
-      if (sevCounts.info > 0) html += "<span style=\"font-size:10px;font-weight:600;color:var(--blue);background:rgba(85,179,255,0.12);padding:1px 6px;border-radius:4px\">" + sevCounts.info + " info</span>";
+      if (sevCounts.critical > 0) html += "<span onclick=\"window._filterFindings('critical')\" style=\"cursor:pointer;font-size:10px;font-weight:600;color:var(--red);background:rgba(255,99,99," + (_activeSevF === "critical" ? "0.3" : "0.12") + ");padding:1px 6px;border-radius:4px" + (_activeSevF === "critical" ? ";box-shadow:0 0 0 1px var(--red)" : "") + "\">" + sevCounts.critical + " critical</span>";
+      if (sevCounts.warning > 0) html += "<span onclick=\"window._filterFindings('warning')\" style=\"cursor:pointer;font-size:10px;font-weight:600;color:var(--yellow);background:rgba(255,188,51," + (_activeSevF === "warning" ? "0.3" : "0.12") + ");padding:1px 6px;border-radius:4px" + (_activeSevF === "warning" ? ";box-shadow:0 0 0 1px var(--yellow)" : "") + "\">" + sevCounts.warning + " warning</span>";
+      if (sevCounts.info > 0) html += "<span onclick=\"window._filterFindings('info')\" style=\"cursor:pointer;font-size:10px;font-weight:600;color:var(--blue);background:rgba(85,179,255," + (_activeSevF === "info" ? "0.3" : "0.12") + ");padding:1px 6px;border-radius:4px" + (_activeSevF === "info" ? ";box-shadow:0 0 0 1px var(--blue)" : "") + "\">" + sevCounts.info + " info</span>";
+      if (_activeSevF) html += "<span onclick=\"window._filterFindings(null)\" style=\"cursor:pointer;font-size:10px;font-weight:500;color:var(--text-tertiary);background:var(--surface-200);padding:1px 6px;border-radius:4px\">Clear</span>";
       html += "</div>";
+
+      /* Apply severity filter */
+      if (_activeSevF) { findings = findings.filter(function(ff) { return ff.severity === _activeSevF; }); }
 
       html += "<div class=\"findings-list\">";
       for (var i = 0; i < findings.length; i++) {
@@ -1538,6 +1544,7 @@ td.mono {
     html += "<div class=\"section-block\" data-section=\"network\">";
     if (snapshot && snapshot.network && snapshot.network.interfaces && snapshot.network.interfaces.length > 0) {
       html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Network</div>";
+      html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);overflow-x:auto\">";
       html += "<table style=\"width:100%;font-size:12px;border-collapse:collapse\">";
       html += "<tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Interface</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">State</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Speed</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">IP</th></tr>";
       for (var ni = 0; ni < snapshot.network.interfaces.length; ni++) {
@@ -1548,7 +1555,7 @@ td.mono {
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc(iface.speed || "\u2014") + "</td>";
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc(iface.ipv4 || "\u2014") + "</td></tr>";
       }
-      html += "</table></div>";
+      html += "</table></div></div>";
     }
     html += "</div>"; /* section-block network */
 
@@ -1577,7 +1584,7 @@ td.mono {
       var par = snapshot.parity;
       html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Parity</div>";
       if (par.history && par.history.length > 0) {
-        html += "<div style=\"max-height:200px;overflow-y:auto;scrollbar-width:thin\">";
+        html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);overflow-x:auto;max-height:200px;overflow-y:auto;scrollbar-width:thin\">";
         html += "<table style=\"width:100%;font-size:12px;border-collapse:collapse\">";
         html += "<tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Date</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Duration</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Speed</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Errors</th></tr>";
         for (var pi = 0; pi < par.history.length; pi++) {
@@ -1639,6 +1646,11 @@ td.mono {
     activeFindingId = isNowActive ? fid : null;
   };
 
+  window._filterFindings = function(sev) {
+    window._findingSevFilter = (window._findingSevFilter === sev) ? null : sev;
+    loadData();
+  };
+
   function loadData() {
     Promise.all([
       fetchJSON("/api/v1/status"),
@@ -1663,8 +1675,6 @@ td.mono {
         _distributeSections();
         _renderSparklines(snapshot);
         postRender(snapshot);
-        if (window.NasSwipe) NasSwipe.init();
-        initSortBars();
       }
       _adjustRefreshRate();
     }).catch(function(err) {
@@ -1696,6 +1706,8 @@ td.mono {
     }
     staging.parentNode.removeChild(staging);
     if(window.NasDrag)NasDrag.init();
+    if(window.NasSwipe)NasSwipe.init();
+    initSortBars();
   }
 
   function _renderSparklines(snapshot) {
@@ -1726,9 +1738,9 @@ td.mono {
       }).catch(function() {});
   }
 
-  window._dismissFinding = function(title) {
+  window._dismissFinding = function(title, skipReload) {
     fetch("/api/v1/findings/dismiss", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({title: title}) })
-      .then(function() { location.reload(); })
+      .then(function() { if (!skipReload) loadData(); })
       .catch(function() {});
   };
 

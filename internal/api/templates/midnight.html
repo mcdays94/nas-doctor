@@ -415,15 +415,29 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       if (window.NasSort) NasSort.sortFindings(visibleFindings, sortPref);
       else visibleFindings.sort(function(a, b) { return ({ critical:0,warning:1,info:2,ok:3 }[a.severity]||9) - ({ critical:0,warning:1,info:2,ok:3 }[b.severity]||9); });
 
-      // Severity count badges in title
+      // Severity filter + sort bar
       var sevCounts = { critical: 0, warning: 0, info: 0 };
       for (var fc = 0; fc < visibleFindings.length; fc++) { var sv = visibleFindings[fc].severity; if (sevCounts[sv] !== undefined) sevCounts[sv]++; }
-      h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">';
+      var activeSevFilter = window._findingSevFilter || null;
+      h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">';
       h += '<div id="findings-sort-mount"></div>';
-      if (sevCounts.critical > 0) h += '<span style="font-size:10px;font-weight:600;color:var(--red);background:var(--red-bg);padding:1px 6px;border-radius:4px">' + sevCounts.critical + ' critical</span>';
-      if (sevCounts.warning > 0) h += '<span style="font-size:10px;font-weight:600;color:var(--amber);background:var(--amber-bg);padding:1px 6px;border-radius:4px">' + sevCounts.warning + ' warning</span>';
-      if (sevCounts.info > 0) h += '<span style="font-size:10px;font-weight:600;color:var(--accent);background:rgba(94,106,210,0.1);padding:1px 6px;border-radius:4px">' + sevCounts.info + ' info</span>';
+      function sevBadge(sev, count, color, bg) {
+        if (count === 0) return '';
+        var isActive = activeSevFilter === sev;
+        var style = 'font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;cursor:pointer;transition:all 0.12s;border:1px solid transparent;';
+        if (isActive) style += 'color:#fff;background:' + color + ';border-color:' + color + ';';
+        else style += 'color:' + color + ';background:' + bg + ';';
+        return '<span style="' + style + '" onclick="window._filterFindings(\'' + sev + '\')">' + count + ' ' + sev + '</span>';
+      }
+      h += sevBadge('critical', sevCounts.critical, 'var(--red)', 'var(--red-bg)');
+      h += sevBadge('warning', sevCounts.warning, 'var(--amber)', 'var(--amber-bg)');
+      h += sevBadge('info', sevCounts.info, 'var(--accent)', 'rgba(94,106,210,0.1)');
+      if (activeSevFilter) h += '<span style="font-size:10px;color:var(--text-quaternary);cursor:pointer;padding:2px 6px" onclick="window._filterFindings(null)">Clear filter</span>';
       h += '</div>';
+      // Apply severity filter
+      if (activeSevFilter) {
+        visibleFindings = visibleFindings.filter(function(f) { return f.severity === activeSevFilter; });
+      }
       h += '<div class="findings-list">';
       for (var fi = 0; fi < visibleFindings.length; fi++) {
         var f = visibleFindings[fi];
@@ -700,23 +714,25 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     if (net && net.interfaces && net.interfaces.length > 0) {
       h += '<div>';
       h += '<div class="section-title">Network</div>';
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow-x:auto">';
       h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
       h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Interface</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">State</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Speed</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">MTU</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">IP</th></tr>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Interface</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">State</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Speed</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">MTU</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">IP</th></tr>';
       for (var ni = 0; ni < net.interfaces.length; ni++) {
         var iface = net.interfaces[ni];
         var stateColor = iface.state === "UP" ? "td-healthy" : "td-warn";
-        h += '<tr><td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(iface.name) + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)" class="' + stateColor + '">' + esc(iface.state) + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(iface.speed || "—") + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + (iface.mtu || 0) + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(iface.ipv4 || "—") + '</td></tr>';
+        h += '<tr><td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(iface.name) + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)" class="' + stateColor + '">' + esc(iface.state) + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(iface.speed || "\u2014") + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + (iface.mtu || 0) + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(iface.ipv4 || "\u2014") + '</td></tr>';
       }
       h += '</table>';
+      h += '</div>';
       h += '</div>';
     }
     h += '</div>'; // end section-block network
@@ -759,20 +775,20 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '<div>';
       h += '<div class="section-title">Parity History</div>';
       h += '<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px">Status: ' + esc(parity.status || "idle") + '</div>';
-      h += '<div style="max-height:200px;overflow-y:auto;scrollbar-width:thin">';
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden;max-height:200px;overflow-y:auto;scrollbar-width:thin">';
       h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
       h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Date</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Duration</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Speed</th>';
-      h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Errors</th></tr>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Date</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Duration</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Speed</th>';
+      h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)">Errors</th></tr>';
       for (var pi = 0; pi < parity.history.length; pi++) {
         var pc = parity.history[pi];
         var errClass = pc.errors > 0 ? "td-crit" : "td-healthy";
-        h += '<tr><td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(pc.date) + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc(pc.duration_human || "—") + '</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + (pc.speed_mb_s || 0).toFixed(1) + ' MB/s</td>';
-        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)" class="' + errClass + '">' + (pc.errors || 0) + '</td></tr>';
+        h += '<tr><td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(pc.date) + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + esc(pc.duration_human || "\u2014") + '</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)">' + (pc.speed_mb_s || 0).toFixed(1) + ' MB/s</td>';
+        h += '<td style="padding:6px 12px;border-bottom:1px solid var(--border)" class="' + errClass + '">' + (pc.errors || 0) + '</td></tr>';
       }
       h += '</table>';
       h += '</div>'; // scroll container
@@ -879,13 +895,22 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
 
     staging.parentNode.removeChild(staging);
 
-    // Init pointer-based drag-to-reorder
+    // Init all interactive features after DOM update
     if (window.NasDrag) NasDrag.init();
+    if (window.NasSwipe) NasSwipe.init();
+    initSortBars();
   }
 
-  window._dismissFinding = function(title) {
+  window._findingSevFilter = null;
+  window._filterFindings = function(sev) {
+    window._findingSevFilter = (window._findingSevFilter === sev) ? null : sev;
+    render();
+    distributeSections();
+  };
+
+  window._dismissFinding = function(title, skipReload) {
     fetch("/api/v1/findings/dismiss", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({title: title}) })
-      .then(function() { loadAll(); })
+      .then(function() { if (!skipReload) loadAll(); })
       .catch(function() {});
   };
 
