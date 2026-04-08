@@ -82,6 +82,13 @@ a:hover{color:var(--hover)}
 .col-left{min-width:0;display:flex;flex-direction:column;min-height:0}
 .col-right{min-width:0;display:flex;flex-direction:column;gap:calc(var(--sp)*3)}
 
+/* Sort bar */
+.sort-bar{display:inline-flex;gap:1px;padding:0;border-radius:6px;background:none;border:none;opacity:0;transition:opacity 0.2s ease}
+.section-block:hover .sort-bar{opacity:1}
+.sort-pill{padding:4px 10px;border:none;border-radius:4px;font-size:10px;font-weight:600;font-family:inherit;color:rgba(255,255,255,0.25);background:none;cursor:pointer;transition:all 0.12s;text-transform:uppercase;letter-spacing:0.3px;outline:none;-webkit-appearance:none;appearance:none}
+.sort-pill:hover{color:rgba(255,255,255,0.5);background:rgba(255,255,255,0.06)}
+.sort-pill.active{color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.08)}
+
 /* Section drag-to-reorder */
 .section-title-row{display:flex;align-items:center;gap:6px}
 .section-drag-handle{
@@ -415,28 +422,29 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       if (window.NasSort) NasSort.sortFindings(visibleFindings, sortPref);
       else visibleFindings.sort(function(a, b) { return ({ critical:0,warning:1,info:2,ok:3 }[a.severity]||9) - ({ critical:0,warning:1,info:2,ok:3 }[b.severity]||9); });
 
-      // Severity filter + sort bar
+      // Severity badges (left) + sort pills (right, fade on hover)
       var sevCounts = { critical: 0, warning: 0, info: 0 };
       for (var fc = 0; fc < visibleFindings.length; fc++) { var sv = visibleFindings[fc].severity; if (sevCounts[sv] !== undefined) sevCounts[sv]++; }
-      var activeSevFilter = window._findingSevFilter || null;
+      var activeFilters = window._findingSevFilters || {};
+      var hasFilter = activeFilters.critical || activeFilters.warning || activeFilters.info;
       h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">';
-      h += '<div id="findings-sort-mount"></div>';
       function sevBadge(sev, count, color, bg) {
         if (count === 0) return '';
-        var isActive = activeSevFilter === sev;
+        var isActive = activeFilters[sev];
         var style = 'font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;cursor:pointer;transition:all 0.12s;border:1px solid transparent;';
         if (isActive) style += 'color:#fff;background:' + color + ';border-color:' + color + ';';
         else style += 'color:' + color + ';background:' + bg + ';';
-        return '<span style="' + style + '" onclick="window._filterFindings(\'' + sev + '\')">' + count + ' ' + sev + '</span>';
+        return '<span style="' + style + '" onclick="window._toggleSevFilter(\'' + sev + '\')">' + count + ' ' + sev + '</span>';
       }
       h += sevBadge('critical', sevCounts.critical, 'var(--red)', 'var(--red-bg)');
       h += sevBadge('warning', sevCounts.warning, 'var(--amber)', 'var(--amber-bg)');
       h += sevBadge('info', sevCounts.info, 'var(--accent)', 'rgba(94,106,210,0.1)');
-      if (activeSevFilter) h += '<span style="font-size:10px;color:var(--text-quaternary);cursor:pointer;padding:2px 6px" onclick="window._filterFindings(null)">Clear filter</span>';
+      if (hasFilter) h += '<span style="font-size:10px;color:var(--text-quaternary);cursor:pointer;padding:2px 6px" onclick="window._clearSevFilters()">&times; Clear</span>';
+      h += '<div id="findings-sort-mount" style="margin-left:auto"></div>';
       h += '</div>';
-      // Apply severity filter
-      if (activeSevFilter) {
-        visibleFindings = visibleFindings.filter(function(f) { return f.severity === activeSevFilter; });
+      // Apply multi-select severity filter
+      if (hasFilter) {
+        visibleFindings = visibleFindings.filter(function(f) { return activeFilters[f.severity]; });
       }
       h += '<div class="findings-list">';
       for (var fi = 0; fi < visibleFindings.length; fi++) {
@@ -490,11 +498,11 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         else if ((smart[hc].temperature_c || 0) >= 50 || smart[hc].reallocated_sectors > 0 || smart[hc].pending_sectors > 0) healthWarn++;
         else healthOk++;
       }
-      h += '<div class="section-title">Drives (' + (smart.length || disks.length) + ')';
-      h += '<span class="health-summary">';
-      if (healthOk > 0) h += '<span><span class="dot dot-ok"></span>' + healthOk + ' ok</span>';
-      if (healthWarn > 0) h += '<span><span class="dot dot-warn"></span>' + healthWarn + ' warn</span>';
-      if (healthCrit > 0) h += '<span><span class="dot dot-crit"></span>' + healthCrit + ' fail</span>';
+      h += '<div class="section-title" style="display:flex;align-items:center;gap:12px">Drives (' + (smart.length || disks.length) + ')';
+      h += '<span class="health-summary" style="display:inline-flex;gap:8px;font-size:11px;color:var(--text-quaternary);font-weight:400;text-transform:none;letter-spacing:0">';
+      if (healthOk > 0) h += '<span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green)"></span>' + healthOk + ' ok</span>';
+      if (healthWarn > 0) h += '<span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:var(--amber)"></span>' + healthWarn + ' warn</span>';
+      if (healthCrit > 0) h += '<span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:var(--red)"></span>' + healthCrit + ' fail</span>';
       h += '</span></div>';
 
       // Sort bar for drives
@@ -622,7 +630,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         var stateClass = c.state === "running" ? "running" : (c.state === "paused" ? "paused" : "exited");
         h += '<tr>';
         h += '<td><span class="status-dot ' + stateClass + '"></span>' + esc(c.name) + '</td>';
-        h += '<td style="color:var(--text-quaternary);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.image) + '</td>';
+        h += '<td style="color:var(--text-quaternary);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.image) + '</td>';
         h += '<td>' + esc(c.status) + '</td>';
         h += '<td>' + (c.cpu_percent || 0).toFixed(1) + '%</td>';
         h += '<td>' + (c.mem_mb || 0).toFixed(0) + ' MB (' + (c.mem_percent || 0).toFixed(1) + '%)</td>';
@@ -901,11 +909,14 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     initSortBars();
   }
 
-  window._findingSevFilter = null;
-  window._filterFindings = function(sev) {
-    window._findingSevFilter = (window._findingSevFilter === sev) ? null : sev;
-    render();
-    distributeSections();
+  window._findingSevFilters = {};
+  window._toggleSevFilter = function(sev) {
+    window._findingSevFilters[sev] = !window._findingSevFilters[sev];
+    render(); distributeSections();
+  };
+  window._clearSevFilters = function() {
+    window._findingSevFilters = {};
+    render(); distributeSections();
   };
 
   window._dismissFinding = function(title, skipReload) {
@@ -961,12 +972,8 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     }
   }
 
-  // Initial load
-  loadAll().then(function() {
-    startRefresh();
-    if (window.NasSwipe) NasSwipe.init();
-    initSortBars();
-  });
+  // Initial load — sort bars and swipe are inited inside distributeSections()
+  loadAll().then(startRefresh);
 })();
 </script>
 </body>
