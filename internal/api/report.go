@@ -7,7 +7,81 @@ import (
 	"strings"
 
 	"github.com/mcdays94/nas-doctor/internal"
+	"github.com/mcdays94/nas-doctor/internal/storage"
 )
+
+// ReportSparklines holds historical data for inline SVG charts in the report.
+type ReportSparklines struct {
+	System []storage.SystemHistoryPoint
+	Disks  []storage.DiskSparklines
+}
+
+// svgSparkline generates an inline SVG sparkline from float64 values.
+func svgSparkline(data []float64, width, height int, color string) string {
+	if len(data) < 2 {
+		return ""
+	}
+	mn, mx := data[0], data[0]
+	for _, v := range data {
+		if v < mn {
+			mn = v
+		}
+		if v > mx {
+			mx = v
+		}
+	}
+	if mx == mn {
+		mn -= 1
+		mx += 1
+	}
+	rng := mx - mn
+	pad := 1.0
+	w := float64(width)
+	h := float64(height)
+
+	var pts strings.Builder
+	var area strings.Builder
+	area.WriteString("M")
+	for i, v := range data {
+		x := pad + float64(i)/float64(len(data)-1)*(w-2*pad)
+		y := pad + (1-(v-mn)/rng)*(h-2*pad)
+		if i > 0 {
+			pts.WriteString(" ")
+			area.WriteString(" L")
+		}
+		pts.WriteString(fmt.Sprintf("%.1f,%.1f", x, y))
+		area.WriteString(fmt.Sprintf("%.1f,%.1f", x, y))
+	}
+	area.WriteString(fmt.Sprintf(" L%.1f,%.0f L%.1f,%.0f Z", pad+(w-2*pad), h, pad, h))
+
+	return fmt.Sprintf(
+		`<svg width="%d" height="%d" viewBox="0 0 %d %d" style="display:inline-block;vertical-align:middle">`+
+			`<path d="%s" fill="%s" fill-opacity="0.12" stroke="none"/>`+
+			`<polyline points="%s" fill="none" stroke="%s" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`+
+			`</svg>`,
+		width, height, width, height,
+		area.String(), color,
+		pts.String(), color,
+	)
+}
+
+func svgSparklineFromInts(data []int64, width, height int, color string) string {
+	f := make([]float64, len(data))
+	for i, v := range data {
+		f[i] = float64(v)
+	}
+	return svgSparkline(f, width, height, color)
+}
+
+func tempColor(temp float64) string {
+	if temp >= 55 {
+		return "#dc2626"
+	}
+	if temp >= 45 {
+		return "#d97706"
+	}
+	return "#16a34a"
+}
 
 // escHTML escapes a string for safe inclusion in HTML.
 func escHTML(s string) string {
@@ -201,9 +275,13 @@ func arrayStatus(findings []internal.Finding) string {
 
 // GenerateReport takes a Snapshot and returns a self-contained HTML string
 // suitable for browser viewing and Chrome print-to-PDF.
-func GenerateReport(snap *internal.Snapshot) string {
+func GenerateReport(snap *internal.Snapshot, sparklines ...ReportSparklines) string {
 	if snap == nil {
 		return "<!DOCTYPE html><html><body><p>No snapshot data available.</p></body></html>"
+	}
+	var sparks ReportSparklines
+	if len(sparklines) > 0 {
+		sparks = sparklines[0]
 	}
 
 	var b strings.Builder
@@ -246,7 +324,7 @@ func GenerateReport(snap *internal.Snapshot) string {
 
 	// ── System Overview ──────────────────────────────────────────────
 	b.WriteString("<div class=\"page\">\n")
-	writeSystemOverview(&b, snap)
+	writeSystemOverview(&b, snap, sparks)
 	b.WriteString("</div>\n")
 
 	// ── Findings ─────────────────────────────────────────────────────
@@ -256,7 +334,7 @@ func GenerateReport(snap *internal.Snapshot) string {
 
 	// ── Drive Health & SMART ─────────────────────────────────────────
 	b.WriteString("<div class=\"page\">\n")
-	writeSMART(&b, snap)
+	writeSMART(&b, snap, sparks)
 	b.WriteString("</div>\n")
 
 	// ── Docker & Application Analysis ────────────────────────────────
@@ -658,7 +736,7 @@ func writeTOC(b *strings.Builder, snap *internal.Snapshot) {
 // System Overview
 // ─────────────────────────────────────────────────────────────────────
 
-func writeSystemOverview(b *strings.Builder, snap *internal.Snapshot) {
+func writeSystemOverview(b *strings.Builder, snap *internal.Snapshot, sparks ReportSparklines) {
 	sys := snap.System
 
 	b.WriteString("<div class=\"section\">\n")
@@ -671,6 +749,32 @@ func writeSystemOverview(b *strings.Builder, snap *internal.Snapshot) {
 	writeStatCard(b, fmt.Sprintf("%.1f%%", sys.IOWait), "I/O Wait", valClass(sys.IOWait, 10, 30))
 	writeStatCard(b, formatUptime(sys.UptimeSecs), "Uptime", "")
 	b.WriteString("  </div>\n")
+
+	// System metric sparklines
+	if len(sparks.System) >= 2 {
+		cpuData := make([]float64, len(sparks.System))
+		memData := make([]float64, len(sparks.System))
+		ioData := make([]float64, len(sparks.System))
+		for i, p := range sparks.System {
+			cpuData[i] = p.CPUUsage
+			memData[i] = p.MemPercent
+			ioData[i] = p.IOWait
+		}
+		b.WriteString("  <div style=\"display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap\">\n")
+		b.WriteString("    <div style=\"flex:1;min-width:140px\">\n")
+		b.WriteString("      <div style=\"font-size:8pt;color:var(--cf-text-muted);margin-bottom:2px\">CPU History</div>\n")
+		b.WriteString("      " + svgSparkline(cpuData, 200, 40, "#0072f5") + "\n")
+		b.WriteString("    </div>\n")
+		b.WriteString("    <div style=\"flex:1;min-width:140px\">\n")
+		b.WriteString("      <div style=\"font-size:8pt;color:var(--cf-text-muted);margin-bottom:2px\">Memory History</div>\n")
+		b.WriteString("      " + svgSparkline(memData, 200, 40, "#7c3aed") + "\n")
+		b.WriteString("    </div>\n")
+		b.WriteString("    <div style=\"flex:1;min-width:140px\">\n")
+		b.WriteString("      <div style=\"font-size:8pt;color:var(--cf-text-muted);margin-bottom:2px\">I/O Wait History</div>\n")
+		b.WriteString("      " + svgSparkline(ioData, 200, 40, "#d97706") + "\n")
+		b.WriteString("    </div>\n")
+		b.WriteString("  </div>\n")
+	}
 
 	// System components table
 	b.WriteString("  <div class=\"table-wrap\"><table>\n")
@@ -884,7 +988,7 @@ func writeFindings(b *strings.Builder, snap *internal.Snapshot) {
 // SMART Analysis
 // ─────────────────────────────────────────────────────────────────────
 
-func writeSMART(b *strings.Builder, snap *internal.Snapshot) {
+func writeSMART(b *strings.Builder, snap *internal.Snapshot, sparks ReportSparklines) {
 	if len(snap.SMART) == 0 {
 		return
 	}
@@ -902,8 +1006,21 @@ func writeSMART(b *strings.Builder, snap *internal.Snapshot) {
 	b.WriteString("<th>Age</th>")
 	b.WriteString("<th>Health</th>")
 	b.WriteString("<th>Concerns</th>")
+	b.WriteString("<th>Temp History</th>")
 	b.WriteString("</tr></thead>\n")
 	b.WriteString("    <tbody>\n")
+
+	// Build serial-to-temps map from sparkline data
+	serialTemps := map[string][]float64{}
+	for _, ds := range sparks.Disks {
+		if len(ds.Temps) >= 2 {
+			temps := make([]float64, len(ds.Temps))
+			for j, t := range ds.Temps {
+				temps[j] = float64(t.Temperature)
+			}
+			serialTemps[ds.Serial] = temps
+		}
+	}
 
 	for _, s := range snap.SMART {
 		healthStr := healthPassedStr(s.HealthPassed)
@@ -974,6 +1091,13 @@ func writeSMART(b *strings.Builder, snap *internal.Snapshot) {
 		b.WriteString(fmt.Sprintf("<td>%s</td>", escHTML(formatAge(s.PowerOnHours))))
 		b.WriteString(fmt.Sprintf("<td class=\"%s\"><strong>%s</strong></td>", hClass, escHTML(healthStr)))
 		b.WriteString(fmt.Sprintf("<td class=\"%s\">%s</td>", concernClass, escHTML(concernStr)))
+		// Temp sparkline
+		if temps, ok := serialTemps[s.Serial]; ok {
+			color := tempColor(float64(s.Temperature))
+			b.WriteString(fmt.Sprintf("<td>%s</td>", svgSparkline(temps, 80, 24, color)))
+		} else {
+			b.WriteString("<td>\u2014</td>")
+		}
 		b.WriteString("</tr>\n")
 	}
 
