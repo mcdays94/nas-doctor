@@ -110,10 +110,13 @@ function attachTooltip(el,hitTest){
 }
 
 /* ── MARGINS ─────────────────────────────────────────────────────── */
-function margins(opts){
-  var l=opts&&opts.yLabel?52:44;
-  var b=opts&&opts.xLabel?42:34;
-  return {t:16,r:16,b:b,l:l};
+function margins(opts,h){
+  /* Adapt margins for small canvases (e.g. 60-80px sparkline-style charts) */
+  var compact=h!==undefined&&h<=100;
+  var l=compact?32:(opts&&opts.yLabel?52:44);
+  var b=compact?18:(opts&&opts.xLabel?42:34);
+  var t=compact?8:16;
+  return {t:t,r:compact?8:16,b:b,l:l};
 }
 
 /* ── computeYTicks ───────────────────────────────────────────────── */
@@ -168,6 +171,36 @@ function drawAxes(ctx,m,w,h,yInfo,labels,opts){
   }
 }
 
+/* ── drawCompactAxes (for small charts ≤100px) ───────────────────── */
+function drawCompactAxes(ctx,m,w,h,yInfo,opts){
+  var th=theme();
+  var ch=h-m.t-m.b;
+  ctx.font="10px -apple-system,system-ui,sans-serif";
+  ctx.textAlign="right"; ctx.textBaseline="middle";
+  /* Only draw min and max labels */
+  var ticks=[yInfo.ticks[0],yInfo.ticks[yInfo.ticks.length-1]];
+  for(var i=0;i<ticks.length;i++){
+    var vy=ticks[i];
+    var py=m.t+ch-(vy-yInfo.min)/(yInfo.max-yInfo.min)*ch;
+    ctx.fillStyle=th.text;
+    var lbl=vy%1===0?vy.toString():vy.toFixed(1);
+    ctx.fillText(lbl,m.l-6,py);
+  }
+  /* light baseline */
+  ctx.strokeStyle=th.grid; ctx.lineWidth=1;
+  ctx.setLineDash([3,3]); ctx.beginPath();
+  ctx.moveTo(m.l,m.t+ch); ctx.lineTo(w-m.r,m.t+ch); ctx.stroke();
+  ctx.setLineDash([]);
+  /* Y-axis label */
+  if(opts&&opts.yLabel){
+    ctx.save(); ctx.translate(8,m.t+ch/2);
+    ctx.rotate(-Math.PI/2); ctx.textAlign="center";
+    ctx.fillStyle=th.text; ctx.font="9px -apple-system,system-ui,sans-serif";
+    ctx.fillText(opts.yLabel,0,0);
+    ctx.restore();
+  }
+}
+
 /* ── crosshair helper ────────────────────────────────────────────── */
 function drawCrosshair(ctx,cross,m,h){
   if(!cross.active||cross.x<0) return;
@@ -193,7 +226,7 @@ function computePoints(data,m,cw,ch,yInfo){
 function drawLine(id,opts){
   var c=prepCanvas(id,opts); if(!c) return;
   var ctx=c.ctx, w=c.w, h=c.h;
-  var m=margins(opts), cw=w-m.l-m.r, ch=h-m.t-m.b;
+  var m=margins(opts,h), cw=w-m.l-m.r, ch=h-m.t-m.b;
   var ds=opts.datasets||[];
   var allD=[]; ds.forEach(function(d){allD=allD.concat(d.data);});
   var yInfo=computeYTicks(Math.min.apply(null,allD),Math.max.apply(null,allD),opts.yMax,6);
@@ -246,16 +279,19 @@ function drawLine(id,opts){
 function drawArea(id,opts){
   var c=prepCanvas(id,opts); if(!c) return;
   var ctx=c.ctx, w=c.w, h=c.h;
-  var m=margins(opts), cw=w-m.l-m.r, ch=h-m.t-m.b;
+  var m=margins(opts,h), cw=w-m.l-m.r, ch=h-m.t-m.b;
+  var compact=h<=100;
   var ds=opts.datasets||[];
   var allD=[]; ds.forEach(function(d){allD=allD.concat(d.data);});
-  var yInfo=computeYTicks(Math.min.apply(null,allD),Math.max.apply(null,allD),opts.yMax,6);
+  var tickCount=compact?3:6;
+  var yInfo=computeYTicks(Math.min.apply(null,allD),Math.max.apply(null,allD),opts.yMax,tickCount);
   var allPts=ds.map(function(d){return computePoints(d.data,m,cw,ch,yInfo);});
   var cross={x:-1,active:false};
 
   function render(progress){
     ctx.clearRect(0,0,w,h);
-    drawAxes(ctx,m,w,h,yInfo,opts.labels,opts);
+    if(compact) drawCompactAxes(ctx,m,w,h,yInfo,opts);
+    else drawAxes(ctx,m,w,h,yInfo,opts.labels,opts);
     drawCrosshair(ctx,cross,m,h);
     var pIdx=progress!==undefined?progress:1;
     ds.forEach(function(d,di){
@@ -308,7 +344,7 @@ function drawArea(id,opts){
 function drawBar(id,opts){
   var c=prepCanvas(id,opts); if(!c) return;
   var ctx=c.ctx, w=c.w, h=c.h;
-  var m=margins(opts), cw=w-m.l-m.r, ch=h-m.t-m.b;
+  var m=margins(opts,h), cw=w-m.l-m.r, ch=h-m.t-m.b;
   var data=opts.data||[];
   var labels=opts.labels||[];
   var colors=opts.colors||[];
