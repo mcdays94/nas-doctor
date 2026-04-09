@@ -42,17 +42,13 @@ func (n *Notifier) SetResultHook(fn func(name, webhookType, status string, findi
 }
 
 // NotifyFindings sends alerts for the given findings to all configured webhooks.
+// This is a legacy fallback — the scheduler's rule engine should be preferred.
 func (n *Notifier) NotifyFindings(findings []internal.Finding, hostname string) {
 	for _, wh := range n.webhooks {
-		if !wh.Enabled {
+		if !wh.Enabled || len(findings) == 0 {
 			continue
 		}
-		// Filter findings by minimum severity
-		filtered := filterBySeverity(findings, wh.MinLevel)
-		if len(filtered) == 0 {
-			continue
-		}
-		n.NotifyWebhook(wh, filtered, hostname)
+		n.NotifyWebhook(wh, findings, hostname)
 	}
 }
 
@@ -343,30 +339,6 @@ func (n *Notifier) postJSON(wh internal.WebhookConfig, payload any) error {
 		return fmt.Errorf("webhook returned %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
-}
-
-func filterBySeverity(findings []internal.Finding, minLevel internal.Severity) []internal.Finding {
-	minRank := severityRank(minLevel)
-	var filtered []internal.Finding
-	for _, f := range findings {
-		if severityRank(f.Severity) >= minRank {
-			filtered = append(filtered, f)
-		}
-	}
-	return filtered
-}
-
-func severityRank(s internal.Severity) int {
-	switch s {
-	case internal.SeverityCritical:
-		return 3
-	case internal.SeverityWarning:
-		return 2
-	case internal.SeverityInfo:
-		return 1
-	default:
-		return 0
-	}
 }
 
 func countBySeverity(findings []internal.Finding) (critical, warnings, infos int) {

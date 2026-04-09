@@ -194,6 +194,7 @@ type SMARTInfo struct {
 	Firmware       string  `json:"firmware"`
 	SizeGB         float64 `json:"size_gb"`
 	HealthPassed   bool    `json:"health_passed"`
+	DataAvailable  bool    `json:"data_available"` // true if SMART attributes were successfully read
 	PowerOnHours   int64   `json:"power_on_hours"`
 	Temperature    int     `json:"temperature_c"`
 	TempMax        int     `json:"temperature_max_c"`
@@ -446,40 +447,28 @@ type NotificationConfig struct {
 }
 
 type WebhookConfig struct {
-	Name     string            `json:"name"`
-	URL      string            `json:"url"`
-	Type     string            `json:"type"` // discord, slack, gotify, ntfy, generic
-	Enabled  bool              `json:"enabled"`
-	MinLevel Severity          `json:"min_level"` // minimum severity to notify (legacy; overridden by Filters)
-	Headers  map[string]string `json:"headers,omitempty"`
-	Secret   string            `json:"secret,omitempty"` // for HMAC signing
-	Filters  *WebhookFilters   `json:"filters,omitempty"`
+	Name    string            `json:"name"`
+	URL     string            `json:"url"`
+	Type    string            `json:"type"` // discord, slack, gotify, ntfy, generic
+	Enabled bool              `json:"enabled"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Secret  string            `json:"secret,omitempty"` // for HMAC signing
 }
 
-// WebhookFilters provides per-webhook granular control over which events
-// trigger a notification. When set, these override MinLevel.
-// Empty slices/zero values mean "disabled" (not "match everything").
-type WebhookFilters struct {
-	// ── Finding filters ──
-	Severities []Severity `json:"severities,omitempty"` // only fire on these severities (empty = use MinLevel fallback)
-	Categories []Category `json:"categories,omitempty"` // only fire on these categories (empty = all)
-
-	// ── Threshold triggers (evaluated against snapshot, 0 = disabled) ──
-	DiskSpaceBelowPct  float64 `json:"disk_space_below_pct,omitempty"`  // any disk free < X%
-	DiskTempAboveC     int     `json:"disk_temp_above_c,omitempty"`     // any single disk > X°C
-	AvgDiskTempAboveC  int     `json:"avg_disk_temp_above_c,omitempty"` // mean of all disks > X°C
-	SmartReallocAbove  int64   `json:"smart_realloc_above,omitempty"`   // any drive reallocated > X
-	UPSBatteryBelowPct float64 `json:"ups_battery_below_pct,omitempty"` // UPS battery < X%
-
-	// ── Boolean event triggers ──
-	OnServiceDown     bool `json:"on_service_down,omitempty"`     // any service check status=down
-	OnParityError     bool `json:"on_parity_error,omitempty"`     // parity check with errors > 0
-	OnSmartFailure    bool `json:"on_smart_failure,omitempty"`    // any drive health_passed=false
-	OnUPSOnBattery    bool `json:"on_ups_on_battery,omitempty"`   // UPS switched to battery
-	OnUpdateAvailable bool `json:"on_update_available,omitempty"` // platform update detected
-
-	// ── Scoped service check filter ──
-	ServiceCheckNames []string `json:"service_check_names,omitempty"` // only these checks (empty = all)
+// NotificationRule defines a single, user-created alert rule.
+// WHEN [Category] + [Condition] on [Target] crosses [Operator] [Value]
+// THEN notify via [Webhook].
+type NotificationRule struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Enabled     bool   `json:"enabled"`
+	Webhook     string `json:"webhook"`            // webhook name
+	Category    string `json:"category"`           // disk_space, disk_temp, smart, service, parity, ups, docker, system, zfs, tunnels, findings, update
+	Condition   string `json:"condition"`          // sub-condition within category
+	Target      string `json:"target,omitempty"`   // specific drive/service/container (empty = any)
+	Operator    string `json:"operator,omitempty"` // gt, lt, eq, any
+	Value       string `json:"value,omitempty"`    // threshold value
+	CooldownSec int    `json:"cooldown_sec"`       // min seconds between notifications
 }
 
 type PrometheusConfig struct {
