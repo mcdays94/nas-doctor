@@ -313,11 +313,10 @@ func loadConfig(path string, cfg *internal.Config) error {
 func applyEnvOverrides(cfg *internal.Config) {
 	if url := os.Getenv("NAS_DOCTOR_WEBHOOK_URL"); url != "" {
 		wh := internal.WebhookConfig{
-			Name:     "env-webhook",
-			URL:      url,
-			Type:     envOr("NAS_DOCTOR_WEBHOOK_TYPE", "generic"),
-			Enabled:  true,
-			MinLevel: internal.Severity(envOr("NAS_DOCTOR_WEBHOOK_MIN_LEVEL", "warning")),
+			Name:    "env-webhook",
+			URL:     url,
+			Type:    envOr("NAS_DOCTOR_WEBHOOK_TYPE", "generic"),
+			Enabled: true,
 		}
 		cfg.Notifications.Webhooks = append(cfg.Notifications.Webhooks, wh)
 	}

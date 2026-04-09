@@ -169,63 +169,9 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         <label for="wh-url">URL</label>
         <input type="url" id="wh-url" placeholder="https://...">
       </div>
-      <div class="form-row">
-        <div>
-          <label for="wh-level">Minimum Level</label>
-          <select id="wh-level">
-            <option value="critical">Critical</option>
-            <option value="warning">Warning</option>
-            <option value="info" selected>Info</option>
-          </select>
-        </div>
-        <div>
-          <label for="wh-secret">Secret (optional, HMAC signing)</label>
-          <input type="password" id="wh-secret" placeholder="Leave blank if not needed">
-        </div>
-      </div>
-      <!-- Notification Filters (granular) -->
-      <div class="form-group" style="margin-top:12px">
-        <label style="cursor:pointer;user-select:none;font-weight:600" onclick="document.getElementById('wh-filters-panel').style.display=document.getElementById('wh-filters-panel').style.display==='none'?'block':'none'">Notification Filters &#9662;</label>
-        <p style="font-size:11px;color:var(--text2);margin-top:2px">Fine-tune exactly which events trigger this webhook.</p>
-        <div id="wh-filters-panel" style="display:none;margin-top:8px;padding:16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
-          <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text)">Severity &amp; Category</div>
-          <div class="form-row">
-            <div><label for="wf-severities">Severities (comma-separated, empty = use Min Level)</label>
-              <input type="text" id="wf-severities" placeholder="e.g. critical,warning"></div>
-            <div><label for="wf-categories">Categories (comma-separated, empty = all)</label>
-              <input type="text" id="wf-categories" placeholder="e.g. smart,disk,parity,ups"></div>
-          </div>
-          <div style="font-size:12px;font-weight:600;margin:16px 0 8px;color:var(--text)">Threshold Triggers</div>
-          <div class="form-row">
-            <div><label for="wf-disk-space">Disk free space below (%)</label>
-              <input type="number" id="wf-disk-space" min="0" max="100" step="1" placeholder="0 = disabled"></div>
-            <div><label for="wf-disk-temp">Any disk temp above (&deg;C)</label>
-              <input type="number" id="wf-disk-temp" min="0" max="100" placeholder="0 = disabled"></div>
-          </div>
-          <div class="form-row">
-            <div><label for="wf-avg-temp">Avg disk temp above (&deg;C)</label>
-              <input type="number" id="wf-avg-temp" min="0" max="100" placeholder="0 = disabled"></div>
-            <div><label for="wf-realloc">SMART reallocated sectors above</label>
-              <input type="number" id="wf-realloc" min="0" placeholder="0 = disabled"></div>
-          </div>
-          <div class="form-row">
-            <div><label for="wf-ups-battery">UPS battery below (%)</label>
-              <input type="number" id="wf-ups-battery" min="0" max="100" step="1" placeholder="0 = disabled"></div>
-            <div></div>
-          </div>
-          <div style="font-size:12px;font-weight:600;margin:16px 0 8px;color:var(--text)">Event Triggers</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="wf-service-down"> Service check goes down</label>
-            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="wf-parity-error"> Parity check has errors</label>
-            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="wf-smart-fail"> SMART health fails</label>
-            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="wf-ups-battery-mode"> UPS switches to battery</label>
-            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="wf-update"> Platform update available</label>
-          </div>
-          <div style="margin-top:12px">
-            <label for="wf-service-names">Limit to specific service checks (comma-separated names, empty = all)</label>
-            <input type="text" id="wf-service-names" placeholder="e.g. Home Assistant,Gateway Ping">
-          </div>
-        </div>
+      <div class="form-group">
+        <label for="wh-secret">Secret (optional, HMAC signing)</label>
+        <input type="password" id="wh-secret" placeholder="Leave blank if not needed">
       </div>
       <!-- Custom Headers -->
       <div class="form-group" style="margin-top:12px">
@@ -342,63 +288,88 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       </div>
     </div>
 
-    <!-- Notification Policies -->
+    <!-- Notification Rules -->
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <div style="font-size:14px;font-weight:600">Notification Policies</div>
-        <button class="btn btn-secondary btn-sm" onclick="togglePolicyForm()">+ Add Policy</button>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:600">Notification Rules</div>
+        <button class="btn btn-secondary btn-sm" onclick="toggleRuleForm()">+ Add Notification</button>
       </div>
-      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Route alerts to specific webhooks by severity, category, and hostname. Policies override the default webhook min-level.</p>
-      <div id="policy-list"></div>
-      <div class="webhook-form" id="policy-form">
-        <input type="hidden" id="pol-edit-index" value="-1">
+      <p style="font-size:12px;color:var(--text2);margin-bottom:8px">Define exactly which events trigger each webhook.</p>
+      <!-- Quick Presets -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn btn-secondary btn-sm" onclick="addPreset('critical')">Critical alerts</button>
+        <button class="btn btn-secondary btn-sm" onclick="addPreset('disk_health')">Disk health</button>
+        <button class="btn btn-secondary btn-sm" onclick="addPreset('services')">Service uptime</button>
+        <button class="btn btn-secondary btn-sm" onclick="addPreset('power')">Power protection</button>
+        <button class="btn btn-secondary btn-sm" onclick="addPreset('storage')">Storage warnings</button>
+      </div>
+      <div id="rule-list"></div>
+      <!-- Rule form — all fields visible -->
+      <div class="webhook-form" id="rule-form">
+        <input type="hidden" id="nr-edit-index" value="-1">
         <div class="form-row">
           <div>
-            <label for="pol-name">Policy Name</label>
-            <input type="text" id="pol-name" placeholder="e.g. Critical to Discord">
+            <label for="nr-name">Name</label>
+            <input type="text" id="nr-name" placeholder="e.g. Disk 1 temperature alert">
           </div>
           <div>
-            <label for="pol-webhook">Target Webhook</label>
-            <select id="pol-webhook"></select>
+            <label for="nr-webhook">Notify via</label>
+            <select id="nr-webhook"></select>
           </div>
         </div>
         <div class="form-row">
           <div>
-            <label for="pol-severity">Minimum Severity</label>
-            <select id="pol-severity">
-              <option value="critical">Critical</option>
-              <option value="warning">Warning</option>
-              <option value="info" selected>Info</option>
+            <label for="nr-category">Category</label>
+            <select id="nr-category" onchange="onRuleCategoryChange()">
+              <option value="findings">Findings (severity)</option>
+              <option value="disk_space">Disk Space</option>
+              <option value="disk_temp">Disk Temperature</option>
+              <option value="smart">SMART Health</option>
+              <option value="service">Service Check</option>
+              <option value="parity">Parity (Unraid)</option>
+              <option value="ups">UPS / Power</option>
+              <option value="docker">Docker</option>
+              <option value="system">System</option>
+              <option value="zfs">ZFS</option>
+              <option value="tunnels">Tunnels</option>
+              <option value="update">Platform Update</option>
             </select>
           </div>
           <div>
-            <label for="pol-cooldown">Cooldown (seconds)</label>
-            <input type="number" id="pol-cooldown" min="0" max="86400" value="900" style="text-align:center">
+            <label for="nr-condition">Condition</label>
+            <select id="nr-condition"></select>
           </div>
         </div>
         <div class="form-row">
           <div>
-            <label for="pol-categories">Categories (comma-separated, or leave blank for all)</label>
-            <input type="text" id="pol-categories" placeholder="e.g. storage,network,system">
+            <label for="nr-target">Target <span style="font-size:10px;color:var(--text3)">(optional — specific drive, service, container)</span></label>
+            <select id="nr-target"><option value="">Any / All</option></select>
           </div>
           <div>
-            <label for="pol-hostnames">Hostnames (comma-separated, or blank for all)</label>
-            <input type="text" id="pol-hostnames" placeholder="e.g. nas1,nas2">
+            <label for="nr-value">Threshold value</label>
+            <input type="number" id="nr-value" placeholder="e.g. 55" step="any">
           </div>
         </div>
         <div class="form-row">
           <div>
-            <div class="toggle-wrap" onclick="document.getElementById('pol-enabled').checked=!document.getElementById('pol-enabled').checked;this.querySelector('.toggle').classList.toggle('on',document.getElementById('pol-enabled').checked)">
-              <div class="toggle on"><div class="toggle-knob"></div></div>
-              <span class="toggle-label">Enabled</span>
-              <input type="checkbox" id="pol-enabled" checked style="display:none">
-            </div>
+            <label for="nr-cooldown">Cooldown</label>
+            <select id="nr-cooldown">
+              <option value="300">5 minutes</option>
+              <option value="900" selected>15 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="14400">4 hours</option>
+              <option value="43200">12 hours</option>
+              <option value="86400">24 hours</option>
+            </select>
           </div>
-          <div></div>
+          <div style="display:flex;align-items:flex-end;padding-bottom:4px">
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="nr-enabled" checked> Enabled</label>
+          </div>
         </div>
         <div class="webhook-form-actions">
-          <button class="btn btn-primary" onclick="savePolicy()">Save Policy</button>
-          <button class="btn btn-secondary" onclick="cancelPolicyForm()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveRule()">Save Rule</button>
+          <button class="btn btn-secondary" onclick="cancelRuleForm()">Cancel</button>
         </div>
       </div>
     </div>
@@ -941,9 +912,9 @@ function loadSettings() {
       /* Maintenance windows */
       maintenanceWindows = notif.maintenance_windows || [];
       renderMaintenanceWindows();
-      /* Policies */
-      policies = notif.policies || [];
-      renderPolicies();
+      /* Notification Rules */
+      notifRules = notif.rules || [];
+      renderRules();
     })
     .catch(function(e) { showToast("Failed to load settings: " + e, "error"); });
 }
@@ -954,7 +925,7 @@ function buildSettingsPayload() {
   var cooldownMin = parseInt(document.getElementById("notif-cooldown").value, 10) || 0;
   var notifications = {
     webhooks: webhooks,
-    policies: policies,
+    rules: notifRules,
     quiet_hours: {
       enabled: document.getElementById("qh-enabled").checked,
       timezone: document.getElementById("qh-timezone").value,
@@ -1014,7 +985,7 @@ function saveSettings() {
   .then(function(saved) {
     settings = saved;
     webhooks = (saved.notifications && saved.notifications.webhooks) ? saved.notifications.webhooks : webhooks;
-    policies = (saved.notifications && saved.notifications.policies) ? saved.notifications.policies : policies;
+    notifRules = (saved.notifications && saved.notifications.rules) ? saved.notifications.rules : notifRules;
     maintenanceWindows = (saved.notifications && saved.notifications.maintenance_windows) ? saved.notifications.maintenance_windows : maintenanceWindows;
     serviceChecks = (saved.service_checks && saved.service_checks.checks) ? saved.service_checks.checks : serviceChecks;
     showToast("Settings saved", "success");
@@ -1023,7 +994,7 @@ function saveSettings() {
     applyTheme(payload.theme);
     try { localStorage.setItem("nas-doctor-theme", payload.theme); } catch(e) {}
     renderWebhooks();
-    renderPolicies();
+    renderRules();
     renderMaintenanceWindows();
     renderServiceChecks();
     loadServiceCheckResults();
@@ -1061,20 +1032,6 @@ function renderWebhooks() {
     html += '  <div class="webhook-info">';
     html += '    <div class="webhook-name">' + escapeHtml(wh.name || "Unnamed") + '<span class="badge ' + badgeClass + '">' + typeName + '</span></div>';
     html += '    <div class="webhook-url">' + escapeHtml(maskUrl(wh.url)) + '</div>';
-    if (wh.filters) {
-      var tags = [];
-      if (wh.filters.severities && wh.filters.severities.length) tags.push("sev: " + wh.filters.severities.join(","));
-      if (wh.filters.categories && wh.filters.categories.length) tags.push("cat: " + wh.filters.categories.join(","));
-      if (wh.filters.on_service_down) tags.push("svc down");
-      if (wh.filters.on_parity_error) tags.push("parity err");
-      if (wh.filters.on_smart_failure) tags.push("SMART fail");
-      if (wh.filters.on_ups_on_battery) tags.push("UPS battery");
-      if (wh.filters.on_update_available) tags.push("updates");
-      if (wh.filters.disk_space_below_pct) tags.push("space <" + wh.filters.disk_space_below_pct + "%");
-      if (wh.filters.disk_temp_above_c) tags.push("temp >" + wh.filters.disk_temp_above_c + "\u00b0C");
-      if (wh.filters.ups_battery_below_pct) tags.push("UPS <" + wh.filters.ups_battery_below_pct + "%");
-      if (tags.length) html += '    <div class="inline-muted" style="margin-top:2px">Filters: ' + escapeHtml(tags.join(" \u00b7 ")) + '</div>';
-    }
     html += '  </div>';
     html += '  <div class="webhook-actions">';
     html += '    <div class="toggle-wrap" onclick="toggleWebhookEnabled(' + i + ')">';
@@ -1094,45 +1051,6 @@ function toggleWebhookEnabled(idx) {
   saveSettings();
 }
 
-function resetWebhookFiltersUI(f) {
-  f = f || {};
-  document.getElementById("wf-severities").value = (f.severities || []).join(",");
-  document.getElementById("wf-categories").value = (f.categories || []).join(",");
-  document.getElementById("wf-disk-space").value = f.disk_space_below_pct || "";
-  document.getElementById("wf-disk-temp").value = f.disk_temp_above_c || "";
-  document.getElementById("wf-avg-temp").value = f.avg_disk_temp_above_c || "";
-  document.getElementById("wf-realloc").value = f.smart_realloc_above || "";
-  document.getElementById("wf-ups-battery").value = f.ups_battery_below_pct || "";
-  document.getElementById("wf-service-down").checked = !!f.on_service_down;
-  document.getElementById("wf-parity-error").checked = !!f.on_parity_error;
-  document.getElementById("wf-smart-fail").checked = !!f.on_smart_failure;
-  document.getElementById("wf-ups-battery-mode").checked = !!f.on_ups_on_battery;
-  document.getElementById("wf-update").checked = !!f.on_update_available;
-  document.getElementById("wf-service-names").value = (f.service_check_names || []).join(",");
-}
-function readWebhookFiltersUI() {
-  var sev = document.getElementById("wf-severities").value.trim();
-  var cat = document.getElementById("wf-categories").value.trim();
-  var svcNames = document.getElementById("wf-service-names").value.trim();
-  var f = {};
-  if (sev) f.severities = sev.split(",").map(function(s){return s.trim().toLowerCase();}).filter(Boolean);
-  if (cat) f.categories = cat.split(",").map(function(s){return s.trim().toLowerCase();}).filter(Boolean);
-  var ds = parseFloat(document.getElementById("wf-disk-space").value); if (ds > 0) f.disk_space_below_pct = ds;
-  var dt = parseInt(document.getElementById("wf-disk-temp").value,10); if (dt > 0) f.disk_temp_above_c = dt;
-  var at = parseInt(document.getElementById("wf-avg-temp").value,10); if (at > 0) f.avg_disk_temp_above_c = at;
-  var ra = parseInt(document.getElementById("wf-realloc").value,10); if (ra > 0) f.smart_realloc_above = ra;
-  var ub = parseFloat(document.getElementById("wf-ups-battery").value); if (ub > 0) f.ups_battery_below_pct = ub;
-  if (document.getElementById("wf-service-down").checked) f.on_service_down = true;
-  if (document.getElementById("wf-parity-error").checked) f.on_parity_error = true;
-  if (document.getElementById("wf-smart-fail").checked) f.on_smart_failure = true;
-  if (document.getElementById("wf-ups-battery-mode").checked) f.on_ups_on_battery = true;
-  if (document.getElementById("wf-update").checked) f.on_update_available = true;
-  if (svcNames) f.service_check_names = svcNames.split(",").map(function(s){return s.trim();}).filter(Boolean);
-  // Return null if no filters set (to avoid sending empty object)
-  if (Object.keys(f).length === 0) return null;
-  return f;
-}
-
 function toggleWebhookForm() {
   var form = document.getElementById("webhook-form");
   if (form.classList.contains("visible")) {
@@ -1143,10 +1061,7 @@ function toggleWebhookForm() {
   document.getElementById("wh-name").value = "";
   document.getElementById("wh-url").value = "";
   document.getElementById("wh-type").value = "discord";
-  document.getElementById("wh-level").value = "info";
   document.getElementById("wh-secret").value = "";
-  resetWebhookFiltersUI({});
-  document.getElementById("wh-filters-panel").style.display = "none";
   form.classList.add("visible");
 }
 
@@ -1156,10 +1071,7 @@ function editWebhook(idx) {
   document.getElementById("wh-name").value = wh.name || "";
   document.getElementById("wh-url").value = wh.url || "";
   document.getElementById("wh-type").value = wh.type || "generic";
-  document.getElementById("wh-level").value = wh.min_level || "info";
   document.getElementById("wh-secret").value = wh.secret || "";
-  resetWebhookFiltersUI(wh.filters || {});
-  document.getElementById("wh-filters-panel").style.display = wh.filters ? "block" : "none";
   document.getElementById("webhook-form").classList.add("visible");
 }
 
@@ -1179,11 +1091,8 @@ function saveWebhook() {
     url: url,
     type: document.getElementById("wh-type").value,
     enabled: true,
-    min_level: document.getElementById("wh-level").value,
     secret: document.getElementById("wh-secret").value.trim() || ""
   };
-  var filters = readWebhookFiltersUI();
-  if (filters) wh.filters = filters;
   var editIdx = parseInt(document.getElementById("wh-edit-index").value, 10);
   if (editIdx >= 0 && editIdx < webhooks.length) {
     wh.enabled = webhooks[editIdx].enabled;
@@ -1916,120 +1825,188 @@ function toggleMaintenanceEnabled(idx) {
   markChanged();
 }
 
-/* ---------- Notification Policies ---------- */
-var policies = [];
+/* ---------- Notification Rules ---------- */
+var notifRules = [];
+var _snapshotCache = null; // cached snapshot for target dropdowns
 
-function renderPolicies() {
-  var container = document.getElementById("policy-list");
-  if (!container) return;
-  // Update the webhook dropdown in the policy form
-  var polWebhookSel = document.getElementById("pol-webhook");
-  if (polWebhookSel) {
-    var currentVal = polWebhookSel.value;
-    polWebhookSel.innerHTML = "";
-    for (var w = 0; w < webhooks.length; w++) {
-      var opt = document.createElement("option");
-      opt.value = webhooks[w].name || "";
-      opt.textContent = webhooks[w].name || "Unnamed";
-      polWebhookSel.appendChild(opt);
-    }
-    if (currentVal) polWebhookSel.value = currentVal;
+var CONDITION_MAP = {
+  findings:   [{v:"critical",l:"Any critical finding"},{v:"warning",l:"Any warning+ finding"},{v:"category",l:"Findings in category"},{v:"any",l:"Any finding"}],
+  disk_space: [{v:"free_below",l:"Free space below %"}],
+  disk_temp:  [{v:"above",l:"Single disk temp above \u00b0C"},{v:"avg_above",l:"Average disk temp above \u00b0C"}],
+  smart:      [{v:"health_fails",l:"SMART health fails"},{v:"reallocated_above",l:"Reallocated sectors above"},{v:"pending_above",l:"Pending sectors above"},{v:"crc_above",l:"CRC errors above"},{v:"power_hours_above",l:"Power-on hours above"}],
+  service:    [{v:"down",l:"Service goes down"},{v:"latency_above",l:"Latency above (ms)"}],
+  parity:     [{v:"errors",l:"Parity check has errors"},{v:"speed_below",l:"Parity speed below MB/s"}],
+  ups:        [{v:"on_battery",l:"UPS switches to battery"},{v:"battery_below",l:"Battery below %"},{v:"load_above",l:"Load above %"}],
+  docker:     [{v:"stopped",l:"Container stops"}],
+  system:     [{v:"cpu_above",l:"CPU above %"},{v:"mem_above",l:"Memory above %"},{v:"load_above",l:"Load average above"},{v:"iowait_above",l:"I/O wait above %"}],
+  zfs:        [{v:"degraded",l:"Pool degraded"},{v:"scrub_errors",l:"Scrub errors detected"},{v:"usage_above",l:"Pool usage above %"}],
+  tunnels:    [{v:"cloudflared_down",l:"Cloudflared tunnel down"},{v:"tailscale_offline",l:"Tailscale node offline"}],
+  update:     [{v:"available",l:"Platform update available"}]
+};
+var NEEDS_VALUE = {free_below:1,above:1,avg_above:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,latency_above:1,speed_below:1,battery_below:1,load_above:1,cpu_above:1,mem_above:1,iowait_above:1,usage_above:1};
+var NEEDS_TARGET = {above:1,health_fails:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,down:1,latency_above:1,stopped:1,degraded:1,scrub_errors:1,usage_above:1,cloudflared_down:1,tailscale_offline:1,free_below:1,category:1};
+
+function onRuleCategoryChange() {
+  var cat = document.getElementById("nr-category").value;
+  var condSel = document.getElementById("nr-condition");
+  condSel.innerHTML = "";
+  var opts = CONDITION_MAP[cat] || [];
+  for (var i = 0; i < opts.length; i++) {
+    var o = document.createElement("option"); o.value = opts[i].v; o.textContent = opts[i].l;
+    condSel.appendChild(o);
   }
-  if (!policies || policies.length === 0) {
-    container.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:8px 0">No notification policies configured. Default webhook min-level rules apply.</div>';
+  populateTargetDropdown(cat);
+}
+
+function populateTargetDropdown(cat) {
+  var sel = document.getElementById("nr-target");
+  sel.innerHTML = '<option value="">Any / All</option>';
+  if (!_snapshotCache) return;
+  var sn = _snapshotCache;
+  if ((cat === "disk_temp" || cat === "smart") && sn.smart) {
+    for (var i = 0; i < sn.smart.length; i++) {
+      var d = sn.smart[i]; var lbl = d.device + " — " + d.model + " (" + d.serial + ")";
+      sel.innerHTML += '<option value="' + escapeHtml(d.serial) + '">' + escapeHtml(lbl) + '</option>';
+    }
+  } else if (cat === "disk_space" && sn.disks) {
+    for (var i = 0; i < sn.disks.length; i++) {
+      var d = sn.disks[i]; sel.innerHTML += '<option value="' + escapeHtml(d.mount_point) + '">' + escapeHtml(d.mount_point + " (" + d.label + ")") + '</option>';
+    }
+  } else if (cat === "service" && sn.service_checks) {
+    for (var i = 0; i < sn.service_checks.length; i++) {
+      var sc = sn.service_checks[i]; sel.innerHTML += '<option value="' + escapeHtml(sc.name) + '">' + escapeHtml(sc.name) + '</option>';
+    }
+  } else if (cat === "docker" && sn.docker && sn.docker.containers) {
+    for (var i = 0; i < sn.docker.containers.length; i++) {
+      var c = sn.docker.containers[i]; sel.innerHTML += '<option value="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</option>';
+    }
+  } else if (cat === "zfs" && sn.zfs && sn.zfs.pools) {
+    for (var i = 0; i < sn.zfs.pools.length; i++) {
+      sel.innerHTML += '<option value="' + escapeHtml(sn.zfs.pools[i].name) + '">' + escapeHtml(sn.zfs.pools[i].name) + '</option>';
+    }
+  } else if (cat === "tunnels" && sn.tunnels) {
+    if (sn.tunnels.cloudflared) { for (var i = 0; i < sn.tunnels.cloudflared.tunnels.length; i++) { var t = sn.tunnels.cloudflared.tunnels[i]; sel.innerHTML += '<option value="' + escapeHtml(t.name) + '">' + escapeHtml("CF: " + t.name) + '</option>'; } }
+    if (sn.tunnels.tailscale && sn.tunnels.tailscale.peers) { for (var i = 0; i < sn.tunnels.tailscale.peers.length; i++) { var nd = sn.tunnels.tailscale.peers[i]; sel.innerHTML += '<option value="' + escapeHtml(nd.name) + '">' + escapeHtml("TS: " + nd.name) + '</option>'; } }
+  } else if (cat === "findings") {
+    // For "category" condition, target = finding category
+    var cats = ["system","disk","smart","docker","network","service","memory","thermal","logs","parity","zfs","ups"];
+    for (var i = 0; i < cats.length; i++) sel.innerHTML += '<option value="' + cats[i] + '">' + cats[i] + '</option>';
+  }
+}
+
+function renderRules() {
+  var container = document.getElementById("rule-list");
+  // Update webhook dropdown
+  var whSel = document.getElementById("nr-webhook");
+  if (whSel) { var cv = whSel.value; whSel.innerHTML = ""; for (var w = 0; w < webhooks.length; w++) { var o = document.createElement("option"); o.value = webhooks[w].name; o.textContent = webhooks[w].name; whSel.appendChild(o); } if (cv) whSel.value = cv; }
+  if (!notifRules || notifRules.length === 0) {
+    container.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:8px 0">No notification rules. All findings will be sent to all enabled webhooks.</div>';
     return;
   }
   var html = "";
-  for (var i = 0; i < policies.length; i++) {
-    var p = policies[i];
-    var cats = p.categories && p.categories.length ? p.categories.join(", ") : "all";
-    var hosts = p.hostnames && p.hostnames.length ? p.hostnames.join(", ") : "all";
+  for (var i = 0; i < notifRules.length; i++) {
+    var r = notifRules[i];
+    var desc = r.category + " / " + r.condition;
+    if (r.target) desc += " on " + r.target;
+    if (r.value) desc += " (threshold: " + r.value + ")";
     html += '<div class="webhook-item">';
-    html += '  <div class="webhook-info">';
-    html += '    <div class="webhook-name">' + escapeHtml(p.name || "Unnamed") + ' <span class="badge badge-generic">' + escapeHtml(p.min_severity || "info") + '+</span></div>';
-    html += '    <div class="webhook-url">Webhook: ' + escapeHtml(p.webhook_name || "—") + ' &middot; Categories: ' + escapeHtml(cats) + ' &middot; Hosts: ' + escapeHtml(hosts) + ' &middot; Cooldown: ' + (p.cooldown_sec || 0) + 's</div>';
-    html += '  </div>';
-    html += '  <div class="webhook-actions">';
-    html += '    <div class="toggle-wrap" onclick="togglePolicyEnabled(' + i + ')"><div class="toggle' + (p.enabled ? ' on' : '') + '"><div class="toggle-knob"></div></div></div>';
-    html += '    <button class="btn btn-secondary btn-sm" onclick="editPolicy(' + i + ')">Edit</button>';
-    html += '    <button class="btn btn-danger btn-sm" onclick="removePolicy(' + i + ')">Remove</button>';
-    html += '  </div>';
-    html += '</div>';
+    html += '<div class="webhook-info">';
+    html += '<div class="webhook-name">' + escapeHtml(r.name || "Unnamed") + '</div>';
+    html += '<div class="webhook-url">' + escapeHtml(desc) + ' &rarr; ' + escapeHtml(r.webhook || "—") + ' &middot; cooldown ' + (r.cooldown_sec || 900) + 's</div>';
+    html += '</div><div class="webhook-actions">';
+    html += '<div class="toggle-wrap" onclick="toggleRuleEnabled(' + i + ')"><div class="toggle' + (r.enabled ? " on" : "") + '"><div class="toggle-knob"></div></div></div>';
+    html += '<button class="btn btn-secondary btn-sm" onclick="editRule(' + i + ')">Edit</button>';
+    html += '<button class="btn btn-danger btn-sm" onclick="removeRule(' + i + ')">Remove</button>';
+    html += '</div></div>';
   }
   container.innerHTML = html;
 }
 
-function togglePolicyForm() {
-  var form = document.getElementById("policy-form");
-  if (form.classList.contains("visible")) { cancelPolicyForm(); return; }
-  document.getElementById("pol-edit-index").value = "-1";
-  document.getElementById("pol-name").value = "";
-  document.getElementById("pol-severity").value = "info";
-  document.getElementById("pol-cooldown").value = "900";
-  document.getElementById("pol-categories").value = "";
-  document.getElementById("pol-hostnames").value = "";
-  document.getElementById("pol-enabled").checked = true;
-  form.querySelector(".toggle").classList.add("on");
-  // Refresh webhook dropdown
-  renderPolicies();
+function toggleRuleForm() {
+  var form = document.getElementById("rule-form");
+  if (form.classList.contains("visible")) { cancelRuleForm(); return; }
+  document.getElementById("nr-edit-index").value = "-1";
+  document.getElementById("nr-name").value = "";
+  document.getElementById("nr-category").value = "findings";
+  document.getElementById("nr-value").value = "";
+  document.getElementById("nr-cooldown").value = "900";
+  document.getElementById("nr-enabled").checked = true;
+  onRuleCategoryChange();
+  renderRules();
   form.classList.add("visible");
 }
-
-function cancelPolicyForm() { document.getElementById("policy-form").classList.remove("visible"); }
-
-function editPolicy(idx) {
-  var p = policies[idx];
-  document.getElementById("pol-edit-index").value = String(idx);
-  document.getElementById("pol-name").value = p.name || "";
-  document.getElementById("pol-webhook").value = p.webhook_name || "";
-  document.getElementById("pol-severity").value = p.min_severity || "info";
-  document.getElementById("pol-cooldown").value = String(p.cooldown_sec || 900);
-  document.getElementById("pol-categories").value = (p.categories || []).join(", ");
-  document.getElementById("pol-hostnames").value = (p.hostnames || []).join(", ");
-  document.getElementById("pol-enabled").checked = p.enabled !== false;
-  var toggle = document.getElementById("policy-form").querySelector(".toggle");
-  toggle.classList.toggle("on", p.enabled !== false);
-  renderPolicies();
-  document.getElementById("policy-form").classList.add("visible");
+function cancelRuleForm() { document.getElementById("rule-form").classList.remove("visible"); }
+function editRule(idx) {
+  var r = notifRules[idx];
+  document.getElementById("nr-edit-index").value = String(idx);
+  document.getElementById("nr-name").value = r.name || "";
+  document.getElementById("nr-webhook").value = r.webhook || "";
+  document.getElementById("nr-category").value = r.category || "findings";
+  onRuleCategoryChange();
+  document.getElementById("nr-condition").value = r.condition || "";
+  document.getElementById("nr-target").value = r.target || "";
+  document.getElementById("nr-value").value = r.value || "";
+  document.getElementById("nr-cooldown").value = String(r.cooldown_sec || 900);
+  document.getElementById("nr-enabled").checked = r.enabled !== false;
+  renderRules();
+  document.getElementById("rule-form").classList.add("visible");
 }
-
-function savePolicy() {
-  var name = document.getElementById("pol-name").value.trim();
-  if (!name) { showToast("Policy name is required", "error"); return; }
-  var cats = document.getElementById("pol-categories").value.trim();
-  var hosts = document.getElementById("pol-hostnames").value.trim();
-  var pol = {
-    name: name,
-    enabled: document.getElementById("pol-enabled").checked,
-    webhook_name: document.getElementById("pol-webhook").value,
-    min_severity: document.getElementById("pol-severity").value,
-    cooldown_sec: parseInt(document.getElementById("pol-cooldown").value, 10) || 900,
-    categories: cats ? cats.split(",").map(function(c) { return c.trim(); }).filter(Boolean) : [],
-    hostnames: hosts ? hosts.split(",").map(function(h) { return h.trim(); }).filter(Boolean) : []
+function saveRule() {
+  var name = document.getElementById("nr-name").value.trim();
+  var wh = document.getElementById("nr-webhook").value;
+  if (!name) { showToast("Rule name is required", "error"); return; }
+  if (!wh) { showToast("Select a webhook", "error"); return; }
+  var rule = {
+    id: "rule-" + Date.now() + "-" + Math.random().toString(36).substr(2,6),
+    name: name, enabled: document.getElementById("nr-enabled").checked,
+    webhook: wh, category: document.getElementById("nr-category").value,
+    condition: document.getElementById("nr-condition").value,
+    target: document.getElementById("nr-target").value,
+    value: document.getElementById("nr-value").value,
+    cooldown_sec: parseInt(document.getElementById("nr-cooldown").value, 10) || 900
   };
-  var editIdx = parseInt(document.getElementById("pol-edit-index").value, 10);
-  if (editIdx >= 0 && editIdx < policies.length) {
-    policies[editIdx] = pol;
-  } else {
-    policies.push(pol);
+  var editIdx = parseInt(document.getElementById("nr-edit-index").value, 10);
+  if (editIdx >= 0 && editIdx < notifRules.length) { rule.id = notifRules[editIdx].id; notifRules[editIdx] = rule; }
+  else notifRules.push(rule);
+  renderRules(); cancelRuleForm(); saveSettings();
+}
+function removeRule(idx) { if (!confirm("Remove rule?")) return; notifRules.splice(idx, 1); renderRules(); saveSettings(); }
+function toggleRuleEnabled(idx) { notifRules[idx].enabled = !notifRules[idx].enabled; renderRules(); saveSettings(); }
+
+function addPreset(preset) {
+  var wh = webhooks.length > 0 ? webhooks[0].name : "";
+  if (!wh) { showToast("Add a webhook first", "error"); return; }
+  var rules = [];
+  switch(preset) {
+    case "critical": rules = [{name:"Critical alerts",category:"findings",condition:"critical",cooldown_sec:900}]; break;
+    case "disk_health": rules = [
+      {name:"SMART failure",category:"smart",condition:"health_fails",cooldown_sec:900},
+      {name:"Reallocated sectors",category:"smart",condition:"reallocated_above",value:"0",cooldown_sec:3600},
+      {name:"Disk temp >55\u00b0C",category:"disk_temp",condition:"above",value:"55",cooldown_sec:1800}
+    ]; break;
+    case "services": rules = [{name:"Service down",category:"service",condition:"down",cooldown_sec:300}]; break;
+    case "power": rules = [
+      {name:"UPS on battery",category:"ups",condition:"on_battery",cooldown_sec:300},
+      {name:"UPS battery <20%",category:"ups",condition:"battery_below",value:"20",cooldown_sec:300}
+    ]; break;
+    case "storage": rules = [{name:"Disk space <10%",category:"disk_space",condition:"free_below",value:"10",cooldown_sec:3600}]; break;
   }
-  renderPolicies();
-  cancelPolicyForm();
-  markChanged();
+  for (var i = 0; i < rules.length; i++) {
+    rules[i].id = "rule-" + Date.now() + "-" + Math.random().toString(36).substr(2,6);
+    rules[i].enabled = true;
+    rules[i].webhook = wh;
+    if (!rules[i].cooldown_sec) rules[i].cooldown_sec = 900;
+    notifRules.push(rules[i]);
+  }
+  renderRules(); saveSettings();
+  showToast("Added " + rules.length + " preset rule(s)", "success");
 }
 
-function removePolicy(idx) {
-  if (!confirm("Remove policy?")) return;
-  policies.splice(idx, 1);
-  renderPolicies();
-  markChanged();
+// Load snapshot for target dropdowns
+function loadSnapshotForTargets() {
+  fetch("/api/v1/snapshot/latest").then(function(r){return r.json()}).then(function(d){_snapshotCache=d;}).catch(function(){});
 }
-
-function togglePolicyEnabled(idx) {
-  policies[idx].enabled = !policies[idx].enabled;
-  renderPolicies();
-  markChanged();
-}
+loadSnapshotForTargets();
 
 /* ---------- Change Detection ---------- */
 var settingsChanged = false;
