@@ -97,19 +97,17 @@ Dedicated `/parity` page with full parity check history:
 - **Expandable detail cards** per check (duration, speed, errors, action, array size, exit code)
 - Dashboard shows **scrollable badge pills** sorted newest-first (replaces the old table)
 
-### Notification Policies & Per-Webhook Filters
+### Notification Rules
 
-Fine-grained alert routing with full granularity configured from Settings:
-- **Per-webhook notification filters** — control exactly which events trigger each webhook:
-  - **Severity/category filters** — e.g., only critical findings in the "smart" category
-  - **Threshold triggers** — disk free space below X%, any disk temp above X°C, average disk temp, SMART reallocated sectors above N, UPS battery below X%
-  - **Event triggers** — service check down, parity errors, SMART health failure, UPS on battery, platform update available
-  - **Scoped service checks** — limit to specific check names
-- **Notification Policies** — route alerts to specific webhooks by severity, category, and hostname with per-policy cooldowns
+Dropdown-driven notification builder with full granularity — no YAML, no complex policy syntax:
+- **12 categories**: Findings, Disk Space, Disk Temperature, SMART Health, Service Checks, Parity, UPS/Power, Docker, System, ZFS, Tunnels, Platform Update
+- **Condition dropdowns** that change per category — e.g., SMART offers "health fails", "reallocated above", "pending above", "CRC errors above", "power-on hours above"
+- **Target selection** from live data — pick a specific drive, service, container, ZFS pool, or tunnel from a dropdown populated by the latest scan
+- **Threshold values** — set exact numbers (e.g., disk space below 10%, temp above 55°C)
+- **5 one-click presets**: Critical alerts, Disk health watch, Service uptime, Power protection, Storage warnings
 - **Quiet Hours** — suppress notifications during a daily time window (alerts still recorded)
 - **Maintenance Windows** — scheduled suppression periods per hostname
-- **Default Cooldown** — global deduplication window for repeated alerts
-- **Webhook Custom Headers** — add custom HTTP headers to any webhook
+- **Default Cooldown** — global deduplication window per rule
 
 ### Multi-Server Fleet Monitoring
 
@@ -122,7 +120,7 @@ Monitor all your NAS Doctor instances from a UniFi-inspired topology view at `/f
 
 | Integration | How |
 |---|---|
-| **Prometheus** | Scrape `/metrics` — 30+ gauges for system, disk, SMART, Docker, findings |
+| **Prometheus** | Scrape `/metrics` — 80+ gauges for system, disk, SMART, Docker, UPS, ZFS, services, tunnels, findings |
 | **Grafana** | Connect via Prometheus data source |
 | **Discord** | Webhook with rich embeds, severity colors, finding details |
 | **Slack** | Webhook with blocks, severity counts, top findings |
@@ -319,8 +317,8 @@ NAS Doctor ships with 3 dashboard themes. Switch between them from Settings.
 All configurable from the web UI at `/settings`, organized with a sticky section nav:
 
 - **General**: Scan interval (preset or custom with cron preview), theme selection, app icon
-- **Webhooks**: Add/remove/test Discord, Slack, Gotify, Ntfy, or generic HTTP webhooks with optional custom headers, HMAC signing, and **per-webhook notification filters** (severity, category, thresholds, event triggers)
-- **Notification Behavior**: Default cooldown, quiet hours (timezone-aware), maintenance windows, notification policies with per-webhook routing rules
+- **Webhooks**: Add/remove/test Discord, Slack, Gotify, Ntfy, or generic HTTP webhooks with optional custom headers and HMAC signing
+- **Notification Rules**: Dropdown-driven rule builder with 12 categories, live target selection, threshold inputs, one-click presets, quiet hours, and maintenance windows
 - **Service Checks**: HTTP, TCP, DNS, Ping/ICMP, SMB/NFS uptime monitoring with per-check configurable intervals (30s–1h)
 - **Fleet**: Add/remove remote NAS Doctor instances with optional API key auth
 - **Dashboard Sections**: Toggle visibility of individual sections (SMART, Docker, ZFS, UPS, Parity, Network, Tunnels, etc.)
