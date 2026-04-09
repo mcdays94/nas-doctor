@@ -72,10 +72,11 @@ type RetentionSettings struct {
 	NotifyLogDays int `json:"notify_log_days"` // Keep notification log entries for N days (0 = default 30)
 }
 
-// SettingsNotifications holds the webhook list within settings.
+// SettingsNotifications holds the webhook list and notification rules.
 type SettingsNotifications struct {
 	Webhooks           []internal.WebhookConfig      `json:"webhooks"`
-	Policies           []scheduler.AlertPolicy       `json:"policies,omitempty"`
+	Rules              []internal.NotificationRule   `json:"rules,omitempty"`
+	Policies           []scheduler.AlertPolicy       `json:"policies,omitempty"` // legacy — kept for migration
 	QuietHours         scheduler.QuietHours          `json:"quiet_hours,omitempty"`
 	MaintenanceWindows []scheduler.MaintenanceWindow `json:"maintenance_windows,omitempty"`
 	DefaultCooldownSec int                           `json:"default_cooldown_sec,omitempty"`
@@ -511,7 +512,8 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		// Update notifier webhooks at runtime.
 		s.scheduler.UpdateNotifier(s.buildNotifier(settings.Notifications.Webhooks))
 		s.scheduler.UpdateAlerting(scheduler.AlertingConfig{
-			Policies:           settings.Notifications.Policies,
+			Rules:              settings.Notifications.Rules,
+			Policies:           settings.Notifications.Policies, // legacy compat
 			QuietHours:         settings.Notifications.QuietHours,
 			MaintenanceWindows: settings.Notifications.MaintenanceWindows,
 			DefaultCooldownSec: settings.Notifications.DefaultCooldownSec,
@@ -790,9 +792,6 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	// Force enabled for the test
 	wh.Enabled = true
-	if wh.MinLevel == "" {
-		wh.MinLevel = internal.SeverityInfo
-	}
 
 	testFindings := []internal.Finding{
 		{
