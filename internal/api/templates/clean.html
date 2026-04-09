@@ -685,6 +685,7 @@ body {
 .status-dot.amber  { background: #d97706; }
 .status-dot.red    { background: #dc2626; }
 .status-dot.gray   { background: #808080; }
+.status-dot.unknown { background: #b3b3b3; }
 
 /* ---- Loading ---- */
 .loading {
@@ -1007,6 +1008,7 @@ body {
     var healthOk = 0, healthWarn = 0, healthCrit = 0;
     for (var hc = 0; hc < _smart.length; hc++) {
       if (!_smart[hc].health_passed) healthCrit++;
+      else if (_smart[hc].data_available === false) healthWarn++;
       else if ((_smart[hc].temperature_c || 0) >= 50 || _smart[hc].reallocated_sectors > 0 || _smart[hc].pending_sectors > 0) healthWarn++;
       else healthOk++;
     }
@@ -1048,21 +1050,24 @@ body {
     if (_smart.length > 0) {
       for (var si = 0; si < _smart.length; si++) {
         var sm = _smart[si];
+        var noData = sm.data_available === false;
         var hlOk = sm.health_passed;
         var sizeStr = sm.size_gb >= 1000 ? (sm.size_gb/1000).toFixed(1)+' TB' : (sm.size_gb||0).toFixed(0)+' GB';
-        var ageStr = sm.power_on_hours > 8766 ? (sm.power_on_hours/8766).toFixed(1)+'y' : (sm.power_on_hours||0).toLocaleString()+'h';
+        var ageStr = noData ? '\u2014' : (sm.power_on_hours > 8766 ? (sm.power_on_hours/8766).toFixed(1)+'y' : (sm.power_on_hours||0).toLocaleString()+'h');
         var slot = sm.array_slot || '';
         html += '<div class="card" style="margin-bottom:6px;padding:10px 14px;cursor:pointer" onclick="window.location=\'/disk/'+encodeURIComponent(sm.serial||'')+'\'">';
         html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
-        html += '<span class="status-dot '+(hlOk?'green':'red')+'"></span>';
+        html += '<span class="status-dot '+(noData?'unknown':hlOk?'green':'red')+'"></span>';
         html += '<span style="font-weight:600;font-size:13px">'+escapeHTML(sm.device)+'</span>';
         if (slot) html += '<span style="font-size:11px;color:#808080;background:#f5f5f5;padding:1px 6px;border-radius:4px">'+escapeHTML(slot)+'</span>';
         html += '<span style="font-size:12px;color:#4d4d4d;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHTML(sm.model)+'</span>';
         html += '<span style="font-size:12px;color:#808080">'+sizeStr+'</span>';
-        html += '<span style="font-size:12px;font-weight:600;color:'+(sm.temperature_c>=55?'#dc2626':sm.temperature_c>=45?'#d97706':'#16a34a')+'">'+(sm.temperature_c||0)+'&deg;C</span>';
+        var tempColor = noData ? '#b3b3b3' : (sm.temperature_c>=55?'#dc2626':sm.temperature_c>=45?'#d97706':'#16a34a');
+        html += '<span style="font-size:12px;font-weight:600;color:'+tempColor+'">'+(noData?'\u2014':((sm.temperature_c||0)+'&deg;C'))+'</span>';
         html += '<span style="font-size:11px;color:#b3b3b3">'+ageStr+'</span>';
         html += '<canvas id="spark-temp-'+si+'" width="50" height="18" style="flex-shrink:0"></canvas>';
-        if (!hlOk) html += '<span style="font-size:10px;font-weight:600;color:#dc2626;background:rgba(220,38,38,0.06);padding:1px 6px;border-radius:9999px">FAILED</span>';
+        if (noData) html += '<span style="font-size:10px;font-weight:600;color:#d97706;background:rgba(217,119,6,0.06);padding:1px 6px;border-radius:9999px">NO DATA</span>';
+        else if (!hlOk) html += '<span style="font-size:10px;font-weight:600;color:#dc2626;background:rgba(220,38,38,0.06);padding:1px 6px;border-radius:9999px">FAILED</span>';
         if (sm.reallocated_sectors>0) html += '<span style="font-size:10px;color:#d97706;background:rgba(217,119,6,0.06);padding:1px 6px;border-radius:9999px">'+sm.reallocated_sectors+' realloc</span>';
         if (sm.pending_sectors>0) html += '<span style="font-size:10px;color:#dc2626;background:rgba(220,38,38,0.06);padding:1px 6px;border-radius:9999px">'+sm.pending_sectors+' pending</span>';
         html += '</div>';

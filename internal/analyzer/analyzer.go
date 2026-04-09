@@ -58,6 +58,23 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 func analyzeSMART(drives []internal.SMARTInfo) []internal.Finding {
 	var findings []internal.Finding
 	for _, d := range drives {
+		// SMART data unavailable (drive detected but no attributes)
+		if !d.DataAvailable {
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategorySMART,
+				Title:       fmt.Sprintf("SMART data unavailable: %s", d.Device),
+				Description: fmt.Sprintf("Drive %s (%s) was detected but smartctl could not read SMART attributes. The drive may be behind an HBA, USB bridge, or unsupported controller.", d.Device, d.Model),
+				Evidence:    []string{"Temperature: 0°C", "Power-on hours: 0", "No SMART attributes in smartctl output"},
+				Impact:      "Drive health cannot be monitored — failures may go undetected",
+				Action:      "Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.",
+				Priority:    "short-term",
+				Cost:        "Free",
+				RelatedDisk: d.Serial,
+			})
+			continue
+		}
+
 		// SMART health self-assessment failed
 		if !d.HealthPassed {
 			findings = append(findings, internal.Finding{

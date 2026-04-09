@@ -1377,6 +1377,7 @@ td.mono {
     var _hlOkC = 0, _hlWarnC = 0, _hlCritC = 0;
     for (var hc = 0; hc < _sm.length; hc++) {
       if (!_sm[hc].health_passed) _hlCritC++;
+      else if (_sm[hc].data_available === false) _hlWarnC++;
       else if ((_sm[hc].temperature_c || 0) >= 50 || _sm[hc].reallocated_sectors > 0 || _sm[hc].pending_sectors > 0) _hlWarnC++;
       else _hlOkC++;
     }
@@ -1418,21 +1419,23 @@ td.mono {
     if (_sm.length > 0) {
       for (var si=0;si<_sm.length;si++) {
         var sm = _sm[si];
+        var noData = sm.data_available === false;
         var hlOk = sm.health_passed;
         var szStr = sm.size_gb>=1000?(sm.size_gb/1000).toFixed(1)+" TB":(sm.size_gb||0).toFixed(0)+" GB";
-        var ageStr = sm.power_on_hours > 8766 ? (sm.power_on_hours/8766).toFixed(1)+"y" : (sm.power_on_hours||0).toLocaleString()+"h";
+        var ageStr = noData ? "\u2014" : (sm.power_on_hours > 8766 ? (sm.power_on_hours/8766).toFixed(1)+"y" : (sm.power_on_hours||0).toLocaleString()+"h");
         var slot = sm.array_slot||"";
         html += "<div class=\"card-static\" style=\"margin-bottom:6px;padding:10px 12px;cursor:pointer\" onclick=\"window.location='/disk/"+encodeURIComponent(sm.serial||"")+"'\">";
         html += "<div style=\"display:flex;align-items:center;gap:8px;flex-wrap:wrap\">";
-        html += "<span class=\"status-dot "+(hlOk?"s-green":"s-red")+"\"></span>";
+        html += "<span class=\"status-dot "+(noData?"s-gray":hlOk?"s-green":"s-red")+"\"></span>";
         html += "<span style=\"font-family:var(--font-mono);font-weight:500;font-size:13px\">"+esc(sm.device)+"</span>";
         if(slot)html+="<span style=\"font-size:11px;color:var(--text-dim);background:var(--surface-200);padding:1px 6px;border-radius:4px\">"+esc(slot)+"</span>";
         html+="<span style=\"font-size:12px;color:var(--text-tertiary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">"+esc(sm.model)+"</span>";
         html+="<span style=\"font-size:12px;color:var(--text-dim)\">"+szStr+"</span>";
-        html+="<span class=\"mono\" style=\"font-size:12px;font-weight:600;"+tempColor(sm.temperature_c)+"\">"+(sm.temperature_c||0)+"&deg;</span>";
+        html+="<span class=\"mono\" style=\"font-size:12px;font-weight:600;"+(noData?"color:var(--text-dim)":tempColor(sm.temperature_c))+"\">"+(noData?"\u2014":((sm.temperature_c||0)+"&deg;"))+"</span>";
         html+="<span style=\"font-size:11px;color:var(--text-dim)\">"+ageStr+"</span>";
         html+="<canvas id=\"spark-temp-"+si+"\" width=\"50\" height=\"18\" style=\"flex-shrink:0\"></canvas>";
-        if(!hlOk)html+="<span style=\"font-size:10px;font-weight:600;color:var(--red);background:rgba(255,99,99,0.1);padding:1px 6px;border-radius:9999px\">FAIL</span>";
+        if(noData)html+="<span style=\"font-size:10px;font-weight:600;color:#FACC15;background:rgba(250,204,21,0.1);padding:1px 6px;border-radius:9999px\">NO DATA</span>";
+        else if(!hlOk)html+="<span style=\"font-size:10px;font-weight:600;color:var(--red);background:rgba(255,99,99,0.1);padding:1px 6px;border-radius:9999px\">FAIL</span>";
         if(sm.reallocated_sectors>0)html+="<span style=\"font-size:10px;color:#FACC15;background:rgba(250,204,21,0.1);padding:1px 6px;border-radius:9999px\">"+sm.reallocated_sectors+" realloc</span>";
         if(sm.pending_sectors>0)html+="<span style=\"font-size:10px;color:var(--red);background:rgba(255,99,99,0.1);padding:1px 6px;border-radius:9999px\">"+sm.pending_sectors+" pending</span>";
         html+="</div>";

@@ -194,6 +194,7 @@ type SMARTInfo struct {
 	Firmware       string  `json:"firmware"`
 	SizeGB         float64 `json:"size_gb"`
 	HealthPassed   bool    `json:"health_passed"`
+	DataAvailable  bool    `json:"data_available"` // true if SMART attributes were successfully read
 	PowerOnHours   int64   `json:"power_on_hours"`
 	Temperature    int     `json:"temperature_c"`
 	TempMax        int     `json:"temperature_max_c"`
