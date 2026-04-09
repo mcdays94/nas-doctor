@@ -1586,6 +1586,7 @@ td.mono {
     html += "<div class=\"section-block\" data-section=\"services\">";
     if (snapshot && snapshot.service_checks && snapshot.service_checks.length > 0) {
       html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Service Checks (" + snapshot.service_checks.length + ")</div>";
+      html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);overflow:hidden\">";
       html += "<table style=\"width:100%;font-size:12px;border-collapse:collapse\">";
       html += "<tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Name</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Type</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Status</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Latency</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Failures</th></tr>";
       for (var si = 0; si < snapshot.service_checks.length; si++) {
@@ -1597,7 +1598,7 @@ td.mono {
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + ((sc.response_ms != null) ? (sc.response_ms + " ms") : "—") + "</td>";
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + (sc.consecutive_failures || 0) + " / " + (sc.failure_threshold || 1) + "</td></tr>";
       }
-      html += "</table></div>";
+      html += "</table></div></div>"; /* table + card + section */
     }
     html += "</div>"; /* section-block services */
 
@@ -1606,6 +1607,7 @@ td.mono {
     var tunnels = snapshot ? snapshot.tunnels : null;
     if (tunnels && (tunnels.cloudflared || tunnels.tailscale)) {
       html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Tunnels</div>";
+      html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);padding:12px\">";
       if (tunnels.cloudflared && tunnels.cloudflared.tunnels && tunnels.cloudflared.tunnels.length > 0) {
         html += "<div style=\"font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px\">Cloudflared " + esc(tunnels.cloudflared.version || "") + "</div>";
         for (var ti = 0; ti < tunnels.cloudflared.tunnels.length; ti++) {
@@ -1636,7 +1638,8 @@ td.mono {
           html += "</div>";
         }
       }
-      html += "</div>";
+      html += "</div>"; /* card */
+      html += "</div>"; /* section */
     }
     html += "</div>"; /* section-block tunnels */
 
@@ -1646,6 +1649,7 @@ td.mono {
       var par = snapshot.parity;
       html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\" style=\"display:flex;align-items:center;justify-content:space-between\"><span>Parity</span><a href=\"/parity\" style=\"font-size:11px;color:var(--text-dim);text-decoration:none;font-weight:400;margin-left:16px;white-space:nowrap\">View all &rarr;</a></div>";
       if (par.history && par.history.length > 0) {
+        html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);padding:12px\">";
         html += "<div style=\"display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin\">";
         var sorted = par.history.slice().sort(function(a,b){ return (b.date||"").localeCompare(a.date||""); });
         for (var pi = 0; pi < sorted.length; pi++) {
@@ -1659,9 +1663,10 @@ td.mono {
           html += "<div style=\"font-size:11px;margin-top:2px;font-weight:600;color:"+(hasErr?"var(--red)":"var(--green)")+"\">"+(hasErr?pc.errors+" errors":"Clean")+"</div>";
           html += "</div></a>";
         }
-        html += "</div>";
+        html += "</div>"; /* flex row */
+        html += "</div>"; /* card */
       } else {
-        html += "<div style=\"font-size:12px;color:var(--text-dim)\">Status: " + esc(par.status || "idle") + "</div>";
+        html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);padding:12px;font-size:12px;color:var(--text-dim)\">Status: " + esc(par.status || "idle") + "</div>";
       }
       html += "</div>";
     }
