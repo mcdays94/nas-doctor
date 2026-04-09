@@ -188,6 +188,11 @@ func parseSMARTJSON(device, out string) (internal.SMARTInfo, error) {
 	info.Temperature = data.Temperature.Current
 	info.PowerOnHours = data.PowerOnTime.Hours
 	info.SizeGB = float64(data.UserCapacity.Bytes) / (1024 * 1024 * 1024)
+	// Mark data as available if we got meaningful attributes (a powered drive
+	// always has temperature > 0 or power-on hours > 0)
+	info.DataAvailable = info.Temperature > 0 || info.PowerOnHours > 0 ||
+		strings.Contains(jsonStr, "\"ata_smart_attributes\"") ||
+		strings.Contains(jsonStr, "\"nvme_smart_health_information_log\"")
 
 	// Determine disk type
 	if strings.Contains(device, "nvme") {

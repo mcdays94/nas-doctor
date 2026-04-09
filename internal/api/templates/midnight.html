@@ -190,6 +190,8 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
 .status-dot.running{background:var(--green)}
 .status-dot.exited{background:var(--red)}
 .status-dot.paused{background:var(--amber)}
+.status-dot.unknown{background:var(--text-quaternary)}
+.td-unknown{color:var(--text-quaternary)}
 
 /* Utility */
 .text-green{color:var(--green)}.text-amber{color:var(--amber)}.text-red{color:var(--red)}.text-brand{color:var(--accent)}
@@ -505,6 +507,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       var healthOk = 0, healthWarn = 0, healthCrit = 0;
       for (var hc = 0; hc < smart.length; hc++) {
         if (!smart[hc].health_passed) healthCrit++;
+        else if (smart[hc].data_available === false) healthWarn++;
         else if ((smart[hc].temperature_c || 0) >= 50 || smart[hc].reallocated_sectors > 0 || smart[hc].pending_sectors > 0) healthWarn++;
         else healthOk++;
       }
@@ -554,10 +557,11 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       if (smart.length > 0) {
         for (var si = 0; si < smart.length; si++) {
           var s = smart[si];
-          var healthDot = s.health_passed ? "running" : "exited";
-          var tempClass = (s.temperature_c || 0) >= 55 ? "td-crit" : (s.temperature_c || 0) >= 45 ? "td-warn" : "td-healthy";
+          var noData = s.data_available === false;
+          var healthDot = noData ? "unknown" : (s.health_passed ? "running" : "exited");
+          var tempClass = noData ? "td-unknown" : ((s.temperature_c || 0) >= 55 ? "td-crit" : (s.temperature_c || 0) >= 45 ? "td-warn" : "td-healthy");
           var sizeStr = s.size_gb >= 1000 ? (s.size_gb / 1000).toFixed(1) + ' TB' : (s.size_gb || 0).toFixed(0) + ' GB';
-          var ageStr = s.power_on_hours > 8766 ? (s.power_on_hours / 8766).toFixed(1) + 'y' : (s.power_on_hours || 0).toLocaleString() + 'h';
+          var ageStr = noData ? '—' : (s.power_on_hours > 8766 ? (s.power_on_hours / 8766).toFixed(1) + 'y' : (s.power_on_hours || 0).toLocaleString() + 'h');
           var slotLabel = s.array_slot || '';
 
           h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px;margin-bottom:6px;cursor:pointer" onclick="window.location=\'/disk/' + encodeURIComponent(s.serial || '') + '\'">';
@@ -567,10 +571,11 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
           if (slotLabel) h += '<span style="font-size:11px;color:var(--text-quaternary);background:var(--bg-elevated);padding:1px 6px;border-radius:4px">' + esc(slotLabel) + '</span>';
           h += '<span style="font-size:12px;color:var(--text-tertiary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.model) + '</span>';
           h += '<span style="font-size:12px;color:var(--text-tertiary)">' + sizeStr + '</span>';
-          h += '<span class="' + tempClass + '" style="font-size:12px;font-weight:600">' + (s.temperature_c || 0) + '&deg;C</span>';
+          h += '<span class="' + tempClass + '" style="font-size:12px;font-weight:600">' + (noData ? '—' : ((s.temperature_c || 0) + '&deg;C')) + '</span>';
           h += '<span style="font-size:11px;color:var(--text-quaternary)">' + ageStr + '</span>';
           h += '<canvas id="spark-temp-' + si + '" width="60" height="20" style="flex-shrink:0"></canvas>';
-          if (!s.health_passed) h += '<span style="font-size:10px;font-weight:600;color:var(--red);background:rgba(220,38,38,0.1);padding:1px 6px;border-radius:9999px">FAILED</span>';
+          if (noData) h += '<span style="font-size:10px;font-weight:600;color:var(--amber);background:rgba(217,119,6,0.1);padding:1px 6px;border-radius:9999px">NO DATA</span>';
+          else if (!s.health_passed) h += '<span style="font-size:10px;font-weight:600;color:var(--red);background:rgba(220,38,38,0.1);padding:1px 6px;border-radius:9999px">FAILED</span>';
           if (s.reallocated_sectors > 0) h += '<span style="font-size:10px;color:var(--amber);background:rgba(217,119,6,0.1);padding:1px 6px;border-radius:9999px">' + s.reallocated_sectors + ' realloc</span>';
           if (s.pending_sectors > 0) h += '<span style="font-size:10px;color:var(--red);background:rgba(220,38,38,0.1);padding:1px 6px;border-radius:9999px">' + s.pending_sectors + ' pending</span>';
           if (s.udma_crc_errors > 0) h += '<span style="font-size:10px;color:var(--amber);background:rgba(217,119,6,0.1);padding:1px 6px;border-radius:9999px">' + s.udma_crc_errors + ' CRC</span>';
