@@ -12,6 +12,11 @@
 
 > **Alpha** — NAS Doctor is in alpha. Features may be incomplete, bugs are expected, and breaking changes can occur between releases. Only tested on Unraid. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
+<p align="center">
+  <em>Sleep tight. Your server never does.</em><br><br>
+  <a href="https://buymeacoffee.com/miguelcaetanodias"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg?style=flat-square&logo=buy-me-a-coffee" alt="Buy Me A Coffee"></a>
+</p>
+
 ---
 
 ![NAS Doctor Dashboard](screenshots/midnight-top.jpg)
@@ -321,7 +326,7 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 - **Dashboard Sections**: Toggle visibility of individual sections (SMART, Docker, ZFS, UPS, Parity, Network, Tunnels, etc.)
 - **Data & Retention**: Snapshot retention days, max DB size cap, notification log retention
 - **Backup**: Scheduled DB backups with configurable location, interval, and retention count
-- **Log Forwarding**: Forward scan results to external logging endpoints (coming soon)
+- **Log Forwarding**: Forward scan results to **Loki**, **syslog** (UDP/TCP), or any **HTTP JSON** endpoint after each scan — with custom headers, labels, and payload format (full, findings only, summary)
 
 ### Environment Variables
 
@@ -386,38 +391,64 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 All metrics prefixed with `nasdoctor_`. Full list:
 
 <details>
-<summary>Expand metric list</summary>
+<summary>Expand metric list (80+ metrics)</summary>
 
 ```
-# System
-nasdoctor_system_cpu_usage_percent
-nasdoctor_system_memory_used_bytes / _total_bytes
+# System (12 gauges)
+nasdoctor_system_cpu_usage_percent / _cpu_cores
+nasdoctor_system_memory_used_bytes / _total_bytes / _used_percent
+nasdoctor_system_swap_used_bytes / _total_bytes
 nasdoctor_system_load_avg_1 / _5 / _15
-nasdoctor_system_io_wait_percent
-nasdoctor_system_uptime_seconds
+nasdoctor_system_io_wait_percent / _uptime_seconds
 
 # Disks (labels: device, mountpoint, label)
 nasdoctor_disk_used_bytes / _total_bytes / _used_percent
 
-# SMART (labels: device, model, serial)
-nasdoctor_smart_healthy  (1=passed, 0=failed)
-nasdoctor_smart_temperature_celsius
-nasdoctor_smart_reallocated_sectors / _pending_sectors
-nasdoctor_smart_udma_crc_errors / _power_on_hours
+# SMART (labels: device, model, serial) — 11 gauges per drive
+nasdoctor_smart_healthy / _temperature_celsius / _temperature_max_celsius
+nasdoctor_smart_reallocated_sectors / _pending_sectors / _offline_uncorrectable
+nasdoctor_smart_udma_crc_errors / _command_timeout / _spin_retry_count
+nasdoctor_smart_power_on_hours / _size_bytes
 
 # Docker (labels: name, image)
-nasdoctor_docker_container_cpu_percent / _memory_bytes
+nasdoctor_docker_container_cpu_percent / _memory_bytes / _running
+nasdoctor_docker_container_count
+
+# Network (labels: interface)
+nasdoctor_network_interface_up / _mtu
+
+# UPS (10 gauges)
+nasdoctor_ups_battery_percent / _battery_voltage
+nasdoctor_ups_input_voltage / _output_voltage / _load_percent
+nasdoctor_ups_runtime_minutes / _wattage_watts / _temperature_celsius
+nasdoctor_ups_on_battery / _low_battery
+
+# ZFS (labels: pool for pools, dataset+pool for datasets)
+nasdoctor_zfs_pool_healthy / _used_bytes / _total_bytes / _used_percent
+nasdoctor_zfs_pool_fragmentation_percent / _scan_percent / _scan_errors
+nasdoctor_zfs_pool_read_errors / _write_errors / _checksum_errors
+nasdoctor_zfs_arc_size_bytes / _max_size_bytes / _hit_rate_percent
+nasdoctor_zfs_arc_hits_total / _misses_total
+nasdoctor_zfs_l2arc_size_bytes / _hit_rate_percent
+nasdoctor_zfs_dataset_used_bytes / _avail_bytes / _compression_ratio
+
+# Service Checks (labels: name, type, target)
+nasdoctor_service_up / _response_ms / _consecutive_failures
+
+# Parity (Unraid)
+nasdoctor_parity_speed_mb_per_sec / _duration_seconds / _errors / _running
+
+# Tunnels
+nasdoctor_tunnel_cloudflared_up / _connections (labels: name)
+nasdoctor_tunnel_tailscale_node_online / _tx_bytes / _rx_bytes (labels: name, ip)
 
 # Findings
 nasdoctor_findings_critical_count / _warning_count
 nasdoctor_findings_total{severity="critical|warning|info"}
 
-# Parity (Unraid)
-nasdoctor_parity_speed_mb_per_sec / _duration_seconds
-
-# Collection
-nasdoctor_collection_duration_seconds
-nasdoctor_last_collection_timestamp
+# Other
+nasdoctor_update_available
+nasdoctor_collection_duration_seconds / _last_collection_timestamp
 ```
 
 </details>
@@ -468,10 +499,3 @@ Demo includes: 7 SMART drives (with Backblaze-informed findings), 14 Docker cont
 ## License
 
 MIT
-
----
-
-<p align="center">
-  If NAS Doctor helps you sleep better knowing your server is healthy:<br><br>
-  <a href="https://buymeacoffee.com/miguelcaetanodias"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg?style=flat-square&logo=buy-me-a-coffee" alt="Buy Me A Coffee"></a>
-</p>

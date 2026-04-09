@@ -21,6 +21,7 @@ import (
 	"github.com/mcdays94/nas-doctor/internal"
 	"github.com/mcdays94/nas-doctor/internal/analyzer"
 	"github.com/mcdays94/nas-doctor/internal/collector"
+	"github.com/mcdays94/nas-doctor/internal/logfwd"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/storage"
 )
@@ -69,12 +70,13 @@ type MaintenanceWindow struct {
 	Hostnames []string `json:"hostnames,omitempty"`
 }
 
-// AlertingConfig controls policy routing and suppression behavior.
+// AlertingConfig controls notification rules and suppression behavior.
 type AlertingConfig struct {
-	Policies           []AlertPolicy       `json:"policies,omitempty"`
-	QuietHours         QuietHours          `json:"quiet_hours,omitempty"`
-	MaintenanceWindows []MaintenanceWindow `json:"maintenance_windows,omitempty"`
-	DefaultCooldownSec int                 `json:"default_cooldown_sec,omitempty"`
+	Rules              []internal.NotificationRule `json:"rules,omitempty"`
+	Policies           []AlertPolicy               `json:"policies,omitempty"` // legacy
+	QuietHours         QuietHours                  `json:"quiet_hours,omitempty"`
+	MaintenanceWindows []MaintenanceWindow         `json:"maintenance_windows,omitempty"`
+	DefaultCooldownSec int                         `json:"default_cooldown_sec,omitempty"`
 }
 
 // Scheduler periodically runs diagnostic collections and analysis.
@@ -89,6 +91,8 @@ type Scheduler struct {
 	alerting      AlertingConfig
 	serviceChecks []internal.ServiceCheckConfig
 	lastCheckRun  map[string]time.Time // per-check last execution time
+
+	logForwarder *logfwd.Forwarder
 
 	mu      sync.RWMutex
 	latest  *internal.Snapshot
@@ -277,6 +281,18 @@ func (s *Scheduler) RunOnce() {
 		s.dispatchNotifications(notif, snap, hostname, snap.Timestamp)
 	}
 
+	// Log forwarding
+	s.mu.RLock()
+	fwd := s.logForwarder
+	s.mu.RUnlock()
+	if fwd != nil {
+		hostname := snap.System.Hostname
+		if hostname == "" {
+			hostname = "Unknown"
+		}
+		fwd.Forward(snap, hostname)
+	}
+
 	// Data lifecycle: prune old data
 	s.pruneData()
 
@@ -412,6 +428,17 @@ func (s *Scheduler) UpdateBackup(cfg BackupConfig) {
 		"keep", cfg.KeepCount,
 		"interval_h", cfg.IntervalH,
 	)
+}
+
+// UpdateLogForwarder sets the log forwarding destinations.
+func (s *Scheduler) UpdateLogForwarder(dests []logfwd.Destination) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.logForwarder == nil {
+		s.logForwarder = logfwd.New(s.logger)
+	}
+	s.logForwarder.SetDestinations(dests)
+	s.logger.Info("log forwarder updated", "destinations", len(dests))
 }
 
 // UpdateAlerting updates policy routing and suppression configuration.
@@ -983,8 +1010,7 @@ func serviceCheckKey(check internal.ServiceCheckConfig) string {
 }
 
 func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, snap *internal.Snapshot, hostname string, now time.Time) {
-	findings := snap.Findings
-	if notif == nil || len(findings) == 0 {
+	if notif == nil {
 		return
 	}
 
@@ -997,326 +1023,446 @@ func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, snap *intern
 	}
 
 	if inMaintenanceWindow(cfg.MaintenanceWindows, hostname, now) {
-		s.logSuppressed(notif, findings, hostname, cfg, "suppressed_maintenance")
+		s.logSuppressed(notif, snap.Findings, hostname, cfg, "suppressed_maintenance")
 		return
 	}
 	if inQuietHours(cfg.QuietHours, now) {
-		s.logSuppressed(notif, findings, hostname, cfg, "suppressed_quiet_hours")
+		s.logSuppressed(notif, snap.Findings, hostname, cfg, "suppressed_quiet_hours")
 		return
 	}
 
-	if len(cfg.Policies) == 0 {
-		s.dispatchLegacyNotifications(notif, snap, hostname, now, cfg.DefaultCooldownSec)
-		return
-	}
-
+	// Build webhook lookup
 	webhooks := make(map[string]internal.WebhookConfig)
 	for _, wh := range notif.Webhooks() {
 		webhooks[strings.ToLower(strings.TrimSpace(wh.Name))] = wh
 	}
 
-	matchedPolicy := false
-	for i, policy := range cfg.Policies {
-		if !policy.Enabled {
-			continue
+	if len(cfg.Rules) == 0 {
+		// No rules configured — send all findings to all enabled webhooks (legacy)
+		if len(snap.Findings) > 0 {
+			for _, wh := range notif.Webhooks() {
+				if !wh.Enabled {
+					continue
+				}
+				routeKey := "legacy:" + strings.ToLower(strings.TrimSpace(wh.Name))
+				toSend := s.applyCooldown(snap.Findings, routeKey, time.Duration(cfg.DefaultCooldownSec)*time.Second, now)
+				if len(toSend) == 0 {
+					continue
+				}
+				if err := notif.NotifyWebhook(wh, toSend, hostname); err != nil {
+					continue
+				}
+				s.recordSent(toSend, routeKey, now)
+			}
 		}
-		if !matchesHostname(policy.Hostnames, hostname) {
-			continue
-		}
+		return
+	}
 
-		whName := strings.ToLower(strings.TrimSpace(policy.WebhookName))
-		if whName == "" {
+	// ── Rule-based dispatch ──
+	for _, rule := range cfg.Rules {
+		if !rule.Enabled {
 			continue
 		}
+		whName := strings.ToLower(strings.TrimSpace(rule.Webhook))
 		wh, ok := webhooks[whName]
 		if !ok || !wh.Enabled {
-			s.logger.Warn("alert policy references unknown webhook", "policy", policy.Name, "webhook", policy.WebhookName)
 			continue
 		}
 
-		filtered := filterFindingsForPolicy(findings, policy)
-		if len(filtered) == 0 {
+		matched := evaluateRule(rule, snap)
+		if len(matched) == 0 {
 			continue
 		}
-		matchedPolicy = true
 
-		routeKey := policyRouteKey(policy, i, wh.Name)
-		cooldown := time.Duration(policy.CooldownSec) * time.Second
+		cooldown := time.Duration(rule.CooldownSec) * time.Second
 		if cooldown <= 0 {
 			cooldown = time.Duration(cfg.DefaultCooldownSec) * time.Second
 		}
-
-		toSend := s.applyCooldown(filtered, routeKey, cooldown, now)
+		routeKey := "rule:" + rule.ID
+		toSend := s.applyCooldown(matched, routeKey, cooldown, now)
 		if len(toSend) == 0 {
-			_ = s.store.SaveNotificationLog(wh.Name, wh.Type, "suppressed_cooldown", len(filtered), "")
+			_ = s.store.SaveNotificationLog(wh.Name, wh.Type, "suppressed_cooldown", len(matched), "")
 			continue
 		}
 
 		if err := notif.NotifyWebhook(wh, toSend, hostname); err != nil {
 			continue
 		}
-
-		fingerprints := make([]string, 0, len(toSend))
-		for _, f := range toSend {
-			fp := findingFingerprint(f)
-			fingerprints = append(fingerprints, fp)
-			if err := s.store.SaveNotificationState(fp, routeKey, "sent", now); err != nil {
-				s.logger.Warn("failed to save notification state", "fingerprint", fp, "route", routeKey, "error", err)
-			}
-		}
-		if err := s.store.MarkAlertsNotifiedByFingerprint(fingerprints, now); err != nil {
-			s.logger.Warn("failed to mark alerts notified", "error", err)
-		}
-	}
-
-	if !matchedPolicy {
-		s.dispatchLegacyNotifications(notif, snap, hostname, now, cfg.DefaultCooldownSec)
+		s.recordSent(toSend, routeKey, now)
 	}
 }
 
-func (s *Scheduler) dispatchLegacyNotifications(notif *notifier.Notifier, snap *internal.Snapshot, hostname string, now time.Time, defaultCooldownSec int) {
-	if defaultCooldownSec <= 0 {
-		defaultCooldownSec = 900
+func (s *Scheduler) recordSent(findings []internal.Finding, routeKey string, now time.Time) {
+	fingerprints := make([]string, 0, len(findings))
+	for _, f := range findings {
+		fp := findingFingerprint(f)
+		fingerprints = append(fingerprints, fp)
+		if err := s.store.SaveNotificationState(fp, routeKey, "sent", now); err != nil {
+			s.logger.Warn("failed to save notification state", "fingerprint", fp, "route", routeKey, "error", err)
+		}
 	}
-	for _, wh := range notif.Webhooks() {
-		if !wh.Enabled {
-			continue
-		}
-		filtered := applyWebhookFilters(wh, snap)
-		if len(filtered) == 0 {
-			continue
-		}
-		routeKey := "legacy:" + strings.ToLower(strings.TrimSpace(wh.Name))
-		toSend := s.applyCooldown(filtered, routeKey, time.Duration(defaultCooldownSec)*time.Second, now)
-		if len(toSend) == 0 {
-			_ = s.store.SaveNotificationLog(wh.Name, wh.Type, "suppressed_cooldown", len(filtered), "")
-			continue
-		}
-		if err := notif.NotifyWebhook(wh, toSend, hostname); err != nil {
-			continue
-		}
-		fingerprints := make([]string, 0, len(toSend))
-		for _, f := range toSend {
-			fp := findingFingerprint(f)
-			fingerprints = append(fingerprints, fp)
-			if err := s.store.SaveNotificationState(fp, routeKey, "sent", now); err != nil {
-				s.logger.Warn("failed to save notification state", "fingerprint", fp, "route", routeKey, "error", err)
-			}
-		}
-		if err := s.store.MarkAlertsNotifiedByFingerprint(fingerprints, now); err != nil {
-			s.logger.Warn("failed to mark alerts notified", "error", err)
-		}
+	if err := s.store.MarkAlertsNotifiedByFingerprint(fingerprints, now); err != nil {
+		s.logger.Warn("failed to mark alerts notified", "error", err)
 	}
 }
 
-// applyWebhookFilters evaluates a webhook's filter configuration against the
-// full snapshot. If the webhook has no filters, falls back to legacy MinLevel
-// severity filtering. When filters are set, they control both which findings
-// pass through AND generate synthetic trigger findings from threshold breaches.
-func applyWebhookFilters(wh internal.WebhookConfig, snap *internal.Snapshot) []internal.Finding {
-	if wh.Filters == nil {
-		return filterBySeverity(snap.Findings, wh.MinLevel)
+// evaluateRule checks a single notification rule against the snapshot and
+// returns matching findings (real or synthetic).
+func evaluateRule(rule internal.NotificationRule, snap *internal.Snapshot) []internal.Finding {
+	cat := strings.ToLower(rule.Category)
+	cond := strings.ToLower(rule.Condition)
+	target := strings.ToLower(strings.TrimSpace(rule.Target))
+	val := parseFloat(rule.Value)
+
+	switch cat {
+	case "findings":
+		return evalFindings(cond, target, snap.Findings)
+	case "disk_space":
+		return evalDiskSpace(cond, target, val, snap.Disks)
+	case "disk_temp":
+		return evalDiskTemp(cond, target, int(val), snap.SMART)
+	case "smart":
+		return evalSMART(cond, target, int64(val), snap.SMART)
+	case "service":
+		return evalService(cond, target, val, snap.Services)
+	case "parity":
+		return evalParity(cond, val, snap.Parity)
+	case "ups":
+		return evalUPS(cond, val, snap.UPS)
+	case "docker":
+		return evalDocker(cond, target, snap.Docker)
+	case "system":
+		return evalSystem(cond, val, snap.System)
+	case "zfs":
+		return evalZFS(cond, target, val, snap.ZFS)
+	case "tunnels":
+		return evalTunnels(cond, target, snap.Tunnels)
+	case "update":
+		return evalUpdate(snap.Update)
 	}
-	f := wh.Filters
+	return nil
+}
+
+func parseFloat(s string) float64 {
+	v, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	return v
+}
+
+func synth(id string, sev internal.Severity, cat internal.Category, title, desc string) internal.Finding {
+	return internal.Finding{ID: id, Severity: sev, Category: cat, Title: title, Description: desc}
+}
+
+func matchTarget(target, candidate string) bool {
+	if target == "" {
+		return true
+	}
+	return strings.EqualFold(target, strings.TrimSpace(candidate))
+}
+
+// ── Category evaluators ──
+
+func evalFindings(cond, target string, findings []internal.Finding) []internal.Finding {
 	var out []internal.Finding
-
-	// ── 1. Filter existing findings by severity + category ──
-	for _, finding := range snap.Findings {
-		if !matchesSeverityFilter(finding.Severity, f.Severities, wh.MinLevel) {
-			continue
-		}
-		if len(f.Categories) > 0 && !containsCategory(f.Categories, finding.Category) {
-			continue
-		}
-		out = append(out, finding)
-	}
-
-	// ── 2. Threshold triggers → synthetic findings ──
-	if f.DiskSpaceBelowPct > 0 {
-		for _, d := range snap.Disks {
-			free := 100.0 - d.UsedPct
-			if free < f.DiskSpaceBelowPct {
-				out = append(out, internal.Finding{
-					ID: "trigger:disk-space:" + d.MountPoint, Severity: internal.SeverityWarning,
-					Category: internal.CategoryDisk, Title: "Disk space low: " + d.MountPoint,
-					Description: fmt.Sprintf("Free space %.1f%% is below threshold %.0f%%", free, f.DiskSpaceBelowPct),
-				})
+	for _, f := range findings {
+		switch cond {
+		case "critical":
+			if f.Severity == internal.SeverityCritical {
+				out = append(out, f)
 			}
-		}
-	}
-	if f.DiskTempAboveC > 0 {
-		for _, s := range snap.SMART {
-			if s.Temperature > f.DiskTempAboveC {
-				out = append(out, internal.Finding{
-					ID: "trigger:disk-temp:" + s.Serial, Severity: internal.SeverityWarning,
-					Category: internal.CategoryThermal, Title: "Disk temperature high: " + s.Device,
-					Description: fmt.Sprintf("%d°C exceeds threshold %d°C", s.Temperature, f.DiskTempAboveC),
-					RelatedDisk: s.Serial,
-				})
+		case "warning":
+			if f.Severity == internal.SeverityWarning || f.Severity == internal.SeverityCritical {
+				out = append(out, f)
 			}
-		}
-	}
-	if f.AvgDiskTempAboveC > 0 && len(snap.SMART) > 0 {
-		var sum int
-		for _, s := range snap.SMART {
-			sum += s.Temperature
-		}
-		avg := sum / len(snap.SMART)
-		if avg > f.AvgDiskTempAboveC {
-			out = append(out, internal.Finding{
-				ID: "trigger:avg-disk-temp", Severity: internal.SeverityWarning,
-				Category: internal.CategoryThermal, Title: "Average disk temperature high",
-				Description: fmt.Sprintf("Average %d°C exceeds threshold %d°C", avg, f.AvgDiskTempAboveC),
-			})
-		}
-	}
-	if f.SmartReallocAbove > 0 {
-		for _, s := range snap.SMART {
-			if s.Reallocated > f.SmartReallocAbove {
-				out = append(out, internal.Finding{
-					ID: "trigger:smart-realloc:" + s.Serial, Severity: internal.SeverityCritical,
-					Category: internal.CategorySMART, Title: "Reallocated sectors high: " + s.Device,
-					Description: fmt.Sprintf("%d reallocated sectors exceeds threshold %d", s.Reallocated, f.SmartReallocAbove),
-					RelatedDisk: s.Serial,
-				})
+		case "category":
+			if strings.EqualFold(string(f.Category), target) {
+				out = append(out, f)
 			}
+		case "any":
+			out = append(out, f)
 		}
 	}
-
-	// ── 3. Boolean event triggers ──
-	if f.OnSmartFailure {
-		for _, s := range snap.SMART {
-			if !s.HealthPassed {
-				out = append(out, internal.Finding{
-					ID: "trigger:smart-fail:" + s.Serial, Severity: internal.SeverityCritical,
-					Category: internal.CategorySMART, Title: "SMART health check failed: " + s.Device,
-					Description: s.Model + " (S/N: " + s.Serial + ") reports SMART failure",
-					RelatedDisk: s.Serial,
-				})
-			}
-		}
-	}
-	if f.OnServiceDown {
-		for _, sc := range snap.Services {
-			if sc.Status == "down" {
-				if len(f.ServiceCheckNames) > 0 && !containsString(f.ServiceCheckNames, sc.Name) {
-					continue
-				}
-				out = append(out, internal.Finding{
-					ID: "trigger:service-down:" + sc.Key, Severity: internal.SeverityWarning,
-					Category: internal.CategoryService, Title: "Service check down: " + sc.Name,
-					Description: fmt.Sprintf("%s (%s) is down — %s", sc.Target, sc.Type, sc.Error),
-				})
-			}
-		}
-	}
-	if f.OnParityError && snap.Parity != nil {
-		for _, pc := range snap.Parity.History {
-			if pc.Errors > 0 {
-				out = append(out, internal.Finding{
-					ID: "trigger:parity-error:" + pc.Date, Severity: internal.SeverityCritical,
-					Category: internal.CategoryParity, Title: "Parity check errors: " + pc.Date,
-					Description: fmt.Sprintf("%d errors found during parity check", pc.Errors),
-				})
-				break // only trigger for the most recent error
-			}
-		}
-	}
-	if f.OnUPSOnBattery && snap.UPS != nil && snap.UPS.Available && snap.UPS.OnBattery {
-		out = append(out, internal.Finding{
-			ID: "trigger:ups-battery", Severity: internal.SeverityCritical,
-			Category: internal.CategoryUPS, Title: "UPS running on battery",
-			Description: fmt.Sprintf("Battery at %.0f%%, estimated runtime %.0f minutes", snap.UPS.BatteryPct, snap.UPS.RuntimeMins),
-		})
-	}
-	if f.UPSBatteryBelowPct > 0 && snap.UPS != nil && snap.UPS.Available {
-		if snap.UPS.BatteryPct < f.UPSBatteryBelowPct {
-			out = append(out, internal.Finding{
-				ID: "trigger:ups-low-battery", Severity: internal.SeverityCritical,
-				Category: internal.CategoryUPS, Title: "UPS battery critically low",
-				Description: fmt.Sprintf("Battery %.0f%% is below threshold %.0f%%", snap.UPS.BatteryPct, f.UPSBatteryBelowPct),
-			})
-		}
-	}
-	if f.OnUpdateAvailable && snap.Update != nil && snap.Update.UpdateAvailable {
-		out = append(out, internal.Finding{
-			ID: "trigger:update-available", Severity: internal.SeverityInfo,
-			Category: internal.CategorySystem, Title: "Platform update available",
-			Description: fmt.Sprintf("%s → %s", snap.Update.InstalledVersion, snap.Update.LatestVersion),
-		})
-	}
-
 	return out
 }
 
-func matchesSeverityFilter(sev internal.Severity, allowed []internal.Severity, fallback internal.Severity) bool {
-	if len(allowed) == 0 {
-		return severityRank(sev) >= severityRank(fallback)
+func evalDiskSpace(cond, target string, val float64, disks []internal.DiskInfo) []internal.Finding {
+	if val <= 0 {
+		return nil
 	}
-	for _, a := range allowed {
-		if strings.EqualFold(string(sev), string(a)) {
-			return true
+	var out []internal.Finding
+	for _, d := range disks {
+		if !matchTarget(target, d.MountPoint) && !matchTarget(target, d.Label) {
+			continue
+		}
+		free := 100.0 - d.UsedPct
+		if free < val {
+			out = append(out, synth("rule:disk-space:"+d.MountPoint, internal.SeverityWarning, internal.CategoryDisk,
+				"Disk space low: "+d.MountPoint, fmt.Sprintf("Free space %.1f%% is below threshold %.0f%%", free, val)))
 		}
 	}
-	return false
+	return out
 }
 
-func containsCategory(list []internal.Category, cat internal.Category) bool {
-	for _, c := range list {
-		if strings.EqualFold(string(c), string(cat)) {
-			return true
+func evalDiskTemp(cond, target string, val int, smart []internal.SMARTInfo) []internal.Finding {
+	if val <= 0 {
+		return nil
+	}
+	var out []internal.Finding
+	switch cond {
+	case "above", "single_above":
+		for _, s := range smart {
+			if !matchTarget(target, s.Serial) && !matchTarget(target, s.Device) {
+				continue
+			}
+			if s.Temperature > val {
+				out = append(out, synth("rule:disk-temp:"+s.Serial, internal.SeverityWarning, internal.CategoryThermal,
+					"Disk temperature high: "+s.Device, fmt.Sprintf("%d°C exceeds threshold %d°C", s.Temperature, val)))
+			}
+		}
+	case "avg_above":
+		if len(smart) == 0 {
+			return nil
+		}
+		sum := 0
+		for _, s := range smart {
+			sum += s.Temperature
+		}
+		avg := sum / len(smart)
+		if avg > val {
+			out = append(out, synth("rule:avg-disk-temp", internal.SeverityWarning, internal.CategoryThermal,
+				"Average disk temperature high", fmt.Sprintf("Average %d°C exceeds threshold %d°C", avg, val)))
 		}
 	}
-	return false
+	return out
 }
 
-func containsString(list []string, s string) bool {
-	lower := strings.ToLower(strings.TrimSpace(s))
-	for _, item := range list {
-		if strings.ToLower(strings.TrimSpace(item)) == lower {
-			return true
+func evalSMART(cond, target string, val int64, smart []internal.SMARTInfo) []internal.Finding {
+	var out []internal.Finding
+	for _, s := range smart {
+		if !matchTarget(target, s.Serial) && !matchTarget(target, s.Device) {
+			continue
+		}
+		switch cond {
+		case "health_fails":
+			if !s.HealthPassed {
+				out = append(out, synth("rule:smart-fail:"+s.Serial, internal.SeverityCritical, internal.CategorySMART,
+					"SMART health failed: "+s.Device, s.Model+" (S/N: "+s.Serial+")"))
+			}
+		case "reallocated_above":
+			if val > 0 && s.Reallocated > val {
+				out = append(out, synth("rule:smart-realloc:"+s.Serial, internal.SeverityCritical, internal.CategorySMART,
+					"Reallocated sectors high: "+s.Device, fmt.Sprintf("%d exceeds threshold %d", s.Reallocated, val)))
+			}
+		case "pending_above":
+			if val > 0 && s.Pending > val {
+				out = append(out, synth("rule:smart-pending:"+s.Serial, internal.SeverityWarning, internal.CategorySMART,
+					"Pending sectors: "+s.Device, fmt.Sprintf("%d exceeds threshold %d", s.Pending, val)))
+			}
+		case "crc_above":
+			if val > 0 && s.UDMACRC > val {
+				out = append(out, synth("rule:smart-crc:"+s.Serial, internal.SeverityWarning, internal.CategorySMART,
+					"UDMA CRC errors: "+s.Device, fmt.Sprintf("%d exceeds threshold %d", s.UDMACRC, val)))
+			}
+		case "power_hours_above":
+			if val > 0 && s.PowerOnHours > val {
+				out = append(out, synth("rule:smart-age:"+s.Serial, internal.SeverityInfo, internal.CategorySMART,
+					"Drive age warning: "+s.Device, fmt.Sprintf("%.1f years (%.0f hours threshold)", float64(s.PowerOnHours)/8766, float64(val))))
+			}
 		}
 	}
-	return false
+	return out
+}
+
+func evalService(cond, target string, val float64, services []internal.ServiceCheckResult) []internal.Finding {
+	var out []internal.Finding
+	for _, sc := range services {
+		if !matchTarget(target, sc.Name) && !matchTarget(target, sc.Key) {
+			continue
+		}
+		switch cond {
+		case "down":
+			if sc.Status == "down" {
+				out = append(out, synth("rule:svc-down:"+sc.Key, internal.SeverityWarning, internal.CategoryService,
+					"Service down: "+sc.Name, fmt.Sprintf("%s (%s) — %s", sc.Target, sc.Type, sc.Error)))
+			}
+		case "latency_above":
+			if val > 0 && float64(sc.ResponseMS) > val {
+				out = append(out, synth("rule:svc-latency:"+sc.Key, internal.SeverityWarning, internal.CategoryService,
+					"Service latency high: "+sc.Name, fmt.Sprintf("%dms exceeds threshold %.0fms", sc.ResponseMS, val)))
+			}
+		}
+	}
+	return out
+}
+
+func evalParity(cond string, val float64, parity *internal.ParityInfo) []internal.Finding {
+	if parity == nil || len(parity.History) == 0 {
+		return nil
+	}
+	last := parity.History[len(parity.History)-1]
+	switch cond {
+	case "errors":
+		if last.Errors > 0 {
+			return []internal.Finding{synth("rule:parity-err:"+last.Date, internal.SeverityCritical, internal.CategoryParity,
+				"Parity check errors: "+last.Date, fmt.Sprintf("%d errors found", last.Errors))}
+		}
+	case "speed_below":
+		if val > 0 && last.SpeedMBs < val {
+			return []internal.Finding{synth("rule:parity-slow:"+last.Date, internal.SeverityWarning, internal.CategoryParity,
+				"Parity check slow", fmt.Sprintf("%.1f MB/s below threshold %.0f MB/s", last.SpeedMBs, val))}
+		}
+	}
+	return nil
+}
+
+func evalUPS(cond string, val float64, ups *internal.UPSInfo) []internal.Finding {
+	if ups == nil || !ups.Available {
+		return nil
+	}
+	switch cond {
+	case "on_battery":
+		if ups.OnBattery {
+			return []internal.Finding{synth("rule:ups-battery", internal.SeverityCritical, internal.CategoryUPS,
+				"UPS on battery", fmt.Sprintf("Battery %.0f%%, runtime %.0f min", ups.BatteryPct, ups.RuntimeMins))}
+		}
+	case "battery_below":
+		if val > 0 && ups.BatteryPct < val {
+			return []internal.Finding{synth("rule:ups-low", internal.SeverityCritical, internal.CategoryUPS,
+				"UPS battery low", fmt.Sprintf("%.0f%% below threshold %.0f%%", ups.BatteryPct, val))}
+		}
+	case "load_above":
+		if val > 0 && ups.LoadPct > val {
+			return []internal.Finding{synth("rule:ups-load", internal.SeverityWarning, internal.CategoryUPS,
+				"UPS load high", fmt.Sprintf("%.0f%% exceeds threshold %.0f%%", ups.LoadPct, val))}
+		}
+	}
+	return nil
+}
+
+func evalDocker(cond, target string, docker internal.DockerInfo) []internal.Finding {
+	var out []internal.Finding
+	for _, c := range docker.Containers {
+		if !matchTarget(target, c.Name) {
+			continue
+		}
+		switch cond {
+		case "stopped":
+			if c.State != "running" {
+				out = append(out, synth("rule:docker-stop:"+c.Name, internal.SeverityWarning, internal.CategoryDocker,
+					"Container stopped: "+c.Name, c.Image+" — state: "+c.State))
+			}
+		}
+	}
+	return out
+}
+
+func evalSystem(cond string, val float64, sys internal.SystemInfo) []internal.Finding {
+	if val <= 0 {
+		return nil
+	}
+	switch cond {
+	case "cpu_above":
+		if sys.CPUUsage > val {
+			return []internal.Finding{synth("rule:sys-cpu", internal.SeverityWarning, internal.CategorySystem,
+				"CPU usage high", fmt.Sprintf("%.1f%% exceeds threshold %.0f%%", sys.CPUUsage, val))}
+		}
+	case "mem_above":
+		if sys.MemPercent > val {
+			return []internal.Finding{synth("rule:sys-mem", internal.SeverityWarning, internal.CategorySystem,
+				"Memory usage high", fmt.Sprintf("%.1f%% exceeds threshold %.0f%%", sys.MemPercent, val))}
+		}
+	case "load_above":
+		if sys.LoadAvg1 > val {
+			return []internal.Finding{synth("rule:sys-load", internal.SeverityWarning, internal.CategorySystem,
+				"Load average high", fmt.Sprintf("%.2f exceeds threshold %.0f", sys.LoadAvg1, val))}
+		}
+	case "iowait_above":
+		if sys.IOWait > val {
+			return []internal.Finding{synth("rule:sys-iowait", internal.SeverityWarning, internal.CategorySystem,
+				"I/O wait high", fmt.Sprintf("%.1f%% exceeds threshold %.0f%%", sys.IOWait, val))}
+		}
+	}
+	return nil
+}
+
+func evalZFS(cond, target string, val float64, zfs *internal.ZFSInfo) []internal.Finding {
+	if zfs == nil || !zfs.Available {
+		return nil
+	}
+	var out []internal.Finding
+	for _, pool := range zfs.Pools {
+		if !matchTarget(target, pool.Name) {
+			continue
+		}
+		switch cond {
+		case "degraded":
+			if !strings.EqualFold(pool.State, "ONLINE") {
+				out = append(out, synth("rule:zfs-degraded:"+pool.Name, internal.SeverityCritical, internal.CategoryZFS,
+					"ZFS pool degraded: "+pool.Name, "State: "+pool.State))
+			}
+		case "scrub_errors":
+			if pool.ScanErrors > 0 {
+				out = append(out, synth("rule:zfs-scrub-err:"+pool.Name, internal.SeverityCritical, internal.CategoryZFS,
+					"ZFS scrub errors: "+pool.Name, fmt.Sprintf("%d errors found", pool.ScanErrors)))
+			}
+		case "usage_above":
+			if val > 0 && pool.UsedPct > val {
+				out = append(out, synth("rule:zfs-usage:"+pool.Name, internal.SeverityWarning, internal.CategoryZFS,
+					"ZFS pool usage high: "+pool.Name, fmt.Sprintf("%.1f%% exceeds threshold %.0f%%", pool.UsedPct, val)))
+			}
+		}
+	}
+	return out
+}
+
+func evalTunnels(cond, target string, tunnels *internal.TunnelInfo) []internal.Finding {
+	if tunnels == nil {
+		return nil
+	}
+	var out []internal.Finding
+	switch cond {
+	case "cloudflared_down":
+		if tunnels.Cloudflared != nil {
+			for _, t := range tunnels.Cloudflared.Tunnels {
+				if !matchTarget(target, t.Name) {
+					continue
+				}
+				if t.Status != "healthy" {
+					out = append(out, synth("rule:cf-down:"+t.Name, internal.SeverityWarning, internal.CategoryNetwork,
+						"Cloudflared tunnel down: "+t.Name, "Status: "+t.Status))
+				}
+			}
+		}
+	case "tailscale_offline":
+		if tunnels.Tailscale != nil {
+			all := tunnels.Tailscale.Peers
+			for _, nd := range all {
+				if !matchTarget(target, nd.Name) {
+					continue
+				}
+				if !nd.Online {
+					out = append(out, synth("rule:ts-offline:"+nd.Name, internal.SeverityWarning, internal.CategoryNetwork,
+						"Tailscale node offline: "+nd.Name, "IP: "+nd.IP))
+				}
+			}
+		}
+	}
+	return out
+}
+
+func evalUpdate(update *internal.UpdateInfo) []internal.Finding {
+	if update != nil && update.UpdateAvailable {
+		return []internal.Finding{synth("rule:update", internal.SeverityInfo, internal.CategorySystem,
+			"Platform update available", fmt.Sprintf("%s → %s", update.InstalledVersion, update.LatestVersion))}
+	}
+	return nil
 }
 
 func (s *Scheduler) logSuppressed(notif *notifier.Notifier, findings []internal.Finding, hostname string, cfg AlertingConfig, status string) {
-	if len(cfg.Policies) == 0 {
-		for _, wh := range notif.Webhooks() {
-			if !wh.Enabled {
-				continue
-			}
-			filtered := filterBySeverity(findings, wh.MinLevel)
-			if len(filtered) == 0 {
-				continue
-			}
-			if err := s.store.SaveNotificationLog(wh.Name, wh.Type, status, len(filtered), ""); err != nil {
-				s.logger.Warn("failed to save suppressed notification log", "error", err)
-			}
-		}
-		s.logger.Info("notifications suppressed", "reason", status, "hostname", hostname)
-		return
-	}
-
-	webhooks := make(map[string]internal.WebhookConfig)
 	for _, wh := range notif.Webhooks() {
-		webhooks[strings.ToLower(strings.TrimSpace(wh.Name))] = wh
-	}
-	for _, policy := range cfg.Policies {
-		if !policy.Enabled || !matchesHostname(policy.Hostnames, hostname) {
+		if !wh.Enabled || len(findings) == 0 {
 			continue
 		}
-		wh, ok := webhooks[strings.ToLower(strings.TrimSpace(policy.WebhookName))]
-		if !ok || !wh.Enabled {
-			continue
-		}
-		filtered := filterFindingsForPolicy(findings, policy)
-		if len(filtered) == 0 {
-			continue
-		}
-		if err := s.store.SaveNotificationLog(wh.Name, wh.Type, status, len(filtered), ""); err != nil {
-			s.logger.Warn("failed to save suppressed policy log", "error", err)
-		}
+		_ = s.store.SaveNotificationLog(wh.Name, wh.Type, status, len(findings), "")
 	}
 	s.logger.Info("notifications suppressed", "reason", status, "hostname", hostname)
 }
@@ -1355,44 +1501,17 @@ func (s *Scheduler) applyCooldown(findings []internal.Finding, routeKey string, 
 	return out
 }
 
-func filterFindingsForPolicy(findings []internal.Finding, policy AlertPolicy) []internal.Finding {
-	min := policy.MinSeverity
-	if min == "" {
-		min = internal.SeverityWarning
+func matchesHostname(hosts []string, hostname string) bool {
+	if len(hosts) == 0 {
+		return true
 	}
-
-	catSet := make(map[string]struct{}, len(policy.Categories))
-	for _, c := range policy.Categories {
-		catSet[strings.ToLower(string(c))] = struct{}{}
-	}
-
-	out := make([]internal.Finding, 0, len(findings))
-	for _, f := range findings {
-		if severityRank(f.Severity) < severityRank(min) {
-			continue
-		}
-		if len(catSet) > 0 {
-			if _, ok := catSet[strings.ToLower(string(f.Category))]; !ok {
-				continue
-			}
-		}
-		out = append(out, f)
-	}
-	return out
-}
-
-func filterBySeverity(findings []internal.Finding, minLevel internal.Severity) []internal.Finding {
-	min := minLevel
-	if min == "" {
-		min = internal.SeverityWarning
-	}
-	out := make([]internal.Finding, 0, len(findings))
-	for _, f := range findings {
-		if severityRank(f.Severity) >= severityRank(min) {
-			out = append(out, f)
+	h := strings.ToLower(strings.TrimSpace(hostname))
+	for _, c := range hosts {
+		if strings.ToLower(strings.TrimSpace(c)) == h {
+			return true
 		}
 	}
-	return out
+	return false
 }
 
 func severityRank(sev internal.Severity) int {
@@ -1406,26 +1525,6 @@ func severityRank(sev internal.Severity) int {
 	default:
 		return 0
 	}
-}
-
-func matchesHostname(policyHosts []string, hostname string) bool {
-	if len(policyHosts) == 0 {
-		return true
-	}
-	h := strings.ToLower(strings.TrimSpace(hostname))
-	for _, candidate := range policyHosts {
-		if strings.ToLower(strings.TrimSpace(candidate)) == h {
-			return true
-		}
-	}
-	return false
-}
-
-func policyRouteKey(policy AlertPolicy, idx int, webhookName string) string {
-	if name := strings.TrimSpace(policy.Name); name != "" {
-		return "policy:" + name
-	}
-	return fmt.Sprintf("policy:%d:%s", idx, strings.ToLower(strings.TrimSpace(webhookName)))
 }
 
 func inQuietHours(cfg QuietHours, now time.Time) bool {

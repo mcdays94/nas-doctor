@@ -20,9 +20,24 @@ func collectDisks() ([]internal.DiskInfo, error) {
 	}
 	disks := parseDFOutput(out)
 
-	// If running inside Docker, also read host mounts via /host/mnt
+	// If running inside Docker, merge host mount disks with df disks.
+	// Host mounts override df entries for the same real mount point,
+	// but df entries for volumes not bind-mounted (e.g. /volume2 on
+	// Synology when only /volume1 is mapped) are preserved.
 	if hostDisks := collectHostMountDisks(); len(hostDisks) > 0 {
-		disks = hostDisks // prefer host disks over container view
+		merged := make(map[string]internal.DiskInfo)
+		// Start with df-detected disks (keyed by real mount point)
+		for _, d := range disks {
+			merged[d.MountPoint] = d
+		}
+		// Host-mount disks override and add new entries
+		for _, d := range hostDisks {
+			merged[d.MountPoint] = d
+		}
+		disks = make([]internal.DiskInfo, 0, len(merged))
+		for _, d := range merged {
+			disks = append(disks, d)
+		}
 	}
 
 	return disks, nil

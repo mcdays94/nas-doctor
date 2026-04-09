@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 
 	"github.com/mcdays94/nas-doctor/internal"
+	"github.com/mcdays94/nas-doctor/internal/logfwd"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/scheduler"
 	"github.com/mcdays94/nas-doctor/internal/storage"
@@ -71,10 +72,11 @@ type RetentionSettings struct {
 	NotifyLogDays int `json:"notify_log_days"` // Keep notification log entries for N days (0 = default 30)
 }
 
-// SettingsNotifications holds the webhook list within settings.
+// SettingsNotifications holds the webhook list and notification rules.
 type SettingsNotifications struct {
 	Webhooks           []internal.WebhookConfig      `json:"webhooks"`
-	Policies           []scheduler.AlertPolicy       `json:"policies,omitempty"`
+	Rules              []internal.NotificationRule   `json:"rules,omitempty"`
+	Policies           []scheduler.AlertPolicy       `json:"policies,omitempty"` // legacy — kept for migration
 	QuietHours         scheduler.QuietHours          `json:"quiet_hours,omitempty"`
 	MaintenanceWindows []scheduler.MaintenanceWindow `json:"maintenance_windows,omitempty"`
 	DefaultCooldownSec int                           `json:"default_cooldown_sec,omitempty"`
@@ -93,10 +95,13 @@ type SettingsLogForward struct {
 
 // LogForwardDestination represents a single log-forwarding target.
 type LogForwardDestination struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	URL     string `json:"url"`
-	Enabled bool   `json:"enabled"`
+	Name    string            `json:"name"`
+	Type    string            `json:"type"` // loki, http_json, syslog
+	URL     string            `json:"url"`  // endpoint URL (Loki push, HTTP endpoint, syslog host:port)
+	Enabled bool              `json:"enabled"`
+	Headers map[string]string `json:"headers,omitempty"` // custom HTTP headers (auth tokens, etc.)
+	Labels  map[string]string `json:"labels,omitempty"`  // Loki labels / metadata tags
+	Format  string            `json:"format,omitempty"`  // full (default), findings_only, summary
 }
 
 const settingsConfigKey = "settings"
@@ -507,12 +512,32 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		// Update notifier webhooks at runtime.
 		s.scheduler.UpdateNotifier(s.buildNotifier(settings.Notifications.Webhooks))
 		s.scheduler.UpdateAlerting(scheduler.AlertingConfig{
-			Policies:           settings.Notifications.Policies,
+			Rules:              settings.Notifications.Rules,
+			Policies:           settings.Notifications.Policies, // legacy compat
 			QuietHours:         settings.Notifications.QuietHours,
 			MaintenanceWindows: settings.Notifications.MaintenanceWindows,
 			DefaultCooldownSec: settings.Notifications.DefaultCooldownSec,
 		})
 		s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
+
+		// Update log forwarding
+		if settings.LogPush.Enabled && len(settings.LogPush.Destinations) > 0 {
+			var dests []logfwd.Destination
+			for _, d := range settings.LogPush.Destinations {
+				dests = append(dests, logfwd.Destination{
+					Name:    d.Name,
+					Type:    d.Type,
+					URL:     d.URL,
+					Enabled: d.Enabled,
+					Headers: d.Headers,
+					Labels:  d.Labels,
+					Format:  d.Format,
+				})
+			}
+			s.scheduler.UpdateLogForwarder(dests)
+		} else {
+			s.scheduler.UpdateLogForwarder(nil)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, settings)
@@ -767,9 +792,6 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	// Force enabled for the test
 	wh.Enabled = true
-	if wh.MinLevel == "" {
-		wh.MinLevel = internal.SeverityInfo
-	}
 
 	testFindings := []internal.Finding{
 		{
