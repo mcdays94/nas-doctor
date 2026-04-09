@@ -134,6 +134,11 @@
   function fetchJSON(url){return fetch(url).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()});}
   function pillClass(t){t=(t||"").toLowerCase();if(t==="http")return"pill-http";if(t==="tcp")return"pill-tcp";if(t==="dns")return"pill-dns";if(t==="ping")return"pill-ping";if(t==="smb"||t==="nfs")return"pill-smb";return"pill-http";}
   function fmtInterval(sec){if(sec<60)return sec+"s";if(sec<3600)return Math.floor(sec/60)+"m";return Math.floor(sec/3600)+"h";}
+  function faviconHTML(type,target){
+    if((type||"").toLowerCase()!=="http")return"";
+    try{var u=new URL(target);return'<img src="https://www.google.com/s2/favicons?domain='+encodeURIComponent(u.hostname)+'&sz=16" width="16" height="16" style="border-radius:3px;flex-shrink:0" onerror="this.style.display=\'none\'">';}
+    catch(e){return"";}
+  }
 
   // ── Summary counters ──
   function renderSummary(){
@@ -173,6 +178,7 @@
       h+='<div class="badge-card'+(isActive?" active":"")+'" onclick="filterByCheck(\''+esc(c.key)+'\')">';
       h+='<div class="badge-top">';
       h+='<div class="badge-dot '+(isUp?"up":"down")+'"></div>';
+      h+=faviconHTML(c.type,c.target);
       h+='<div class="badge-name">'+esc(c.name)+'</div>';
       h+='<span class="pill '+pillClass(c.type)+'" style="font-size:9px;padding:1px 5px">'+esc((c.type||"").toUpperCase())+'</span>';
       h+='</div>';
@@ -238,7 +244,7 @@
       var ts=e.checked_at?new Date(e.checked_at).toLocaleString():"—";
       h+='<tr>';
       h+='<td>'+esc(ts)+'</td>';
-      h+='<td>'+esc(e.name||"—")+'</td>';
+      h+='<td style="display:flex;align-items:center;gap:5px">'+faviconHTML(e.type,e.target)+esc(e.name||"—")+'</td>';
       h+='<td><span class="pill '+pillClass(e.type)+'" style="font-size:9px;padding:1px 5px">'+esc((e.type||"").toUpperCase())+'</span></td>';
       h+='<td class="status-'+e.status+'">'+esc(e.status)+'</td>';
       h+='<td>'+(e.response_ms!=null?e.response_ms+' ms':'—')+'</td>';

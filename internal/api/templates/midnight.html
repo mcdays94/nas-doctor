@@ -761,6 +761,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     if (svcChecks && svcChecks.length > 0) {
       h += '<div>';
       h += '<div class="section-title">Service Checks (' + svcChecks.length + ')</div>';
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden">';
       h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
       h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
       h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Name</th>';
@@ -782,6 +783,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         h += '</tr>';
       }
       h += '</table>';
+      h += '</div>'; // card
       h += '</div>';
     }
     h += '</div>'; // end section-block services
@@ -792,6 +794,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     if (tunnels && (tunnels.cloudflared || tunnels.tailscale)) {
       h += '<div>';
       h += '<div class="section-title">Tunnels</div>';
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px">';
       if (tunnels.cloudflared && tunnels.cloudflared.tunnels && tunnels.cloudflared.tunnels.length > 0) {
         h += '<div style="font-size:11px;color:var(--text-quaternary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Cloudflared ' + esc(tunnels.cloudflared.version || '') + '</div>';
         for (var ti = 0; ti < tunnels.cloudflared.tunnels.length; ti++) {
@@ -823,6 +826,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
           h += '</div>';
         }
       }
+      h += '</div>'; // card
       h += '</div>';
     }
     h += '</div>'; // end section-block tunnels
@@ -834,6 +838,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '<div>';
       h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between"><span>Parity History</span><a href="/parity" style="font-size:11px;color:var(--text-quaternary);text-decoration:none;font-weight:400;margin-left:16px;white-space:nowrap">View all &rarr;</a></div>';
       h += '<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px">Status: ' + esc(parity.status || "idle") + '</div>';
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px">';
       h += '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin">';
       var sorted = parity.history.slice().sort(function(a,b){ return (b.date||"").localeCompare(a.date||""); });
       for (var pi = 0; pi < sorted.length; pi++) {
@@ -847,12 +852,13 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         h += '<div style="font-size:11px;margin-top:2px;font-weight:600;color:'+(hasErr?'var(--red)':'var(--green)')+'">'+( hasErr ? pc.errors+' errors' : 'Clean' )+'</div>';
         h += '</div></a>';
       }
-      h += '</div>';
+      h += '</div>'; // flex row
+      h += '</div>'; // card
       h += '</div>';
     } else if (parity && parity.status) {
       h += '<div>';
       h += '<div class="section-title">Parity</div>';
-      h += '<div style="font-size:12px;color:var(--text-tertiary)">Status: ' + esc(parity.status) + ' &middot; No parity check history found</div>';
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px;font-size:12px;color:var(--text-tertiary)">Status: ' + esc(parity.status) + ' &middot; No parity check history found</div>';
       h += '</div>';
     }
     h += '</div>'; // end section-block parity
