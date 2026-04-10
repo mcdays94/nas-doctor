@@ -150,6 +150,7 @@ func (m *Manager) pollServer(srv internal.RemoteServer) *internal.RemoteServerSt
 	var statusResp struct {
 		Hostname      string `json:"hostname"`
 		Platform      string `json:"platform"`
+		Version       string `json:"version"`
 		Uptime        string `json:"uptime"`
 		OverallHealth string `json:"overall_health"`
 		CriticalCount int    `json:"critical_count"`
@@ -170,6 +171,7 @@ func (m *Manager) pollServer(srv internal.RemoteServer) *internal.RemoteServerSt
 	result.Online = true
 	result.Hostname = statusResp.Hostname
 	result.Platform = statusResp.Platform
+	result.Version = statusResp.Version
 	result.Uptime = statusResp.Uptime
 	result.OverallHealth = statusResp.OverallHealth
 	result.CriticalCount = statusResp.CriticalCount

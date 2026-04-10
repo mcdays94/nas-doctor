@@ -154,6 +154,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 type statusResponse struct {
 	Hostname          string             `json:"hostname"`
 	Platform          string             `json:"platform"`
+	Version           string             `json:"version"`
 	Uptime            string             `json:"uptime"`
 	LastScan          string             `json:"last_scan"`
 	ScanIntervalSecs  int                `json:"scan_interval_secs"`
@@ -167,7 +168,7 @@ type statusResponse struct {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	resp := statusResponse{}
+	resp := statusResponse{Version: s.version}
 	settings := s.getSettings()
 	dismissed := make(map[string]struct{}, len(settings.DismissedFindings))
 	for _, title := range settings.DismissedFindings {

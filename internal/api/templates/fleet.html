@@ -133,6 +133,7 @@ body{padding:0}
       }
       h+='<div class="node-meta-row"><span class="meta-label">OS</span><span class="meta-val">'+esc(s.platform||"unknown")+'</span></div>';
       h+='<div class="node-meta-row"><span class="meta-label">Up</span><span class="meta-val">'+esc(s.uptime||"—")+'</span></div>';
+      if(s.version)h+='<div class="node-meta-row"><span class="meta-label">Ver</span><span class="meta-val" style="font-family:var(--font-mono)">'+esc(s.version)+'</span></div>';
       h+='</div>';
       if(s.critical_count>0||s.warning_count>0||s.info_count>0){
         h+='<div class="node-findings">';
@@ -182,7 +183,9 @@ body{padding:0}
       }
       h+='<div style="font-size:11px;color:var(--text2);margin-top:6px">';
       if(selfIP)h+=esc(selfIP)+' &middot; ';
-      h+=esc(selfPlatform)+' &middot; Up '+esc(selfStatus.uptime||"—")+'</div>';
+      h+=esc(selfPlatform)+' &middot; Up '+esc(selfStatus.uptime||"—");
+      if(selfStatus.version)h+=' &middot; <span style="font-family:var(--font-mono)">'+esc(selfStatus.version)+'</span>';
+      h+='</div>';
     }
     h+='</div>';
     h+='<div class="topo-spine"></div>';
