@@ -841,6 +841,89 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     }
     h += '</div>'; // end section-block tunnels
 
+    // ======= Section: Proxmox =======
+    h += '<div class="section-block" data-section="proxmox">';
+    var pve = sn ? sn.proxmox : null;
+    if (pve && pve.connected) {
+      h += '<div>';
+      h += '<div class="section-title">Proxmox VE' + (pve.cluster_name ? ' &middot; ' + esc(pve.cluster_name) : '') + (pve.version ? ' <span style="font-size:11px;color:var(--text-quaternary);font-weight:400">v' + esc(pve.version) + '</span>' : '') + '</div>';
+      // Node cards
+      if (pve.nodes && pve.nodes.length > 0) {
+        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+        for (var ni = 0; ni < pve.nodes.length; ni++) {
+          var nd = pve.nodes[ni];
+          var ndOnline = nd.status === 'online';
+          var memPct = nd.mem_total > 0 ? (nd.mem_used / nd.mem_total * 100) : 0;
+          var uptStr = nd.uptime > 86400 ? Math.floor(nd.uptime/86400) + 'd' : Math.floor(nd.uptime/3600) + 'h';
+          h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 14px;flex:1;min-width:200px">';
+          h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">';
+          h += '<span style="width:8px;height:8px;border-radius:50%;background:' + (ndOnline ? 'var(--green)' : 'var(--red)') + '"></span>';
+          h += '<span style="font-weight:600;font-size:13px">' + esc(nd.name) + '</span>';
+          h += '<span style="font-size:11px;color:var(--text-quaternary);margin-left:auto">' + uptStr + '</span>';
+          h += '</div>';
+          h += '<div style="display:flex;gap:12px;font-size:11px;color:var(--text-tertiary)">';
+          h += '<span>CPU ' + (nd.cpu_usage * 100).toFixed(0) + '%</span>';
+          h += '<span>Mem ' + memPct.toFixed(0) + '%</span>';
+          h += '<span>' + nd.cpu_cores + ' cores</span>';
+          h += '</div>';
+          if (nd.cpu_model) h += '<div style="font-size:10px;color:var(--text-quaternary);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(nd.cpu_model) + '</div>';
+          h += '</div>';
+        }
+        h += '</div>';
+      }
+      // Guest table (VMs + LXCs)
+      if (pve.guests && pve.guests.length > 0) {
+        h += '<div style="font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Guests (' + pve.guests.length + ')</div>';
+        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden">';
+        h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+        h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
+        h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">ID</th>';
+        h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Name</th>';
+        h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Type</th>';
+        h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Node</th>';
+        h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Status</th>';
+        h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">CPU</th>';
+        h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Memory</th>';
+        h += '</tr>';
+        for (var gi = 0; gi < pve.guests.length; gi++) {
+          var g = pve.guests[gi];
+          var gRunning = g.status === 'running';
+          var gMemPct = g.mem_max > 0 ? (g.mem_used / g.mem_max * 100).toFixed(0) + '%' : '—';
+          var gMemStr = g.mem_max > 0 ? (g.mem_max / 1073741824).toFixed(1) + ' GB' : '—';
+          var gType = g.type === 'qemu' ? 'VM' : 'LXC';
+          h += '<tr>';
+          h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:11px">' + g.vmid + '</td>';
+          h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-weight:500">' + esc(g.name) + '</td>';
+          h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><span style="font-size:10px;padding:1px 6px;border-radius:999px;background:' + (g.type === 'qemu' ? 'rgba(94,106,210,0.12);color:var(--accent)' : 'rgba(245,158,11,0.12);color:var(--amber)') + '">' + gType + '</span></td>';
+          h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-tertiary)">' + esc(g.node) + '</td>';
+          h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><span style="color:' + (gRunning ? 'var(--green)' : 'var(--text-quaternary)') + ';font-weight:600">' + esc(g.status) + '</span></td>';
+          h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px">' + (gRunning ? (g.cpu_usage * 100).toFixed(0) + '%' : '—') + '</td>';
+          h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px">' + (gRunning ? gMemPct + ' / ' + gMemStr : gMemStr) + '</td>';
+          h += '</tr>';
+        }
+        h += '</table></div>';
+      }
+      // Storage pools
+      if (pve.storage && pve.storage.length > 0) {
+        h += '<div style="font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px">Storage Pools (' + pve.storage.length + ')</div>';
+        h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">';
+        for (var si = 0; si < pve.storage.length; si++) {
+          var st = pve.storage[si];
+          var stPct = st.used_pct || 0;
+          var stColor = stPct >= 90 ? 'var(--red)' : stPct >= 75 ? 'var(--amber)' : 'var(--green)';
+          var stTotal = st.total > 1099511627776 ? (st.total / 1099511627776).toFixed(1) + ' TB' : (st.total / 1073741824).toFixed(0) + ' GB';
+          h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px">';
+          h += '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="font-weight:500">' + esc(st.storage) + '</span><span style="color:var(--text-quaternary);font-size:10px">' + esc(st.node) + ' &middot; ' + esc(st.type) + '</span></div>';
+          h += '<div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:' + stPct.toFixed(1) + '%;background:' + stColor + ';border-radius:2px"></div></div>';
+          h += '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-quaternary);margin-top:3px"><span>' + stPct.toFixed(0) + '% used</span><span>' + stTotal + '</span></div>';
+          h += '</div>';
+        }
+        h += '</div>';
+      }
+      h += '</div>';
+    }
+    h += '</div>'; // end section-block proxmox
+
     // ======= Section: Parity =======
     h += '<div class="section-block" data-section="parity">';
     var parity = sn ? sn.parity : null;
@@ -973,13 +1056,17 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     initSortBars();
   }
 
-  window._findingSevFilters = {};
+  // Restore persisted severity filters
+  try { window._findingSevFilters = JSON.parse(localStorage.getItem("nas-doctor-sev-filters")) || {}; } catch(e) { window._findingSevFilters = {}; }
   window._toggleSevFilter = function(sev) {
     window._findingSevFilters[sev] = !window._findingSevFilters[sev];
+    if (!window._findingSevFilters[sev]) delete window._findingSevFilters[sev];
+    try { localStorage.setItem("nas-doctor-sev-filters", JSON.stringify(window._findingSevFilters)); } catch(e) {}
     render(); distributeSections();
   };
   window._clearSevFilters = function() {
     window._findingSevFilters = {};
+    try { localStorage.removeItem("nas-doctor-sev-filters"); } catch(e) {}
     render(); distributeSections();
   };
 
