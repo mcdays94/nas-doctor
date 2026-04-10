@@ -79,11 +79,11 @@ Dedicated `/alerts` page with:
 
 ### Service Checks
 
-Dedicated `/service-checks` page with Uptime Kuma-style monitoring:
+Dedicated `/service-checks` page with uptime monitoring:
 - **HTTP/HTTPS**, **TCP**, **DNS**, **Ping/ICMP**, **SMB**, **NFS** check types
 - **Per-check configurable intervals** (30s to 1h) with independent scheduling loop
-- **Heartbeat badge cards** — Kuma-style colored dots showing recent check status per service
-- **Paginated log table** with filters (check name, status, time range) — like Cloudflare Analytics
+- **Heartbeat badge cards** — colored dots showing recent check status per service, with favicon for HTTP targets
+- **Paginated log table** with filters (check name, status, time range)
 - Historical response time tracking and uptime percentages
 
 ### Tunnel Monitoring
@@ -114,7 +114,7 @@ Dropdown-driven notification builder with full granularity — no YAML, no compl
 
 ### Multi-Server Fleet Monitoring
 
-Monitor all your NAS Doctor instances from a UniFi-inspired topology view at `/fleet`:
+Monitor all your NAS Doctor instances from a visual topology view at `/fleet`:
 - **Visual topology** with central primary node and connected remote servers
 - Per-server: platform icon, hostname, IP, uptime, health status, finding counts
 - Supports optional API key authentication per server
@@ -467,7 +467,7 @@ nasdoctor_collection_duration_seconds / _last_collection_timestamp
 | **Proxmox** | ⚠️ Untested | ZFS pool health support built-in |
 | **Generic Linux** | ⚠️ Untested | Any distro with Docker |
 
-> Tested on **Unraid** and **Synology DSM**. Other platforms should work but may have issues with disk detection, SMART access, or platform-specific features. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
+> Tested on **Unraid**. Synology DSM has community reports. Other platforms should work but may have issues with disk detection, SMART access, or platform-specific features. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
 ---
 
