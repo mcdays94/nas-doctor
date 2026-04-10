@@ -472,13 +472,6 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       </div>
     </div>
 
-    <div style="margin-top:18px" id="sc-status-summary">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <label>Quick Status</label>
-        <a href="/service-checks" style="font-size:12px;color:var(--accent);text-decoration:none">View logs &amp; details &rarr;</a>
-      </div>
-      <div id="sc-status-pills" style="font-size:12px;color:var(--text2)">Loading...</div>
-    </div>
   </div>
 
   <!-- 4. Log Forwarding -->
@@ -867,54 +860,6 @@ function loadSettings() {
       /* Service checks */
       serviceChecks = (data.service_checks && data.service_checks.checks) ? data.service_checks.checks : [];
       renderServiceChecks();
-      loadServiceCheckResults();
-      /* Retention */
-      var ret = data.retention || {};
-      document.getElementById("ret-snapshot-days").value = ret.snapshot_days || 90;
-      document.getElementById("ret-notify-days").value = ret.notify_log_days || 30;
-      document.getElementById("ret-max-db").value = ret.max_db_size_mb || 500;
-      /* Backup */
-      var bk = data.backup || {};
-      var bkToggle = document.getElementById("backup-toggle");
-      if (bk.enabled === false) { bkToggle.classList.remove("on"); } else { bkToggle.classList.add("on"); }
-      /* Log forwarding */
-      var lp = data.log_push || {};
-      var lfToggle = document.getElementById("logfwd-toggle");
-      if (lp.enabled) lfToggle.classList.add("on"); else lfToggle.classList.remove("on");
-      logFwdDests = lp.destinations || [];
-      renderLogFwdDests();
-      /* Sections */
-      var sec = data.sections || {};
-      function setSecToggle(id, val) { var el = document.getElementById(id); if (el) { if (val === false) el.classList.remove("on"); else el.classList.add("on"); } }
-      setSecToggle("sec-findings", sec.findings);
-      setSecToggle("sec-disk", sec.disk_space);
-      setSecToggle("sec-smart", sec.smart);
-      setSecToggle("sec-docker", sec.docker);
-      setSecToggle("sec-zfs", sec.zfs);
-      setSecToggle("sec-ups", sec.ups);
-      setSecToggle("sec-parity", sec.parity);
-      setSecToggle("sec-network", sec.network);
-      setSecToggle("sec-tunnels", sec.tunnels);
-      setSecToggle("sec-merged-drives", sec.merged_drives);
-      document.getElementById("backup-path").value = bk.path || "";
-      document.getElementById("backup-keep").value = bk.keep_count || 4;
-      setBackupIntervalUI(bk.interval_hours || 168);
-      /* Notification behavior */
-      var notif = data.notifications || {};
-      document.getElementById("notif-cooldown").value = Math.round((notif.default_cooldown_sec || 900) / 60);
-      /* Quiet hours */
-      var qh = notif.quiet_hours || {};
-      if (qh.enabled) { document.getElementById("qh-toggle").classList.add("on"); document.getElementById("qh-enabled").checked = true; }
-      else { document.getElementById("qh-toggle").classList.remove("on"); document.getElementById("qh-enabled").checked = false; }
-      document.getElementById("qh-timezone").value = qh.timezone || "UTC";
-      document.getElementById("qh-start").value = qh.start || "22:00";
-      document.getElementById("qh-end").value = qh.end || "07:00";
-      /* Maintenance windows */
-      maintenanceWindows = notif.maintenance_windows || [];
-      renderMaintenanceWindows();
-      /* Notification Rules */
-      notifRules = notif.rules || [];
-      renderRules();
     })
     .catch(function(e) { showToast("Failed to load settings: " + e, "error"); });
 }
@@ -997,7 +942,6 @@ function saveSettings() {
     renderRules();
     renderMaintenanceWindows();
     renderServiceChecks();
-    loadServiceCheckResults();
   })
   .catch(function(e) { showToast("Error: " + e.message, "error"); });
 }
@@ -1344,51 +1288,13 @@ function runServiceChecksNow() {
     })
     .then(function() {
       showToast("Service checks completed", "success");
-      loadServiceCheckResults();
     })
     .catch(function(e) {
       showToast("Run failed: " + e.message, "error");
     });
 }
 
-function loadServiceCheckResults() {
-  var container = document.getElementById("sc-status-pills");
-  if (!container) return;
-  fetch("/api/v1/service-checks")
-    .then(function(r) { return r.json(); })
-    .then(function(entries) {
-      if (!entries || entries.length === 0) {
-        container.innerHTML = '<span style="color:var(--text3)">No checks running yet.</span>';
-        return;
-      }
-      // Deduplicate by key (API may return multiple entries per check)
-      var seen = {};
-      var unique = [];
-      for (var i = 0; i < entries.length; i++) {
-        if (!seen[entries[i].key]) { seen[entries[i].key] = true; unique.push(entries[i]); }
-      }
-      var up = 0;
-      for (var i = 0; i < unique.length; i++) { if (unique[i].status === "up") up++; }
-      var pct = unique.length > 0 ? Math.round(up / unique.length * 100) : 100;
-      var pctColor = pct >= 99 ? "var(--green)" : pct >= 90 ? "var(--amber)" : "var(--red)";
-      var html = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">';
-      for (var i = 0; i < unique.length; i++) {
-        var e = unique[i];
-        var isUp = e.status === "up";
-        html += '<div style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--input-bg);font-size:12px">';
-        html += '<span style="width:7px;height:7px;border-radius:50%;background:' + (isUp ? 'var(--green)' : 'var(--red)') + ';flex-shrink:0"></span>';
-        html += escapeHtml(e.name);
-        html += '<span class="pill ' + serviceTypePillClass(e.type) + '" style="font-size:9px;padding:1px 5px">' + escapeHtml((e.type || "").toUpperCase()) + '</span>';
-        html += '</div>';
-      }
-      html += '<span style="margin-left:auto;font-weight:600;color:' + pctColor + '">' + pct + '% up</span>';
-      html += '</div>';
-      container.innerHTML = html;
-    })
-    .catch(function() {
-      container.innerHTML = '<span style="color:var(--red)">Failed to load status</span>';
-    });
-}
+
 
 /* ---------- Alerts, Incidents, Trends, Notification History have moved to /alerts ---------- */
 
@@ -2042,9 +1948,7 @@ loadSettings();
 loadDBStats();
 loadBackupInfo();
 loadFleetServers();
-loadServiceCheckResults();
 onServiceTypeChange();
-setInterval(loadServiceCheckResults, 60000);
 </script>
 </body>
 </html>
