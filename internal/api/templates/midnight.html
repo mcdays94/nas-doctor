@@ -954,7 +954,15 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
             h += '<span style="font-weight:600;font-size:13px">' + esc(kn.name) + '</span>';
             if (kn.roles) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">' + esc(kn.roles) + '</span>';
             h += '</div>';
-            h += '<div style="font-size:11px;color:var(--text-tertiary)">' + kn.cpu_cores + ' cores &middot; ' + (kn.mem_total > 0 ? (kn.mem_total/1073741824).toFixed(0) + ' GB' : '?') + ' &middot; ' + kn.pod_count + '/' + kn.pod_capacity + ' pods</div>';
+            h += '<div style="font-size:11px;color:var(--text-tertiary)">' + kn.cpu_cores + ' cores &middot; ' + (kn.mem_total > 0 ? (kn.mem_total/1073741824).toFixed(0) + ' GB RAM' : '?') + ' &middot; ' + kn.pod_count + '/' + kn.pod_capacity + ' pods</div>';
+            if (kn.disk_total > 0) {
+              var diskUsed = kn.disk_total - kn.disk_allocatable;
+              var diskPct = (diskUsed / kn.disk_total * 100);
+              var diskColor = diskPct >= 90 ? 'var(--red)' : diskPct >= 75 ? 'var(--amber)' : 'var(--green)';
+              var diskStr = kn.disk_total >= 1073741824 ? (kn.disk_total/1073741824).toFixed(0) + ' GB' : (kn.disk_total/1048576).toFixed(0) + ' MB';
+              h += '<div style="margin-top:4px"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-quaternary);margin-bottom:2px"><span>Disk</span><span>' + diskPct.toFixed(0) + '% of ' + diskStr + '</span></div>';
+              h += '<div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:' + diskPct.toFixed(1) + '%;background:' + diskColor + ';border-radius:2px"></div></div></div>';
+            }
             if (kn.conditions && kn.conditions.length > 0) h += '<div style="font-size:10px;color:var(--amber);margin-top:4px">' + esc(kn.conditions.join(', ')) + '</div>';
             h += '</div>';
           }
@@ -1005,6 +1013,17 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
             h += '<span style="font-size:10px;color:var(--text-quaternary);margin-left:auto">' + nodePods.length + ' pods</span>';
             if (nodeInfo && nodeInfo.roles) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">' + esc(nodeInfo.roles) + '</span>';
             h += '</div>';
+            // Disk bar for this node
+            if (nodeInfo && nodeInfo.disk_total > 0) {
+              var ndu = nodeInfo.disk_total - nodeInfo.disk_allocatable;
+              var ndp = (ndu / nodeInfo.disk_total * 100);
+              var ndc = ndp >= 90 ? 'var(--red)' : ndp >= 75 ? 'var(--amber)' : 'var(--green)';
+              h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:10px;color:var(--text-quaternary)">';
+              h += '<span>Disk ' + ndp.toFixed(0) + '%</span>';
+              h += '<div style="flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:' + ndp.toFixed(1) + '%;background:' + ndc + '"></div></div>';
+              h += '<span>' + (nodeInfo.disk_total >= 1073741824 ? (nodeInfo.disk_total/1073741824).toFixed(0) + 'G' : (nodeInfo.disk_total/1048576).toFixed(0) + 'M') + '</span>';
+              h += '</div>';
+            }
             // Group pods by namespace within node
             var nsPods = {};
             for (var npi = 0; npi < nodePods.length; npi++) { var ns = nodePods[npi].namespace; if (!nsPods[ns]) nsPods[ns] = []; nsPods[ns].push(nodePods[npi]); }

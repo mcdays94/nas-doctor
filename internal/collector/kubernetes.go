@@ -131,14 +131,16 @@ func CollectKubernetes(cfg KubeConfig) *internal.KubeInfo {
 						ContainerRuntimeVersion string `json:"containerRuntimeVersion"`
 					} `json:"nodeInfo"`
 					Capacity struct {
-						CPU    string `json:"cpu"`
-						Memory string `json:"memory"`
-						Pods   string `json:"pods"`
+						CPU              string `json:"cpu"`
+						Memory           string `json:"memory"`
+						Pods             string `json:"pods"`
+						EphemeralStorage string `json:"ephemeral-storage"`
 					} `json:"capacity"`
 					Allocatable struct {
-						CPU    string `json:"cpu"`
-						Memory string `json:"memory"`
-						Pods   string `json:"pods"`
+						CPU              string `json:"cpu"`
+						Memory           string `json:"memory"`
+						Pods             string `json:"pods"`
+						EphemeralStorage string `json:"ephemeral-storage"`
 					} `json:"allocatable"`
 				} `json:"status"`
 			} `json:"items"`
@@ -187,6 +189,8 @@ func CollectKubernetes(cfg KubeConfig) *internal.KubeInfo {
 			node.CPUCores = parseKubeQuantityInt(n.Status.Capacity.CPU)
 			node.MemTotal = parseKubeMemBytes(n.Status.Capacity.Memory)
 			node.PodCapacity = parseKubeQuantityInt(n.Status.Allocatable.Pods)
+			node.DiskTotal = parseKubeMemBytes(n.Status.Capacity.EphemeralStorage)
+			node.DiskAllocatable = parseKubeMemBytes(n.Status.Allocatable.EphemeralStorage)
 			info.Nodes = append(info.Nodes, node)
 		}
 	}

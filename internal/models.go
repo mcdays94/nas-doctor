@@ -590,7 +590,9 @@ type KubeNode struct {
 	MemUsage         int64    `json:"mem_usage,omitempty"` // bytes (from metrics API)
 	PodCount         int      `json:"pod_count"`
 	PodCapacity      int      `json:"pod_capacity"`
-	Conditions       []string `json:"conditions,omitempty"` // MemoryPressure, DiskPressure, PIDPressure
+	DiskTotal        int64    `json:"disk_total,omitempty"`       // ephemeral-storage capacity (bytes)
+	DiskAllocatable  int64    `json:"disk_allocatable,omitempty"` // ephemeral-storage allocatable (bytes)
+	Conditions       []string `json:"conditions,omitempty"`       // MemoryPressure, DiskPressure, PIDPressure
 	Age              string   `json:"age,omitempty"`
 	Unschedulable    bool     `json:"unschedulable,omitempty"`
 }
