@@ -1660,14 +1660,35 @@ function saveFleetServerForm() {
   var headers = parseHeadersTextarea();
   if (headers) server.headers = headers;
   var editIdx = parseInt(document.getElementById("fleet-edit-index").value, 10);
-  if (editIdx >= 0 && editIdx < fleetServers.length) {
+  var isNew = !(editIdx >= 0 && editIdx < fleetServers.length);
+  if (!isNew) {
     server.id = fleetServers[editIdx].id;
     server.enabled = fleetServers[editIdx].enabled;
     fleetServers[editIdx] = server;
   } else {
     fleetServers.push(server);
+    // Auto-create an HTTP service check for the new fleet instance
+    var healthURL = url.replace(/\/+$/, "") + "/api/v1/health";
+    var newCheck = {
+      name: name + " (fleet)",
+      type: "http",
+      target: healthURL,
+      enabled: true,
+      interval_sec: 300,
+      timeout_sec: 10,
+      failure_threshold: 3,
+      failure_severity: "warning",
+      expected_status_min: 200,
+      expected_status_max: 200
+    };
+    if (headers) newCheck.headers = headers;
+    if (apikey) newCheck.headers = Object.assign(newCheck.headers || {}, {"Authorization": "Bearer " + apikey});
+    serviceChecks.push(newCheck);
+    renderServiceChecks();
+    showToast("Service check auto-created for " + name, "success");
   }
   saveFleetServers();
+  saveSettings();
   cancelFleetForm();
 }
 function testFleetFromForm() {
@@ -1699,13 +1720,24 @@ function _doFleetTest(url, apikey, headers, resultEl) {
   .then(function(d) {
     if (d.success) {
       resultEl.style.color = "var(--green)";
-      resultEl.textContent = "Connected — " + (d.version || "NAS Doctor") + " · " + (d.uptime || "");
+      var info = (d.version || "NAS Doctor");
+      if (d.hostname) info += " · " + d.hostname;
+      if (d.uptime) info += " · " + d.uptime;
+      resultEl.textContent = "Connected — " + info;
+      // Auto-populate name if empty
+      var nameField = document.getElementById("fleet-name");
+      if (nameField && !nameField.value.trim() && d.hostname) {
+        nameField.value = d.hostname;
+      }
+      // Store hostname for auto-service-check creation
+      if (formResultEl) formResultEl._testData = d;
     } else {
       resultEl.style.color = "var(--red)";
       resultEl.textContent = "Failed: " + (d.error || "unknown");
     }
   })
   .catch(function(e) { resultEl.style.color = "var(--red)"; resultEl.textContent = "Error: " + e.message; });
+  var formResultEl = resultEl;
 }
 
 function removeFleetServer(idx) {

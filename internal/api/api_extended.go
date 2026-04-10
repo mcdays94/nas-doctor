@@ -1836,12 +1836,42 @@ func (s *Server) handleTestFleetServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "NAS Doctor responded but status is not 'ok': " + health.Status})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	// Also fetch /api/v1/status for hostname, platform, version
+	result := map[string]interface{}{
 		"success": true,
 		"status":  health.Status,
 		"version": health.Version,
 		"uptime":  health.Uptime,
-	})
+	}
+	statusURL := strings.TrimRight(req.URL, "/") + "/api/v1/status"
+	statusReq, _ := http.NewRequest("GET", statusURL, nil)
+	statusReq.Header.Set("User-Agent", "nas-doctor-fleet-test/1.0")
+	if req.APIKey != "" {
+		statusReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
+	for k, v := range req.Headers {
+		statusReq.Header.Set(k, v)
+	}
+	if statusResp, err := client.Do(statusReq); err == nil {
+		defer statusResp.Body.Close()
+		var st struct {
+			Hostname string `json:"hostname"`
+			Platform string `json:"platform"`
+			Version  string `json:"version"`
+		}
+		if json.NewDecoder(statusResp.Body).Decode(&st) == nil {
+			if st.Hostname != "" {
+				result["hostname"] = st.Hostname
+			}
+			if st.Platform != "" {
+				result["platform"] = st.Platform
+			}
+			if st.Version != "" {
+				result["version"] = st.Version
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // handleTestProxmox tests the Proxmox VE API connection.
