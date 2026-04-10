@@ -41,6 +41,10 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 		findings = append(findings, analyzeOSUpdate(snap.Update)...)
 	}
 
+	if snap.Proxmox != nil && snap.Proxmox.Connected {
+		findings = append(findings, analyzeProxmox(snap.Proxmox)...)
+	}
+
 	// Cross-correlation: combine related findings
 	findings = correlate(findings, snap)
 

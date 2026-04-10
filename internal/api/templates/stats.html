@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NAS Doctor — Drive Health</title>
+<title>NAS Doctor</title>
 <link rel="icon" href="/icon.png">
 <link rel="stylesheet" href="/css/shared.css">
 <style>
@@ -124,6 +124,7 @@ body.theme-clean .sort-pill.active{color:rgba(0,0,0,0.7);background:rgba(0,0,0,0
 </div>
 <script src="/js/charts.js"></script>
 <script>
+fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
 (function() {
   var snapshot = null, sparklines = null, expandedIdx = -1;
   function esc(s) { var d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }

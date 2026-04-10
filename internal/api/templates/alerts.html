@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NAS Doctor — Alerts</title>
+<title>NAS Doctor</title>
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -488,6 +488,7 @@ function applyTheme(theme) {
 fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){
   if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}
 }).catch(function(){});
+fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
 
 /* ========== Alert summary ========== */
 function loadAlertSummary() {

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 
 	"github.com/mcdays94/nas-doctor/internal"
+	"github.com/mcdays94/nas-doctor/internal/collector"
 	"github.com/mcdays94/nas-doctor/internal/logfwd"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/scheduler"
@@ -35,6 +36,7 @@ type Settings struct {
 	Retention         RetentionSettings       `json:"retention"`
 	Backup            BackupSettings          `json:"backup"`
 	Sections          DashboardSections       `json:"sections"`
+	Proxmox           SettingsProxmox         `json:"proxmox"`
 	Fleet             []internal.RemoteServer `json:"fleet,omitempty"`
 	DismissedFindings []string                `json:"dismissed_findings,omitempty"`
 }
@@ -53,6 +55,7 @@ type DashboardSections struct {
 	Parity       bool `json:"parity"`
 	Network      bool `json:"network"`
 	Tunnels      bool `json:"tunnels"`
+	Proxmox      bool `json:"proxmox"`
 	MergedDrives bool `json:"merged_drives"` // Combine SMART + storage into one card per drive
 }
 
@@ -85,6 +88,16 @@ type SettingsNotifications struct {
 // SettingsServiceChecks holds configured service checks.
 type SettingsServiceChecks struct {
 	Checks []internal.ServiceCheckConfig `json:"checks"`
+}
+
+// SettingsProxmox holds the Proxmox VE API connection settings.
+type SettingsProxmox struct {
+	Enabled  bool   `json:"enabled"`
+	URL      string `json:"url"`       // e.g. https://192.168.1.10:8006
+	TokenID  string `json:"token_id"`  // e.g. root@pam!nas-doctor
+	Secret   string `json:"secret"`    // API token UUID secret
+	NodeName string `json:"node_name"` // optional: real PVE node name to filter (auto-detected)
+	Alias    string `json:"alias"`     // optional: friendly display name
 }
 
 // SettingsLogForward holds the log-forwarding configuration within settings.
@@ -172,6 +185,7 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/service-checks", s.handleServiceChecks)
 	r.Get("/api/v1/service-checks/history", s.handleServiceCheckHistory)
 	r.Post("/api/v1/service-checks/run", s.handleRunServiceChecks)
+	r.Delete("/api/v1/service-checks/{key}", s.handleDeleteServiceCheck)
 	r.Get("/api/v1/incidents/timeline", s.handleIncidentTimeline)
 	r.Get("/api/v1/incidents/correlation", s.handleIncidentCorrelation)
 	r.Get("/api/v1/smart/trends", s.handleSMARTTrends)
@@ -194,6 +208,12 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 
 	// Alerts page
 	r.Get("/alerts", s.handleAlertsPage)
+
+	// Fleet test
+	r.Post("/api/v1/fleet/test", s.handleTestFleetServer)
+
+	// Proxmox test
+	r.Post("/api/v1/proxmox/test", s.handleTestProxmox)
 
 	// Service Checks page
 	r.Get("/service-checks", s.handleServiceChecksPage)
@@ -519,6 +539,21 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			DefaultCooldownSec: settings.Notifications.DefaultCooldownSec,
 		})
 		s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
+
+		// Auto-enable Proxmox dashboard section when PVE integration is turned on
+		if settings.Proxmox.Enabled && !settings.Sections.Proxmox {
+			settings.Sections.Proxmox = true
+		}
+
+		// Update Proxmox config on the collector
+		s.collector.SetProxmoxConfig(collector.ProxmoxConfig{
+			Enabled:  settings.Proxmox.Enabled,
+			URL:      settings.Proxmox.URL,
+			TokenID:  settings.Proxmox.TokenID,
+			Secret:   settings.Proxmox.Secret,
+			NodeName: settings.Proxmox.NodeName,
+			Alias:    settings.Proxmox.Alias,
+		})
 
 		// Update log forwarding
 		if settings.LogPush.Enabled && len(settings.LogPush.Destinations) > 0 {
@@ -1009,6 +1044,22 @@ func (s *Server) handleRunServiceChecks(w http.ResponseWriter, r *http.Request) 
 		results = []internal.ServiceCheckResult{}
 	}
 	writeJSON(w, http.StatusOK, results)
+}
+
+// handleDeleteServiceCheck removes all history for a service check key.
+// DELETE /api/v1/service-checks/{key}
+func (s *Server) handleDeleteServiceCheck(w http.ResponseWriter, r *http.Request) {
+	key := chi.URLParam(r, "key")
+	if key == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "key is required"})
+		return
+	}
+	deleted, err := s.store.DeleteServiceCheckByKey(key)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": deleted, "key": key})
 }
 
 type incidentTimelineEvent struct {
@@ -1722,6 +1773,112 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(alertsPageHTML))
+}
+
+// handleTestFleetServer tests connectivity to a remote NAS Doctor instance.
+// POST /api/v1/fleet/test
+func (s *Server) handleTestFleetServer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL     string            `json:"url"`
+		APIKey  string            `json:"api_key"`
+		Headers map[string]string `json:"headers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.URL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "URL is required"})
+		return
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	healthURL := strings.TrimRight(req.URL, "/") + "/api/v1/health"
+	httpReq, err := http.NewRequest("GET", healthURL, nil)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "invalid URL: " + err.Error()})
+		return
+	}
+	httpReq.Header.Set("User-Agent", "nas-doctor-fleet-test/1.0")
+	if req.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
+	for k, v := range req.Headers {
+		httpReq.Header.Set(k, v)
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": fmt.Sprintf("HTTP %d from %s", resp.StatusCode, healthURL)})
+		return
+	}
+	// Verify this is actually a NAS Doctor instance (not a proxy login page)
+	var health struct {
+		Status  string `json:"status"`
+		NasDoc  bool   `json:"nas_doctor"`
+		Version string `json:"version"`
+		Uptime  string `json:"uptime"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "Response is not valid JSON — likely a proxy login page (Cloudflare Access?). Add the required auth headers."})
+		return
+	}
+	// Check for NAS Doctor signature (header or JSON field)
+	hasHeader := resp.Header.Get("X-NAS-Doctor") == "true"
+	if !health.NasDoc && !hasHeader {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "Response does not contain NAS Doctor signature — this may be a proxy login page. Check your auth headers."})
+		return
+	}
+	if health.Status != "ok" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "NAS Doctor responded but status is not 'ok': " + health.Status})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"status":  health.Status,
+		"version": health.Version,
+		"uptime":  health.Uptime,
+	})
+}
+
+// handleTestProxmox tests the Proxmox VE API connection.
+// POST /api/v1/proxmox/test
+func (s *Server) handleTestProxmox(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL     string `json:"url"`
+		TokenID string `json:"token_id"`
+		Secret  string `json:"secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.URL == "" || req.TokenID == "" || req.Secret == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "URL, token ID, and secret are required"})
+		return
+	}
+	cfg := collector.ProxmoxConfig{Enabled: true, URL: req.URL, TokenID: req.TokenID, Secret: req.Secret}
+	result := collector.CollectProxmox(cfg)
+	if result == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "failed to connect"})
+		return
+	}
+	nodeNames := make([]string, 0, len(result.Nodes))
+	for _, n := range result.Nodes {
+		nodeNames = append(nodeNames, n.Name)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"version":    result.Version,
+		"cluster":    result.ClusterName,
+		"nodes":      len(result.Nodes),
+		"node_names": nodeNames,
+		"guests":     len(result.Guests),
+		"storage":    len(result.Storage),
+	})
 }
 
 // handleServiceChecksPage serves the service checks HTML page.

@@ -106,12 +106,14 @@ func main() {
 
 	var sched *scheduler.Scheduler
 
+	// Create collector (shared between demo and production paths)
+	coll := collector.New(cfg.HostPaths, logger)
+
 	if *demoMode {
 		// Demo mode: inject fake data with historical snapshots
 		logger.Info("demo mode: generating mock diagnostic data with history")
 
-		col := collector.New(cfg.HostPaths, logger)
-		sched = scheduler.New(col, store, nil, metrics, logger, 24*time.Hour)
+		sched = scheduler.New(coll, store, nil, metrics, logger, 24*time.Hour)
 
 		// Generate 30 days of historical snapshots (one per day) for chart data
 		for i := 29; i >= 0; i-- {
@@ -220,7 +222,6 @@ func main() {
 		)
 	} else {
 		// Production mode: real collectors
-		col := collector.New(cfg.HostPaths, logger)
 		interval = intervalFromSettings(persistedSettings, interval, logger)
 
 		webhooks := cfg.Notifications.Webhooks
@@ -229,8 +230,20 @@ func main() {
 		}
 		notif := buildNotifier(webhooks, logger, store)
 
-		sched = scheduler.New(col, store, notif, metrics, logger, interval)
+		sched = scheduler.New(coll, store, notif, metrics, logger, interval)
 		applySchedulerSettingsFromStore(sched, persistedSettings)
+		// Apply Proxmox config to collector on startup
+		if persistedSettings != nil && persistedSettings.Proxmox.Enabled {
+			coll.SetProxmoxConfig(collector.ProxmoxConfig{
+				Enabled:  true,
+				URL:      persistedSettings.Proxmox.URL,
+				TokenID:  persistedSettings.Proxmox.TokenID,
+				Secret:   persistedSettings.Proxmox.Secret,
+				NodeName: persistedSettings.Proxmox.NodeName,
+				Alias:    persistedSettings.Proxmox.Alias,
+			})
+			logger.Info("proxmox integration loaded", "url", persistedSettings.Proxmox.URL)
+		}
 		sched.Start()
 		defer sched.Stop()
 	}
@@ -252,7 +265,7 @@ func main() {
 	}
 
 	// Create API server
-	apiServer := api.New(store, sched, metrics, fleetMgr, logger, version)
+	apiServer := api.New(store, sched, coll, metrics, fleetMgr, logger, version)
 
 	// HTTP server
 	srv := &http.Server{

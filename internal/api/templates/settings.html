@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NAS Doctor — Settings</title>
+<title>NAS Doctor</title>
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -404,6 +404,13 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           </select>
         </div>
       </div>
+      <div class="form-row" id="sc-instance-wrap" style="display:none">
+        <div>
+          <label for="sc-instance">Instance</label>
+          <select id="sc-instance"><option value="">This server (local)</option></select>
+          <p style="font-size:11px;color:var(--text2);margin-top:4px">Run this check from a fleet member instead of locally.</p>
+        </div>
+      </div>
       <div class="form-row">
         <div>
           <label for="sc-target">Target</label>
@@ -456,6 +463,10 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           </div>
         </div>
       </div>
+      <div class="form-group" id="sc-headers-wrap">
+        <label for="sc-headers">Custom HTTP Headers (optional — for auth, CF Access, etc.)</label>
+        <textarea id="sc-headers" rows="2" placeholder="Authorization: Bearer token123&#10;CF-Access-Client-Id: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
+      </div>
       <div class="form-row">
         <div>
           <div class="toggle-wrap" onclick="document.getElementById('sc-enabled').checked = !document.getElementById('sc-enabled').checked; this.querySelector('.toggle').classList.toggle('on', document.getElementById('sc-enabled').checked)">
@@ -474,7 +485,41 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
 
   </div>
 
-  <!-- 4. Log Forwarding -->
+  <!-- 4. Proxmox VE Integration -->
+  <div class="card" id="card-proxmox">
+    <div class="card-title">Proxmox VE</div>
+    <div class="card-desc">Connect to a Proxmox VE API to monitor VMs, LXC containers, storage pools, and cluster health. Create an API token in PVE: Datacenter → Permissions → API Tokens.</div>
+    <div class="toggle-wrap" style="margin-bottom:16px">
+      <div class="toggle" id="pve-toggle" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
+      <span class="toggle-label">Enable Proxmox Integration</span>
+    </div>
+    <div class="form-row">
+      <div><label for="pve-url">PVE API URL</label>
+        <input type="text" id="pve-url" placeholder="https://192.168.1.10:8006">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">The Proxmox web UI URL (default port 8006). Self-signed certs are accepted.</p></div>
+      <div><label for="pve-alias">Display Name (optional)</label>
+        <input type="text" id="pve-alias" placeholder="e.g. Proxmox LDN">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Friendly name shown on the dashboard instead of the node hostname.</p></div>
+    </div>
+    <div class="form-row">
+      <div><label for="pve-token">API Token ID</label>
+        <input type="text" id="pve-token" placeholder="root@pam!nas-doctor">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Format: <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">user@realm!tokenname</code></p></div>
+      <div><label for="pve-secret">Token Secret</label>
+        <input type="password" id="pve-secret" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+    </div>
+    <div class="form-row">
+      <div><label for="pve-node">Node filter (optional)</label>
+        <select id="pve-node"><option value="">All nodes (poll entire cluster)</option></select>
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Auto-detected from PVE. Click Test Connection to populate.</p></div>
+    </div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
+      <button class="btn btn-secondary btn-sm" onclick="testProxmoxConnection()">Test Connection</button>
+      <span id="pve-test-result" style="font-size:12px"></span>
+    </div>
+  </div>
+
+  <!-- 5. Log Forwarding -->
   <div class="card" id="card-logfwd">
     <div class="card-title">Log Forwarding</div>
     <div class="card-desc">Forward scan results to Loki, syslog, or any HTTP JSON endpoint after each diagnostic scan.</div>
@@ -555,15 +600,39 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
   <!-- 6. Fleet / Multi-Server -->
   <div class="card" id="card-fleet">
     <div class="card-title">Fleet Monitoring</div>
-    <div class="card-desc">Monitor multiple NAS Doctor instances from this dashboard. Each remote server must be running NAS Doctor.</div>
+    <div class="card-desc">Monitor multiple NAS Doctor instances from this dashboard. Supports private IPs and public hostnames (with custom auth headers for Cloudflare Access, etc.).</div>
     <div id="fleet-list" style="margin-bottom:12px"></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <input type="text" id="fleet-name" placeholder="Server name" style="flex:1;min-width:120px">
-      <input type="url" id="fleet-url" placeholder="http://192.168.1.50:8080" style="flex:2;min-width:200px">
-      <input type="password" id="fleet-apikey" placeholder="API Key (optional)" style="flex:1;min-width:120px">
-      <button class="btn-secondary" onclick="addFleetServer()">Add Server</button>
+    <!-- Add/Edit form -->
+    <div class="webhook-form" id="fleet-form">
+      <input type="hidden" id="fleet-edit-index" value="-1">
+      <div class="form-row">
+        <div><label for="fleet-name">Server Name</label>
+          <input type="text" id="fleet-name" placeholder="e.g. Backup NAS"></div>
+        <div><label for="fleet-url">URL</label>
+          <input type="url" id="fleet-url" placeholder="http://192.168.1.50:8060 or https://nas.example.com"></div>
+      </div>
+      <div class="form-row">
+        <div><label for="fleet-apikey">API Key (optional)</label>
+          <input type="password" id="fleet-apikey" placeholder="Leave blank if not needed"></div>
+      </div>
+      <div class="form-group">
+        <label for="fleet-headers">Custom Headers (optional — for CF Access, auth proxies)</label>
+        <textarea id="fleet-headers" rows="2" placeholder="CF-Access-Client-Id: xxxxx&#10;CF-Access-Client-Secret: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="btn btn-primary" onclick="saveFleetServerForm()">Save</button>
+        <button class="btn btn-secondary" onclick="cancelFleetForm()">Cancel</button>
+        <button class="btn btn-secondary btn-sm" onclick="testFleetFromForm()">Test</button>
+        <span id="fleet-test-result" style="font-size:12px"></span>
+      </div>
     </div>
-    <div style="margin-top:8px"><a href="/fleet" style="color:var(--accent);font-size:13px">Open Fleet Dashboard &rarr;</a></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+      <button class="btn btn-secondary btn-sm" onclick="toggleFleetForm()" style="display:inline-flex;align-items:center;gap:4px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Server
+      </button>
+      <a href="/fleet" style="color:var(--accent);font-size:13px;margin-left:auto">Open Fleet Dashboard &rarr;</a>
+    </div>
   </div>
 
   <!-- 7. Dashboard Sections -->
@@ -580,6 +649,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div class="toggle-wrap"><div class="toggle on" id="sec-parity" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Parity (Unraid)</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-network" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Network</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-tunnels" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Tunnels (Cloudflared / Tailscale)</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-proxmox" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Proxmox VE</span></div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div class="toggle-wrap"><div class="toggle on" id="sec-merged-drives" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Drive View <span style="font-size:11px;color:var(--text2)">(combine SMART + storage into one card per drive)</span></span></div>
       </div>
@@ -860,6 +930,34 @@ function loadSettings() {
       /* Service checks */
       serviceChecks = (data.service_checks && data.service_checks.checks) ? data.service_checks.checks : [];
       renderServiceChecks();
+      /* Dashboard section toggles */
+      var sec = data.sections || {};
+      var secMap = {findings:1,disk_space:1,smart:1,docker:1,zfs:1,ups:1,parity:1,network:1,tunnels:1,proxmox:1,merged_drives:1};
+      var secIds = {"findings":"sec-findings","disk_space":"sec-disk","smart":"sec-smart","docker":"sec-docker","zfs":"sec-zfs","ups":"sec-ups","parity":"sec-parity","network":"sec-network","tunnels":"sec-tunnels","proxmox":"sec-proxmox","merged_drives":"sec-merged-drives"};
+      for (var sk in secIds) { var el = document.getElementById(secIds[sk]); if (el) { if (sec[sk] === false) el.classList.remove("on"); else el.classList.add("on"); } }
+      /* Proxmox VE */
+      var pve = data.proxmox || {};
+      if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
+      document.getElementById("pve-url").value = pve.url || "";
+      document.getElementById("pve-alias").value = pve.alias || "";
+      document.getElementById("pve-token").value = pve.token_id || "";
+      document.getElementById("pve-secret").value = pve.secret || "";
+      // Restore node filter — add as option if not already in dropdown
+      var nodeSel = document.getElementById("pve-node");
+      if (pve.node_name) {
+        var found = false;
+        for (var ni = 0; ni < nodeSel.options.length; ni++) { if (nodeSel.options[ni].value === pve.node_name) { found = true; break; } }
+        if (!found) nodeSel.innerHTML += '<option value="' + pve.node_name + '">' + pve.node_name + '</option>';
+        nodeSel.value = pve.node_name;
+      }
+      /* Log forwarding */
+      var lp = data.log_push || {};
+      if (lp.enabled) document.getElementById("logfwd-toggle").classList.add("on"); else document.getElementById("logfwd-toggle").classList.remove("on");
+      logFwdDests = lp.destinations || [];
+      renderLogFwdDests();
+      /* Notification Rules */
+      notifRules = (data.notifications && data.notifications.rules) ? data.notifications.rules : [];
+      renderRules();
     })
     .catch(function(e) { showToast("Failed to load settings: " + e, "error"); });
 }
@@ -903,7 +1001,16 @@ function buildSettingsPayload() {
       parity: document.getElementById("sec-parity").classList.contains("on"),
       network: document.getElementById("sec-network").classList.contains("on"),
       tunnels: document.getElementById("sec-tunnels").classList.contains("on"),
+      proxmox: document.getElementById("sec-proxmox").classList.contains("on"),
       merged_drives: document.getElementById("sec-merged-drives").classList.contains("on")
+    },
+    proxmox: {
+      enabled: document.getElementById("pve-toggle").classList.contains("on"),
+      url: document.getElementById("pve-url").value.trim(),
+      alias: document.getElementById("pve-alias").value.trim(),
+      node_name: document.getElementById("pve-node").value,
+      token_id: document.getElementById("pve-token").value.trim(),
+      secret: document.getElementById("pve-secret").value.trim()
     },
     backup: {
       enabled: document.getElementById("backup-toggle").classList.contains("on"),
@@ -911,7 +1018,7 @@ function buildSettingsPayload() {
       keep_count: parseInt(document.getElementById("backup-keep").value, 10) || 4,
       interval_hours: getBackupIntervalH()
     },
-    fleet: base.fleet || [],
+    fleet: fleetServers || base.fleet || [],
     dismissed_findings: base.dismissed_findings || []
   };
 }
@@ -1120,6 +1227,17 @@ function serviceTypePillClass(t) {
   return "pill-http";
 }
 
+function populateInstanceSelector() {
+  var sel = document.getElementById("sc-instance");
+  var wrap = document.getElementById("sc-instance-wrap");
+  if (!sel || !wrap) return;
+  sel.innerHTML = '<option value="">This server (local)</option>';
+  for (var i = 0; i < fleetServers.length; i++) {
+    var s = fleetServers[i];
+    sel.innerHTML += '<option value="' + escapeHtml(s.id || s.name) + '">' + escapeHtml(s.name) + ' (' + escapeHtml(s.url) + ')</option>';
+  }
+  wrap.style.display = fleetServers.length > 0 ? '' : 'none';
+}
 function renderServiceChecks() {
   var container = document.getElementById("service-check-list");
   if (!container) return;
@@ -1167,13 +1285,16 @@ function toggleServiceCheckForm() {
   document.getElementById("sc-type").value = "http";
   document.getElementById("sc-target").value = "";
   document.getElementById("sc-port").value = "";
+  document.getElementById("sc-instance").value = "";
   document.getElementById("sc-interval").value = "300";
   document.getElementById("sc-timeout").value = "5";
   document.getElementById("sc-threshold").value = "1";
   document.getElementById("sc-severity").value = "warning";
   document.getElementById("sc-http-min").value = "200";
   document.getElementById("sc-http-max").value = "399";
+  document.getElementById("sc-headers").value = "";
   setServiceCheckEnabledUI(true);
+  populateInstanceSelector();
   onServiceTypeChange();
   form.classList.add("visible");
 }
@@ -1190,14 +1311,27 @@ function onServiceTypeChange() {
   var type = document.getElementById("sc-type").value;
   var httpWrap = document.getElementById("sc-http-expected-wrap");
   var portWrap = document.getElementById("sc-port-wrap");
+  var headersWrap = document.getElementById("sc-headers-wrap");
   if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
   if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
+  if (headersWrap) headersWrap.style.display = (type === "http") ? "block" : "none";
   var targetInput = document.getElementById("sc-target");
   if (targetInput) {
     if (type === "ping") targetInput.placeholder = "e.g. 8.8.8.8 or gateway.local";
     else if (type === "dns") targetInput.placeholder = "e.g. google.com";
     else targetInput.placeholder = "https://nas.local/health, 192.168.1.10, or host:port";
   }
+}
+function parseScHeaders() {
+  var raw = (document.getElementById("sc-headers") || {}).value || "";
+  if (!raw.trim()) return null;
+  var h = {};
+  raw.trim().split("\n").forEach(function(l) { var i = l.indexOf(":"); if (i > 0) h[l.substring(0,i).trim()] = l.substring(i+1).trim(); });
+  return Object.keys(h).length > 0 ? h : null;
+}
+function scHeadersToText(hdrs) {
+  if (!hdrs) return "";
+  var lines = []; for (var k in hdrs) lines.push(k + ": " + hdrs[k]); return lines.join("\n");
 }
 
 function editServiceCheck(idx) {
@@ -1208,12 +1342,15 @@ function editServiceCheck(idx) {
   document.getElementById("sc-type").value = sc.type;
   document.getElementById("sc-target").value = sc.target;
   document.getElementById("sc-port").value = sc.port > 0 ? String(sc.port) : "";
+  populateInstanceSelector();
+  document.getElementById("sc-instance").value = sc.instance || "";
   document.getElementById("sc-interval").value = String(sc.interval_sec || 300);
   document.getElementById("sc-timeout").value = String(sc.timeout_sec || 5);
   document.getElementById("sc-threshold").value = String(sc.failure_threshold || 1);
   document.getElementById("sc-severity").value = sc.failure_severity || "warning";
   document.getElementById("sc-http-min").value = String(sc.expected_status_min || 200);
   document.getElementById("sc-http-max").value = String(sc.expected_status_max || 399);
+  document.getElementById("sc-headers").value = scHeadersToText(sc.headers);
   setServiceCheckEnabledUI(sc.enabled !== false);
   onServiceTypeChange();
   document.getElementById("service-check-form").classList.add("visible");
@@ -1236,6 +1373,7 @@ function saveServiceCheck() {
     type: type,
     target: target,
     enabled: document.getElementById("sc-enabled").checked,
+    instance: document.getElementById("sc-instance").value || "",
     interval_sec: parseInt(document.getElementById("sc-interval").value, 10) || 300,
     timeout_sec: parseInt(document.getElementById("sc-timeout").value, 10) || 5,
     port: parseInt(document.getElementById("sc-port").value, 10) || 0,
@@ -1244,6 +1382,8 @@ function saveServiceCheck() {
     expected_status_min: parseInt(document.getElementById("sc-http-min").value, 10) || 200,
     expected_status_max: parseInt(document.getElementById("sc-http-max").value, 10) || 399
   };
+  var scHdrs = parseScHeaders();
+  if (scHdrs) sc.headers = scHdrs;
   if (sc.timeout_sec < 1) sc.timeout_sec = 5;
   if (sc.timeout_sec > 30) sc.timeout_sec = 30;
   if (sc.failure_threshold < 1) sc.failure_threshold = 1;
@@ -1450,30 +1590,126 @@ function renderFleetList() {
   var h = '';
   for (var i = 0; i < fleetServers.length; i++) {
     var s = fleetServers[i];
-    h += '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">';
-    h += '<span style="font-weight:500;flex:1">' + (s.name || 'Server ' + (i+1)) + '</span>';
-    h += '<span style="font-size:12px;color:var(--text2);flex:2">' + (s.url || '') + '</span>';
-    h += '<button class="btn-danger" onclick="removeFleetServer(' + i + ')" style="padding:4px 10px;font-size:11px">Remove</button>';
+    var hdrs = s.headers ? Object.keys(s.headers).length : 0;
+    h += '<div class="webhook-item">';
+    h += '<div class="webhook-info">';
+    h += '<div class="webhook-name">' + escapeHtml(s.name || 'Server ' + (i+1)) + '</div>';
+    h += '<div class="webhook-url">' + escapeHtml(s.url || '') + '</div>';
+    var tags = [];
+    if (hdrs > 0) tags.push(hdrs + ' header' + (hdrs>1?'s':''));
+    if (s.api_key) tags.push('API key');
+    if (tags.length) h += '<div class="inline-muted">' + escapeHtml(tags.join(' · ')) + '</div>';
+    h += '</div>';
+    h += '<div class="webhook-actions">';
+    h += '<button class="btn btn-secondary btn-sm" onclick="testFleetServer(' + i + ')">Test</button>';
+    h += '<button class="btn btn-secondary btn-sm" onclick="editFleetServer(' + i + ')">Edit</button>';
+    h += '<button class="btn btn-danger btn-sm" onclick="removeFleetServer(' + i + ')">Remove</button>';
+    h += '</div>';
     h += '</div>';
   }
   el.innerHTML = h;
 }
 
-function addFleetServer() {
-  var name = document.getElementById("fleet-name").value.trim();
-  var url = document.getElementById("fleet-url").value.trim();
-  var apikey = document.getElementById("fleet-apikey").value.trim();
-  if (!name || !url) { showToast("Name and URL required", "error"); return; }
-  var server = { id: "", name: name, url: url, enabled: true };
-  if (apikey) server.api_key = apikey;
-  fleetServers.push(server);
-  saveFleetServers();
+function parseHeadersTextarea() {
+  var raw = document.getElementById("fleet-headers").value.trim();
+  if (!raw) return null;
+  var headers = {};
+  raw.split("\n").forEach(function(line) {
+    var idx = line.indexOf(":");
+    if (idx > 0) headers[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+  });
+  return Object.keys(headers).length > 0 ? headers : null;
+}
+function headersToText(hdrs) {
+  if (!hdrs) return "";
+  var lines = [];
+  for (var k in hdrs) lines.push(k + ": " + hdrs[k]);
+  return lines.join("\n");
+}
+function toggleFleetForm() {
+  var form = document.getElementById("fleet-form");
+  if (form.classList.contains("visible")) { cancelFleetForm(); return; }
+  document.getElementById("fleet-edit-index").value = "-1";
   document.getElementById("fleet-name").value = "";
   document.getElementById("fleet-url").value = "";
   document.getElementById("fleet-apikey").value = "";
+  document.getElementById("fleet-headers").value = "";
+  document.getElementById("fleet-test-result").textContent = "";
+  form.classList.add("visible");
+}
+function editFleetServer(idx) {
+  var s = fleetServers[idx];
+  document.getElementById("fleet-edit-index").value = String(idx);
+  document.getElementById("fleet-name").value = s.name || "";
+  document.getElementById("fleet-url").value = s.url || "";
+  document.getElementById("fleet-apikey").value = s.api_key || "";
+  document.getElementById("fleet-headers").value = headersToText(s.headers);
+  document.getElementById("fleet-test-result").textContent = "";
+  document.getElementById("fleet-form").classList.add("visible");
+}
+function cancelFleetForm() {
+  document.getElementById("fleet-form").classList.remove("visible");
+}
+function saveFleetServerForm() {
+  var name = document.getElementById("fleet-name").value.trim();
+  var url = document.getElementById("fleet-url").value.trim();
+  if (!name || !url) { showToast("Name and URL required", "error"); return; }
+  var server = { id: "", name: name, url: url, enabled: true };
+  var apikey = document.getElementById("fleet-apikey").value.trim();
+  if (apikey) server.api_key = apikey;
+  var headers = parseHeadersTextarea();
+  if (headers) server.headers = headers;
+  var editIdx = parseInt(document.getElementById("fleet-edit-index").value, 10);
+  if (editIdx >= 0 && editIdx < fleetServers.length) {
+    server.id = fleetServers[editIdx].id;
+    server.enabled = fleetServers[editIdx].enabled;
+    fleetServers[editIdx] = server;
+  } else {
+    fleetServers.push(server);
+  }
+  saveFleetServers();
+  cancelFleetForm();
+}
+function testFleetFromForm() {
+  var url = document.getElementById("fleet-url").value.trim();
+  var apikey = document.getElementById("fleet-apikey").value.trim();
+  var headers = parseHeadersTextarea();
+  _doFleetTest(url, apikey, headers, document.getElementById("fleet-test-result"));
+}
+function testFleetServer(idx) {
+  var s = fleetServers[idx];
+  var resultEl = document.createElement("span");
+  resultEl.style.fontSize = "12px";
+  resultEl.textContent = "Testing...";
+  resultEl.style.color = "var(--text2)";
+  var row = document.getElementById("fleet-list").children[idx];
+  if (row) { var existing = row.querySelector(".fleet-test-inline"); if(existing) existing.remove(); resultEl.className = "fleet-test-inline"; row.querySelector(".webhook-info").appendChild(resultEl); }
+  _doFleetTest(s.url, s.api_key, s.headers, resultEl);
+}
+function _doFleetTest(url, apikey, headers, resultEl) {
+  if (!url) { resultEl.textContent = "URL required"; resultEl.style.color = "var(--red)"; return; }
+  resultEl.textContent = "Testing...";
+  resultEl.style.color = "var(--text2)";
+  fetch("/api/v1/fleet/test", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ url: url, api_key: apikey || "", headers: headers || {} })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.success) {
+      resultEl.style.color = "var(--green)";
+      resultEl.textContent = "Connected — " + (d.version || "NAS Doctor") + " · " + (d.uptime || "");
+    } else {
+      resultEl.style.color = "var(--red)";
+      resultEl.textContent = "Failed: " + (d.error || "unknown");
+    }
+  })
+  .catch(function(e) { resultEl.style.color = "var(--red)"; resultEl.textContent = "Error: " + e.message; });
 }
 
 function removeFleetServer(idx) {
+  if (!confirm("Remove this server from the fleet?")) return;
   fleetServers.splice(idx, 1);
   saveFleetServers();
 }
@@ -1909,6 +2145,45 @@ function addPreset(preset) {
 }
 
 // Load snapshot for target dropdowns
+function testProxmoxConnection() {
+  var result = document.getElementById("pve-test-result");
+  result.textContent = "Testing...";
+  result.style.color = "var(--text2)";
+  fetch("/api/v1/proxmox/test", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      url: document.getElementById("pve-url").value.trim(),
+      token_id: document.getElementById("pve-token").value.trim(),
+      secret: document.getElementById("pve-secret").value.trim()
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.success) {
+      result.style.color = "var(--green)";
+      result.textContent = "Connected — PVE " + (d.version || "?") + (d.cluster ? " · cluster: " + d.cluster : "") + " · " + d.nodes + " node(s), " + d.guests + " guest(s), " + d.storage + " storage pool(s)";
+      // Populate node dropdown from detected nodes
+      var sel = document.getElementById("pve-node");
+      var current = sel.value;
+      sel.innerHTML = '<option value="">All nodes (poll entire cluster)</option>';
+      if (d.node_names) {
+        for (var i = 0; i < d.node_names.length; i++) {
+          sel.innerHTML += '<option value="' + d.node_names[i] + '">' + d.node_names[i] + '</option>';
+        }
+      }
+      if (current) sel.value = current;
+    } else {
+      result.style.color = "var(--red)";
+      result.textContent = "Failed: " + (d.error || "unknown error");
+    }
+  })
+  .catch(function(e) {
+    result.style.color = "var(--red)";
+    result.textContent = "Error: " + e.message;
+  });
+}
+
 function loadSnapshotForTargets() {
   fetch("/api/v1/snapshot/latest").then(function(r){return r.json()}).then(function(d){_snapshotCache=d;}).catch(function(){});
 }
@@ -1949,6 +2224,7 @@ loadDBStats();
 loadBackupInfo();
 loadFleetServers();
 onServiceTypeChange();
+fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
 </script>
 </body>
 </html>
