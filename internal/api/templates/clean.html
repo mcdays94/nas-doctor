@@ -1222,11 +1222,14 @@ body {
       html += '<div class="section"><div class="section-title">Service Checks (' + snapshot.service_checks.length + ')</div>';
       html += '<div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;overflow:hidden">';
       html += '<table style="width:100%;font-size:13px;border-collapse:collapse">';
-      html += '<tr style="color:#808080;font-size:11px"><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Name</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Type</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Status</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Latency</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Failures</th></tr>';
+      html += '<tr style="color:#808080;font-size:11px"><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Name</th><th style="text-align:center;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Health</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Type</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Status</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Latency</th><th style="text-align:left;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08)">Failures</th></tr>';
       for (var si = 0; si < snapshot.service_checks.length; si++) {
         var sc = snapshot.service_checks[si];
         var scColor = (sc.status === "up") ? "#16a34a" : "#dc2626";
+        var fails = sc.consecutive_failures || 0;
+        var dots = ''; for (var di = 0; di < 8; di++) { var isRed = di >= (8 - fails); dots += '<span style="display:inline-block;width:4px;height:12px;border-radius:1px;margin-right:1px;background:' + (isRed ? '#dc2626' : '#16a34a') + '"></span>'; }
         html += '<tr><td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)"><div style="font-weight:500">' + escapeHTML(sc.name || 'Service') + '</div><div style="font-size:12px;color:#808080">' + escapeHTML(sc.target || '') + '</div></td>';
+        html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04);text-align:center"><div style="display:inline-flex;align-items:center;gap:0">' + dots + '</div></td>';
         html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + escapeHTML((sc.type || '').toUpperCase()) + '</td>';
         html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04);color:' + scColor + '">' + escapeHTML(sc.status || 'unknown') + '</td>';
         html += '<td style="padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">' + ((sc.response_ms != null) ? (sc.response_ms + ' ms') : '—') + '</td>';

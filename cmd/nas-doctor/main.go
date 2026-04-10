@@ -169,8 +169,26 @@ func main() {
 		// so that Latest() returns it for the report and status endpoints.
 		sched.SetLatest(snap)
 
-		// Demo service check configs — enable the independent check loop
-		sched.UpdateServiceChecks(demo.DemoServiceCheckConfigs())
+		// Demo service check configs — persist to settings DB so they appear
+		// in the editable list, and push to scheduler for the check loop.
+		demoChecks := demo.DemoServiceCheckConfigs()
+		sched.UpdateServiceChecks(demoChecks)
+		{
+			// Build a minimal settings object with just the checks, then
+			// merge into whatever exists (or create fresh).
+			raw, _ := store.GetConfig("settings")
+			s := map[string]interface{}{}
+			if raw != "" {
+				json.Unmarshal([]byte(raw), &s)
+			}
+			checksJSON, _ := json.Marshal(demoChecks)
+			var checksArr interface{}
+			json.Unmarshal(checksJSON, &checksArr)
+			s["service_checks"] = map[string]interface{}{"checks": checksArr}
+			if data, err := json.Marshal(s); err == nil {
+				store.SetConfig("settings", string(data))
+			}
+		}
 
 		// Generate demo service check history (7 days of data)
 		for i := 7 * 24 * 12; i >= 0; i-- { // every 5 minutes for 7 days
