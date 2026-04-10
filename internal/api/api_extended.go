@@ -208,6 +208,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	// Alerts page
 	r.Get("/alerts", s.handleAlertsPage)
 
+	// Proxmox test
+	r.Post("/api/v1/proxmox/test", s.handleTestProxmox)
+
 	// Service Checks page
 	r.Get("/service-checks", s.handleServiceChecksPage)
 
@@ -1760,6 +1763,38 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(alertsPageHTML))
+}
+
+// handleTestProxmox tests the Proxmox VE API connection.
+// POST /api/v1/proxmox/test
+func (s *Server) handleTestProxmox(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL     string `json:"url"`
+		TokenID string `json:"token_id"`
+		Secret  string `json:"secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.URL == "" || req.TokenID == "" || req.Secret == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "URL, token ID, and secret are required"})
+		return
+	}
+	cfg := collector.ProxmoxConfig{Enabled: true, URL: req.URL, TokenID: req.TokenID, Secret: req.Secret}
+	result := collector.CollectProxmox(cfg)
+	if result == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "failed to connect"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"version": result.Version,
+		"cluster": result.ClusterName,
+		"nodes":   len(result.Nodes),
+		"guests":  len(result.Guests),
+		"storage": len(result.Storage),
+	})
 }
 
 // handleServiceChecksPage serves the service checks HTML page.
