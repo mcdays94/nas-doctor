@@ -540,6 +540,11 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		})
 		s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
 
+		// Auto-enable Proxmox dashboard section when PVE integration is turned on
+		if settings.Proxmox.Enabled && !settings.Sections.Proxmox {
+			settings.Sections.Proxmox = true
+		}
+
 		// Update Proxmox config on the collector
 		s.collector.SetProxmoxConfig(collector.ProxmoxConfig{
 			Enabled:  settings.Proxmox.Enabled,
