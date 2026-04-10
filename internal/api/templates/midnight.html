@@ -962,9 +962,14 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         }
         // Pods table
         if (k8s.pods && k8s.pods.length > 0) {
+          var runningPods = k8s.pods.filter(function(p){ return p.status === 'Running'; });
+          var completedPods = k8s.pods.filter(function(p){ return p.status === 'Succeeded'; });
           var problemPods = k8s.pods.filter(function(p){ return p.status !== 'Running' && p.status !== 'Succeeded'; });
-          var showPods = problemPods.length > 0 ? problemPods : k8s.pods.slice(0, 10);
-          h += '<div style="font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Pods (' + k8s.pods.length + ')' + (problemPods.length > 0 ? ' &middot; <span style="color:var(--red)">' + problemPods.length + ' issues</span>' : '') + '</div>';
+          var showPods = problemPods.length > 0 ? problemPods.concat(runningPods.slice(0, 10)) : runningPods.slice(0, 15);
+          var countStr = runningPods.length + ' running';
+          if (completedPods.length > 0) countStr += ', ' + completedPods.length + ' completed';
+          if (problemPods.length > 0) countStr += ', <span style="color:var(--red)">' + problemPods.length + ' issues</span>';
+          h += '<div style="font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Pods (' + countStr + ')</div>';
           h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden;max-height:300px;overflow-y:auto;scrollbar-width:thin">';
           h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
           h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;position:sticky;top:0;background:var(--bg-panel)">';
