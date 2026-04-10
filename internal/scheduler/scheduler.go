@@ -831,6 +831,10 @@ func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) inter
 			result.Error = err.Error()
 			break
 		}
+		req.Header.Set("User-Agent", "nas-doctor-service-check/1.0")
+		for k, v := range check.Headers {
+			req.Header.Set(k, v)
+		}
 		resp, err := (&http.Client{Timeout: time.Duration(timeoutSec) * time.Second}).Do(req)
 		result.ResponseMS = time.Since(start).Milliseconds()
 		if err != nil {

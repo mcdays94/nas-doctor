@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NAS Doctor — Midnight</title>
+<title>NAS Doctor</title>
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1029,6 +1029,8 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       "ups": sec.ups !== false,
       "services": true,
       "network": sec.network !== false,
+      "tunnels": sec.tunnels !== false,
+      "proxmox": sec.proxmox !== false,
       "parity": sec.parity !== false
     };
 

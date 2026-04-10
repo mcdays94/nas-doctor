@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NAS Doctor — Settings</title>
+<title>NAS Doctor</title>
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -462,6 +462,10 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             <input type="number" id="sc-http-max" min="100" max="599" value="399" placeholder="Max">
           </div>
         </div>
+      </div>
+      <div class="form-group" id="sc-headers-wrap">
+        <label for="sc-headers">Custom HTTP Headers (optional — for auth, CF Access, etc.)</label>
+        <textarea id="sc-headers" rows="2" placeholder="Authorization: Bearer token123&#10;CF-Access-Client-Id: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
       </div>
       <div class="form-row">
         <div>
@@ -1288,6 +1292,7 @@ function toggleServiceCheckForm() {
   document.getElementById("sc-severity").value = "warning";
   document.getElementById("sc-http-min").value = "200";
   document.getElementById("sc-http-max").value = "399";
+  document.getElementById("sc-headers").value = "";
   setServiceCheckEnabledUI(true);
   populateInstanceSelector();
   onServiceTypeChange();
@@ -1306,14 +1311,27 @@ function onServiceTypeChange() {
   var type = document.getElementById("sc-type").value;
   var httpWrap = document.getElementById("sc-http-expected-wrap");
   var portWrap = document.getElementById("sc-port-wrap");
+  var headersWrap = document.getElementById("sc-headers-wrap");
   if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
   if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
+  if (headersWrap) headersWrap.style.display = (type === "http") ? "block" : "none";
   var targetInput = document.getElementById("sc-target");
   if (targetInput) {
     if (type === "ping") targetInput.placeholder = "e.g. 8.8.8.8 or gateway.local";
     else if (type === "dns") targetInput.placeholder = "e.g. google.com";
     else targetInput.placeholder = "https://nas.local/health, 192.168.1.10, or host:port";
   }
+}
+function parseScHeaders() {
+  var raw = (document.getElementById("sc-headers") || {}).value || "";
+  if (!raw.trim()) return null;
+  var h = {};
+  raw.trim().split("\n").forEach(function(l) { var i = l.indexOf(":"); if (i > 0) h[l.substring(0,i).trim()] = l.substring(i+1).trim(); });
+  return Object.keys(h).length > 0 ? h : null;
+}
+function scHeadersToText(hdrs) {
+  if (!hdrs) return "";
+  var lines = []; for (var k in hdrs) lines.push(k + ": " + hdrs[k]); return lines.join("\n");
 }
 
 function editServiceCheck(idx) {
@@ -1332,6 +1350,7 @@ function editServiceCheck(idx) {
   document.getElementById("sc-severity").value = sc.failure_severity || "warning";
   document.getElementById("sc-http-min").value = String(sc.expected_status_min || 200);
   document.getElementById("sc-http-max").value = String(sc.expected_status_max || 399);
+  document.getElementById("sc-headers").value = scHeadersToText(sc.headers);
   setServiceCheckEnabledUI(sc.enabled !== false);
   onServiceTypeChange();
   document.getElementById("service-check-form").classList.add("visible");
@@ -1363,6 +1382,8 @@ function saveServiceCheck() {
     expected_status_min: parseInt(document.getElementById("sc-http-min").value, 10) || 200,
     expected_status_max: parseInt(document.getElementById("sc-http-max").value, 10) || 399
   };
+  var scHdrs = parseScHeaders();
+  if (scHdrs) sc.headers = scHdrs;
   if (sc.timeout_sec < 1) sc.timeout_sec = 5;
   if (sc.timeout_sec > 30) sc.timeout_sec = 30;
   if (sc.failure_threshold < 1) sc.failure_threshold = 1;
@@ -2203,6 +2224,7 @@ loadDBStats();
 loadBackupInfo();
 loadFleetServers();
 onServiceTypeChange();
+fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
 </script>
 </body>
 </html>

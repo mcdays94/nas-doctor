@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NAS Doctor — Fleet</title>
+<title>NAS Doctor</title>
 <link rel="icon" href="/icon.png">
 <link rel="stylesheet" href="/css/shared.css">
 <style>
@@ -74,6 +74,7 @@ body{padding:0}
   function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
   try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
   fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
+  fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
 })();
 (function() {
   "use strict";
