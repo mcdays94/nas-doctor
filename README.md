@@ -5,6 +5,10 @@
 <h1 align="center">NAS Doctor</h1>
 
 <p align="center">
+  <strong><em>Sleep tight knowing your server never does.</em></strong>
+</p>
+
+<p align="center">
   <strong>Local NAS diagnostic and monitoring tool.</strong><br>
   Run it as a Docker container on your Unraid, TrueNAS, Synology, or any Linux NAS.<br>
   Beautiful dashboards, Prometheus metrics, webhook alerts — no cloud account required.
@@ -13,7 +17,6 @@
 > **Alpha** — NAS Doctor is in alpha. Features may be incomplete, bugs are expected, and breaking changes can occur between releases. Only tested on Unraid. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
 <p align="center">
-  <em>Sleep tight. Your server never does.</em><br><br>
   <a href="https://buymeacoffee.com/miguelcaetanodias"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg?style=flat-square&logo=buy-me-a-coffee" alt="Buy Me A Coffee"></a>
 </p>
 
@@ -458,13 +461,56 @@ nasdoctor_collection_duration_seconds / _last_collection_timestamp
 | Platform | Status | Notes |
 |---|---|---|
 | **Unraid** | ✅ Tested | Parity analysis, array status, disk labels, OS update check |
-| **Synology DSM** | ✅ Tested | `/volume<#>` detection, `/dev/mapper/cachedev_*` support, SMART health parsing |
+| **Synology DSM** | ⚠️ Community tested | `/volume<#>` detection, `/dev/mapper/cachedev_*` support, SMART health parsing |
 | **TrueNAS SCALE** | ⚠️ Untested | ZFS pool health support built-in, but not yet validated on real hardware |
 | **QNAP QTS** | ⚠️ Untested | Should work via Container Station |
 | **Proxmox** | ⚠️ Untested | ZFS pool health support built-in |
 | **Generic Linux** | ⚠️ Untested | Any distro with Docker |
 
 > Tested on **Unraid** and **Synology DSM**. Other platforms should work but may have issues with disk detection, SMART access, or platform-specific features. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
+
+---
+
+## File Structure & Data Locations
+
+### Inside the container (`/data` volume)
+
+```
+/data/
+├── nas-doctor.db          # SQLite database (snapshots, alerts, history, settings)
+└── backups/               # Automatic DB backups (configurable)
+    ├── nas-doctor-2026-04-10.db
+    └── ...
+```
+
+All configuration is stored in the SQLite database and managed via the web UI at `/settings`. There are no config files to edit manually.
+
+### Host bind mounts (read-only)
+
+| Container path | Host path | Purpose |
+|---|---|---|
+| `/host/mnt` | `/mnt` | Disk space monitoring (Unraid, TrueNAS) |
+| `/host/volume1` | `/volume1` | Disk space monitoring (Synology) |
+| `/host/log` | `/var/log` | System log analysis (dmesg, syslog) |
+| `/host/boot` | `/boot` | Parity logs, Unraid identification |
+| `/var/run/docker.sock` | Docker socket | Container monitoring |
+
+### Source tree
+
+```
+cmd/nas-doctor/            # Entry point, CLI flags, demo mode
+internal/
+├── analyzer/              # Diagnostic rules engine, Backblaze thresholds
+├── api/                   # HTTP handlers, embedded HTML templates, shared CSS
+│   └── templates/         # Dashboard themes (midnight, clean, ember) + subpages
+├── collector/             # Data collection (SMART, disk, docker, network, UPS, tunnels)
+├── demo/                  # Mock data generation for demo mode
+├── fleet/                 # Multi-server fleet polling
+├── logfwd/                # Log forwarding (Loki, HTTP JSON, syslog)
+├── notifier/              # Webhook delivery + Prometheus exporter
+├── scheduler/             # Scan scheduling, notification rules, service checks
+└── storage/               # SQLite database layer
+```
 
 ---
 

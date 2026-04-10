@@ -770,6 +770,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
       h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
       h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Name</th>';
+      h += '<th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border)">Health</th>';
       h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Type</th>';
       h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Status</th>';
       h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Latency</th>';
@@ -779,8 +780,11 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         var sc = svcChecks[svi];
         var scStatus = (sc.status || '').toLowerCase();
         var scClass = scStatus === 'up' ? 'td-healthy' : 'td-crit';
+        var fails = sc.consecutive_failures || 0;
+        var dots = ''; for (var di = 0; di < 8; di++) { var isRed = di >= (8 - fails); dots += '<span style="display:inline-block;width:4px;height:12px;border-radius:1px;margin-right:1px;background:' + (isRed ? 'var(--red)' : 'var(--green)') + '"></span>'; }
         h += '<tr>';
         h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><div style="font-weight:500">' + esc(sc.name || 'Service') + '</div><div style="font-size:11px;color:var(--text-quaternary)">' + esc(sc.target || '') + '</div></td>';
+        h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);text-align:center"><div style="display:inline-flex;align-items:center;gap:0">' + dots + '</div></td>';
         h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc((sc.type || '').toUpperCase()) + '</td>';
         h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)" class="' + scClass + '">' + esc(sc.status || 'unknown') + '</td>';
         h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + ((sc.response_ms != null) ? (sc.response_ms + ' ms') : '—') + '</td>';

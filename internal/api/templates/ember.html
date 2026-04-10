@@ -1591,11 +1591,14 @@ td.mono {
       html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Service Checks (" + snapshot.service_checks.length + ")</div>";
       html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);overflow:hidden\">";
       html += "<table style=\"width:100%;font-size:12px;border-collapse:collapse\">";
-      html += "<tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Name</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Type</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Status</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Latency</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Failures</th></tr>";
+      html += "<tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Name</th><th style=\"text-align:center;padding:6px 8px;border-bottom:1px solid var(--border)\">Health</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Type</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Status</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Latency</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Failures</th></tr>";
       for (var si = 0; si < snapshot.service_checks.length; si++) {
         var sc = snapshot.service_checks[si];
         var scClr = (sc.status === "up") ? "var(--green)" : "var(--red)";
+        var fails = sc.consecutive_failures || 0;
+        var dots = ""; for (var di = 0; di < 8; di++) { var isRed = di >= (8 - fails); dots += "<span style=\"display:inline-block;width:4px;height:12px;border-radius:1px;margin-right:1px;background:" + (isRed ? "var(--red)" : "var(--green)") + "\"></span>"; }
         html += "<tr><td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\"><div style=\"font-weight:500\">" + esc(sc.name || "Service") + "</div><div style=\"font-size:11px;color:var(--text-dim)\">" + esc(sc.target || "") + "</div></td>";
+        html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border);text-align:center\"><div style=\"display:inline-flex;align-items:center;gap:0\">" + dots + "</div></td>";
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc((sc.type || "").toUpperCase()) + "</td>";
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border);color:" + scClr + "\">" + esc(sc.status || "unknown") + "</td>";
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + ((sc.response_ms != null) ? (sc.response_ms + " ms") : "—") + "</td>";
