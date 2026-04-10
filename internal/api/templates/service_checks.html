@@ -14,9 +14,12 @@
 .summary-stat.up .stat-count{color:var(--green)}
 .summary-stat.down .stat-count{color:var(--red)}
 .summary-stat.total .stat-count{color:var(--accent)}
-/* Heartbeat badge cards */
-.badges-row{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;scrollbar-width:thin;margin-bottom:20px}
-.badge-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 16px;min-width:200px;flex-shrink:0;cursor:pointer;transition:border-color 0.15s}
+/* Heartbeat badge cards — 4-col grid, 3 rows visible then scroll */
+.badges-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-height:calc(88px * 3 + 10px * 2);overflow-y:auto;scrollbar-width:thin;margin-bottom:20px;padding-bottom:4px}
+@media(max-width:1100px){.badges-row{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:800px){.badges-row{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:500px){.badges-row{grid-template-columns:1fr}}
+.badge-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 16px;cursor:pointer;transition:border-color 0.15s;min-height:68px}
 .badge-card:hover,.badge-card.active{border-color:var(--accent)}
 .badge-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .badge-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
@@ -26,8 +29,8 @@
 .badge-pct{font-size:12px;font-weight:600}
 .badge-pct.good{color:var(--green)}.badge-pct.warn{color:var(--amber)}.badge-pct.bad{color:var(--red)}
 .badge-meta{font-size:11px;color:var(--text3);display:flex;gap:8px}
-.heartbeat{display:flex;gap:1px;align-items:flex-end;height:20px;overflow:hidden;margin-top:6px}
-.hb-dot{width:3px;border-radius:1px;flex-shrink:0;min-height:3px}
+.heartbeat{display:flex;gap:1px;align-items:center;height:20px;overflow:hidden;margin-top:6px}
+.hb-dot{width:3px;height:14px;border-radius:1px;flex-shrink:0}
 .hb-dot.up{background:var(--green)}.hb-dot.down{background:var(--red)}.hb-dot.empty{background:var(--border);opacity:0.3}
 /* Filter bar */
 .filter-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
@@ -152,13 +155,12 @@
   // ── Heartbeat badge cards ──
   function buildHeartbeat(hist){
     var N=60,h='<div class="heartbeat">';
-    if(!hist||hist.length===0){for(var d=0;d<N;d++)h+='<div class="hb-dot empty" style="height:10px"></div>';h+='</div>';return h;}
+    if(!hist||hist.length===0){for(var d=0;d<N;d++)h+='<div class="hb-dot empty"></div>';h+='</div>';return h;}
     var count=Math.min(hist.length,N);var pad=N-count;
-    for(var d=0;d<pad;d++)h+='<div class="hb-dot empty" style="height:10px"></div>';
+    for(var d=0;d<pad;d++)h+='<div class="hb-dot empty"></div>';
     for(var d=count-1;d>=0;d--){
       var e=hist[d];var isUp=e.status==="up";
-      var latH=Math.max(4,Math.min(20,4+Math.round((e.response_ms||0)/50*16)));
-      h+='<div class="hb-dot '+(isUp?"up":"down")+'" style="height:'+latH+'px"></div>';
+      h+='<div class="hb-dot '+(isUp?"up":"down")+'" title="'+(e.response_ms||0)+'ms"></div>';
     }
     h+='</div>';return h;
   }
