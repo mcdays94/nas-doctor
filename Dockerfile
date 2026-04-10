@@ -1,4 +1,18 @@
-# Runtime-only Dockerfile — uses pre-compiled binary
+# Multi-stage multi-arch Dockerfile
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+
+ARG TARGETOS TARGETARCH VERSION=dev
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -ldflags="-s -w -X main.version=${VERSION}" \
+    -o /nas-doctor ./cmd/nas-doctor
+
+# Runtime
 FROM alpine:3.21
 
 LABEL org.opencontainers.image.title="NAS Doctor" \
@@ -11,10 +25,9 @@ LABEL org.opencontainers.image.title="NAS Doctor" \
       net.unraid.docker.webui="http://[IP]:[PORT:8060]/" \
       net.unraid.docker.managed="dockerman"
 
-COPY nas-doctor-linux-amd64 /app/nas-doctor
-RUN chmod +x /app/nas-doctor
+COPY --from=builder /nas-doctor /app/nas-doctor
 
-# Critical packages (must succeed)
+# Critical packages
 RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata
 # Optional packages (may not be available on all architectures)
 RUN apk add --no-cache hdparm iproute2 || true
