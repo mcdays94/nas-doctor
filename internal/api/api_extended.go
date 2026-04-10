@@ -209,6 +209,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	// Alerts page
 	r.Get("/alerts", s.handleAlertsPage)
 
+	// Fleet test
+	r.Post("/api/v1/fleet/test", s.handleTestFleetServer)
+
 	// Proxmox test
 	r.Post("/api/v1/proxmox/test", s.handleTestProxmox)
 
@@ -1765,6 +1768,60 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(alertsPageHTML))
+}
+
+// handleTestFleetServer tests connectivity to a remote NAS Doctor instance.
+// POST /api/v1/fleet/test
+func (s *Server) handleTestFleetServer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL     string            `json:"url"`
+		APIKey  string            `json:"api_key"`
+		Headers map[string]string `json:"headers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.URL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "URL is required"})
+		return
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	healthURL := strings.TrimRight(req.URL, "/") + "/api/v1/health"
+	httpReq, err := http.NewRequest("GET", healthURL, nil)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "invalid URL: " + err.Error()})
+		return
+	}
+	httpReq.Header.Set("User-Agent", "nas-doctor-fleet-test/1.0")
+	if req.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
+	for k, v := range req.Headers {
+		httpReq.Header.Set(k, v)
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": fmt.Sprintf("HTTP %d from %s", resp.StatusCode, healthURL)})
+		return
+	}
+	var health struct {
+		Status  string `json:"status"`
+		Version string `json:"version"`
+		Uptime  string `json:"uptime"`
+	}
+	json.NewDecoder(resp.Body).Decode(&health)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"status":  health.Status,
+		"version": health.Version,
+		"uptime":  health.Uptime,
+	})
 }
 
 // handleTestProxmox tests the Proxmox VE API connection.

@@ -598,17 +598,37 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <div class="card-title">Fleet Monitoring</div>
     <div class="card-desc">Monitor multiple NAS Doctor instances from this dashboard. Supports private IPs and public hostnames (with custom auth headers for Cloudflare Access, etc.).</div>
     <div id="fleet-list" style="margin-bottom:12px"></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <input type="text" id="fleet-name" placeholder="Server name" style="flex:1;min-width:120px">
-      <input type="url" id="fleet-url" placeholder="http://192.168.1.50:8060 or https://nas.example.com" style="flex:2;min-width:200px">
-      <input type="password" id="fleet-apikey" placeholder="API Key (optional)" style="flex:1;min-width:100px">
-      <button class="btn-secondary" onclick="addFleetServer()">Add</button>
+    <!-- Add/Edit form -->
+    <div class="webhook-form" id="fleet-form">
+      <input type="hidden" id="fleet-edit-index" value="-1">
+      <div class="form-row">
+        <div><label for="fleet-name">Server Name</label>
+          <input type="text" id="fleet-name" placeholder="e.g. Backup NAS"></div>
+        <div><label for="fleet-url">URL</label>
+          <input type="url" id="fleet-url" placeholder="http://192.168.1.50:8060 or https://nas.example.com"></div>
+      </div>
+      <div class="form-row">
+        <div><label for="fleet-apikey">API Key (optional)</label>
+          <input type="password" id="fleet-apikey" placeholder="Leave blank if not needed"></div>
+      </div>
+      <div class="form-group">
+        <label for="fleet-headers">Custom Headers (optional — for CF Access, auth proxies)</label>
+        <textarea id="fleet-headers" rows="2" placeholder="CF-Access-Client-Id: xxxxx&#10;CF-Access-Client-Secret: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="btn btn-primary" onclick="saveFleetServerForm()">Save</button>
+        <button class="btn btn-secondary" onclick="cancelFleetForm()">Cancel</button>
+        <button class="btn btn-secondary btn-sm" onclick="testFleetFromForm()">Test</button>
+        <span id="fleet-test-result" style="font-size:12px"></span>
+      </div>
     </div>
-    <div style="margin-top:8px">
-      <label for="fleet-headers" style="font-size:11px;color:var(--text2)">Custom Headers (for CF Access, auth proxies — format: <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">Key:Value</code>, one per line)</label>
-      <textarea id="fleet-headers" rows="2" placeholder="CF-Access-Client-Id: xxxxx&#10;CF-Access-Client-Secret: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);margin-top:4px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+      <button class="btn btn-secondary btn-sm" onclick="toggleFleetForm()" style="display:inline-flex;align-items:center;gap:4px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Server
+      </button>
+      <a href="/fleet" style="color:var(--accent);font-size:13px;margin-left:auto">Open Fleet Dashboard &rarr;</a>
     </div>
-    <div style="margin-top:8px"><a href="/fleet" style="color:var(--accent);font-size:13px">Open Fleet Dashboard &rarr;</a></div>
   </div>
 
   <!-- 7. Dashboard Sections -->
@@ -1550,12 +1570,20 @@ function renderFleetList() {
   for (var i = 0; i < fleetServers.length; i++) {
     var s = fleetServers[i];
     var hdrs = s.headers ? Object.keys(s.headers).length : 0;
-    h += '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">';
-    h += '<span style="font-weight:500;flex:1">' + escapeHtml(s.name || 'Server ' + (i+1)) + '</span>';
-    h += '<span style="font-size:12px;color:var(--text2);flex:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(s.url || '') + '</span>';
-    if (hdrs > 0) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.12);color:var(--accent)">' + hdrs + ' header' + (hdrs>1?'s':'') + '</span>';
-    if (s.api_key) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(39,166,68,0.12);color:var(--green)">auth</span>';
-    h += '<button class="btn-danger" onclick="removeFleetServer(' + i + ')" style="padding:4px 10px;font-size:11px">Remove</button>';
+    h += '<div class="webhook-item">';
+    h += '<div class="webhook-info">';
+    h += '<div class="webhook-name">' + escapeHtml(s.name || 'Server ' + (i+1)) + '</div>';
+    h += '<div class="webhook-url">' + escapeHtml(s.url || '') + '</div>';
+    var tags = [];
+    if (hdrs > 0) tags.push(hdrs + ' header' + (hdrs>1?'s':''));
+    if (s.api_key) tags.push('API key');
+    if (tags.length) h += '<div class="inline-muted">' + escapeHtml(tags.join(' · ')) + '</div>';
+    h += '</div>';
+    h += '<div class="webhook-actions">';
+    h += '<button class="btn btn-secondary btn-sm" onclick="testFleetServer(' + i + ')">Test</button>';
+    h += '<button class="btn btn-secondary btn-sm" onclick="editFleetServer(' + i + ')">Edit</button>';
+    h += '<button class="btn btn-danger btn-sm" onclick="removeFleetServer(' + i + ')">Remove</button>';
+    h += '</div>';
     h += '</div>';
   }
   el.innerHTML = h;
@@ -1571,24 +1599,96 @@ function parseHeadersTextarea() {
   });
   return Object.keys(headers).length > 0 ? headers : null;
 }
-function addFleetServer() {
-  var name = document.getElementById("fleet-name").value.trim();
-  var url = document.getElementById("fleet-url").value.trim();
-  var apikey = document.getElementById("fleet-apikey").value.trim();
-  if (!name || !url) { showToast("Name and URL required", "error"); return; }
-  var server = { id: "", name: name, url: url, enabled: true };
-  if (apikey) server.api_key = apikey;
-  var headers = parseHeadersTextarea();
-  if (headers) server.headers = headers;
-  fleetServers.push(server);
-  saveFleetServers();
+function headersToText(hdrs) {
+  if (!hdrs) return "";
+  var lines = [];
+  for (var k in hdrs) lines.push(k + ": " + hdrs[k]);
+  return lines.join("\n");
+}
+function toggleFleetForm() {
+  var form = document.getElementById("fleet-form");
+  if (form.classList.contains("visible")) { cancelFleetForm(); return; }
+  document.getElementById("fleet-edit-index").value = "-1";
   document.getElementById("fleet-name").value = "";
   document.getElementById("fleet-url").value = "";
   document.getElementById("fleet-apikey").value = "";
   document.getElementById("fleet-headers").value = "";
+  document.getElementById("fleet-test-result").textContent = "";
+  form.classList.add("visible");
+}
+function editFleetServer(idx) {
+  var s = fleetServers[idx];
+  document.getElementById("fleet-edit-index").value = String(idx);
+  document.getElementById("fleet-name").value = s.name || "";
+  document.getElementById("fleet-url").value = s.url || "";
+  document.getElementById("fleet-apikey").value = s.api_key || "";
+  document.getElementById("fleet-headers").value = headersToText(s.headers);
+  document.getElementById("fleet-test-result").textContent = "";
+  document.getElementById("fleet-form").classList.add("visible");
+}
+function cancelFleetForm() {
+  document.getElementById("fleet-form").classList.remove("visible");
+}
+function saveFleetServerForm() {
+  var name = document.getElementById("fleet-name").value.trim();
+  var url = document.getElementById("fleet-url").value.trim();
+  if (!name || !url) { showToast("Name and URL required", "error"); return; }
+  var server = { id: "", name: name, url: url, enabled: true };
+  var apikey = document.getElementById("fleet-apikey").value.trim();
+  if (apikey) server.api_key = apikey;
+  var headers = parseHeadersTextarea();
+  if (headers) server.headers = headers;
+  var editIdx = parseInt(document.getElementById("fleet-edit-index").value, 10);
+  if (editIdx >= 0 && editIdx < fleetServers.length) {
+    server.id = fleetServers[editIdx].id;
+    server.enabled = fleetServers[editIdx].enabled;
+    fleetServers[editIdx] = server;
+  } else {
+    fleetServers.push(server);
+  }
+  saveFleetServers();
+  cancelFleetForm();
+}
+function testFleetFromForm() {
+  var url = document.getElementById("fleet-url").value.trim();
+  var apikey = document.getElementById("fleet-apikey").value.trim();
+  var headers = parseHeadersTextarea();
+  _doFleetTest(url, apikey, headers, document.getElementById("fleet-test-result"));
+}
+function testFleetServer(idx) {
+  var s = fleetServers[idx];
+  var resultEl = document.createElement("span");
+  resultEl.style.fontSize = "12px";
+  resultEl.textContent = "Testing...";
+  resultEl.style.color = "var(--text2)";
+  var row = document.getElementById("fleet-list").children[idx];
+  if (row) { var existing = row.querySelector(".fleet-test-inline"); if(existing) existing.remove(); resultEl.className = "fleet-test-inline"; row.querySelector(".webhook-info").appendChild(resultEl); }
+  _doFleetTest(s.url, s.api_key, s.headers, resultEl);
+}
+function _doFleetTest(url, apikey, headers, resultEl) {
+  if (!url) { resultEl.textContent = "URL required"; resultEl.style.color = "var(--red)"; return; }
+  resultEl.textContent = "Testing...";
+  resultEl.style.color = "var(--text2)";
+  fetch("/api/v1/fleet/test", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ url: url, api_key: apikey || "", headers: headers || {} })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.success) {
+      resultEl.style.color = "var(--green)";
+      resultEl.textContent = "Connected — " + (d.version || "NAS Doctor") + " · " + (d.uptime || "");
+    } else {
+      resultEl.style.color = "var(--red)";
+      resultEl.textContent = "Failed: " + (d.error || "unknown");
+    }
+  })
+  .catch(function(e) { resultEl.style.color = "var(--red)"; resultEl.textContent = "Error: " + e.message; });
 }
 
 function removeFleetServer(idx) {
+  if (!confirm("Remove this server from the fleet?")) return;
   fleetServers.splice(idx, 1);
   saveFleetServers();
 }
