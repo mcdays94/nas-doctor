@@ -504,6 +504,10 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div><label for="pve-secret">Token Secret</label>
         <input type="password" id="pve-secret" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
     </div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
+      <button class="btn btn-secondary btn-sm" onclick="testProxmoxConnection()">Test Connection</button>
+      <span id="pve-test-result" style="font-size:12px"></span>
+    </div>
   </div>
 
   <!-- 5. Log Forwarding -->
@@ -2006,6 +2010,35 @@ function addPreset(preset) {
 }
 
 // Load snapshot for target dropdowns
+function testProxmoxConnection() {
+  var result = document.getElementById("pve-test-result");
+  result.textContent = "Testing...";
+  result.style.color = "var(--text2)";
+  fetch("/api/v1/proxmox/test", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      url: document.getElementById("pve-url").value.trim(),
+      token_id: document.getElementById("pve-token").value.trim(),
+      secret: document.getElementById("pve-secret").value.trim()
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.success) {
+      result.style.color = "var(--green)";
+      result.textContent = "Connected — PVE " + (d.version || "?") + (d.cluster ? " · cluster: " + d.cluster : "") + " · " + d.nodes + " node(s), " + d.guests + " guest(s), " + d.storage + " storage pool(s)";
+    } else {
+      result.style.color = "var(--red)";
+      result.textContent = "Failed: " + (d.error || "unknown error");
+    }
+  })
+  .catch(function(e) {
+    result.style.color = "var(--red)";
+    result.textContent = "Error: " + e.message;
+  });
+}
+
 function loadSnapshotForTargets() {
   fetch("/api/v1/snapshot/latest").then(function(r){return r.json()}).then(function(d){_snapshotCache=d;}).catch(function(){});
 }
