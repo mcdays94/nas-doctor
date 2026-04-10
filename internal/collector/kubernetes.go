@@ -168,8 +168,13 @@ func CollectKubernetes(cfg KubeConfig) *internal.KubeInfo {
 				if c.Type == "Ready" && c.Status == "True" {
 					node.Status = "Ready"
 				}
+				// Only report actual pressure conditions, not informational ones
 				if c.Type != "Ready" && c.Status == "True" {
-					node.Conditions = append(node.Conditions, c.Type)
+					// Filter out non-problematic conditions (k3s EtcdIsVoter, etc.)
+					switch c.Type {
+					case "MemoryPressure", "DiskPressure", "PIDPressure", "NetworkUnavailable":
+						node.Conditions = append(node.Conditions, c.Type)
+					}
 				}
 			}
 			// IP
