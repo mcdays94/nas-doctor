@@ -16,11 +16,17 @@ type Collector struct {
 	hostPaths     internal.HostPaths
 	logger        *slog.Logger
 	proxmoxConfig ProxmoxConfig
+	kubeConfig    KubeConfig
 }
 
 // SetProxmoxConfig updates the Proxmox VE API connection settings.
 func (c *Collector) SetProxmoxConfig(cfg ProxmoxConfig) {
 	c.proxmoxConfig = cfg
+}
+
+// SetKubeConfig updates the Kubernetes cluster connection settings.
+func (c *Collector) SetKubeConfig(cfg KubeConfig) {
+	c.kubeConfig = cfg
 }
 
 // New creates a new Collector with the given host path mappings.
@@ -144,6 +150,21 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 				c.logger.Warn("Proxmox VE collection error", "error", pveInfo.Error)
 			} else {
 				c.logger.Info("Proxmox VE data collected", "nodes", len(pveInfo.Nodes), "guests", len(pveInfo.Guests))
+			}
+		}
+	}
+
+	// Kubernetes (if configured)
+	if c.kubeConfig.Enabled {
+		c.logger.Info("collecting Kubernetes data")
+		kubeInfo := CollectKubernetes(c.kubeConfig)
+		if kubeInfo != nil {
+			kubeInfo.Alias = c.kubeConfig.Alias
+			snap.Kubernetes = kubeInfo
+			if kubeInfo.Error != "" {
+				c.logger.Warn("Kubernetes collection error", "error", kubeInfo.Error)
+			} else {
+				c.logger.Info("Kubernetes data collected", "nodes", len(kubeInfo.Nodes), "pods", len(kubeInfo.Pods))
 			}
 		}
 	}

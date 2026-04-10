@@ -37,6 +37,7 @@ type Settings struct {
 	Backup            BackupSettings          `json:"backup"`
 	Sections          DashboardSections       `json:"sections"`
 	Proxmox           SettingsProxmox         `json:"proxmox"`
+	Kubernetes        SettingsKubernetes      `json:"kubernetes"`
 	Fleet             []internal.RemoteServer `json:"fleet,omitempty"`
 	DismissedFindings []string                `json:"dismissed_findings,omitempty"`
 }
@@ -56,6 +57,7 @@ type DashboardSections struct {
 	Network      bool `json:"network"`
 	Tunnels      bool `json:"tunnels"`
 	Proxmox      bool `json:"proxmox"`
+	Kubernetes   bool `json:"kubernetes"`
 	MergedDrives bool `json:"merged_drives"` // Combine SMART + storage into one card per drive
 }
 
@@ -98,6 +100,15 @@ type SettingsProxmox struct {
 	Secret   string `json:"secret"`    // API token UUID secret
 	NodeName string `json:"node_name"` // optional: real PVE node name to filter (auto-detected)
 	Alias    string `json:"alias"`     // optional: friendly display name
+}
+
+// SettingsKubernetes holds the Kubernetes cluster connection settings.
+type SettingsKubernetes struct {
+	Enabled   bool   `json:"enabled"`
+	URL       string `json:"url"`        // e.g. https://192.168.1.10:6443
+	Token     string `json:"token"`      // bearer token
+	Alias     string `json:"alias"`      // friendly display name
+	InCluster bool   `json:"in_cluster"` // auto-detect from mounted service account
 }
 
 // SettingsLogForward holds the log-forwarding configuration within settings.
@@ -211,6 +222,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 
 	// Fleet test
 	r.Post("/api/v1/fleet/test", s.handleTestFleetServer)
+
+	// Kubernetes test
+	r.Post("/api/v1/kubernetes/test", s.handleTestKubernetes)
 
 	// Proxmox test
 	r.Post("/api/v1/proxmox/test", s.handleTestProxmox)
@@ -540,6 +554,11 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		})
 		s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
 
+		// Auto-enable Kubernetes dashboard section when K8s integration is turned on
+		if settings.Kubernetes.Enabled && !settings.Sections.Kubernetes {
+			settings.Sections.Kubernetes = true
+		}
+
 		// Auto-enable Proxmox dashboard section when PVE integration is turned on
 		if settings.Proxmox.Enabled && !settings.Sections.Proxmox {
 			settings.Sections.Proxmox = true
@@ -553,6 +572,15 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			Secret:   settings.Proxmox.Secret,
 			NodeName: settings.Proxmox.NodeName,
 			Alias:    settings.Proxmox.Alias,
+		})
+
+		// Update Kubernetes config on the collector
+		s.collector.SetKubeConfig(collector.KubeConfig{
+			Enabled:   settings.Kubernetes.Enabled,
+			URL:       settings.Kubernetes.URL,
+			Token:     settings.Kubernetes.Token,
+			Alias:     settings.Kubernetes.Alias,
+			InCluster: settings.Kubernetes.InCluster,
 		})
 
 		// Update log forwarding
@@ -1872,6 +1900,39 @@ func (s *Server) handleTestFleetServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleTestKubernetes tests the Kubernetes API connection.
+// POST /api/v1/kubernetes/test
+func (s *Server) handleTestKubernetes(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL       string `json:"url"`
+		Token     string `json:"token"`
+		InCluster bool   `json:"in_cluster"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	cfg := collector.KubeConfig{Enabled: true, URL: req.URL, Token: req.Token, InCluster: req.InCluster}
+	result := collector.CollectKubernetes(cfg)
+	if result == nil || !result.Connected {
+		errMsg := "failed to connect"
+		if result != nil && result.Error != "" {
+			errMsg = result.Error
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": errMsg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":     true,
+		"version":     result.Version,
+		"platform":    result.Platform,
+		"nodes":       len(result.Nodes),
+		"pods":        len(result.Pods),
+		"namespaces":  len(result.Namespaces),
+		"deployments": len(result.Deployments),
+	})
 }
 
 // handleTestProxmox tests the Proxmox VE API connection.
