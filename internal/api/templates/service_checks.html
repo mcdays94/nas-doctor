@@ -15,17 +15,17 @@
 .summary-stat.down .stat-count{color:var(--red)}
 .summary-stat.total .stat-count{color:var(--accent)}
 /* Heartbeat badge cards — 4-col grid, 3 rows visible then scroll */
-.badges-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-height:calc(88px * 3 + 10px * 2);overflow-y:auto;scrollbar-width:thin;margin-bottom:20px;padding-bottom:4px}
+.badges-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-height:calc(92px * 3 + 10px * 2);overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;margin-bottom:20px;padding-bottom:4px;box-sizing:border-box}
 @media(max-width:1100px){.badges-row{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:800px){.badges-row{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:500px){.badges-row{grid-template-columns:1fr}}
-.badge-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 16px;cursor:pointer;transition:border-color 0.15s;min-height:68px}
+.badge-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;cursor:pointer;transition:border-color 0.15s;min-height:68px;min-width:0;overflow:hidden}
 .badge-card:hover,.badge-card.active{border-color:var(--accent)}
 .badge-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .badge-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .badge-dot.up{background:var(--green)}
 .badge-dot.down{background:var(--red)}
-.badge-name{font-weight:600;font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge-name{font-weight:600;font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .badge-pct{font-size:12px;font-weight:600}
 .badge-pct.good{color:var(--green)}.badge-pct.warn{color:var(--amber)}.badge-pct.bad{color:var(--red)}
 .badge-meta{font-size:11px;color:var(--text3);display:flex;gap:8px}
