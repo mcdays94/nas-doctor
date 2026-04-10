@@ -960,39 +960,72 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
           }
           h += '</div>';
         }
-        // Pods table
+        // Pods grouped by node
         if (k8s.pods && k8s.pods.length > 0) {
           var runningPods = k8s.pods.filter(function(p){ return p.status === 'Running'; });
           var completedPods = k8s.pods.filter(function(p){ return p.status === 'Succeeded'; });
           var problemPods = k8s.pods.filter(function(p){ return p.status !== 'Running' && p.status !== 'Succeeded'; });
-          var showPods = problemPods.length > 0 ? problemPods.concat(runningPods.slice(0, 10)) : runningPods.slice(0, 15);
           var countStr = runningPods.length + ' running';
           if (completedPods.length > 0) countStr += ', ' + completedPods.length + ' completed';
           if (problemPods.length > 0) countStr += ', <span style="color:var(--red)">' + problemPods.length + ' issues</span>';
-          h += '<div style="font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Pods (' + countStr + ')</div>';
-          h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden;max-height:300px;overflow-y:auto;scrollbar-width:thin">';
-          h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
-          h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;position:sticky;top:0;background:var(--bg-panel)">';
-          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Pod</th>';
-          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">NS</th>';
-          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Status</th>';
-          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Ready</th>';
-          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Restarts</th>';
-          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Age</th>';
-          h += '</tr>';
-          for (var pi = 0; pi < showPods.length; pi++) {
-            var kp = showPods[pi];
-            var podOk = kp.status === 'Running' || kp.status === 'Succeeded';
-            h += '<tr>';
-            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(kp.name) + '</td>';
-            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-tertiary)">' + esc(kp.namespace) + '</td>';
-            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);color:' + (podOk ? 'var(--green)' : 'var(--red)') + ';font-weight:600">' + esc(kp.status) + '</td>';
-            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px">' + esc(kp.ready) + '</td>';
-            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;' + (kp.restarts > 5 ? 'color:var(--amber)' : '') + '">' + kp.restarts + '</td>';
-            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-quaternary)">' + esc(kp.age || '') + '</td>';
-            h += '</tr>';
+          h += '<div style="font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Workloads (' + countStr + ')</div>';
+          // Problem pods banner
+          if (problemPods.length > 0) {
+            h += '<div style="background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.2);border-radius:calc(var(--radius)*1.5);padding:8px 12px;margin-bottom:8px">';
+            for (var pp = 0; pp < problemPods.length; pp++) {
+              var prb = problemPods[pp];
+              h += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px">';
+              h += '<span style="color:var(--red);font-weight:600">' + esc(prb.status) + '</span>';
+              h += '<span style="font-weight:500">' + esc(prb.name) + '</span>';
+              h += '<span style="color:var(--text-quaternary);font-size:11px">' + esc(prb.namespace) + '</span>';
+              if (prb.restarts > 0) h += '<span style="color:var(--amber);font-size:11px">' + prb.restarts + ' restarts</span>';
+              h += '</div>';
+            }
+            h += '</div>';
           }
-          h += '</table></div>';
+          // Group running pods by node
+          var podsByNode = {};
+          for (var pi = 0; pi < runningPods.length; pi++) {
+            var nd = runningPods[pi].node || 'unassigned';
+            if (!podsByNode[nd]) podsByNode[nd] = [];
+            podsByNode[nd].push(runningPods[pi]);
+          }
+          h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px">';
+          var nodeNames = Object.keys(podsByNode).sort();
+          for (var nni = 0; nni < nodeNames.length; nni++) {
+            var nodeName = nodeNames[nni];
+            var nodePods = podsByNode[nodeName];
+            // Find node info
+            var nodeInfo = null;
+            for (var fi = 0; fi < (k8s.nodes||[]).length; fi++) { if (k8s.nodes[fi].name === nodeName) { nodeInfo = k8s.nodes[fi]; break; } }
+            h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px">';
+            h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">';
+            h += '<span style="width:8px;height:8px;border-radius:50%;background:' + (nodeInfo && nodeInfo.status === 'Ready' ? 'var(--green)' : 'var(--text-quaternary)') + '"></span>';
+            h += '<span style="font-weight:600;font-size:13px">' + esc(nodeName) + '</span>';
+            h += '<span style="font-size:10px;color:var(--text-quaternary);margin-left:auto">' + nodePods.length + ' pods</span>';
+            if (nodeInfo && nodeInfo.roles) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">' + esc(nodeInfo.roles) + '</span>';
+            h += '</div>';
+            // Group pods by namespace within node
+            var nsPods = {};
+            for (var npi = 0; npi < nodePods.length; npi++) { var ns = nodePods[npi].namespace; if (!nsPods[ns]) nsPods[ns] = []; nsPods[ns].push(nodePods[npi]); }
+            var nsKeys = Object.keys(nsPods).sort();
+            for (var nsk = 0; nsk < nsKeys.length; nsk++) {
+              h += '<div style="margin-bottom:4px">';
+              h += '<div style="font-size:10px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px">' + esc(nsKeys[nsk]) + '</div>';
+              for (var npj = 0; npj < nsPods[nsKeys[nsk]].length; npj++) {
+                var pod = nsPods[nsKeys[nsk]][npj];
+                h += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px">';
+                h += '<span style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>';
+                h += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + esc(pod.name) + '</span>';
+                h += '<span style="color:var(--text-quaternary);font-size:10px">' + esc(pod.ready) + '</span>';
+                if (pod.restarts > 0) h += '<span style="color:var(--amber);font-size:10px">' + pod.restarts + 'r</span>';
+                h += '</div>';
+              }
+              h += '</div>';
+            }
+            h += '</div>';
+          }
+          h += '</div>';
         }
         // Deployments summary
         if (k8s.deployments && k8s.deployments.length > 0) {
