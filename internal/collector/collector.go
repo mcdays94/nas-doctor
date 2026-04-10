@@ -13,8 +13,14 @@ import (
 
 // Collector runs all diagnostic sub-collectors and assembles a Snapshot.
 type Collector struct {
-	hostPaths internal.HostPaths
-	logger    *slog.Logger
+	hostPaths     internal.HostPaths
+	logger        *slog.Logger
+	proxmoxConfig ProxmoxConfig
+}
+
+// SetProxmoxConfig updates the Proxmox VE API connection settings.
+func (c *Collector) SetProxmoxConfig(cfg ProxmoxConfig) {
+	c.proxmoxConfig = cfg
 }
 
 // New creates a new Collector with the given host path mappings.
@@ -125,6 +131,15 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 	tunnelInfo := collectTunnels(docker)
 	if tunnelInfo != nil {
 		snap.Tunnels = tunnelInfo
+	}
+
+	// Proxmox VE (if configured)
+	if c.proxmoxConfig.Enabled {
+		c.logger.Info("collecting Proxmox VE data")
+		pveInfo := CollectProxmox(c.proxmoxConfig)
+		if pveInfo != nil {
+			snap.Proxmox = pveInfo
+		}
 	}
 
 	// ZFS (if available)

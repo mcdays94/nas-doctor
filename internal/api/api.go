@@ -13,6 +13,8 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/mcdays94/nas-doctor/internal/collector"
+
 	"github.com/mcdays94/nas-doctor/internal"
 	"github.com/mcdays94/nas-doctor/internal/fleet"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
@@ -32,6 +34,7 @@ const (
 type Server struct {
 	store     *storage.DB
 	scheduler *scheduler.Scheduler
+	collector *collector.Collector
 	metrics   *notifier.Metrics
 	fleet     *fleet.Manager
 	logger    *slog.Logger
@@ -40,10 +43,11 @@ type Server struct {
 }
 
 // New creates a new API server.
-func New(store *storage.DB, sched *scheduler.Scheduler, metrics *notifier.Metrics, fleetMgr *fleet.Manager, logger *slog.Logger, version string) *Server {
+func New(store *storage.DB, sched *scheduler.Scheduler, coll *collector.Collector, metrics *notifier.Metrics, fleetMgr *fleet.Manager, logger *slog.Logger, version string) *Server {
 	return &Server{
 		store:     store,
 		scheduler: sched,
+		collector: coll,
 		metrics:   metrics,
 		fleet:     fleetMgr,
 		logger:    logger,
