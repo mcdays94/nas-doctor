@@ -377,6 +377,7 @@ type RemoteServerStatus struct {
 	LastPoll      string       `json:"last_poll"` // ISO timestamp
 	Hostname      string       `json:"hostname"`
 	Platform      string       `json:"platform"`
+	Version       string       `json:"version"` // NAS Doctor version
 	Uptime        string       `json:"uptime"`
 	OverallHealth string       `json:"overall_health"` // healthy, warning, critical
 	CriticalCount int          `json:"critical_count"`
