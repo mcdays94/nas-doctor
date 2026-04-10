@@ -844,9 +844,14 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     // ======= Section: Proxmox =======
     h += '<div class="section-block" data-section="proxmox">';
     var pve = sn ? sn.proxmox : null;
-    if (pve && pve.connected) {
+    if (pve) {
       h += '<div>';
       h += '<div class="section-title">Proxmox VE' + (pve.cluster_name ? ' &middot; ' + esc(pve.cluster_name) : '') + (pve.version ? ' <span style="font-size:11px;color:var(--text-quaternary);font-weight:400">v' + esc(pve.version) + '</span>' : '') + '</div>';
+      if (pve.error) {
+        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px;color:var(--red);font-size:12px">' + esc(pve.error) + '</div>';
+      } else if (!pve.connected) {
+        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px;color:var(--text-tertiary);font-size:12px">Not connected. Configure API credentials in Settings.</div>';
+      } else {
       // Node cards
       if (pve.nodes && pve.nodes.length > 0) {
         h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
@@ -920,6 +925,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         }
         h += '</div>';
       }
+      } // end else (connected, no error)
       h += '</div>';
     }
     h += '</div>'; // end section-block proxmox

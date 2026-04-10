@@ -76,16 +76,20 @@ func CollectProxmox(cfg ProxmoxConfig) *internal.ProxmoxInfo {
 		return nil
 	}
 	client := newProxmoxClient(cfg)
-	info := &internal.ProxmoxInfo{Connected: true}
+	info := &internal.ProxmoxInfo{Connected: false}
 
-	// Version
-	if data, err := client.get("/version"); err == nil {
-		var ver struct {
-			Version string `json:"version"`
-		}
-		json.Unmarshal(data, &ver)
-		info.Version = ver.Version
+	// Version — use as connectivity test
+	data, err := client.get("/version")
+	if err != nil {
+		info.Error = fmt.Sprintf("PVE API connection failed: %v", err)
+		return info
 	}
+	info.Connected = true
+	var ver struct {
+		Version string `json:"version"`
+	}
+	json.Unmarshal(data, &ver)
+	info.Version = ver.Version
 
 	// Cluster status
 	if data, err := client.get("/cluster/status"); err == nil {
