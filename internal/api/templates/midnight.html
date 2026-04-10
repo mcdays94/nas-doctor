@@ -967,10 +967,12 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
 
     // Footer
     h += '<div style="text-align:center;padding:' + 'calc(var(--sp)*4) 0;color:var(--text-quaternary);font-size:12px" class="fade-in">';
-    h += 'NAS Doctor &middot; Updates when new scan data is available';
+    var appVer = (st && st.version) ? st.version : '';
+    h += 'NAS Doctor' + (appVer ? ' <span style="font-family:var(--font-mono);opacity:0.6">' + esc(appVer) + '</span>' : '') + ' &middot; Updates when new scan data is available';
     h += '</div>';
 
     document.getElementById("app").innerHTML = h;
+    if (hostname && hostname !== "Unknown") document.title = "NAS Doctor — " + hostname;
 
     // Auto-distribute sections across two columns for balanced height
     distributeSections();

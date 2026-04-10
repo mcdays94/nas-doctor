@@ -1718,7 +1718,8 @@ td.mono {
 
     /* ---- Footer ---- */
     html += "<div class=\"section\">";
-    html += "<div class=\"footer\">NAS Doctor &middot; <span>Updates when new scan data is available</span></div>";
+    var appVer = (_cachedStatus && _cachedStatus.version) ? _cachedStatus.version : "";
+    html += "<div class=\"footer\">NAS Doctor" + (appVer ? " <span style=\"font-family:var(--font-mono);opacity:0.6\">" + esc(appVer) + "</span>" : "") + " &middot; <span>Updates when new scan data is available</span></div>";
     html += "</div>";
 
     return html;

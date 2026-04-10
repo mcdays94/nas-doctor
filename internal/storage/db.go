@@ -1157,13 +1157,11 @@ func (d *DB) PruneServiceCheckHistory(olderThan time.Duration) (int, error) {
 
 // DeleteServiceCheckByKey removes all history for a specific service check key.
 func (d *DB) DeleteServiceCheckByKey(key string) (int, error) {
-	result, err := d.db.Exec("DELETE FROM service_checks_history WHERE key = ?", key)
+	result, err := d.db.Exec("DELETE FROM service_checks_history WHERE check_key = ?", key)
 	if err != nil {
 		return 0, err
 	}
 	n, _ := result.RowsAffected()
-	// Also remove from latest state
-	d.db.Exec("DELETE FROM service_checks_latest WHERE key = ?", key)
 	return int(n), nil
 }
 
