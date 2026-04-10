@@ -141,11 +141,13 @@ func (s *Server) Router() http.Handler {
 // ---------- Handlers ----------
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-NAS-Doctor", "true")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":  "ok",
-		"version": s.version,
-		"uptime":  time.Since(s.startTime).String(),
-		"themes":  []string{ThemeMidnight, ThemeClean, ThemeEmber},
+		"status":     "ok",
+		"nas_doctor": true,
+		"version":    s.version,
+		"uptime":     time.Since(s.startTime).String(),
+		"themes":     []string{ThemeMidnight, ThemeClean, ThemeEmber},
 	})
 }
 

@@ -1815,12 +1815,27 @@ func (s *Server) handleTestFleetServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": fmt.Sprintf("HTTP %d from %s", resp.StatusCode, healthURL)})
 		return
 	}
+	// Verify this is actually a NAS Doctor instance (not a proxy login page)
 	var health struct {
 		Status  string `json:"status"`
+		NasDoc  bool   `json:"nas_doctor"`
 		Version string `json:"version"`
 		Uptime  string `json:"uptime"`
 	}
-	json.NewDecoder(resp.Body).Decode(&health)
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "Response is not valid JSON — likely a proxy login page (Cloudflare Access?). Add the required auth headers."})
+		return
+	}
+	// Check for NAS Doctor signature (header or JSON field)
+	hasHeader := resp.Header.Get("X-NAS-Doctor") == "true"
+	if !health.NasDoc && !hasHeader {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "Response does not contain NAS Doctor signature — this may be a proxy login page. Check your auth headers."})
+		return
+	}
+	if health.Status != "ok" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "NAS Doctor responded but status is not 'ok': " + health.Status})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"status":  health.Status,
