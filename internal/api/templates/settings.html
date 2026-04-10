@@ -519,7 +519,36 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     </div>
   </div>
 
-  <!-- 5. Log Forwarding -->
+  <!-- 5. Kubernetes Cluster -->
+  <div class="card" id="card-kubernetes">
+    <div class="card-title">Kubernetes</div>
+    <div class="card-desc">Connect to a Kubernetes cluster (k8s, k3s, EKS, GKE, AKS) to monitor nodes, pods, deployments, services, and PVCs.</div>
+    <div class="toggle-wrap" style="margin-bottom:16px">
+      <div class="toggle" id="k8s-toggle" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
+      <span class="toggle-label">Enable Kubernetes Integration</span>
+    </div>
+    <div class="form-row">
+      <div><label for="k8s-url">K8s API URL</label>
+        <input type="text" id="k8s-url" placeholder="https://192.168.1.10:6443">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Leave empty for in-cluster auto-detection (when deployed inside K8s).</p></div>
+      <div><label for="k8s-alias">Display Name (optional)</label>
+        <input type="text" id="k8s-alias" placeholder="e.g. Production Cluster"></div>
+    </div>
+    <div class="form-row">
+      <div><label for="k8s-token">Bearer Token</label>
+        <input type="password" id="k8s-token" placeholder="eyJhbGciOi...">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Service account token. For k3s: <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">cat /var/lib/rancher/k3s/server/token</code></p></div>
+      <div style="display:flex;align-items:flex-end;padding-bottom:4px">
+        <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="k8s-incluster"> In-cluster auto-detect</label>
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
+      <button class="btn btn-secondary btn-sm" onclick="testKubernetesConnection()">Test Connection</button>
+      <span id="k8s-test-result" style="font-size:12px"></span>
+    </div>
+  </div>
+
+  <!-- 6. Log Forwarding -->
   <div class="card" id="card-logfwd">
     <div class="card-title">Log Forwarding</div>
     <div class="card-desc">Forward scan results to Loki, syslog, or any HTTP JSON endpoint after each diagnostic scan.</div>
@@ -650,6 +679,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div class="toggle-wrap"><div class="toggle on" id="sec-network" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Network</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-tunnels" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Tunnels (Cloudflared / Tailscale)</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-proxmox" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Proxmox VE</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-kubernetes" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Kubernetes</span></div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div class="toggle-wrap"><div class="toggle on" id="sec-merged-drives" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Drive View <span style="font-size:11px;color:var(--text2)">(combine SMART + storage into one card per drive)</span></span></div>
       </div>
@@ -932,8 +962,8 @@ function loadSettings() {
       renderServiceChecks();
       /* Dashboard section toggles */
       var sec = data.sections || {};
-      var secMap = {findings:1,disk_space:1,smart:1,docker:1,zfs:1,ups:1,parity:1,network:1,tunnels:1,proxmox:1,merged_drives:1};
-      var secIds = {"findings":"sec-findings","disk_space":"sec-disk","smart":"sec-smart","docker":"sec-docker","zfs":"sec-zfs","ups":"sec-ups","parity":"sec-parity","network":"sec-network","tunnels":"sec-tunnels","proxmox":"sec-proxmox","merged_drives":"sec-merged-drives"};
+      var secMap = {findings:1,disk_space:1,smart:1,docker:1,zfs:1,ups:1,parity:1,network:1,tunnels:1,proxmox:1,kubernetes:1,merged_drives:1};
+      var secIds = {"findings":"sec-findings","disk_space":"sec-disk","smart":"sec-smart","docker":"sec-docker","zfs":"sec-zfs","ups":"sec-ups","parity":"sec-parity","network":"sec-network","tunnels":"sec-tunnels","proxmox":"sec-proxmox","kubernetes":"sec-kubernetes","merged_drives":"sec-merged-drives"};
       for (var sk in secIds) { var el = document.getElementById(secIds[sk]); if (el) { if (sec[sk] === false) el.classList.remove("on"); else el.classList.add("on"); } }
       /* Proxmox VE */
       var pve = data.proxmox || {};
@@ -950,6 +980,13 @@ function loadSettings() {
         if (!found) nodeSel.innerHTML += '<option value="' + pve.node_name + '">' + pve.node_name + '</option>';
         nodeSel.value = pve.node_name;
       }
+      /* Kubernetes */
+      var k8s = data.kubernetes || {};
+      if (k8s.enabled) document.getElementById("k8s-toggle").classList.add("on"); else document.getElementById("k8s-toggle").classList.remove("on");
+      document.getElementById("k8s-url").value = k8s.url || "";
+      document.getElementById("k8s-token").value = k8s.token || "";
+      document.getElementById("k8s-alias").value = k8s.alias || "";
+      document.getElementById("k8s-incluster").checked = !!k8s.in_cluster;
       /* Log forwarding */
       var lp = data.log_push || {};
       if (lp.enabled) document.getElementById("logfwd-toggle").classList.add("on"); else document.getElementById("logfwd-toggle").classList.remove("on");
@@ -1002,6 +1039,7 @@ function buildSettingsPayload() {
       network: document.getElementById("sec-network").classList.contains("on"),
       tunnels: document.getElementById("sec-tunnels").classList.contains("on"),
       proxmox: document.getElementById("sec-proxmox").classList.contains("on"),
+      kubernetes: document.getElementById("sec-kubernetes").classList.contains("on"),
       merged_drives: document.getElementById("sec-merged-drives").classList.contains("on")
     },
     proxmox: {
@@ -1011,6 +1049,13 @@ function buildSettingsPayload() {
       node_name: document.getElementById("pve-node").value,
       token_id: document.getElementById("pve-token").value.trim(),
       secret: document.getElementById("pve-secret").value.trim()
+    },
+    kubernetes: {
+      enabled: document.getElementById("k8s-toggle").classList.contains("on"),
+      url: document.getElementById("k8s-url").value.trim(),
+      token: document.getElementById("k8s-token").value.trim(),
+      alias: document.getElementById("k8s-alias").value.trim(),
+      in_cluster: document.getElementById("k8s-incluster").checked
     },
     backup: {
       enabled: document.getElementById("backup-toggle").classList.contains("on"),
@@ -2177,6 +2222,18 @@ function addPreset(preset) {
 }
 
 // Load snapshot for target dropdowns
+function testKubernetesConnection() {
+  var result = document.getElementById("k8s-test-result");
+  result.textContent = "Testing..."; result.style.color = "var(--text2)";
+  fetch("/api/v1/kubernetes/test", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ url: document.getElementById("k8s-url").value.trim(), token: document.getElementById("k8s-token").value.trim(), in_cluster: document.getElementById("k8s-incluster").checked })
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d.success){result.style.color="var(--green)";result.textContent="Connected — "+d.platform+" "+d.version+" · "+d.nodes+" nodes, "+d.pods+" pods, "+d.namespaces+" ns, "+d.deployments+" deployments";}
+    else{result.style.color="var(--red)";result.textContent="Failed: "+(d.error||"unknown");}
+  }).catch(function(e){result.style.color="var(--red)";result.textContent="Error: "+e.message;});
+}
+
 function testProxmoxConnection() {
   var result = document.getElementById("pve-test-result");
   result.textContent = "Testing...";

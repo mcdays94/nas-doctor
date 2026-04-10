@@ -931,6 +931,94 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     }
     h += '</div>'; // end section-block proxmox
 
+    // ======= Section: Kubernetes =======
+    h += '<div class="section-block" data-section="kubernetes">';
+    var k8s = sn ? sn.kubernetes : null;
+    if (k8s) {
+      h += '<div>';
+      var k8sTitle = k8s.alias ? esc(k8s.alias) : 'Kubernetes';
+      h += '<div class="section-title">' + k8sTitle + (k8s.platform ? ' <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.12);color:var(--accent)">' + esc(k8s.platform) + '</span>' : '') + (k8s.version ? ' <span style="font-size:11px;color:var(--text-quaternary);font-weight:400">' + esc(k8s.version) + '</span>' : '') + '</div>';
+      if (k8s.error) {
+        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px;color:var(--red);font-size:12px">' + esc(k8s.error) + '</div>';
+      } else if (k8s.connected) {
+        // Nodes
+        if (k8s.nodes && k8s.nodes.length > 0) {
+          h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+          for (var ki = 0; ki < k8s.nodes.length; ki++) {
+            var kn = k8s.nodes[ki];
+            var knReady = kn.status === 'Ready';
+            var knMemPct = kn.mem_total > 0 ? (kn.mem_usage / kn.mem_total * 100) : 0;
+            h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 14px;flex:1;min-width:200px">';
+            h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">';
+            h += '<span style="width:8px;height:8px;border-radius:50%;background:' + (knReady ? 'var(--green)' : 'var(--red)') + '"></span>';
+            h += '<span style="font-weight:600;font-size:13px">' + esc(kn.name) + '</span>';
+            if (kn.roles) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">' + esc(kn.roles) + '</span>';
+            h += '</div>';
+            h += '<div style="font-size:11px;color:var(--text-tertiary)">' + kn.cpu_cores + ' cores &middot; ' + (kn.mem_total > 0 ? (kn.mem_total/1073741824).toFixed(0) + ' GB' : '?') + ' &middot; ' + kn.pod_count + '/' + kn.pod_capacity + ' pods</div>';
+            if (kn.conditions && kn.conditions.length > 0) h += '<div style="font-size:10px;color:var(--amber);margin-top:4px">' + esc(kn.conditions.join(', ')) + '</div>';
+            h += '</div>';
+          }
+          h += '</div>';
+        }
+        // Pods table
+        if (k8s.pods && k8s.pods.length > 0) {
+          var problemPods = k8s.pods.filter(function(p){ return p.status !== 'Running' && p.status !== 'Succeeded'; });
+          var showPods = problemPods.length > 0 ? problemPods : k8s.pods.slice(0, 10);
+          h += '<div style="font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Pods (' + k8s.pods.length + ')' + (problemPods.length > 0 ? ' &middot; <span style="color:var(--red)">' + problemPods.length + ' issues</span>' : '') + '</div>';
+          h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden;max-height:300px;overflow-y:auto;scrollbar-width:thin">';
+          h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+          h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;position:sticky;top:0;background:var(--bg-panel)">';
+          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Pod</th>';
+          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">NS</th>';
+          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Status</th>';
+          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Ready</th>';
+          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Restarts</th>';
+          h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Age</th>';
+          h += '</tr>';
+          for (var pi = 0; pi < showPods.length; pi++) {
+            var kp = showPods[pi];
+            var podOk = kp.status === 'Running' || kp.status === 'Succeeded';
+            h += '<tr>';
+            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(kp.name) + '</td>';
+            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-tertiary)">' + esc(kp.namespace) + '</td>';
+            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);color:' + (podOk ? 'var(--green)' : 'var(--red)') + ';font-weight:600">' + esc(kp.status) + '</td>';
+            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px">' + esc(kp.ready) + '</td>';
+            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;' + (kp.restarts > 5 ? 'color:var(--amber)' : '') + '">' + kp.restarts + '</td>';
+            h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-quaternary)">' + esc(kp.age || '') + '</td>';
+            h += '</tr>';
+          }
+          h += '</table></div>';
+        }
+        // Deployments summary
+        if (k8s.deployments && k8s.deployments.length > 0) {
+          var unhealthy = k8s.deployments.filter(function(d){ return d.unavailable > 0; });
+          if (unhealthy.length > 0) {
+            h += '<div style="font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px">Unhealthy Deployments (' + unhealthy.length + ')</div>';
+            for (var di = 0; di < unhealthy.length; di++) {
+              var dep = unhealthy[di];
+              h += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span style="color:var(--red);font-weight:600">' + esc(dep.name) + '</span><span style="color:var(--text-tertiary)">' + dep.ready_replicas + '/' + dep.replicas + ' ready</span><span style="font-size:11px;color:var(--text-quaternary)">' + esc(dep.namespace) + '</span></div>';
+            }
+          }
+        }
+        // Warning events
+        if (k8s.events && k8s.events.length > 0) {
+          h += '<div style="font-size:11px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px">Recent Warnings (' + k8s.events.length + ')</div>';
+          h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:8px;max-height:150px;overflow-y:auto;scrollbar-width:thin">';
+          for (var ei = 0; ei < Math.min(k8s.events.length, 10); ei++) {
+            var ev = k8s.events[ei];
+            h += '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border)">';
+            h += '<span style="color:var(--amber);font-weight:600">' + esc(ev.reason) + '</span>';
+            h += ' <span style="color:var(--text-quaternary)">' + esc(ev.object) + '</span>';
+            h += ' <span style="color:var(--text-tertiary)">' + esc(ev.message).substring(0, 80) + '</span>';
+            h += '</div>';
+          }
+          h += '</div>';
+        }
+      }
+      h += '</div>';
+    }
+    h += '</div>'; // end section-block kubernetes
+
     // ======= Section: Parity =======
     h += '<div class="section-block" data-section="parity">';
     var parity = sn ? sn.parity : null;
@@ -1033,6 +1121,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       "network": sec.network !== false,
       "tunnels": sec.tunnels !== false,
       "proxmox": sec.proxmox !== false,
+      "kubernetes": sec.kubernetes !== false,
       "parity": sec.parity !== false
     };
 

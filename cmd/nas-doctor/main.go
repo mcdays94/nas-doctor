@@ -244,6 +244,16 @@ func main() {
 			})
 			logger.Info("proxmox integration loaded", "url", persistedSettings.Proxmox.URL)
 		}
+		if persistedSettings != nil && persistedSettings.Kubernetes.Enabled {
+			coll.SetKubeConfig(collector.KubeConfig{
+				Enabled:   true,
+				URL:       persistedSettings.Kubernetes.URL,
+				Token:     persistedSettings.Kubernetes.Token,
+				Alias:     persistedSettings.Kubernetes.Alias,
+				InCluster: persistedSettings.Kubernetes.InCluster,
+			})
+			logger.Info("kubernetes integration loaded", "url", persistedSettings.Kubernetes.URL, "in_cluster", persistedSettings.Kubernetes.InCluster)
+		}
 		sched.Start()
 		defer sched.Stop()
 	}
