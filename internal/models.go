@@ -59,6 +59,7 @@ type Snapshot struct {
 type ProxmoxInfo struct {
 	Connected   bool             `json:"connected"`
 	Error       string           `json:"error,omitempty"`
+	Alias       string           `json:"alias,omitempty"` // user-defined display name
 	Version     string           `json:"version,omitempty"`
 	ClusterName string           `json:"cluster_name,omitempty"`
 	Nodes       []ProxmoxNode    `json:"nodes,omitempty"`

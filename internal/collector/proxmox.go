@@ -19,6 +19,7 @@ type ProxmoxConfig struct {
 	TokenID  string // e.g. root@pam!nas-doctor
 	Secret   string // the UUID token secret
 	NodeName string // optional: limit to a specific node (empty = all)
+	Alias    string // optional: friendly display name
 	Enabled  bool
 }
 

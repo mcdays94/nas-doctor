@@ -96,7 +96,8 @@ type SettingsProxmox struct {
 	URL      string `json:"url"`       // e.g. https://192.168.1.10:8006
 	TokenID  string `json:"token_id"`  // e.g. root@pam!nas-doctor
 	Secret   string `json:"secret"`    // API token UUID secret
-	NodeName string `json:"node_name"` // optional: limit to specific node
+	NodeName string `json:"node_name"` // optional: real PVE node name to filter (auto-detected)
+	Alias    string `json:"alias"`     // optional: friendly display name
 }
 
 // SettingsLogForward holds the log-forwarding configuration within settings.
@@ -543,6 +544,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			TokenID:  settings.Proxmox.TokenID,
 			Secret:   settings.Proxmox.Secret,
 			NodeName: settings.Proxmox.NodeName,
+			Alias:    settings.Proxmox.Alias,
 		})
 
 		// Update log forwarding
@@ -1787,13 +1789,18 @@ func (s *Server) handleTestProxmox(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "failed to connect"})
 		return
 	}
+	nodeNames := make([]string, 0, len(result.Nodes))
+	for _, n := range result.Nodes {
+		nodeNames = append(nodeNames, n.Name)
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"version": result.Version,
-		"cluster": result.ClusterName,
-		"nodes":   len(result.Nodes),
-		"guests":  len(result.Guests),
-		"storage": len(result.Storage),
+		"success":    true,
+		"version":    result.Version,
+		"cluster":    result.ClusterName,
+		"nodes":      len(result.Nodes),
+		"node_names": nodeNames,
+		"guests":     len(result.Guests),
+		"storage":    len(result.Storage),
 	})
 }
 
