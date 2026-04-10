@@ -117,6 +117,7 @@ body.theme-ember code { font-family:var(--font-mono) }
   font-size:20px; font-weight:600; letter-spacing:-0.5px; color:var(--text);
 }
 .logo img { width:24px; height:24px; border-radius:4px }
+.logo-slogan { font-size:11px; font-style:italic; font-weight:400; color:var(--text3,#888); margin-left:4px; white-space:nowrap }
 .page-title { font-size:20px; font-weight:600; color:var(--text2) }
 .header-sub { font-size:13px; color:var(--text2) }
 
