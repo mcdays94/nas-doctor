@@ -45,6 +45,10 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 		findings = append(findings, analyzeProxmox(snap.Proxmox)...)
 	}
 
+	if snap.Kubernetes != nil && snap.Kubernetes.Connected {
+		findings = append(findings, analyzeKubernetes(snap.Kubernetes)...)
+	}
+
 	// Cross-correlation: combine related findings
 	findings = correlate(findings, snap)
 

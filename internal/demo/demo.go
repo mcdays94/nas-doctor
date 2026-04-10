@@ -31,8 +31,59 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.Services = demoServiceChecks()
 	snap.Tunnels = demoTunnels()
 	snap.Proxmox = demoProxmox()
+	snap.Kubernetes = demoKubernetes()
 
 	return snap
+}
+
+func demoKubernetes() *internal.KubeInfo {
+	return &internal.KubeInfo{
+		Connected: true, Version: "v1.31.4+k3s1", Platform: "k3s", Alias: "Homelab K3s",
+		Nodes: []internal.KubeNode{
+			{Name: "k3s-master", Status: "Ready", Roles: "control-plane,master", Version: "v1.31.4+k3s1", OS: "linux", Arch: "amd64", ContainerRuntime: "containerd://1.7.23-k3s2", InternalIP: "192.168.1.20", CPUCores: 4, MemTotal: 8589934592, PodCount: 18, PodCapacity: 110, Age: "120d"},
+			{Name: "k3s-worker1", Status: "Ready", Roles: "worker", Version: "v1.31.4+k3s1", OS: "linux", Arch: "amd64", ContainerRuntime: "containerd://1.7.23-k3s2", InternalIP: "192.168.1.21", CPUCores: 8, MemTotal: 17179869184, PodCount: 25, PodCapacity: 110, Age: "90d"},
+			{Name: "k3s-worker2", Status: "Ready", Roles: "worker", Version: "v1.31.4+k3s1", OS: "linux", Arch: "arm64", ContainerRuntime: "containerd://1.7.23-k3s2", InternalIP: "192.168.1.22", CPUCores: 4, MemTotal: 4294967296, PodCount: 12, PodCapacity: 110, Age: "60d"},
+		},
+		Namespaces: []internal.KubeNamespace{
+			{Name: "default", Status: "Active", PodCount: 2, Age: "120d"},
+			{Name: "kube-system", Status: "Active", PodCount: 8, Age: "120d"},
+			{Name: "monitoring", Status: "Active", PodCount: 5, Age: "90d"},
+			{Name: "media", Status: "Active", PodCount: 6, Age: "60d"},
+			{Name: "home", Status: "Active", PodCount: 4, Age: "45d"},
+		},
+		Pods: []internal.KubePod{
+			{Name: "jellyfin-0", Namespace: "media", Node: "k3s-worker1", Status: "Running", Phase: "Running", Ready: "1/1", Restarts: 0, Age: "30d", IP: "10.42.1.15"},
+			{Name: "sonarr-0", Namespace: "media", Node: "k3s-worker1", Status: "Running", Phase: "Running", Ready: "1/1", Restarts: 2, Age: "30d", IP: "10.42.1.16"},
+			{Name: "radarr-0", Namespace: "media", Node: "k3s-worker1", Status: "Running", Phase: "Running", Ready: "1/1", Restarts: 0, Age: "30d", IP: "10.42.1.17"},
+			{Name: "home-assistant-0", Namespace: "home", Node: "k3s-worker2", Status: "Running", Phase: "Running", Ready: "1/1", Restarts: 1, Age: "45d", IP: "10.42.2.10"},
+			{Name: "grafana-6f8b9c7d4-xk2m1", Namespace: "monitoring", Node: "k3s-master", Status: "Running", Phase: "Running", Ready: "1/1", Restarts: 0, Age: "15d", IP: "10.42.0.20"},
+			{Name: "prometheus-0", Namespace: "monitoring", Node: "k3s-master", Status: "Running", Phase: "Running", Ready: "2/2", Restarts: 0, Age: "90d", IP: "10.42.0.21"},
+			{Name: "vaultwarden-0", Namespace: "home", Node: "k3s-worker2", Status: "Running", Phase: "Running", Ready: "1/1", Restarts: 0, Age: "60d", IP: "10.42.2.11"},
+			{Name: "broken-app-7b9f4c-abc12", Namespace: "default", Node: "k3s-worker1", Status: "CrashLoopBackOff", Phase: "Running", Ready: "0/1", Restarts: 47, Age: "2d", IP: "10.42.1.99",
+				Containers: []internal.KubeContainer{{Name: "app", Image: "broken-app:latest", Ready: false, RestartCount: 47, State: "waiting", Reason: "CrashLoopBackOff", LastTermMsg: "OOMKilled: memory limit exceeded"}}},
+			{Name: "pending-job-xyz", Namespace: "default", Node: "", Status: "Pending", Phase: "Pending", Ready: "0/1", Restarts: 0, Age: "1d"},
+		},
+		Deployments: []internal.KubeDeployment{
+			{Name: "jellyfin", Namespace: "media", Replicas: 1, ReadyReplicas: 1, Available: 1, Age: "30d", Strategy: "Recreate"},
+			{Name: "grafana", Namespace: "monitoring", Replicas: 1, ReadyReplicas: 1, Available: 1, Age: "15d", Strategy: "RollingUpdate"},
+			{Name: "broken-app", Namespace: "default", Replicas: 1, ReadyReplicas: 0, Available: 0, Unavailable: 1, Age: "2d", Strategy: "RollingUpdate"},
+		},
+		Services: []internal.KubeService{
+			{Name: "jellyfin", Namespace: "media", Type: "LoadBalancer", ClusterIP: "10.43.100.10", ExternalIP: "192.168.1.200", Ports: []string{"8096/TCP"}},
+			{Name: "home-assistant", Namespace: "home", Type: "LoadBalancer", ClusterIP: "10.43.100.20", ExternalIP: "192.168.1.201", Ports: []string{"8123/TCP"}},
+			{Name: "grafana", Namespace: "monitoring", Type: "ClusterIP", ClusterIP: "10.43.100.30", Ports: []string{"3000/TCP"}},
+		},
+		PVCs: []internal.KubePVC{
+			{Name: "jellyfin-config", Namespace: "media", Status: "Bound", StorageClass: "local-path", Capacity: "10Gi", AccessModes: "ReadWriteOnce", Age: "30d"},
+			{Name: "prometheus-data", Namespace: "monitoring", Status: "Bound", StorageClass: "local-path", Capacity: "50Gi", AccessModes: "ReadWriteOnce", Age: "90d"},
+			{Name: "pending-pvc", Namespace: "default", Status: "Pending", StorageClass: "nfs", Capacity: "", AccessModes: "ReadWriteMany", Age: "1d"},
+		},
+		Events: []internal.KubeEvent{
+			{Type: "Warning", Reason: "BackOff", Message: "Back-off restarting failed container app in pod broken-app-7b9f4c-abc12", Object: "Pod/broken-app-7b9f4c-abc12", Namespace: "default", Count: 47, LastSeen: time.Now().Add(-5 * time.Minute).Format(time.RFC3339)},
+			{Type: "Warning", Reason: "FailedScheduling", Message: "0/3 nodes are available: insufficient memory", Object: "Pod/pending-job-xyz", Namespace: "default", Count: 12, LastSeen: time.Now().Add(-30 * time.Minute).Format(time.RFC3339)},
+			{Type: "Warning", Reason: "ProvisioningFailed", Message: "failed to provision volume: nfs server not reachable", Object: "PersistentVolumeClaim/pending-pvc", Namespace: "default", Count: 5, LastSeen: time.Now().Add(-45 * time.Minute).Format(time.RFC3339)},
+		},
+	}
 }
 
 func demoProxmox() *internal.ProxmoxInfo {
