@@ -30,8 +30,46 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.Update = demoUpdate(snap.System.Platform, snap.System.PlatformVer)
 	snap.Services = demoServiceChecks()
 	snap.Tunnels = demoTunnels()
+	snap.Proxmox = demoProxmox()
 
 	return snap
+}
+
+func demoProxmox() *internal.ProxmoxInfo {
+	return &internal.ProxmoxInfo{
+		Connected:   true,
+		Version:     "8.3.2",
+		ClusterName: "homelab",
+		Nodes: []internal.ProxmoxNode{
+			{Name: "pve-01", Status: "online", Uptime: 7776000, CPUUsage: 0.23, CPUCores: 16, MemUsed: 27917287424, MemTotal: 68719476736, DiskUsed: 42949672960, DiskTotal: 214748364800, PVEVersion: "pve-manager/8.3.2", KernelVer: "6.8.12-6-pve", CPUModel: "AMD EPYC 7543P"},
+			{Name: "pve-02", Status: "online", Uptime: 5184000, CPUUsage: 0.14, CPUCores: 8, MemUsed: 12884901888, MemTotal: 34359738368, DiskUsed: 21474836480, DiskTotal: 107374182400, PVEVersion: "pve-manager/8.3.2", KernelVer: "6.8.12-6-pve", CPUModel: "Intel Core i5-13500"},
+		},
+		Guests: []internal.ProxmoxGuest{
+			{VMID: 100, Name: "ubuntu-docker", Node: "pve-01", Type: "qemu", Status: "running", Uptime: 2592000, CPUUsage: 0.12, CPUs: 4, MemUsed: 4294967296, MemMax: 8589934592, DiskUsed: 42949672960, DiskMax: 107374182400, NetIn: 154618822656, NetOut: 98784247808, Tags: "docker,production"},
+			{VMID: 101, Name: "home-assistant", Node: "pve-01", Type: "qemu", Status: "running", Uptime: 2592000, CPUUsage: 0.05, CPUs: 2, MemUsed: 1073741824, MemMax: 4294967296, DiskUsed: 10737418240, DiskMax: 32212254720, NetIn: 5368709120, NetOut: 2147483648, Tags: "automation"},
+			{VMID: 102, Name: "windows-11", Node: "pve-01", Type: "qemu", Status: "stopped", CPUs: 4, MemMax: 17179869184, DiskMax: 214748364800, Tags: "desktop"},
+			{VMID: 200, Name: "pihole", Node: "pve-01", Type: "lxc", Status: "running", Uptime: 7776000, CPUUsage: 0.01, CPUs: 1, MemUsed: 134217728, MemMax: 536870912, DiskUsed: 1073741824, DiskMax: 8589934592, NetIn: 87241523200, NetOut: 85899345920, Tags: "dns,network"},
+			{VMID: 201, Name: "nginx-proxy", Node: "pve-01", Type: "lxc", Status: "running", Uptime: 7776000, CPUUsage: 0.02, CPUs: 1, MemUsed: 268435456, MemMax: 1073741824, DiskUsed: 2147483648, DiskMax: 8589934592, NetIn: 214748364800, NetOut: 193273528320, Tags: "proxy,web"},
+			{VMID: 300, Name: "media-server", Node: "pve-02", Type: "qemu", Status: "running", Uptime: 5184000, CPUUsage: 0.35, CPUs: 4, MemUsed: 6442450944, MemMax: 8589934592, DiskUsed: 53687091200, DiskMax: 107374182400, NetIn: 1099511627776, NetOut: 549755813888, Tags: "media"},
+			{VMID: 301, Name: "backup-vm", Node: "pve-02", Type: "qemu", Status: "running", Uptime: 5184000, CPUUsage: 0.08, CPUs: 2, MemUsed: 2147483648, MemMax: 4294967296, DiskUsed: 85899345920, DiskMax: 214748364800, NetIn: 21474836480, NetOut: 10737418240, Tags: "backup"},
+		},
+		Storage: []internal.ProxmoxStorage{
+			{Storage: "local", Node: "pve-01", Type: "dir", Status: "available", Used: 42949672960, Total: 214748364800, UsedPct: 20.0, Content: "vztmpl,iso,backup"},
+			{Storage: "local-lvm", Node: "pve-01", Type: "lvmthin", Status: "available", Used: 171798691840, Total: 429496729600, UsedPct: 40.0, Content: "images,rootdir"},
+			{Storage: "nfs-backup", Node: "pve-01", Type: "nfs", Status: "available", Used: 2147483648000, Total: 8589934592000, UsedPct: 25.0, Shared: true, Content: "backup,images"},
+			{Storage: "local", Node: "pve-02", Type: "dir", Status: "available", Used: 21474836480, Total: 107374182400, UsedPct: 20.0, Content: "vztmpl,iso,backup"},
+			{Storage: "local-lvm", Node: "pve-02", Type: "lvmthin", Status: "available", Used: 107374182400, Total: 214748364800, UsedPct: 50.0, Content: "images,rootdir"},
+		},
+		Tasks: []internal.ProxmoxTask{
+			{Node: "pve-01", Type: "vzdump", Status: "OK", User: "root@pam", StartTime: time.Now().Add(-6 * time.Hour).Unix(), EndTime: time.Now().Add(-5*time.Hour - 45*time.Minute).Unix(), VMID: 100},
+			{Node: "pve-01", Type: "vzdump", Status: "OK", User: "root@pam", StartTime: time.Now().Add(-6 * time.Hour).Unix(), EndTime: time.Now().Add(-5*time.Hour - 50*time.Minute).Unix(), VMID: 101},
+			{Node: "pve-02", Type: "vzdump", Status: "OK", User: "root@pam", StartTime: time.Now().Add(-6 * time.Hour).Unix(), EndTime: time.Now().Add(-5*time.Hour - 30*time.Minute).Unix(), VMID: 300},
+		},
+		HAServices: []internal.ProxmoxHA{
+			{SID: "vm:100", State: "started", Node: "pve-01", Status: "OK"},
+			{SID: "vm:101", State: "started", Node: "pve-01", Status: "OK"},
+		},
+	}
 }
 
 func demoTunnels() *internal.TunnelInfo {

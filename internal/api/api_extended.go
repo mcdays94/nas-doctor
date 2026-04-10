@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 
 	"github.com/mcdays94/nas-doctor/internal"
+	"github.com/mcdays94/nas-doctor/internal/collector"
 	"github.com/mcdays94/nas-doctor/internal/logfwd"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/scheduler"
@@ -35,6 +36,7 @@ type Settings struct {
 	Retention         RetentionSettings       `json:"retention"`
 	Backup            BackupSettings          `json:"backup"`
 	Sections          DashboardSections       `json:"sections"`
+	Proxmox           SettingsProxmox         `json:"proxmox"`
 	Fleet             []internal.RemoteServer `json:"fleet,omitempty"`
 	DismissedFindings []string                `json:"dismissed_findings,omitempty"`
 }
@@ -53,6 +55,7 @@ type DashboardSections struct {
 	Parity       bool `json:"parity"`
 	Network      bool `json:"network"`
 	Tunnels      bool `json:"tunnels"`
+	Proxmox      bool `json:"proxmox"`
 	MergedDrives bool `json:"merged_drives"` // Combine SMART + storage into one card per drive
 }
 
@@ -85,6 +88,15 @@ type SettingsNotifications struct {
 // SettingsServiceChecks holds configured service checks.
 type SettingsServiceChecks struct {
 	Checks []internal.ServiceCheckConfig `json:"checks"`
+}
+
+// SettingsProxmox holds the Proxmox VE API connection settings.
+type SettingsProxmox struct {
+	Enabled  bool   `json:"enabled"`
+	URL      string `json:"url"`       // e.g. https://192.168.1.10:8006
+	TokenID  string `json:"token_id"`  // e.g. root@pam!nas-doctor
+	Secret   string `json:"secret"`    // API token UUID secret
+	NodeName string `json:"node_name"` // optional: limit to specific node
 }
 
 // SettingsLogForward holds the log-forwarding configuration within settings.
@@ -519,6 +531,15 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			DefaultCooldownSec: settings.Notifications.DefaultCooldownSec,
 		})
 		s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
+
+		// Update Proxmox config on the collector
+		s.collector.SetProxmoxConfig(collector.ProxmoxConfig{
+			Enabled:  settings.Proxmox.Enabled,
+			URL:      settings.Proxmox.URL,
+			TokenID:  settings.Proxmox.TokenID,
+			Secret:   settings.Proxmox.Secret,
+			NodeName: settings.Proxmox.NodeName,
+		})
 
 		// Update log forwarding
 		if settings.LogPush.Enabled && len(settings.LogPush.Destinations) > 0 {

@@ -128,6 +128,10 @@ func (m *Manager) pollServer(srv internal.RemoteServer) *internal.RemoteServerSt
 	if srv.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+srv.APIKey)
 	}
+	// Inject custom headers (e.g. Cloudflare Access service tokens)
+	for k, v := range srv.Headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := m.client.Do(req)
 	if err != nil {
