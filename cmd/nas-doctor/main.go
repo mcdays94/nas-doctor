@@ -232,6 +232,17 @@ func main() {
 
 		sched = scheduler.New(coll, store, notif, metrics, logger, interval)
 		applySchedulerSettingsFromStore(sched, persistedSettings)
+		// Apply Proxmox config to collector on startup
+		if persistedSettings != nil && persistedSettings.Proxmox.Enabled {
+			coll.SetProxmoxConfig(collector.ProxmoxConfig{
+				Enabled:  true,
+				URL:      persistedSettings.Proxmox.URL,
+				TokenID:  persistedSettings.Proxmox.TokenID,
+				Secret:   persistedSettings.Proxmox.Secret,
+				NodeName: persistedSettings.Proxmox.NodeName,
+			})
+			logger.Info("proxmox integration loaded", "url", persistedSettings.Proxmox.URL)
+		}
 		sched.Start()
 		defer sched.Stop()
 	}
