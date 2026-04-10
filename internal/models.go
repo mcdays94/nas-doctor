@@ -35,23 +35,24 @@ const (
 
 // Snapshot represents a single point-in-time diagnostic collection.
 type Snapshot struct {
-	ID        string               `json:"id" db:"id"`
-	Timestamp time.Time            `json:"timestamp" db:"timestamp"`
-	Duration  float64              `json:"duration_seconds" db:"duration_seconds"` // how long the collection took
-	System    SystemInfo           `json:"system"`
-	Disks     []DiskInfo           `json:"disks"`
-	SMART     []SMARTInfo          `json:"smart"`
-	Docker    DockerInfo           `json:"docker"`
-	Network   NetworkInfo          `json:"network"`
-	Logs      LogInfo              `json:"logs"`
-	Parity    *ParityInfo          `json:"parity,omitempty"`
-	ZFS       *ZFSInfo             `json:"zfs,omitempty"`
-	UPS       *UPSInfo             `json:"ups,omitempty"`
-	Update    *UpdateInfo          `json:"update,omitempty"`
-	Tunnels   *TunnelInfo          `json:"tunnels,omitempty"`
-	Proxmox   *ProxmoxInfo         `json:"proxmox,omitempty"`
-	Services  []ServiceCheckResult `json:"service_checks,omitempty"`
-	Findings  []Finding            `json:"findings"`
+	ID         string               `json:"id" db:"id"`
+	Timestamp  time.Time            `json:"timestamp" db:"timestamp"`
+	Duration   float64              `json:"duration_seconds" db:"duration_seconds"` // how long the collection took
+	System     SystemInfo           `json:"system"`
+	Disks      []DiskInfo           `json:"disks"`
+	SMART      []SMARTInfo          `json:"smart"`
+	Docker     DockerInfo           `json:"docker"`
+	Network    NetworkInfo          `json:"network"`
+	Logs       LogInfo              `json:"logs"`
+	Parity     *ParityInfo          `json:"parity,omitempty"`
+	ZFS        *ZFSInfo             `json:"zfs,omitempty"`
+	UPS        *UPSInfo             `json:"ups,omitempty"`
+	Update     *UpdateInfo          `json:"update,omitempty"`
+	Tunnels    *TunnelInfo          `json:"tunnels,omitempty"`
+	Proxmox    *ProxmoxInfo         `json:"proxmox,omitempty"`
+	Kubernetes *KubeInfo            `json:"kubernetes,omitempty"`
+	Services   []ServiceCheckResult `json:"service_checks,omitempty"`
+	Findings   []Finding            `json:"findings"`
 }
 
 // ---------- Proxmox VE ----------
@@ -554,6 +555,120 @@ type NotificationRule struct {
 	Operator    string `json:"operator,omitempty"` // gt, lt, eq, any
 	Value       string `json:"value,omitempty"`    // threshold value
 	CooldownSec int    `json:"cooldown_sec"`       // min seconds between notifications
+}
+
+// ---------- Kubernetes ----------
+
+type KubeInfo struct {
+	Connected   bool             `json:"connected"`
+	Error       string           `json:"error,omitempty"`
+	Alias       string           `json:"alias,omitempty"`
+	Version     string           `json:"version,omitempty"`  // server version (e.g. v1.31.4+k3s1)
+	Platform    string           `json:"platform,omitempty"` // k8s, k3s, eks, gke, aks, etc.
+	ClusterName string           `json:"cluster_name,omitempty"`
+	Nodes       []KubeNode       `json:"nodes,omitempty"`
+	Namespaces  []KubeNamespace  `json:"namespaces,omitempty"`
+	Pods        []KubePod        `json:"pods,omitempty"`
+	Deployments []KubeDeployment `json:"deployments,omitempty"`
+	Services    []KubeService    `json:"services,omitempty"`
+	PVCs        []KubePVC        `json:"pvcs,omitempty"`
+	Events      []KubeEvent      `json:"events,omitempty"`
+}
+
+type KubeNode struct {
+	Name             string   `json:"name"`
+	Status           string   `json:"status"`                      // Ready, NotReady, Unknown
+	Roles            string   `json:"roles,omitempty"`             // control-plane, worker
+	Version          string   `json:"version,omitempty"`           // kubelet version
+	OS               string   `json:"os,omitempty"`                // linux, windows
+	Arch             string   `json:"arch,omitempty"`              // amd64, arm64
+	ContainerRuntime string   `json:"container_runtime,omitempty"` // containerd, docker
+	InternalIP       string   `json:"internal_ip,omitempty"`
+	CPUCores         int      `json:"cpu_cores"`
+	CPUUsage         float64  `json:"cpu_usage,omitempty"` // 0.0-1.0 (from metrics API)
+	MemTotal         int64    `json:"mem_total"`           // bytes
+	MemUsage         int64    `json:"mem_usage,omitempty"` // bytes (from metrics API)
+	PodCount         int      `json:"pod_count"`
+	PodCapacity      int      `json:"pod_capacity"`
+	DiskTotal        int64    `json:"disk_total,omitempty"`       // ephemeral-storage capacity (bytes)
+	DiskAllocatable  int64    `json:"disk_allocatable,omitempty"` // ephemeral-storage allocatable (bytes)
+	Conditions       []string `json:"conditions,omitempty"`       // MemoryPressure, DiskPressure, PIDPressure
+	Age              string   `json:"age,omitempty"`
+	Unschedulable    bool     `json:"unschedulable,omitempty"`
+}
+
+type KubeNamespace struct {
+	Name     string `json:"name"`
+	Status   string `json:"status"` // Active, Terminating
+	PodCount int    `json:"pod_count"`
+	Age      string `json:"age,omitempty"`
+}
+
+type KubePod struct {
+	Name       string          `json:"name"`
+	Namespace  string          `json:"namespace"`
+	Node       string          `json:"node,omitempty"`
+	Status     string          `json:"status"` // Running, Pending, Succeeded, Failed, CrashLoopBackOff, etc.
+	Phase      string          `json:"phase"`  // raw phase
+	Ready      string          `json:"ready"`  // e.g. "1/1", "0/1"
+	Restarts   int             `json:"restarts"`
+	CPUUsage   int64           `json:"cpu_usage_millicores,omitempty"`
+	MemUsage   int64           `json:"mem_usage_bytes,omitempty"`
+	Age        string          `json:"age,omitempty"`
+	IP         string          `json:"ip,omitempty"`
+	Containers []KubeContainer `json:"containers,omitempty"`
+}
+
+type KubeContainer struct {
+	Name         string `json:"name"`
+	Image        string `json:"image"`
+	Ready        bool   `json:"ready"`
+	RestartCount int    `json:"restart_count"`
+	State        string `json:"state"`            // running, waiting, terminated
+	Reason       string `json:"reason,omitempty"` // CrashLoopBackOff, OOMKilled, etc.
+	LastTermMsg  string `json:"last_term_msg,omitempty"`
+}
+
+type KubeDeployment struct {
+	Name          string `json:"name"`
+	Namespace     string `json:"namespace"`
+	Replicas      int    `json:"replicas"`
+	ReadyReplicas int    `json:"ready_replicas"`
+	Available     int    `json:"available"`
+	Unavailable   int    `json:"unavailable"`
+	Age           string `json:"age,omitempty"`
+	Strategy      string `json:"strategy,omitempty"` // RollingUpdate, Recreate
+}
+
+type KubeService struct {
+	Name       string   `json:"name"`
+	Namespace  string   `json:"namespace"`
+	Type       string   `json:"type"` // ClusterIP, NodePort, LoadBalancer, ExternalName
+	ClusterIP  string   `json:"cluster_ip,omitempty"`
+	ExternalIP string   `json:"external_ip,omitempty"`
+	Ports      []string `json:"ports,omitempty"` // e.g. ["80/TCP", "443/TCP"]
+}
+
+type KubePVC struct {
+	Name         string `json:"name"`
+	Namespace    string `json:"namespace"`
+	Status       string `json:"status"` // Bound, Pending, Lost
+	StorageClass string `json:"storage_class,omitempty"`
+	Capacity     string `json:"capacity,omitempty"`     // e.g. "50Gi"
+	AccessModes  string `json:"access_modes,omitempty"` // e.g. "ReadWriteOnce"
+	VolumeName   string `json:"volume_name,omitempty"`
+	Age          string `json:"age,omitempty"`
+}
+
+type KubeEvent struct {
+	Type      string `json:"type"` // Normal, Warning
+	Reason    string `json:"reason"`
+	Message   string `json:"message"`
+	Object    string `json:"object"` // e.g. "Pod/my-app-xyz"
+	Namespace string `json:"namespace"`
+	Count     int    `json:"count"`
+	FirstSeen string `json:"first_seen,omitempty"`
+	LastSeen  string `json:"last_seen,omitempty"`
 }
 
 type PrometheusConfig struct {

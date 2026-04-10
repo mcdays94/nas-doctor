@@ -37,6 +37,8 @@ type Settings struct {
 	Backup            BackupSettings          `json:"backup"`
 	Sections          DashboardSections       `json:"sections"`
 	Proxmox           SettingsProxmox         `json:"proxmox"`
+	Kubernetes        SettingsKubernetes      `json:"kubernetes"`
+	APIKey            string                  `json:"api_key,omitempty"` // Instance API key for fleet auth
 	Fleet             []internal.RemoteServer `json:"fleet,omitempty"`
 	DismissedFindings []string                `json:"dismissed_findings,omitempty"`
 }
@@ -56,6 +58,7 @@ type DashboardSections struct {
 	Network      bool `json:"network"`
 	Tunnels      bool `json:"tunnels"`
 	Proxmox      bool `json:"proxmox"`
+	Kubernetes   bool `json:"kubernetes"`
 	MergedDrives bool `json:"merged_drives"` // Combine SMART + storage into one card per drive
 }
 
@@ -98,6 +101,15 @@ type SettingsProxmox struct {
 	Secret   string `json:"secret"`    // API token UUID secret
 	NodeName string `json:"node_name"` // optional: real PVE node name to filter (auto-detected)
 	Alias    string `json:"alias"`     // optional: friendly display name
+}
+
+// SettingsKubernetes holds the Kubernetes cluster connection settings.
+type SettingsKubernetes struct {
+	Enabled   bool   `json:"enabled"`
+	URL       string `json:"url"`        // e.g. https://192.168.1.10:6443
+	Token     string `json:"token"`      // bearer token
+	Alias     string `json:"alias"`      // friendly display name
+	InCluster bool   `json:"in_cluster"` // auto-detect from mounted service account
 }
 
 // SettingsLogForward holds the log-forwarding configuration within settings.
@@ -211,6 +223,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 
 	// Fleet test
 	r.Post("/api/v1/fleet/test", s.handleTestFleetServer)
+
+	// Kubernetes test
+	r.Post("/api/v1/kubernetes/test", s.handleTestKubernetes)
 
 	// Proxmox test
 	r.Post("/api/v1/proxmox/test", s.handleTestProxmox)
@@ -540,6 +555,11 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		})
 		s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
 
+		// Auto-enable Kubernetes dashboard section when K8s integration is turned on
+		if settings.Kubernetes.Enabled && !settings.Sections.Kubernetes {
+			settings.Sections.Kubernetes = true
+		}
+
 		// Auto-enable Proxmox dashboard section when PVE integration is turned on
 		if settings.Proxmox.Enabled && !settings.Sections.Proxmox {
 			settings.Sections.Proxmox = true
@@ -553,6 +573,15 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			Secret:   settings.Proxmox.Secret,
 			NodeName: settings.Proxmox.NodeName,
 			Alias:    settings.Proxmox.Alias,
+		})
+
+		// Update Kubernetes config on the collector
+		s.collector.SetKubeConfig(collector.KubeConfig{
+			Enabled:   settings.Kubernetes.Enabled,
+			URL:       settings.Kubernetes.URL,
+			Token:     settings.Kubernetes.Token,
+			Alias:     settings.Kubernetes.Alias,
+			InCluster: settings.Kubernetes.InCluster,
 		})
 
 		// Update log forwarding
@@ -1791,87 +1820,118 @@ func (s *Server) handleTestFleetServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "URL is required"})
 		return
 	}
+	baseURL := strings.TrimRight(req.URL, "/")
 	client := &http.Client{Timeout: 10 * time.Second}
-	healthURL := strings.TrimRight(req.URL, "/") + "/api/v1/health"
-	httpReq, err := http.NewRequest("GET", healthURL, nil)
+
+	// Build request headers helper
+	buildReq := func(path string) (*http.Request, error) {
+		r, err := http.NewRequest("GET", baseURL+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		r.Header.Set("User-Agent", "nas-doctor-fleet-test/1.0")
+		if req.APIKey != "" {
+			r.Header.Set("Authorization", "Bearer "+req.APIKey)
+		}
+		for k, v := range req.Headers {
+			r.Header.Set(k, v)
+		}
+		return r, nil
+	}
+
+	// Primary test: hit /api/v1/status (requires API key when set)
+	statusReq, err := buildReq("/api/v1/status")
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "invalid URL: " + err.Error()})
 		return
 	}
-	httpReq.Header.Set("User-Agent", "nas-doctor-fleet-test/1.0")
-	if req.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
-	}
-	for k, v := range req.Headers {
-		httpReq.Header.Set(k, v)
-	}
-	resp, err := client.Do(httpReq)
+	resp, err := client.Do(statusReq)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
 	defer resp.Body.Close()
+
+	// Handle 401 — instance has API key, we don't have it (or wrong key)
+	if resp.StatusCode == 401 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "Authentication failed — this instance requires a valid API key."})
+		return
+	}
 	if resp.StatusCode != 200 {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": fmt.Sprintf("HTTP %d from %s", resp.StatusCode, healthURL)})
-		return
-	}
-	// Verify this is actually a NAS Doctor instance (not a proxy login page)
-	var health struct {
-		Status  string `json:"status"`
-		NasDoc  bool   `json:"nas_doctor"`
-		Version string `json:"version"`
-		Uptime  string `json:"uptime"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "Response is not valid JSON — likely a proxy login page (Cloudflare Access?). Add the required auth headers."})
-		return
-	}
-	// Check for NAS Doctor signature (header or JSON field)
-	hasHeader := resp.Header.Get("X-NAS-Doctor") == "true"
-	if !health.NasDoc && !hasHeader {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "Response does not contain NAS Doctor signature — this may be a proxy login page. Check your auth headers."})
-		return
-	}
-	if health.Status != "ok" {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "NAS Doctor responded but status is not 'ok': " + health.Status})
-		return
-	}
-	// Also fetch /api/v1/status for hostname, platform, version
-	result := map[string]interface{}{
-		"success": true,
-		"status":  health.Status,
-		"version": health.Version,
-		"uptime":  health.Uptime,
-	}
-	statusURL := strings.TrimRight(req.URL, "/") + "/api/v1/status"
-	statusReq, _ := http.NewRequest("GET", statusURL, nil)
-	statusReq.Header.Set("User-Agent", "nas-doctor-fleet-test/1.0")
-	if req.APIKey != "" {
-		statusReq.Header.Set("Authorization", "Bearer "+req.APIKey)
-	}
-	for k, v := range req.Headers {
-		statusReq.Header.Set(k, v)
-	}
-	if statusResp, err := client.Do(statusReq); err == nil {
-		defer statusResp.Body.Close()
-		var st struct {
-			Hostname string `json:"hostname"`
-			Platform string `json:"platform"`
-			Version  string `json:"version"`
-		}
-		if json.NewDecoder(statusResp.Body).Decode(&st) == nil {
-			if st.Hostname != "" {
-				result["hostname"] = st.Hostname
-			}
-			if st.Platform != "" {
-				result["platform"] = st.Platform
-			}
-			if st.Version != "" {
-				result["version"] = st.Version
+		// Try health endpoint to distinguish "not NAS Doctor" from "auth issue"
+		if healthReq, err := buildReq("/api/v1/health"); err == nil {
+			if hResp, err := client.Do(healthReq); err == nil {
+				defer hResp.Body.Close()
+				var h struct {
+					NasDoc bool `json:"nas_doctor"`
+				}
+				json.NewDecoder(hResp.Body).Decode(&h)
+				if !h.NasDoc {
+					writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "Response does not contain NAS Doctor signature — check URL and auth headers."})
+					return
+				}
 			}
 		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": fmt.Sprintf("HTTP %d from %s", resp.StatusCode, baseURL+"/api/v1/status")})
+		return
 	}
-	writeJSON(w, http.StatusOK, result)
+
+	// Parse status response
+	var st struct {
+		Hostname string `json:"hostname"`
+		Platform string `json:"platform"`
+		Version  string `json:"version"`
+		Uptime   string `json:"uptime"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "Response is not valid JSON — likely a proxy login page. Add the required auth headers."})
+		return
+	}
+	if st.Hostname == "" && st.Platform == "" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": "Response does not look like a NAS Doctor instance — check URL and auth headers."})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":  true,
+		"hostname": st.Hostname,
+		"platform": st.Platform,
+		"version":  st.Version,
+		"uptime":   st.Uptime,
+	})
+}
+
+// handleTestKubernetes tests the Kubernetes API connection.
+// POST /api/v1/kubernetes/test
+func (s *Server) handleTestKubernetes(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL       string `json:"url"`
+		Token     string `json:"token"`
+		InCluster bool   `json:"in_cluster"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	cfg := collector.KubeConfig{Enabled: true, URL: req.URL, Token: req.Token, InCluster: req.InCluster}
+	result := collector.CollectKubernetes(cfg)
+	if result == nil || !result.Connected {
+		errMsg := "failed to connect"
+		if result != nil && result.Error != "" {
+			errMsg = result.Error
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": errMsg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":     true,
+		"version":     result.Version,
+		"platform":    result.Platform,
+		"nodes":       len(result.Nodes),
+		"pods":        len(result.Pods),
+		"namespaces":  len(result.Namespaces),
+		"deployments": len(result.Deployments),
+	})
 }
 
 // handleTestProxmox tests the Proxmox VE API connection.

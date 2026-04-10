@@ -117,6 +117,14 @@ type Metrics struct {
 	pveStorageUsed  *prometheus.GaugeVec
 	pveStorageTotal *prometheus.GaugeVec
 
+	// ── Kubernetes ──
+	k8sNodeReady     *prometheus.GaugeVec
+	k8sNodePods      *prometheus.GaugeVec
+	k8sPodRunning    *prometheus.GaugeVec
+	k8sPodRestarts   *prometheus.GaugeVec
+	k8sDeployReady   *prometheus.GaugeVec
+	k8sDeployDesired *prometheus.GaugeVec
+
 	// ── Findings ──
 	findingsTotal    *prometheus.GaugeVec
 	findingsCritical prometheus.Gauge
@@ -262,6 +270,17 @@ func NewMetrics() *Metrics {
 	m.pveStorageUsed = gaugeVec(ns, "proxmox", "storage_used_bytes", "PVE storage used", pveStorageLabels)
 	m.pveStorageTotal = gaugeVec(ns, "proxmox", "storage_total_bytes", "PVE storage total", pveStorageLabels)
 
+	// ── Kubernetes ──
+	k8sNodeLabels := []string{"node"}
+	m.k8sNodeReady = gaugeVec(ns, "k8s", "node_ready", "K8s node ready (1=yes)", k8sNodeLabels)
+	m.k8sNodePods = gaugeVec(ns, "k8s", "node_pod_count", "K8s node pod count", k8sNodeLabels)
+	k8sPodLabels := []string{"pod", "namespace"}
+	m.k8sPodRunning = gaugeVec(ns, "k8s", "pod_running", "K8s pod running (1=yes)", k8sPodLabels)
+	m.k8sPodRestarts = gaugeVec(ns, "k8s", "pod_restarts", "K8s pod restart count", k8sPodLabels)
+	k8sDepLabels := []string{"deployment", "namespace"}
+	m.k8sDeployReady = gaugeVec(ns, "k8s", "deployment_ready_replicas", "K8s deployment ready replicas", k8sDepLabels)
+	m.k8sDeployDesired = gaugeVec(ns, "k8s", "deployment_desired_replicas", "K8s deployment desired replicas", k8sDepLabels)
+
 	// ── Findings ──
 	m.findingsTotal = gaugeVec(ns, "findings", "total", "Findings by severity", []string{"severity"})
 	m.findingsCritical = gauge(ns, "findings", "critical_count", "Critical finding count")
@@ -299,6 +318,8 @@ func NewMetrics() *Metrics {
 		m.pveNodeCPU, m.pveNodeMemUsed, m.pveNodeMemTotal, m.pveNodeOnline,
 		m.pveGuestCPU, m.pveGuestMemUsed, m.pveGuestMemMax, m.pveGuestRunning,
 		m.pveStorageUsed, m.pveStorageTotal,
+		m.k8sNodeReady, m.k8sNodePods, m.k8sPodRunning, m.k8sPodRestarts,
+		m.k8sDeployReady, m.k8sDeployDesired,
 		m.findingsTotal, m.findingsCritical, m.findingsWarning,
 		m.collectionDuration, m.lastCollectionTime, m.updateAvailable,
 	}
@@ -535,6 +556,31 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 			l := prometheus.Labels{"storage": s.Storage, "node": s.Node, "type": s.Type}
 			m.pveStorageUsed.With(l).Set(float64(s.Used))
 			m.pveStorageTotal.With(l).Set(float64(s.Total))
+		}
+	}
+
+	// ── Kubernetes ──
+	m.k8sNodeReady.Reset()
+	m.k8sNodePods.Reset()
+	m.k8sPodRunning.Reset()
+	m.k8sPodRestarts.Reset()
+	m.k8sDeployReady.Reset()
+	m.k8sDeployDesired.Reset()
+	if snap.Kubernetes != nil && snap.Kubernetes.Connected {
+		for _, n := range snap.Kubernetes.Nodes {
+			l := prometheus.Labels{"node": n.Name}
+			m.k8sNodeReady.With(l).Set(boolToFloat(n.Status == "Ready"))
+			m.k8sNodePods.With(l).Set(float64(n.PodCount))
+		}
+		for _, p := range snap.Kubernetes.Pods {
+			l := prometheus.Labels{"pod": p.Name, "namespace": p.Namespace}
+			m.k8sPodRunning.With(l).Set(boolToFloat(p.Status == "Running"))
+			m.k8sPodRestarts.With(l).Set(float64(p.Restarts))
+		}
+		for _, d := range snap.Kubernetes.Deployments {
+			l := prometheus.Labels{"deployment": d.Name, "namespace": d.Namespace}
+			m.k8sDeployReady.With(l).Set(float64(d.ReadyReplicas))
+			m.k8sDeployDesired.With(l).Set(float64(d.Replicas))
 		}
 	}
 

@@ -340,10 +340,21 @@
     }).then(function(settings){
       var cfgChecks=(settings.service_checks&&settings.service_checks.checks)||[];
       configuredKeys={};
-      var cfgMap={};for(var i=0;i<cfgChecks.length;i++){cfgMap[cfgChecks[i].name.toLowerCase()]=cfgChecks[i];configuredKeys[cfgChecks[i].name.toLowerCase()]=true;}
+      var cfgMap={};var cfgTargets={};
+      for(var i=0;i<cfgChecks.length;i++){
+        cfgMap[cfgChecks[i].name.toLowerCase()]=cfgChecks[i];
+        configuredKeys[cfgChecks[i].name.toLowerCase()]=true;
+        // Also key by target URL for matching
+        if(cfgChecks[i].target)cfgTargets[cfgChecks[i].target.toLowerCase()]=true;
+      }
       for(var i=0;i<checksData.length;i++){
         var cfg=cfgMap[(checksData[i].name||"").toLowerCase()];
-        if(cfg){checksData[i].interval_sec=cfg.interval_sec||300;configuredKeys[checksData[i].key]=true;}
+        var targetMatch=cfgTargets[(checksData[i].target||"").toLowerCase()];
+        if(cfg||targetMatch){
+          if(cfg)checksData[i].interval_sec=cfg.interval_sec||300;
+          configuredKeys[checksData[i].key]=true;
+          configuredKeys[(checksData[i].name||"").toLowerCase()]=true;
+        }
       }
       renderSummary();
       populateCheckFilter();
