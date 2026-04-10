@@ -1018,7 +1018,7 @@ function buildSettingsPayload() {
       keep_count: parseInt(document.getElementById("backup-keep").value, 10) || 4,
       interval_hours: getBackupIntervalH()
     },
-    fleet: base.fleet || [],
+    fleet: fleetServers || base.fleet || [],
     dismissed_findings: base.dismissed_findings || []
   };
 }
