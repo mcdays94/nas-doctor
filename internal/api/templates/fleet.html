@@ -141,6 +141,9 @@ body{padding:0}
         if(s.info_count>0)h+='<span class="pill-sm info">'+s.info_count+' info</span>';
         h+='</div>';
       }
+      h+='<div style="margin-top:8px;display:flex;gap:6px">';
+      h+='<a href="'+esc(url)+'" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none" onclick="event.stopPropagation()">Open Dashboard &rarr;</a>';
+      h+='</div>';
     } else {
       h+='<div class="node-meta">';
       h+='<div class="node-meta-row"><span class="meta-label">'+(conn.isLocal?"LAN":"Endpoint")+'</span><span class="meta-val">'+esc(conn.display)+'</span></div>';

@@ -158,7 +158,12 @@ func (m *Manager) pollServer(srv internal.RemoteServer) *internal.RemoteServerSt
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&statusResp); err != nil {
-		result.Error = fmt.Sprintf("parse error: %v", err)
+		result.Error = "response is not valid JSON — likely a proxy login page (check auth headers)"
+		return result
+	}
+	// Validate this is a NAS Doctor instance
+	if statusResp.Hostname == "" && statusResp.Platform == "" {
+		result.Error = "response does not look like a NAS Doctor instance — check URL and auth headers"
 		return result
 	}
 
