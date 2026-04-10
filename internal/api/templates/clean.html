@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NAS Doctor — Clean</title>
+<title>NAS Doctor</title>
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1281,6 +1281,41 @@ body {
     }
     html += '</div>'; // end section-block tunnels
 
+    // ==== Section: Proxmox ====
+    html += '<div class="section-block" data-section="proxmox">';
+    var pve = snapshot ? snapshot.proxmox : null;
+    if (pve && pve.connected) {
+      html += '<div class="section"><div class="section-title">Proxmox VE' + (pve.cluster_name ? ' &middot; ' + escapeHTML(pve.cluster_name) : '') + '</div>';
+      if (pve.nodes && pve.nodes.length > 0) {
+        html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+        for (var ni = 0; ni < pve.nodes.length; ni++) {
+          var nd = pve.nodes[ni]; var ndOn = nd.status==='online'; var mP = nd.mem_total>0?(nd.mem_used/nd.mem_total*100):0;
+          html += '<div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:10px 14px;flex:1;min-width:200px">';
+          html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span class="status-dot '+(ndOn?'green':'red')+'"></span><span style="font-weight:600">' + escapeHTML(nd.name) + '</span></div>';
+          html += '<div style="font-size:11px;color:#808080">CPU '+(nd.cpu_usage*100).toFixed(0)+'% &middot; Mem '+mP.toFixed(0)+'% &middot; '+nd.cpu_cores+' cores</div>';
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+      if (pve.guests && pve.guests.length > 0) {
+        html += '<div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;overflow:hidden">';
+        html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+        html += '<tr style="color:#808080;font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">ID</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Name</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Type</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Status</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">CPU</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Memory</th></tr>';
+        for (var gi = 0; gi < pve.guests.length; gi++) {
+          var g = pve.guests[gi]; var gR = g.status==='running'; var gMP = g.mem_max>0?(g.mem_used/g.mem_max*100).toFixed(0)+'%':'—';
+          html += '<tr><td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04);font-family:monospace;font-size:11px">'+g.vmid+'</td>';
+          html += '<td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04);font-weight:500">'+escapeHTML(g.name)+'</td>';
+          html += '<td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04)">'+(g.type==='qemu'?'VM':'LXC')+'</td>';
+          html += '<td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04);color:'+(gR?'#16a34a':'#808080')+';font-weight:600">'+escapeHTML(g.status)+'</td>';
+          html += '<td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04)">'+(gR?(g.cpu_usage*100).toFixed(0)+'%':'—')+'</td>';
+          html += '<td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04)">'+gMP+'</td></tr>';
+        }
+        html += '</table></div>';
+      }
+      html += '</div>';
+    }
+    html += '</div>'; // end section-block proxmox
+
     // ==== Section: Parity ====
     html += '<div class="section-block" data-section="parity">';
     if (snapshot && snapshot.parity) {
@@ -1356,7 +1391,7 @@ body {
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
     var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
-    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "parity": sec.parity !== false };
+    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "parity": sec.parity !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var blockMap={};var visibleItems=[];
@@ -1399,13 +1434,16 @@ body {
       }).catch(function() {});
   }
 
-  window._findingSevFilters = {};
+  try { window._findingSevFilters = JSON.parse(localStorage.getItem("nas-doctor-sev-filters")) || {}; } catch(e) { window._findingSevFilters = {}; }
   window._toggleSevFilter = function(sev) {
     window._findingSevFilters[sev] = !window._findingSevFilters[sev];
+    if (!window._findingSevFilters[sev]) delete window._findingSevFilters[sev];
+    try { localStorage.setItem("nas-doctor-sev-filters", JSON.stringify(window._findingSevFilters)); } catch(e) {}
     loadData();
   };
   window._clearSevFilters = function() {
     window._findingSevFilters = {};
+    try { localStorage.removeItem("nas-doctor-sev-filters"); } catch(e) {}
     loadData();
   };
 

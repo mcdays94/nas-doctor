@@ -1155,6 +1155,18 @@ func (d *DB) PruneServiceCheckHistory(olderThan time.Duration) (int, error) {
 	return int(n), nil
 }
 
+// DeleteServiceCheckByKey removes all history for a specific service check key.
+func (d *DB) DeleteServiceCheckByKey(key string) (int, error) {
+	result, err := d.db.Exec("DELETE FROM service_checks_history WHERE key = ?", key)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	// Also remove from latest state
+	d.db.Exec("DELETE FROM service_checks_latest WHERE key = ?", key)
+	return int(n), nil
+}
+
 // GetFindingHistory returns how a specific finding category has changed over time.
 func (d *DB) GetFindingHistory(category string, limit int) ([]internal.Finding, error) {
 	rows, err := d.db.Query(`

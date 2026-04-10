@@ -105,6 +105,18 @@ type Metrics struct {
 	tsNodeTxBytes *prometheus.GaugeVec
 	tsNodeRxBytes *prometheus.GaugeVec
 
+	// ── Proxmox ──
+	pveNodeCPU      *prometheus.GaugeVec
+	pveNodeMemUsed  *prometheus.GaugeVec
+	pveNodeMemTotal *prometheus.GaugeVec
+	pveNodeOnline   *prometheus.GaugeVec
+	pveGuestCPU     *prometheus.GaugeVec
+	pveGuestMemUsed *prometheus.GaugeVec
+	pveGuestMemMax  *prometheus.GaugeVec
+	pveGuestRunning *prometheus.GaugeVec
+	pveStorageUsed  *prometheus.GaugeVec
+	pveStorageTotal *prometheus.GaugeVec
+
 	// ── Findings ──
 	findingsTotal    *prometheus.GaugeVec
 	findingsCritical prometheus.Gauge
@@ -235,6 +247,21 @@ func NewMetrics() *Metrics {
 	m.tsNodeTxBytes = gaugeVec(ns, "tunnel", "tailscale_node_tx_bytes", "Tailscale node TX bytes", []string{"name", "ip"})
 	m.tsNodeRxBytes = gaugeVec(ns, "tunnel", "tailscale_node_rx_bytes", "Tailscale node RX bytes", []string{"name", "ip"})
 
+	// ── Proxmox ──
+	pveNodeLabels := []string{"node"}
+	m.pveNodeCPU = gaugeVec(ns, "proxmox", "node_cpu_usage", "PVE node CPU usage (0-1)", pveNodeLabels)
+	m.pveNodeMemUsed = gaugeVec(ns, "proxmox", "node_memory_used_bytes", "PVE node memory used", pveNodeLabels)
+	m.pveNodeMemTotal = gaugeVec(ns, "proxmox", "node_memory_total_bytes", "PVE node memory total", pveNodeLabels)
+	m.pveNodeOnline = gaugeVec(ns, "proxmox", "node_online", "PVE node online (1=yes)", pveNodeLabels)
+	pveGuestLabels := []string{"vmid", "name", "type", "node"}
+	m.pveGuestCPU = gaugeVec(ns, "proxmox", "guest_cpu_usage", "PVE guest CPU usage (0-1)", pveGuestLabels)
+	m.pveGuestMemUsed = gaugeVec(ns, "proxmox", "guest_memory_used_bytes", "PVE guest memory used", pveGuestLabels)
+	m.pveGuestMemMax = gaugeVec(ns, "proxmox", "guest_memory_max_bytes", "PVE guest memory max", pveGuestLabels)
+	m.pveGuestRunning = gaugeVec(ns, "proxmox", "guest_running", "PVE guest running (1=yes)", pveGuestLabels)
+	pveStorageLabels := []string{"storage", "node", "type"}
+	m.pveStorageUsed = gaugeVec(ns, "proxmox", "storage_used_bytes", "PVE storage used", pveStorageLabels)
+	m.pveStorageTotal = gaugeVec(ns, "proxmox", "storage_total_bytes", "PVE storage total", pveStorageLabels)
+
 	// ── Findings ──
 	m.findingsTotal = gaugeVec(ns, "findings", "total", "Findings by severity", []string{"severity"})
 	m.findingsCritical = gauge(ns, "findings", "critical_count", "Critical finding count")
@@ -269,6 +296,9 @@ func NewMetrics() *Metrics {
 		m.serviceUp, m.serviceLatency, m.serviceFailures,
 		m.paritySpeedMBs, m.parityDurationSec, m.parityErrors, m.parityRunning,
 		m.cfTunnelUp, m.cfTunnelConns, m.tsNodeOnline, m.tsNodeTxBytes, m.tsNodeRxBytes,
+		m.pveNodeCPU, m.pveNodeMemUsed, m.pveNodeMemTotal, m.pveNodeOnline,
+		m.pveGuestCPU, m.pveGuestMemUsed, m.pveGuestMemMax, m.pveGuestRunning,
+		m.pveStorageUsed, m.pveStorageTotal,
 		m.findingsTotal, m.findingsCritical, m.findingsWarning,
 		m.collectionDuration, m.lastCollectionTime, m.updateAvailable,
 	}
@@ -472,6 +502,39 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 				m.tsNodeTxBytes.With(l).Set(float64(nd.TxBytes))
 				m.tsNodeRxBytes.With(l).Set(float64(nd.RxBytes))
 			}
+		}
+	}
+
+	// ── Proxmox ──
+	m.pveNodeCPU.Reset()
+	m.pveNodeMemUsed.Reset()
+	m.pveNodeMemTotal.Reset()
+	m.pveNodeOnline.Reset()
+	m.pveGuestCPU.Reset()
+	m.pveGuestMemUsed.Reset()
+	m.pveGuestMemMax.Reset()
+	m.pveGuestRunning.Reset()
+	m.pveStorageUsed.Reset()
+	m.pveStorageTotal.Reset()
+	if snap.Proxmox != nil && snap.Proxmox.Connected {
+		for _, n := range snap.Proxmox.Nodes {
+			l := prometheus.Labels{"node": n.Name}
+			m.pveNodeCPU.With(l).Set(n.CPUUsage)
+			m.pveNodeMemUsed.With(l).Set(float64(n.MemUsed))
+			m.pveNodeMemTotal.With(l).Set(float64(n.MemTotal))
+			m.pveNodeOnline.With(l).Set(boolToFloat(n.Status == "online"))
+		}
+		for _, g := range snap.Proxmox.Guests {
+			l := prometheus.Labels{"vmid": fmt.Sprintf("%d", g.VMID), "name": g.Name, "type": g.Type, "node": g.Node}
+			m.pveGuestCPU.With(l).Set(g.CPUUsage)
+			m.pveGuestMemUsed.With(l).Set(float64(g.MemUsed))
+			m.pveGuestMemMax.With(l).Set(float64(g.MemMax))
+			m.pveGuestRunning.With(l).Set(boolToFloat(g.Status == "running"))
+		}
+		for _, s := range snap.Proxmox.Storage {
+			l := prometheus.Labels{"storage": s.Storage, "node": s.Node, "type": s.Type}
+			m.pveStorageUsed.With(l).Set(float64(s.Used))
+			m.pveStorageTotal.With(l).Set(float64(s.Total))
 		}
 	}
 

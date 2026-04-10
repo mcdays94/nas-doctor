@@ -49,8 +49,89 @@ type Snapshot struct {
 	UPS       *UPSInfo             `json:"ups,omitempty"`
 	Update    *UpdateInfo          `json:"update,omitempty"`
 	Tunnels   *TunnelInfo          `json:"tunnels,omitempty"`
+	Proxmox   *ProxmoxInfo         `json:"proxmox,omitempty"`
 	Services  []ServiceCheckResult `json:"service_checks,omitempty"`
 	Findings  []Finding            `json:"findings"`
+}
+
+// ---------- Proxmox VE ----------
+
+type ProxmoxInfo struct {
+	Connected   bool             `json:"connected"`
+	Error       string           `json:"error,omitempty"`
+	Alias       string           `json:"alias,omitempty"` // user-defined display name
+	Version     string           `json:"version,omitempty"`
+	ClusterName string           `json:"cluster_name,omitempty"`
+	Nodes       []ProxmoxNode    `json:"nodes,omitempty"`
+	Guests      []ProxmoxGuest   `json:"guests,omitempty"` // VMs + LXC combined
+	Storage     []ProxmoxStorage `json:"storage,omitempty"`
+	Tasks       []ProxmoxTask    `json:"tasks,omitempty"`
+	HAServices  []ProxmoxHA      `json:"ha_services,omitempty"`
+}
+
+type ProxmoxNode struct {
+	Name       string  `json:"name"`
+	Status     string  `json:"status"`     // online, offline
+	Uptime     int64   `json:"uptime"`     // seconds
+	CPUUsage   float64 `json:"cpu_usage"`  // 0.0-1.0
+	MemUsed    int64   `json:"mem_used"`   // bytes
+	MemTotal   int64   `json:"mem_total"`  // bytes
+	DiskUsed   int64   `json:"disk_used"`  // bytes (root fs)
+	DiskTotal  int64   `json:"disk_total"` // bytes
+	PVEVersion string  `json:"pve_version,omitempty"`
+	KernelVer  string  `json:"kernel_version,omitempty"`
+	CPUModel   string  `json:"cpu_model,omitempty"`
+	CPUCores   int     `json:"cpu_cores,omitempty"`
+}
+
+type ProxmoxGuest struct {
+	VMID     int     `json:"vmid"`
+	Name     string  `json:"name"`
+	Node     string  `json:"node"`
+	Type     string  `json:"type"`      // qemu, lxc
+	Status   string  `json:"status"`    // running, stopped, paused
+	Uptime   int64   `json:"uptime"`    // seconds
+	CPUUsage float64 `json:"cpu_usage"` // 0.0-1.0
+	CPUs     int     `json:"cpus"`
+	MemUsed  int64   `json:"mem_used"`  // bytes
+	MemMax   int64   `json:"mem_max"`   // bytes
+	DiskUsed int64   `json:"disk_used"` // bytes
+	DiskMax  int64   `json:"disk_max"`  // bytes
+	NetIn    int64   `json:"net_in"`    // bytes
+	NetOut   int64   `json:"net_out"`   // bytes
+	Tags     string  `json:"tags,omitempty"`
+	Template bool    `json:"template,omitempty"`
+	HAState  string  `json:"ha_state,omitempty"` // managed, started, error, etc.
+}
+
+type ProxmoxStorage struct {
+	Storage string  `json:"storage"`
+	Node    string  `json:"node"`
+	Type    string  `json:"type"`   // dir, lvm, lvmthin, zfspool, nfs, cifs, ceph
+	Status  string  `json:"status"` // available, unavailable
+	Used    int64   `json:"used"`   // bytes
+	Total   int64   `json:"total"`  // bytes
+	UsedPct float64 `json:"used_pct"`
+	Shared  bool    `json:"shared"`
+	Content string  `json:"content"` // images,rootdir,vztmpl,iso,backup
+}
+
+type ProxmoxTask struct {
+	UPID      string `json:"upid"`
+	Node      string `json:"node"`
+	Type      string `json:"type"`   // vzdump, qmigrate, vzmigrate, etc.
+	Status    string `json:"status"` // OK, Error, running
+	User      string `json:"user"`
+	StartTime int64  `json:"start_time"` // unix epoch
+	EndTime   int64  `json:"end_time"`
+	VMID      int    `json:"vmid,omitempty"`
+}
+
+type ProxmoxHA struct {
+	SID    string `json:"sid"`   // e.g., "vm:100"
+	State  string `json:"state"` // started, stopped, error, fence
+	Node   string `json:"node"`
+	Status string `json:"status"` // OK, error message
 }
 
 // ---------- Tunnels (Cloudflared / Tailscale) ----------
@@ -112,17 +193,19 @@ const (
 )
 
 type ServiceCheckConfig struct {
-	Name             string   `json:"name"`
-	Type             string   `json:"type"`
-	Target           string   `json:"target"`
-	Enabled          bool     `json:"enabled"`
-	IntervalSec      int      `json:"interval_sec,omitempty"` // Per-check interval in seconds (default 300 = 5min)
-	TimeoutSec       int      `json:"timeout_sec,omitempty"`
-	Port             int      `json:"port,omitempty"`
-	FailureThreshold int      `json:"failure_threshold,omitempty"`
-	FailureSeverity  Severity `json:"failure_severity,omitempty"`
-	ExpectedMin      int      `json:"expected_status_min,omitempty"`
-	ExpectedMax      int      `json:"expected_status_max,omitempty"`
+	Name             string            `json:"name"`
+	Type             string            `json:"type"`
+	Target           string            `json:"target"`
+	Enabled          bool              `json:"enabled"`
+	Instance         string            `json:"instance,omitempty"`     // fleet server ID; empty = local
+	IntervalSec      int               `json:"interval_sec,omitempty"` // Per-check interval in seconds (default 300 = 5min)
+	TimeoutSec       int               `json:"timeout_sec,omitempty"`
+	Port             int               `json:"port,omitempty"`
+	FailureThreshold int               `json:"failure_threshold,omitempty"`
+	FailureSeverity  Severity          `json:"failure_severity,omitempty"`
+	ExpectedMin      int               `json:"expected_status_min,omitempty"`
+	ExpectedMax      int               `json:"expected_status_max,omitempty"`
+	Headers          map[string]string `json:"headers,omitempty"` // custom request headers for HTTP checks
 }
 
 type ServiceCheckResult struct {
@@ -280,11 +363,12 @@ type ParityCheck struct {
 // ---------- Fleet / Multi-Server ----------
 
 type RemoteServer struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"` // friendly name ("Backup NAS", "Proxmox")
-	URL     string `json:"url"`  // base URL ("http://192.168.1.50:8080")
-	Enabled bool   `json:"enabled"`
-	APIKey  string `json:"api_key,omitempty"` // for future auth
+	ID      string            `json:"id"`
+	Name    string            `json:"name"` // friendly name ("Backup NAS", "Proxmox")
+	URL     string            `json:"url"`  // base URL ("http://192.168.1.50:8080" or "https://nas.example.com")
+	Enabled bool              `json:"enabled"`
+	APIKey  string            `json:"api_key,omitempty"` // NAS Doctor API key auth
+	Headers map[string]string `json:"headers,omitempty"` // custom request headers (e.g. CF-Access-Client-Id, Authorization)
 }
 
 type RemoteServerStatus struct {

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NAS Doctor — Fleet</title>
+<title>NAS Doctor</title>
 <link rel="icon" href="/icon.png">
 <link rel="stylesheet" href="/css/shared.css">
 <style>
@@ -74,6 +74,7 @@ body{padding:0}
   function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
   try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
   fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
+  fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
 })();
 (function() {
   "use strict";
@@ -89,15 +90,29 @@ body{padding:0}
     return{cls:"unknown",icon:"?"};
   }
 
-  function extractIP(url){
-    try{var u=new URL(url);return u.hostname+":"+u.port;}catch(e){return url;}
+  function parseConnection(url){
+    try{
+      var u=new URL(url);
+      var host=u.hostname;
+      var port=u.port?":"+u.port:"";
+      // Detect if local (private IP) vs public hostname
+      var isLocal=/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|localhost|127\.)/.test(host);
+      var tunnelType="";
+      if(!isLocal){
+        // Heuristic: if it's a public hostname, try to detect tunnel
+        if(host.indexOf(".trycloudflare.com")>=0||host.indexOf("cloudflare")>=0)tunnelType="cfd";
+        // Tailscale IPs are in 100.x.x.x range
+        if(/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host))tunnelType="tailscale";
+      }
+      return{host:host,port:port,isLocal:isLocal,tunnelType:tunnelType,display:host+port};
+    }catch(e){return{host:url,port:"",isLocal:false,tunnelType:"",display:url};}
   }
 
   function renderNode(s){
     var healthClass=s.online?(s.overall_health||"healthy"):"offline";
     var p=platformIcon(s.platform||"");
     var url=s.server.url||"#";
-    var ip=extractIP(url);
+    var conn=parseConnection(url);
     var h='<div class="node-branch"></div>';
     h+='<div class="node-card">';
     h+='<a href="'+esc(url)+'" target="_blank">';
@@ -111,7 +126,11 @@ body{padding:0}
       if(s.hostname&&s.hostname!==s.server.name){
         h+='<div class="node-meta-row"><span class="meta-label">Host</span><span class="meta-val">'+esc(s.hostname)+'</span></div>';
       }
-      h+='<div class="node-meta-row"><span class="meta-label">IP</span><span class="meta-val">'+esc(ip)+'</span></div>';
+      h+='<div class="node-meta-row"><span class="meta-label">'+(conn.isLocal?"LAN":"Endpoint")+'</span><span class="meta-val">'+esc(conn.display)+'</span></div>';
+      if(conn.tunnelType){
+        var tLabel=conn.tunnelType==="cfd"?"Cloudflare Tunnel":conn.tunnelType==="tailscale"?"Tailscale":"Tunnel";
+        h+='<div class="node-meta-row"><span class="meta-label">Via</span><span class="meta-val" style="color:var(--accent)">'+esc(tLabel)+'</span></div>';
+      }
       h+='<div class="node-meta-row"><span class="meta-label">OS</span><span class="meta-val">'+esc(s.platform||"unknown")+'</span></div>';
       h+='<div class="node-meta-row"><span class="meta-label">Up</span><span class="meta-val">'+esc(s.uptime||"—")+'</span></div>';
       h+='</div>';
@@ -122,8 +141,14 @@ body{padding:0}
         if(s.info_count>0)h+='<span class="pill-sm info">'+s.info_count+' info</span>';
         h+='</div>';
       }
+      h+='<div style="margin-top:8px;display:flex;gap:6px">';
+      h+='<a href="'+esc(url)+'" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none" onclick="event.stopPropagation()">Open Dashboard &rarr;</a>';
+      h+='</div>';
     } else {
-      h+='<div class="node-meta"><div class="node-meta-row"><span class="meta-label">IP</span><span class="meta-val">'+esc(ip)+'</span></div></div>';
+      h+='<div class="node-meta">';
+      h+='<div class="node-meta-row"><span class="meta-label">'+(conn.isLocal?"LAN":"Endpoint")+'</span><span class="meta-val">'+esc(conn.display)+'</span></div>';
+      if(conn.tunnelType){var tl2=conn.tunnelType==="cfd"?"Cloudflare Tunnel":conn.tunnelType==="tailscale"?"Tailscale":"Tunnel";h+='<div class="node-meta-row"><span class="meta-label">Via</span><span class="meta-val" style="color:var(--accent)">'+esc(tl2)+'</span></div>';}
+      h+='</div>';
       h+='<div class="node-error">'+esc(s.error||"Offline")+'</div>';
     }
     h+='</a></div>';
@@ -147,7 +172,17 @@ body{padding:0}
     h+='<div class="node-name">'+esc(selfName)+'</div>';
     h+='<div class="node-role">Primary &middot; Fleet Controller</div>';
     if(selfStatus){
-      h+='<div style="font-size:11px;color:var(--text2);margin-top:6px">'+esc(selfPlatform)+' &middot; Up '+esc(selfStatus.uptime||"—")+'</div>';
+      // Get local IP from network interfaces
+      var selfIP="";
+      if(selfStatus.network&&selfStatus.network.interfaces){
+        for(var ni=0;ni<selfStatus.network.interfaces.length;ni++){
+          var iface=selfStatus.network.interfaces[ni];
+          if(iface.state==="UP"&&iface.ipv4&&iface.ipv4.indexOf("127.")!==0){selfIP=iface.ipv4.split("/")[0];break;}
+        }
+      }
+      h+='<div style="font-size:11px;color:var(--text2);margin-top:6px">';
+      if(selfIP)h+=esc(selfIP)+' &middot; ';
+      h+=esc(selfPlatform)+' &middot; Up '+esc(selfStatus.uptime||"—")+'</div>';
     }
     h+='</div>';
     h+='<div class="topo-spine"></div>';
