@@ -240,6 +240,7 @@ func main() {
 				TokenID:  persistedSettings.Proxmox.TokenID,
 				Secret:   persistedSettings.Proxmox.Secret,
 				NodeName: persistedSettings.Proxmox.NodeName,
+				Alias:    persistedSettings.Proxmox.Alias,
 			})
 			logger.Info("proxmox integration loaded", "url", persistedSettings.Proxmox.URL)
 		}

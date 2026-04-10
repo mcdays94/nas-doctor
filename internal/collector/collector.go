@@ -138,6 +138,7 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 		c.logger.Info("collecting Proxmox VE data")
 		pveInfo := CollectProxmox(c.proxmoxConfig)
 		if pveInfo != nil {
+			pveInfo.Alias = c.proxmoxConfig.Alias
 			snap.Proxmox = pveInfo
 			if pveInfo.Error != "" {
 				c.logger.Warn("Proxmox VE collection error", "error", pveInfo.Error)

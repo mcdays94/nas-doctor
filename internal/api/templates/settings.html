@@ -493,9 +493,9 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div><label for="pve-url">PVE API URL</label>
         <input type="text" id="pve-url" placeholder="https://192.168.1.10:8006">
         <p style="font-size:11px;color:var(--text2);margin-top:4px">The Proxmox web UI URL (default port 8006). Self-signed certs are accepted.</p></div>
-      <div><label for="pve-node">Node name (optional)</label>
-        <input type="text" id="pve-node" placeholder="Leave empty for all nodes">
-        <p style="font-size:11px;color:var(--text2);margin-top:4px">Limit to a specific node. Empty polls all cluster nodes.</p></div>
+      <div><label for="pve-alias">Display Name (optional)</label>
+        <input type="text" id="pve-alias" placeholder="e.g. Proxmox LDN">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Friendly name shown on the dashboard instead of the node hostname.</p></div>
     </div>
     <div class="form-row">
       <div><label for="pve-token">API Token ID</label>
@@ -503,6 +503,11 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         <p style="font-size:11px;color:var(--text2);margin-top:4px">Format: <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">user@realm!tokenname</code></p></div>
       <div><label for="pve-secret">Token Secret</label>
         <input type="password" id="pve-secret" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+    </div>
+    <div class="form-row">
+      <div><label for="pve-node">Node filter (optional)</label>
+        <select id="pve-node"><option value="">All nodes (poll entire cluster)</option></select>
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Auto-detected from PVE. Click Test Connection to populate.</p></div>
     </div>
     <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
       <button class="btn btn-secondary btn-sm" onclick="testProxmoxConnection()">Test Connection</button>
@@ -910,9 +915,17 @@ function loadSettings() {
       var pve = data.proxmox || {};
       if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
       document.getElementById("pve-url").value = pve.url || "";
-      document.getElementById("pve-node").value = pve.node_name || "";
+      document.getElementById("pve-alias").value = pve.alias || "";
       document.getElementById("pve-token").value = pve.token_id || "";
       document.getElementById("pve-secret").value = pve.secret || "";
+      // Restore node filter — add as option if not already in dropdown
+      var nodeSel = document.getElementById("pve-node");
+      if (pve.node_name) {
+        var found = false;
+        for (var ni = 0; ni < nodeSel.options.length; ni++) { if (nodeSel.options[ni].value === pve.node_name) { found = true; break; } }
+        if (!found) nodeSel.innerHTML += '<option value="' + pve.node_name + '">' + pve.node_name + '</option>';
+        nodeSel.value = pve.node_name;
+      }
       /* Log forwarding */
       var lp = data.log_push || {};
       if (lp.enabled) document.getElementById("logfwd-toggle").classList.add("on"); else document.getElementById("logfwd-toggle").classList.remove("on");
@@ -970,7 +983,8 @@ function buildSettingsPayload() {
     proxmox: {
       enabled: document.getElementById("pve-toggle").classList.contains("on"),
       url: document.getElementById("pve-url").value.trim(),
-      node_name: document.getElementById("pve-node").value.trim(),
+      alias: document.getElementById("pve-alias").value.trim(),
+      node_name: document.getElementById("pve-node").value,
       token_id: document.getElementById("pve-token").value.trim(),
       secret: document.getElementById("pve-secret").value.trim()
     },
@@ -2028,6 +2042,16 @@ function testProxmoxConnection() {
     if (d.success) {
       result.style.color = "var(--green)";
       result.textContent = "Connected — PVE " + (d.version || "?") + (d.cluster ? " · cluster: " + d.cluster : "") + " · " + d.nodes + " node(s), " + d.guests + " guest(s), " + d.storage + " storage pool(s)";
+      // Populate node dropdown from detected nodes
+      var sel = document.getElementById("pve-node");
+      var current = sel.value;
+      sel.innerHTML = '<option value="">All nodes (poll entire cluster)</option>';
+      if (d.node_names) {
+        for (var i = 0; i < d.node_names.length; i++) {
+          sel.innerHTML += '<option value="' + d.node_names[i] + '">' + d.node_names[i] + '</option>';
+        }
+      }
+      if (current) sel.value = current;
     } else {
       result.style.color = "var(--red)";
       result.textContent = "Failed: " + (d.error || "unknown error");
