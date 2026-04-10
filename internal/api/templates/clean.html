@@ -1336,8 +1336,10 @@ body {
           html += '</div>';
         }
         if (k8s.pods && k8s.pods.length > 0) {
+          var runP = k8s.pods.filter(function(p){return p.status==='Running';});
+          var compP = k8s.pods.filter(function(p){return p.status==='Succeeded';});
           var probPods = k8s.pods.filter(function(p){return p.status!=='Running'&&p.status!=='Succeeded';});
-          var showP = probPods.length > 0 ? probPods : k8s.pods.slice(0,10);
+          var showP = probPods.length > 0 ? probPods.concat(runP.slice(0,10)) : runP.slice(0,15);
           html += '<div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;overflow:hidden;max-height:250px;overflow-y:auto">';
           html += '<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="color:#808080;font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Pod</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">NS</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Status</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Ready</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Restarts</th></tr>';
           for(var pi=0;pi<showP.length;pi++){var kp=showP[pi];var pOk=kp.status==='Running'||kp.status==='Succeeded';
