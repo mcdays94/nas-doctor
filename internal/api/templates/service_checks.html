@@ -52,6 +52,19 @@
 .pagination button:disabled{opacity:0.4;cursor:default}
 .pagination button:not(:disabled):hover{border-color:var(--accent)}
 .actions-bar{display:flex;justify-content:flex-end;gap:8px;margin-bottom:16px}
+/* Expandable log detail */
+.log-table tr{cursor:pointer}
+.log-table tr:hover{background:var(--bg-elevated)}
+.log-detail-row td{padding:0!important;border-bottom:1px solid var(--border)}
+.log-detail{padding:12px 16px;background:var(--bg-elevated);font-size:12px;display:none}
+.log-detail.open{display:block}
+.log-detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.log-detail-item{padding:6px 8px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)}
+.log-detail-item .ld-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.3px}
+.log-detail-item .ld-val{font-size:13px;font-weight:600;margin-top:2px}
+/* Orphan badge */
+.orphan-badge{font-size:9px;padding:1px 6px;border-radius:999px;background:rgba(217,119,6,0.12);color:var(--amber);margin-left:6px}
+.btn-delete-check{font-size:10px;padding:2px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--red);cursor:pointer;margin-left:auto}
 </style>
 </head>
 <body>
@@ -128,6 +141,7 @@
   "use strict";
   var PAGE_SIZE=25;
   var checksData=[];       // latest status per check (deduplicated)
+  var configuredKeys={};   // keys from settings (non-orphaned)
   var historyCache={};     // key -> history[]
   var allLogs=[];          // merged+filtered log entries for the table
   var currentPage=0;
@@ -185,10 +199,12 @@
       h+='<span class="pill '+pillClass(c.type)+'" style="font-size:9px;padding:1px 5px">'+esc((c.type||"").toUpperCase())+'</span>';
       h+='</div>';
       h+=buildHeartbeat(hist);
+      var isOrphan = !configuredKeys[c.key] && !configuredKeys[(c.name||"").toLowerCase()];
       h+='<div class="badge-meta" style="margin-top:6px">';
       h+='<span class="badge-pct '+pctCls+'">'+pct.toFixed(1)+'%</span>';
       h+='<span>'+(isUp?(c.response_ms||0)+'ms':'DOWN')+'</span>';
       if(c.interval_sec)h+='<span>every '+fmtInterval(c.interval_sec)+'</span>';
+      if(isOrphan)h+='<span class="orphan-badge">orphaned</span><button class="btn-delete-check" onclick="event.stopPropagation();deleteCheck(\''+esc(c.key)+'\')">Delete</button>';
       h+='</div>';
       h+='</div>';
     }
@@ -244,20 +260,45 @@
     for(var i=start;i<end;i++){
       var e=allLogs[i];
       var ts=e.checked_at?new Date(e.checked_at).toLocaleString():"—";
-      h+='<tr>';
+      var rid="log-detail-"+i;
+      h+='<tr onclick="toggleLogDetail(\''+rid+'\')">';
       h+='<td>'+esc(ts)+'</td>';
-      h+='<td style="display:flex;align-items:center;gap:5px">'+faviconHTML(e.type,e.target)+esc(e.name||"—")+'</td>';
+      h+='<td>'+faviconHTML(e.type,e.target)+esc(e.name||"—")+'</td>';
       h+='<td><span class="pill '+pillClass(e.type)+'" style="font-size:9px;padding:1px 5px">'+esc((e.type||"").toUpperCase())+'</span></td>';
       h+='<td class="status-'+e.status+'">'+esc(e.status)+'</td>';
       h+='<td>'+(e.response_ms!=null?e.response_ms+' ms':'—')+'</td>';
       h+='<td style="color:var(--text3);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(e.error||"—")+'</td>';
       h+='</tr>';
+      // Expandable detail row
+      h+='<tr class="log-detail-row"><td colspan="6"><div class="log-detail" id="'+rid+'">';
+      h+='<div class="log-detail-grid">';
+      h+='<div class="log-detail-item"><div class="ld-label">Check Name</div><div class="ld-val">'+esc(e.name||"—")+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Type</div><div class="ld-val">'+esc((e.type||"").toUpperCase())+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Target</div><div class="ld-val" style="font-size:11px;font-family:var(--font-mono);word-break:break-all">'+esc(e.target||"—")+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Status</div><div class="ld-val" style="color:'+(e.status==="up"?"var(--green)":"var(--red)")+'">'+esc(e.status||"—")+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Response Time</div><div class="ld-val">'+(e.response_ms!=null?e.response_ms+' ms':'—')+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Checked At</div><div class="ld-val" style="font-size:11px">'+esc(ts)+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Consecutive Failures</div><div class="ld-val">'+(e.consecutive_failures||0)+' / '+(e.failure_threshold||1)+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Check Key</div><div class="ld-val" style="font-size:10px;font-family:var(--font-mono);word-break:break-all;color:var(--text3)">'+esc(e.key||"—")+'</div></div>';
+      if(e.error)h+='<div class="log-detail-item" style="grid-column:1/-1"><div class="ld-label">Error</div><div class="ld-val" style="font-size:12px;color:var(--red);font-weight:400;word-break:break-all">'+esc(e.error)+'</div></div>';
+      // Type-specific details
+      if((e.type||"").toLowerCase()==="http"){
+        h+='<div class="log-detail-item"><div class="ld-label">Expected Status</div><div class="ld-val">'+(e.expected_status_min||200)+' – '+(e.expected_status_max||399)+'</div></div>';
+      }
+      if((e.type||"").toLowerCase()==="dns"){
+        h+='<div class="log-detail-item"><div class="ld-label">DNS Lookup</div><div class="ld-val">'+esc(e.target||"")+'</div></div>';
+      }
+      if((e.type||"").toLowerCase()==="ping"){
+        h+='<div class="log-detail-item"><div class="ld-label">RTT</div><div class="ld-val">'+(e.response_ms||0)+' ms</div></div>';
+      }
+      h+='</div></div></td></tr>';
     }
     tbody.innerHTML=h;
   }
 
   window.prevPage=function(){if(currentPage>0){currentPage--;renderLogTable();}};
   window.nextPage=function(){currentPage++;renderLogTable();};
+  window.toggleLogDetail=function(id){var el=document.getElementById(id);if(el)el.classList.toggle("open");};
 
   window.filterByCheck=function(key){
     var sel=document.getElementById("f-check");
@@ -269,6 +310,11 @@
 
   window.runAllChecks=function(){
     fetch("/api/v1/service-checks/run",{method:"POST"}).then(function(){setTimeout(loadAll,2000);}).catch(function(){});
+  };
+
+  window.deleteCheck=function(key){
+    if(!confirm("Delete all history for this orphaned check?"))return;
+    fetch("/api/v1/service-checks/"+encodeURIComponent(key),{method:"DELETE"}).then(function(){loadAll();}).catch(function(){});
   };
 
   // ── Data loading ──
@@ -292,10 +338,11 @@
       return fetchJSON("/api/v1/settings");
     }).then(function(settings){
       var cfgChecks=(settings.service_checks&&settings.service_checks.checks)||[];
-      var cfgMap={};for(var i=0;i<cfgChecks.length;i++){cfgMap[cfgChecks[i].name.toLowerCase()]=cfgChecks[i];}
+      configuredKeys={};
+      var cfgMap={};for(var i=0;i<cfgChecks.length;i++){cfgMap[cfgChecks[i].name.toLowerCase()]=cfgChecks[i];configuredKeys[cfgChecks[i].name.toLowerCase()]=true;}
       for(var i=0;i<checksData.length;i++){
         var cfg=cfgMap[(checksData[i].name||"").toLowerCase()];
-        if(cfg)checksData[i].interval_sec=cfg.interval_sec||300;
+        if(cfg){checksData[i].interval_sec=cfg.interval_sec||300;configuredKeys[checksData[i].key]=true;}
       }
       renderSummary();
       populateCheckFilter();

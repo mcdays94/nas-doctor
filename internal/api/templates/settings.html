@@ -474,7 +474,32 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
 
   </div>
 
-  <!-- 4. Log Forwarding -->
+  <!-- 4. Proxmox VE Integration -->
+  <div class="card" id="card-proxmox">
+    <div class="card-title">Proxmox VE</div>
+    <div class="card-desc">Connect to a Proxmox VE API to monitor VMs, LXC containers, storage pools, and cluster health. Create an API token in PVE: Datacenter → Permissions → API Tokens.</div>
+    <div class="toggle-wrap" style="margin-bottom:16px">
+      <div class="toggle" id="pve-toggle" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
+      <span class="toggle-label">Enable Proxmox Integration</span>
+    </div>
+    <div class="form-row">
+      <div><label for="pve-url">PVE API URL</label>
+        <input type="text" id="pve-url" placeholder="https://192.168.1.10:8006">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">The Proxmox web UI URL (default port 8006). Self-signed certs are accepted.</p></div>
+      <div><label for="pve-node">Node name (optional)</label>
+        <input type="text" id="pve-node" placeholder="Leave empty for all nodes">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Limit to a specific node. Empty polls all cluster nodes.</p></div>
+    </div>
+    <div class="form-row">
+      <div><label for="pve-token">API Token ID</label>
+        <input type="text" id="pve-token" placeholder="root@pam!nas-doctor">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Format: <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">user@realm!tokenname</code></p></div>
+      <div><label for="pve-secret">Token Secret</label>
+        <input type="password" id="pve-secret" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+    </div>
+  </div>
+
+  <!-- 5. Log Forwarding -->
   <div class="card" id="card-logfwd">
     <div class="card-title">Log Forwarding</div>
     <div class="card-desc">Forward scan results to Loki, syslog, or any HTTP JSON endpoint after each diagnostic scan.</div>
@@ -580,6 +605,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div class="toggle-wrap"><div class="toggle on" id="sec-parity" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Parity (Unraid)</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-network" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Network</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-tunnels" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Tunnels (Cloudflared / Tailscale)</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-proxmox" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Proxmox VE</span></div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div class="toggle-wrap"><div class="toggle on" id="sec-merged-drives" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Drive View <span style="font-size:11px;color:var(--text2)">(combine SMART + storage into one card per drive)</span></span></div>
       </div>
@@ -903,7 +929,15 @@ function buildSettingsPayload() {
       parity: document.getElementById("sec-parity").classList.contains("on"),
       network: document.getElementById("sec-network").classList.contains("on"),
       tunnels: document.getElementById("sec-tunnels").classList.contains("on"),
+      proxmox: document.getElementById("sec-proxmox").classList.contains("on"),
       merged_drives: document.getElementById("sec-merged-drives").classList.contains("on")
+    },
+    proxmox: {
+      enabled: document.getElementById("pve-toggle").classList.contains("on"),
+      url: document.getElementById("pve-url").value.trim(),
+      node_name: document.getElementById("pve-node").value.trim(),
+      token_id: document.getElementById("pve-token").value.trim(),
+      secret: document.getElementById("pve-secret").value.trim()
     },
     backup: {
       enabled: document.getElementById("backup-toggle").classList.contains("on"),

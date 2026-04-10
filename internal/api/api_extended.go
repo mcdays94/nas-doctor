@@ -184,6 +184,7 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/service-checks", s.handleServiceChecks)
 	r.Get("/api/v1/service-checks/history", s.handleServiceCheckHistory)
 	r.Post("/api/v1/service-checks/run", s.handleRunServiceChecks)
+	r.Delete("/api/v1/service-checks/{key}", s.handleDeleteServiceCheck)
 	r.Get("/api/v1/incidents/timeline", s.handleIncidentTimeline)
 	r.Get("/api/v1/incidents/correlation", s.handleIncidentCorrelation)
 	r.Get("/api/v1/smart/trends", s.handleSMARTTrends)
@@ -1030,6 +1031,22 @@ func (s *Server) handleRunServiceChecks(w http.ResponseWriter, r *http.Request) 
 		results = []internal.ServiceCheckResult{}
 	}
 	writeJSON(w, http.StatusOK, results)
+}
+
+// handleDeleteServiceCheck removes all history for a service check key.
+// DELETE /api/v1/service-checks/{key}
+func (s *Server) handleDeleteServiceCheck(w http.ResponseWriter, r *http.Request) {
+	key := chi.URLParam(r, "key")
+	if key == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "key is required"})
+		return
+	}
+	deleted, err := s.store.DeleteServiceCheckByKey(key)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": deleted, "key": key})
 }
 
 type incidentTimelineEvent struct {
