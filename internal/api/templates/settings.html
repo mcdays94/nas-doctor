@@ -404,6 +404,13 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           </select>
         </div>
       </div>
+      <div class="form-row" id="sc-instance-wrap" style="display:none">
+        <div>
+          <label for="sc-instance">Instance</label>
+          <select id="sc-instance"><option value="">This server (local)</option></select>
+          <p style="font-size:11px;color:var(--text2);margin-top:4px">Run this check from a fleet member instead of locally.</p>
+        </div>
+      </div>
       <div class="form-row">
         <div>
           <label for="sc-target">Target</label>
@@ -580,13 +587,17 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
   <!-- 6. Fleet / Multi-Server -->
   <div class="card" id="card-fleet">
     <div class="card-title">Fleet Monitoring</div>
-    <div class="card-desc">Monitor multiple NAS Doctor instances from this dashboard. Each remote server must be running NAS Doctor.</div>
+    <div class="card-desc">Monitor multiple NAS Doctor instances from this dashboard. Supports private IPs and public hostnames (with custom auth headers for Cloudflare Access, etc.).</div>
     <div id="fleet-list" style="margin-bottom:12px"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <input type="text" id="fleet-name" placeholder="Server name" style="flex:1;min-width:120px">
-      <input type="url" id="fleet-url" placeholder="http://192.168.1.50:8080" style="flex:2;min-width:200px">
-      <input type="password" id="fleet-apikey" placeholder="API Key (optional)" style="flex:1;min-width:120px">
-      <button class="btn-secondary" onclick="addFleetServer()">Add Server</button>
+      <input type="url" id="fleet-url" placeholder="http://192.168.1.50:8060 or https://nas.example.com" style="flex:2;min-width:200px">
+      <input type="password" id="fleet-apikey" placeholder="API Key (optional)" style="flex:1;min-width:100px">
+      <button class="btn-secondary" onclick="addFleetServer()">Add</button>
+    </div>
+    <div style="margin-top:8px">
+      <label for="fleet-headers" style="font-size:11px;color:var(--text2)">Custom Headers (for CF Access, auth proxies — format: <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">Key:Value</code>, one per line)</label>
+      <textarea id="fleet-headers" rows="2" placeholder="CF-Access-Client-Id: xxxxx&#10;CF-Access-Client-Secret: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);margin-top:4px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
     </div>
     <div style="margin-top:8px"><a href="/fleet" style="color:var(--accent);font-size:13px">Open Fleet Dashboard &rarr;</a></div>
   </div>
@@ -886,6 +897,26 @@ function loadSettings() {
       /* Service checks */
       serviceChecks = (data.service_checks && data.service_checks.checks) ? data.service_checks.checks : [];
       renderServiceChecks();
+      /* Dashboard section toggles */
+      var sec = data.sections || {};
+      var secMap = {findings:1,disk_space:1,smart:1,docker:1,zfs:1,ups:1,parity:1,network:1,tunnels:1,proxmox:1,merged_drives:1};
+      var secIds = {"findings":"sec-findings","disk_space":"sec-disk","smart":"sec-smart","docker":"sec-docker","zfs":"sec-zfs","ups":"sec-ups","parity":"sec-parity","network":"sec-network","tunnels":"sec-tunnels","proxmox":"sec-proxmox","merged_drives":"sec-merged-drives"};
+      for (var sk in secIds) { var el = document.getElementById(secIds[sk]); if (el) { if (sec[sk] === false) el.classList.remove("on"); else el.classList.add("on"); } }
+      /* Proxmox VE */
+      var pve = data.proxmox || {};
+      if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
+      document.getElementById("pve-url").value = pve.url || "";
+      document.getElementById("pve-node").value = pve.node_name || "";
+      document.getElementById("pve-token").value = pve.token_id || "";
+      document.getElementById("pve-secret").value = pve.secret || "";
+      /* Log forwarding */
+      var lp = data.log_push || {};
+      if (lp.enabled) document.getElementById("logfwd-toggle").classList.add("on"); else document.getElementById("logfwd-toggle").classList.remove("on");
+      logFwdDests = lp.destinations || [];
+      renderLogFwdDests();
+      /* Notification Rules */
+      notifRules = (data.notifications && data.notifications.rules) ? data.notifications.rules : [];
+      renderRules();
     })
     .catch(function(e) { showToast("Failed to load settings: " + e, "error"); });
 }
@@ -1154,6 +1185,17 @@ function serviceTypePillClass(t) {
   return "pill-http";
 }
 
+function populateInstanceSelector() {
+  var sel = document.getElementById("sc-instance");
+  var wrap = document.getElementById("sc-instance-wrap");
+  if (!sel || !wrap) return;
+  sel.innerHTML = '<option value="">This server (local)</option>';
+  for (var i = 0; i < fleetServers.length; i++) {
+    var s = fleetServers[i];
+    sel.innerHTML += '<option value="' + escapeHtml(s.id || s.name) + '">' + escapeHtml(s.name) + ' (' + escapeHtml(s.url) + ')</option>';
+  }
+  wrap.style.display = fleetServers.length > 0 ? '' : 'none';
+}
 function renderServiceChecks() {
   var container = document.getElementById("service-check-list");
   if (!container) return;
@@ -1201,6 +1243,7 @@ function toggleServiceCheckForm() {
   document.getElementById("sc-type").value = "http";
   document.getElementById("sc-target").value = "";
   document.getElementById("sc-port").value = "";
+  document.getElementById("sc-instance").value = "";
   document.getElementById("sc-interval").value = "300";
   document.getElementById("sc-timeout").value = "5";
   document.getElementById("sc-threshold").value = "1";
@@ -1208,6 +1251,7 @@ function toggleServiceCheckForm() {
   document.getElementById("sc-http-min").value = "200";
   document.getElementById("sc-http-max").value = "399";
   setServiceCheckEnabledUI(true);
+  populateInstanceSelector();
   onServiceTypeChange();
   form.classList.add("visible");
 }
@@ -1242,6 +1286,8 @@ function editServiceCheck(idx) {
   document.getElementById("sc-type").value = sc.type;
   document.getElementById("sc-target").value = sc.target;
   document.getElementById("sc-port").value = sc.port > 0 ? String(sc.port) : "";
+  populateInstanceSelector();
+  document.getElementById("sc-instance").value = sc.instance || "";
   document.getElementById("sc-interval").value = String(sc.interval_sec || 300);
   document.getElementById("sc-timeout").value = String(sc.timeout_sec || 5);
   document.getElementById("sc-threshold").value = String(sc.failure_threshold || 1);
@@ -1270,6 +1316,7 @@ function saveServiceCheck() {
     type: type,
     target: target,
     enabled: document.getElementById("sc-enabled").checked,
+    instance: document.getElementById("sc-instance").value || "",
     interval_sec: parseInt(document.getElementById("sc-interval").value, 10) || 300,
     timeout_sec: parseInt(document.getElementById("sc-timeout").value, 10) || 5,
     port: parseInt(document.getElementById("sc-port").value, 10) || 0,
@@ -1484,15 +1531,28 @@ function renderFleetList() {
   var h = '';
   for (var i = 0; i < fleetServers.length; i++) {
     var s = fleetServers[i];
+    var hdrs = s.headers ? Object.keys(s.headers).length : 0;
     h += '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">';
-    h += '<span style="font-weight:500;flex:1">' + (s.name || 'Server ' + (i+1)) + '</span>';
-    h += '<span style="font-size:12px;color:var(--text2);flex:2">' + (s.url || '') + '</span>';
+    h += '<span style="font-weight:500;flex:1">' + escapeHtml(s.name || 'Server ' + (i+1)) + '</span>';
+    h += '<span style="font-size:12px;color:var(--text2);flex:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(s.url || '') + '</span>';
+    if (hdrs > 0) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.12);color:var(--accent)">' + hdrs + ' header' + (hdrs>1?'s':'') + '</span>';
+    if (s.api_key) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(39,166,68,0.12);color:var(--green)">auth</span>';
     h += '<button class="btn-danger" onclick="removeFleetServer(' + i + ')" style="padding:4px 10px;font-size:11px">Remove</button>';
     h += '</div>';
   }
   el.innerHTML = h;
 }
 
+function parseHeadersTextarea() {
+  var raw = document.getElementById("fleet-headers").value.trim();
+  if (!raw) return null;
+  var headers = {};
+  raw.split("\n").forEach(function(line) {
+    var idx = line.indexOf(":");
+    if (idx > 0) headers[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+  });
+  return Object.keys(headers).length > 0 ? headers : null;
+}
 function addFleetServer() {
   var name = document.getElementById("fleet-name").value.trim();
   var url = document.getElementById("fleet-url").value.trim();
@@ -1500,11 +1560,14 @@ function addFleetServer() {
   if (!name || !url) { showToast("Name and URL required", "error"); return; }
   var server = { id: "", name: name, url: url, enabled: true };
   if (apikey) server.api_key = apikey;
+  var headers = parseHeadersTextarea();
+  if (headers) server.headers = headers;
   fleetServers.push(server);
   saveFleetServers();
   document.getElementById("fleet-name").value = "";
   document.getElementById("fleet-url").value = "";
   document.getElementById("fleet-apikey").value = "";
+  document.getElementById("fleet-headers").value = "";
 }
 
 function removeFleetServer(idx) {
