@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -77,7 +78,11 @@ func (s *Server) Router() http.Handler {
 
 	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
+		// Health is always public (load balancers, probes)
 		r.Get("/health", s.handleHealth)
+
+		// All other API routes require API key when set
+		r.Use(s.apiKeyMiddleware)
 		r.Get("/status", s.handleStatus)
 		r.Get("/snapshot/latest", s.handleLatestSnapshot)
 		r.Get("/snapshot/{id}", s.handleGetSnapshot)
@@ -139,6 +144,37 @@ func (s *Server) Router() http.Handler {
 }
 
 // ---------- Handlers ----------
+
+// apiKeyMiddleware checks for a valid API key when one is configured.
+// Requests from the same origin (HTML pages) are exempt — only external
+// API calls need the key. When no key is set, all requests pass through.
+func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		settings := s.getSettings()
+		if settings.APIKey == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Check Authorization header
+		auth := r.Header.Get("Authorization")
+		if auth == "" {
+			// Also check query param for convenience (e.g. browser testing)
+			auth = "Bearer " + r.URL.Query().Get("api_key")
+		}
+		expected := "Bearer " + settings.APIKey
+		if auth != expected {
+			// Allow requests from same origin (Referer contains our host)
+			referer := r.Header.Get("Referer")
+			if referer != "" && (strings.Contains(referer, r.Host) || strings.Contains(referer, "localhost")) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing API key"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-NAS-Doctor", "true")

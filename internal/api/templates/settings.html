@@ -141,6 +141,19 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     </div>
   </div>
 
+  <!-- 1b. API Key -->
+  <div class="card" id="card-apikey">
+    <div class="card-title">API Key</div>
+    <div class="card-desc">Protect this instance's API. When set, all API requests (fleet polling, service checks, etc.) require this key in the Authorization header. The dashboard UI is not affected.</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+      <input type="text" id="api-key-display" readonly style="flex:1;font-family:var(--font-mono);font-size:12px;letter-spacing:0.5px" placeholder="No API key set — instance is open">
+      <button class="btn btn-secondary btn-sm" onclick="generateAPIKey()">Generate</button>
+      <button class="btn btn-secondary btn-sm" onclick="copyAPIKey()">Copy</button>
+      <button class="btn btn-danger btn-sm" onclick="revokeAPIKey()">Revoke</button>
+    </div>
+    <p style="font-size:11px;color:var(--text2);margin-top:8px">Share this key with other NAS Doctor instances that need to connect to this one via fleet monitoring.</p>
+  </div>
+
   <!-- 2. Notifications — Webhooks -->
   <div class="card" id="card-webhooks">
     <div class="card-title">Notifications &mdash; Webhooks</div>
@@ -965,6 +978,8 @@ function loadSettings() {
       var secMap = {findings:1,disk_space:1,smart:1,docker:1,zfs:1,ups:1,parity:1,network:1,tunnels:1,proxmox:1,kubernetes:1,merged_drives:1};
       var secIds = {"findings":"sec-findings","disk_space":"sec-disk","smart":"sec-smart","docker":"sec-docker","zfs":"sec-zfs","ups":"sec-ups","parity":"sec-parity","network":"sec-network","tunnels":"sec-tunnels","proxmox":"sec-proxmox","kubernetes":"sec-kubernetes","merged_drives":"sec-merged-drives"};
       for (var sk in secIds) { var el = document.getElementById(secIds[sk]); if (el) { if (sec[sk] === false) el.classList.remove("on"); else el.classList.add("on"); } }
+      /* API Key */
+      document.getElementById("api-key-display").value = data.api_key || "";
       /* Proxmox VE */
       var pve = data.proxmox || {};
       if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
@@ -1063,6 +1078,7 @@ function buildSettingsPayload() {
       keep_count: parseInt(document.getElementById("backup-keep").value, 10) || 4,
       interval_hours: getBackupIntervalH()
     },
+    api_key: document.getElementById("api-key-display").value.trim(),
     fleet: fleetServers || base.fleet || [],
     dismissed_findings: base.dismissed_findings || []
   };
@@ -1769,6 +1785,10 @@ function _doFleetTest(url, apikey, headers, resultEl) {
       if (d.hostname) info += " · " + d.hostname;
       if (d.uptime) info += " · " + d.uptime;
       resultEl.textContent = "Connected — " + info;
+      if (d.api_key_required) {
+        resultEl.style.color = "var(--amber)";
+        resultEl.textContent += " ⚠ API key required for full monitoring";
+      }
       // Auto-populate name if empty
       var nameField = document.getElementById("fleet-name");
       if (nameField && !nameField.value.trim() && d.hostname) {
@@ -2222,6 +2242,24 @@ function addPreset(preset) {
 }
 
 // Load snapshot for target dropdowns
+function generateAPIKey() {
+  var key = 'nd-' + crypto.randomUUID().replace(/-/g, '');
+  document.getElementById("api-key-display").value = key;
+  saveSettings();
+  showToast("API key generated — save it somewhere safe", "success");
+}
+function copyAPIKey() {
+  var el = document.getElementById("api-key-display");
+  if (!el.value) { showToast("No API key to copy", "error"); return; }
+  navigator.clipboard.writeText(el.value).then(function() { showToast("Copied to clipboard", "success"); });
+}
+function revokeAPIKey() {
+  if (!confirm("Revoke the API key? All fleet instances using this key will lose access.")) return;
+  document.getElementById("api-key-display").value = "";
+  saveSettings();
+  showToast("API key revoked — instance is now open", "success");
+}
+
 function testKubernetesConnection() {
   var result = document.getElementById("k8s-test-result");
   result.textContent = "Testing..."; result.style.color = "var(--text2)";
