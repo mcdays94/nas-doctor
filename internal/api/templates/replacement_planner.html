@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NAS Doctor</title>
+<link rel="icon" href="/icon.png">
+<link rel="stylesheet" href="/css/shared.css">
+<style>
+body{padding:0}
+.rp-container{max-width:1200px;margin:0 auto;padding:24px}
+.rp-container .header-left img{width:28px;height:28px;border-radius:6px}
+
+/* Summary cards */
+.rp-summary{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+.rp-stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;flex:1;min-width:100px;text-align:center}
+.rp-stat-val{font-size:22px;font-weight:600}
+.rp-stat-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-top:2px}
+
+/* Timeline */
+.timeline-section{margin-bottom:28px}
+.timeline-bar{display:flex;height:32px;border-radius:8px;overflow:hidden;background:rgba(255,255,255,0.04);margin-top:8px}
+body.theme-clean .timeline-bar{background:rgba(0,0,0,0.04)}
+.timeline-seg{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;transition:width 0.5s ease;min-width:0;overflow:hidden;white-space:nowrap}
+.timeline-seg.replace-now{background:var(--red)}.timeline-seg.replace-soon{background:var(--amber)}.timeline-seg.monitor{background:rgba(94,106,210,0.3);color:var(--accent)}.timeline-seg.healthy{background:rgba(34,197,94,0.15);color:var(--green)}
+.timeline-legend{display:flex;gap:16px;margin-top:8px;flex-wrap:wrap}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)}
+.legend-dot{width:10px;height:10px;border-radius:3px}
+
+/* Drive rows */
+.drive-table{width:100%;border-collapse:collapse;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.drive-table th{background:var(--elevated);color:var(--text2);font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:0.5px;padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+.drive-table td{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:middle}
+body.theme-clean .drive-table td{border-bottom-color:rgba(0,0,0,0.06)}
+.drive-table tr:last-child td{border-bottom:none}
+.drive-table tr:hover td{background:rgba(255,255,255,0.02)}
+body.theme-clean .drive-table tr:hover td{background:rgba(0,0,0,0.02)}
+
+/* Urgency badges */
+.urg-badge{font-size:10px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;display:inline-block}
+.urg-badge.replace-now{background:rgba(220,38,38,0.15);color:var(--red)}
+.urg-badge.replace-soon{background:rgba(217,119,6,0.15);color:var(--amber)}
+.urg-badge.monitor{background:rgba(94,106,210,0.15);color:var(--accent)}
+.urg-badge.healthy{background:rgba(34,197,94,0.1);color:var(--green)}
+
+/* Health ring */
+.health-ring{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0;border:3px solid}
+.health-ring.crit{border-color:var(--red);color:var(--red)}
+.health-ring.warn{border-color:var(--amber);color:var(--amber)}
+.health-ring.ok{border-color:var(--green);color:var(--green)}
+
+/* Risk factors */
+.risk-list{margin:0;padding:0;list-style:none;font-size:11px;color:var(--text2)}
+.risk-list li{padding:1px 0}
+.risk-list li::before{content:"• ";color:var(--text3)}
+
+/* Life bar */
+.life-bar{width:80px;height:6px;border-radius:3px;background:rgba(255,255,255,0.06);overflow:hidden;display:inline-block;vertical-align:middle;margin-right:6px}
+body.theme-clean .life-bar{background:rgba(0,0,0,0.06)}
+.life-fill{height:100%;border-radius:3px;transition:width 0.5s ease}
+
+/* Cost summary */
+.cost-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 22px;margin-bottom:24px}
+.cost-title{font-size:13px;font-weight:600;margin-bottom:10px}
+.cost-row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px}
+.cost-row .label{color:var(--text2)}.cost-row .val{font-weight:600;font-family:var(--font-mono)}
+.cost-divider{border-top:1px solid var(--border);margin:6px 0}
+
+/* Section header */
+.section-hdr{font-size:14px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;margin-top:28px}
+
+.data-ver{font-size:10px;color:var(--text3);text-align:right;margin-top:12px}
+
+/* Ember */
+body.theme-ember .rp-stat-val,.theme-ember .cost-title,.theme-ember .section-hdr{font-family:var(--font-serif)}
+body.theme-ember .cost-row .val,.theme-ember .health-ring{font-family:var(--font-mono)}
+</style>
+</head>
+<body>
+<div class="rp-container">
+  <div class="header">
+    <div class="header-left">
+      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a><span class="logo-slogan">Sleep tight knowing your server never does.</span>
+      <span class="page-title">Replacement Planner</span>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link">Dashboard</a>
+      <a href="/alerts" class="nav-link">Alerts</a>
+      <a href="/service-checks" class="nav-link">Services</a>
+      <a href="/stats" class="nav-link">Stats</a>
+      <a href="/fleet" class="nav-link">Fleet</a>
+      <a href="/replacement-planner" class="nav-link active">Planner</a>
+      <a href="/settings" class="nav-link" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
+      <a href="https://github.com/mcdays94/nas-doctor" class="nav-link" target="_blank" title="GitHub"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.02 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.82.58C20.56 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
+    </div>
+  </div>
+  <div id="app"><div style="padding:40px;text-align:center;color:var(--text2)">Loading replacement plan...</div></div>
+</div>
+<script>
+(function(){
+  function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
+  try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
+  fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
+  fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor \u2014 "+d.hostname;}).catch(function(){});
+})();
+(function(){
+  "use strict";
+  function esc(s){var d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
+
+  function urgClass(u){
+    if(u==="replace_now")return"replace-now";
+    if(u==="replace_soon")return"replace-soon";
+    if(u==="monitor")return"monitor";
+    return"healthy";
+  }
+  function urgLabel(u){
+    if(u==="replace_now")return"Replace Now";
+    if(u==="replace_soon")return"Replace Soon";
+    if(u==="monitor")return"Monitor";
+    return"Healthy";
+  }
+  function scoreClass(s){return s<30?"crit":s<70?"warn":"ok";}
+  function barColor(pct){return pct>100?"var(--red)":pct>80?"var(--amber)":"var(--green)";}
+  function fmtSize(gb){return gb>=1000?(gb/1000).toFixed(1)+" TB":gb.toFixed(0)+" GB";}
+  function fmtYears(y){return y<0.1?"< 1 month":y<1?(y*12).toFixed(0)+" months":y.toFixed(1)+" years";}
+  function fmtCost(c){return c>0?"$"+c.toFixed(0):"\u2014";}
+  function fmtHours(h){
+    if(!h)return"0h";
+    var d=h/24;
+    if(d>365)return(d/365.25).toFixed(1)+"y";
+    if(d>1)return Math.round(d)+"d";
+    return h+"h";
+  }
+
+  function render(plan){
+    var app=document.getElementById("app");
+    if(!plan||!plan.drives||plan.drives.length===0){
+      app.innerHTML='<div style="text-align:center;padding:60px;color:var(--text2)"><div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px">No SMART data available</div><p>Wait for the first scan to complete, then refresh.</p></div>';
+      return;
+    }
+    var h='';
+
+    // Summary stats
+    h+='<div class="rp-summary">';
+    h+='<div class="rp-stat"><div class="rp-stat-val">'+plan.total_drives+'</div><div class="rp-stat-label">Total Drives</div></div>';
+    if(plan.replace_now>0)h+='<div class="rp-stat"><div class="rp-stat-val" style="color:var(--red)">'+plan.replace_now+'</div><div class="rp-stat-label">Replace Now</div></div>';
+    if(plan.replace_soon>0)h+='<div class="rp-stat"><div class="rp-stat-val" style="color:var(--amber)">'+plan.replace_soon+'</div><div class="rp-stat-label">Replace Soon</div></div>';
+    if(plan.monitor>0)h+='<div class="rp-stat"><div class="rp-stat-val" style="color:var(--accent)">'+plan.monitor+'</div><div class="rp-stat-label">Monitor</div></div>';
+    h+='<div class="rp-stat"><div class="rp-stat-val" style="color:var(--green)">'+plan.healthy+'</div><div class="rp-stat-label">Healthy</div></div>';
+    if(plan.cost_configured&&plan.total_cost>0)h+='<div class="rp-stat"><div class="rp-stat-val" style="color:var(--amber)">$'+plan.total_cost.toFixed(0)+'</div><div class="rp-stat-label">Est. Replacement Cost</div></div>';
+    h+='</div>';
+
+    // Timeline bar
+    var total=plan.total_drives;
+    h+='<div class="timeline-section">';
+    h+='<div class="section-hdr">Fleet Health Distribution</div>';
+    h+='<div class="timeline-bar">';
+    if(plan.replace_now>0)h+='<div class="timeline-seg replace-now" style="width:'+(plan.replace_now/total*100).toFixed(1)+'%">'+(plan.replace_now>0?plan.replace_now:'')+'</div>';
+    if(plan.replace_soon>0)h+='<div class="timeline-seg replace-soon" style="width:'+(plan.replace_soon/total*100).toFixed(1)+'%">'+(plan.replace_soon>0?plan.replace_soon:'')+'</div>';
+    if(plan.monitor>0)h+='<div class="timeline-seg monitor" style="width:'+(plan.monitor/total*100).toFixed(1)+'%">'+(plan.monitor>0?plan.monitor:'')+'</div>';
+    if(plan.healthy>0)h+='<div class="timeline-seg healthy" style="width:'+(plan.healthy/total*100).toFixed(1)+'%">'+(plan.healthy>0?plan.healthy:'')+'</div>';
+    h+='</div>';
+    h+='<div class="timeline-legend">';
+    h+='<div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>Replace Now</div>';
+    h+='<div class="legend-item"><div class="legend-dot" style="background:var(--amber)"></div>Replace Soon</div>';
+    h+='<div class="legend-item"><div class="legend-dot" style="background:rgba(94,106,210,0.5)"></div>Monitor</div>';
+    h+='<div class="legend-item"><div class="legend-dot" style="background:rgba(34,197,94,0.3)"></div>Healthy</div>';
+    h+='</div></div>';
+
+    // Cost breakdown (if configured)
+    if(plan.cost_configured){
+      h+='<div class="cost-box">';
+      h+='<div class="cost-title">Estimated Replacement Costs</div>';
+      if(plan.replace_now>0){h+='<div class="cost-row"><span class="label">Replace Now ('+plan.replace_now+' drives)</span><span class="val" style="color:var(--red)">';
+        var rnCost=0;plan.drives.forEach(function(d){if(d.urgency==="replace_now")rnCost+=d.cost_estimate;});
+        h+='$'+rnCost.toFixed(0)+'</span></div>';}
+      if(plan.replace_soon>0){h+='<div class="cost-row"><span class="label">Replace Soon ('+plan.replace_soon+' drives)</span><span class="val" style="color:var(--amber)">';
+        var rsCost=0;plan.drives.forEach(function(d){if(d.urgency==="replace_soon")rsCost+=d.cost_estimate;});
+        h+='$'+rsCost.toFixed(0)+'</span></div>';}
+      h+='<div class="cost-divider"></div>';
+      h+='<div class="cost-row"><span class="label">Total Urgent Replacements</span><span class="val">$'+plan.total_cost.toFixed(0)+'</span></div>';
+      h+='<div class="cost-row"><span class="label">Full Fleet Replacement (all drives)</span><span class="val" style="color:var(--text3)">$'+plan.total_cost_all.toFixed(0)+'</span></div>';
+      h+='</div>';
+    }
+
+    // Drive table
+    h+='<div class="section-hdr">Drive Assessment</div>';
+    h+='<div style="overflow-x:auto"><table class="drive-table">';
+    h+='<thead><tr><th>Score</th><th>Device</th><th>Model</th><th>Urgency</th><th>Life Used</th><th>Est. Remaining</th><th>Risk Factors</th>';
+    if(plan.cost_configured)h+='<th>Cost</th>';
+    h+='</tr></thead><tbody>';
+    for(var i=0;i<plan.drives.length;i++){
+      var d=plan.drives[i];
+      var sc=scoreClass(d.health_score);
+      var uc=urgClass(d.urgency);
+      h+='<tr>';
+      // Health ring
+      h+='<td><div class="health-ring '+sc+'">'+d.health_score+'</div></td>';
+      // Device
+      h+='<td><strong>'+esc(d.device)+'</strong>'+(d.array_slot?' <span style="color:var(--text3)">('+esc(d.array_slot)+')</span>':'')+'<br><span style="font-size:10px;color:var(--text3)">'+fmtSize(d.size_gb)+' '+esc(d.disk_type)+'</span></td>';
+      // Model
+      h+='<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(d.model)+'</td>';
+      // Urgency
+      h+='<td><span class="urg-badge '+uc+'">'+urgLabel(d.urgency)+'</span><br><span style="font-size:10px;color:var(--text3)">'+esc(d.urgency_label)+'</span></td>';
+      // Life used bar
+      var pct=Math.min(d.life_used_pct,100);
+      h+='<td><div class="life-bar"><div class="life-fill" style="width:'+pct.toFixed(0)+'%;background:'+barColor(d.life_used_pct)+'"></div></div><span style="font-size:11px;font-family:var(--font-mono)">'+d.life_used_pct.toFixed(0)+'%</span><br><span style="font-size:10px;color:var(--text3)">'+fmtHours(d.power_on_hours)+'</span></td>';
+      // Remaining
+      h+='<td style="font-family:var(--font-mono);font-size:11px'+(d.remaining_years<1?';color:var(--red)':d.remaining_years<2?';color:var(--amber)':'')+'">'+fmtYears(d.remaining_years)+'<br><span style="font-size:10px;color:var(--text3)">'+d.failure_mult.toFixed(1)+'x risk</span></td>';
+      // Risk factors
+      h+='<td>';
+      if(d.risk_factors&&d.risk_factors.length>0){
+        h+='<ul class="risk-list">';
+        for(var r=0;r<d.risk_factors.length;r++)h+='<li>'+esc(d.risk_factors[r])+'</li>';
+        h+='</ul>';
+      } else {
+        h+='<span style="color:var(--green);font-size:11px">No risk factors</span>';
+      }
+      h+='</td>';
+      // Cost
+      if(plan.cost_configured)h+='<td style="font-family:var(--font-mono);font-size:11px">'+fmtCost(d.cost_estimate)+'</td>';
+      h+='</tr>';
+    }
+    h+='</tbody></table></div>';
+
+    // Data version
+    h+='<div class="data-ver">Risk analysis based on Backblaze Drive Stats '+esc(plan.data_version)+' (337,000+ drives)</div>';
+
+    if(!plan.cost_configured){
+      h+='<div style="margin-top:16px;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text2)">Set <strong>Cost per TB</strong> in <a href="/settings" style="color:var(--accent)">Settings</a> to see replacement cost estimates.</div>';
+    }
+
+    app.innerHTML=h;
+  }
+
+  fetch("/api/v1/replacement-plan").then(function(r){return r.json()}).then(render).catch(function(e){
+    document.getElementById("app").innerHTML='<div style="padding:40px;text-align:center;color:var(--red)">Failed to load: '+e.message+'</div>';
+  });
+})();
+</script>
+</body>
+</html>
