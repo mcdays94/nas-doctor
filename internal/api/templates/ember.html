@@ -1686,39 +1686,48 @@ td.mono {
     html += "</div>"; /* section-block proxmox */
 
     /* ==== Section: Kubernetes ==== */
-    html += "<div class=\"section-block\" data-section=\"kubernetes\">";
+    // K8s shared
     var k8s = snapshot ? snapshot.kubernetes : null;
-    if (k8s) {
-      var k8sT = k8s.alias ? esc(k8s.alias) : "Kubernetes";
-      html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">" + k8sT + (k8s.platform ? " <span style=\"font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.12);color:var(--accent)\">" + esc(k8s.platform) + "</span>" : "") + "</div>";
-      if (k8s.error) {
-        html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);padding:12px;color:var(--red);font-size:12px\">" + esc(k8s.error) + "</div>";
-      } else if (k8s.connected) {
-        if (k8s.nodes && k8s.nodes.length > 0) {
-          html += "<div style=\"display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px\">";
-          for (var ki = 0; ki < k8s.nodes.length; ki++) { var kn = k8s.nodes[ki]; var knR = kn.status==="Ready";
-            html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);padding:10px 14px;flex:1;min-width:200px\">";
-            html += "<div style=\"display:flex;align-items:center;gap:6px;margin-bottom:6px\"><span class=\"status-dot "+(knR?"s-green":"s-red")+"\"></span><span style=\"font-weight:600\">" + esc(kn.name) + "</span></div>";
-            html += "<div style=\"font-size:11px;color:var(--text-dim)\">"+kn.cpu_cores+" cores &middot; "+kn.pod_count+"/"+kn.pod_capacity+" pods</div></div>";
-          }
-          html += "</div>";
-        }
-        if (k8s.pods && k8s.pods.length > 0) {
-          var runP = k8s.pods.filter(function(p){return p.status==="Running";});
-          var compP = k8s.pods.filter(function(p){return p.status==="Succeeded";});
-          var probP = k8s.pods.filter(function(p){return p.status!=="Running"&&p.status!=="Succeeded";});
-          var showP = probP.length > 0 ? probP.concat(runP.slice(0,10)) : runP.slice(0,15);
-          html += "<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);overflow:hidden;max-height:250px;overflow-y:auto\">";
-          html += "<table style=\"width:100%;font-size:12px;border-collapse:collapse\"><tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Pod</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">NS</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Status</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Ready</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Restarts</th></tr>";
-          for(var pi=0;pi<showP.length;pi++){var kp=showP[pi];var pOk=kp.status==="Running"||kp.status==="Succeeded";
-            html+="<tr><td style=\"padding:5px 8px;border-bottom:1px solid var(--border);font-weight:500\">"+esc(kp.name)+"</td><td style=\"padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-dim)\">"+esc(kp.namespace)+"</td><td style=\"padding:5px 8px;border-bottom:1px solid var(--border);color:"+(pOk?"var(--green)":"var(--red)")+";font-weight:600\">"+esc(kp.status)+"</td><td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">"+esc(kp.ready)+"</td><td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">"+kp.restarts+"</td></tr>";
-          }
-          html += "</table></div>";
-        }
-      }
-      html += "</div>";
-    }
-    html += "</div>"; /* section-block kubernetes */
+    var k8sOk = k8s && k8s.connected && !k8s.error;
+    var k8sT = k8s ? (k8s.alias || "K8s") : "K8s";
+    var k8sBdg = k8s && k8s.platform ? " <span style=\"font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.12);color:var(--accent)\">" + esc(k8s.platform) + "</span>" : "";
+    // K8s Nodes
+    html += "<div class=\"section-block\" data-section=\"k8s_nodes\">";
+    if (k8sOk && k8s.nodes && k8s.nodes.length > 0) {
+      html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">" + esc(k8sT) + " Nodes" + k8sBdg + "</div><div style=\"display:flex;gap:8px;flex-wrap:wrap\">";
+      for (var ki=0;ki<k8s.nodes.length;ki++){var kn=k8s.nodes[ki];var knR=kn.status==="Ready";
+        html+="<div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);padding:10px 14px;flex:1;min-width:200px\"><div style=\"display:flex;align-items:center;gap:6px;margin-bottom:6px\"><span class=\"status-dot "+(knR?"s-green":"s-red")+"\"></span><span style=\"font-weight:600\">"+esc(kn.name)+"</span>";
+        if(kn.roles)html+="<span style=\"font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)\">"+esc(kn.roles)+"</span>";
+        html+="</div><div style=\"font-size:11px;color:var(--text-dim)\">"+kn.cpu_cores+" cores &middot; "+kn.pod_count+"/"+kn.pod_capacity+" pods</div>";
+        if(kn.disk_total>0){var du=kn.disk_total-kn.disk_allocatable,dp=du/kn.disk_total*100,dc=dp>=90?"var(--red)":dp>=75?"var(--amber)":"var(--green)";html+="<div style=\"margin-top:4px;display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim)\"><span>Disk "+dp.toFixed(0)+"%</span><span>"+(kn.disk_total>=1073741824?(kn.disk_total/1073741824).toFixed(0)+" GB":(kn.disk_total/1048576).toFixed(0)+" MB")+"</span></div><div style=\"height:3px;background:var(--border);border-radius:2px;overflow:hidden\"><div style=\"height:100%;width:"+dp.toFixed(1)+"%;background:"+dc+"\"></div></div>";}
+        html+="</div>";}
+      html+="</div></div>";
+    } else if(k8s&&k8s.error){html+="<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">"+esc(k8sT)+" Nodes</div><div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);padding:12px;color:var(--red);font-size:12px\">"+esc(k8s.error)+"</div></div>";}
+    html+="</div>";
+    // K8s Problem Pods + per-node
+    var _eRunP=[],_eProbP=[],_eByNode={};
+    if(k8sOk&&k8s.pods){_eRunP=k8s.pods.filter(function(p){return p.status==="Running";});_eProbP=k8s.pods.filter(function(p){return p.status!=="Running"&&p.status!=="Succeeded";});for(var pi=0;pi<_eRunP.length;pi++){var nd=_eRunP[pi].node||"unassigned";if(!_eByNode[nd])_eByNode[nd]=[];_eByNode[nd].push(_eRunP[pi]);}}
+    html+="<div class=\"section-block\" data-section=\"k8s_problems\">";
+    if(_eProbP.length>0){html+="<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">"+esc(k8sT)+" Problem Pods ("+_eProbP.length+")</div><div style=\"background:rgba(255,99,99,0.08);border:1px solid rgba(255,99,99,0.15);border-radius:12px;padding:8px 12px\">";for(var pp=0;pp<_eProbP.length;pp++){var prb=_eProbP[pp];html+="<div style=\"display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px\"><span style=\"color:var(--red);font-weight:600\">"+esc(prb.status)+"</span><span style=\"font-weight:500\">"+esc(prb.name)+"</span><span style=\"color:var(--text-dim);font-size:11px\">"+esc(prb.namespace)+"</span></div>";}html+="</div></div>";}
+    html+="</div>";
+    var _eNodeKeys=Object.keys(_eByNode).sort();
+    for(var nni=0;nni<_eNodeKeys.length;nni++){var nName=_eNodeKeys[nni];var nPods=_eByNode[nName];var nInfo=null;for(var fi=0;fi<(k8s?k8s.nodes||[]:[]).length;fi++){if(k8s.nodes[fi].name===nName){nInfo=k8s.nodes[fi];break;}}
+      html+="<div class=\"section-block\" data-section=\"k8s_node_"+nni+"\">";
+      html+="<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">"+esc(nName)+" <span style=\"font-size:11px;color:var(--text-dim);font-weight:400\">"+nPods.length+" pods</span>";
+      if(nInfo&&nInfo.roles)html+=" <span style=\"font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)\">"+esc(nInfo.roles)+"</span>";
+      html+="</div><div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);padding:10px 12px\">";
+      if(nInfo&&nInfo.disk_total>0){var ndu=nInfo.disk_total-nInfo.disk_allocatable,ndp=ndu/nInfo.disk_total*100,ndc=ndp>=90?"var(--red)":ndp>=75?"var(--amber)":"var(--green)";html+="<div style=\"display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:10px;color:var(--text-dim)\"><span>Disk "+ndp.toFixed(0)+"%</span><div style=\"flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden\"><div style=\"height:100%;width:"+ndp.toFixed(1)+"%;background:"+ndc+"\"></div></div><span>"+(nInfo.disk_total>=1073741824?(nInfo.disk_total/1073741824).toFixed(0)+"G":(nInfo.disk_total/1048576).toFixed(0)+"M")+"</span></div>";}
+      var nsP={};for(var npi=0;npi<nPods.length;npi++){var ns=nPods[npi].namespace;if(!nsP[ns])nsP[ns]=[];nsP[ns].push(nPods[npi]);}
+      var nsK=Object.keys(nsP).sort();
+      for(var nsk=0;nsk<nsK.length;nsk++){html+="<div style=\"margin-bottom:6px\"><div style=\"font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px\">"+esc(nsK[nsk])+"</div>";for(var npj=0;npj<nsP[nsK[nsk]].length;npj++){var pod=nsP[nsK[nsk]][npj];html+="<div style=\"display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px\"><span style=\"width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0\"></span><span style=\"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1\">"+esc(pod.name)+"</span><span style=\"color:var(--text-dim);font-size:10px\">"+esc(pod.ready)+"</span>"+(pod.restarts>0?"<span style=\"color:var(--amber);font-size:10px\">"+pod.restarts+"r</span>":"")+"</div>";}html+="</div>";}
+      html+="</div></div></div>";}
+    // K8s Deployments + Events
+    html+="<div class=\"section-block\" data-section=\"k8s_deployments\">";
+    if(k8sOk&&k8s.deployments&&k8s.deployments.length>0){var uD=k8s.deployments.filter(function(d){return d.unavailable>0;});html+="<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">"+esc(k8sT)+" Deployments ("+k8s.deployments.length+")"+(uD.length>0?" <span style=\"color:var(--red)\">"+uD.length+" unhealthy</span>":"")+"</div><div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);overflow:hidden;max-height:250px;overflow-y:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><tr style=\"color:var(--text-dim);font-size:10px;text-transform:uppercase\"><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Name</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">NS</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Ready</th><th style=\"text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)\">Strategy</th></tr>";for(var di=0;di<k8s.deployments.length;di++){var dep=k8s.deployments[di];var dOk=dep.unavailable===0&&dep.ready_replicas>=dep.replicas;html+="<tr><td style=\"padding:5px 8px;border-bottom:1px solid var(--border);font-weight:500;color:"+(dOk?"inherit":"var(--red)")+"\">"+esc(dep.name)+"</td><td style=\"padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-dim)\">"+esc(dep.namespace)+"</td><td style=\"padding:5px 8px;border-bottom:1px solid var(--border);color:"+(dOk?"var(--green)":"var(--red)")+"\">"+dep.ready_replicas+"/"+dep.replicas+"</td><td style=\"padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-dim)\">"+esc(dep.strategy||"")+"</td></tr>";}html+="</table></div></div>";}
+    html+="</div>";
+    html+="<div class=\"section-block\" data-section=\"k8s_events\">";
+    if(k8sOk&&k8s.events&&k8s.events.length>0){html+="<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">"+esc(k8sT)+" Events ("+k8s.events.length+" warnings)</div><div style=\"background:var(--surface-100);border-radius:12px;box-shadow:var(--shadow-card);padding:8px;max-height:200px;overflow-y:auto\">";for(var ei=0;ei<Math.min(k8s.events.length,15);ei++){var ev=k8s.events[ei];html+="<div style=\"font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)\"><span style=\"color:var(--amber);font-weight:600\">"+esc(ev.reason)+"</span> <span style=\"color:var(--text-dim)\">"+esc(ev.object)+"</span> <span style=\"color:var(--text-tertiary)\">"+esc(ev.message).substring(0,100)+"</span></div>";}html+="</div></div>";}
+    html+="</div>";
 
     /* ==== Section: Parity ==== */
     html += "<div class=\"section-block\" data-section=\"parity\">";
@@ -1841,11 +1850,11 @@ td.mono {
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
     var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
-    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "parity": sec.parity !== false };
+    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "k8s_nodes": sec.kubernetes !== false, "k8s_problems": sec.kubernetes !== false, "k8s_deployments": sec.kubernetes !== false, "k8s_events": sec.kubernetes !== false, "parity": sec.parity !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var blockMap={};var visibleItems=[];
-    for(var i=0;i<blocks.length;i++){var name=blocks[i].getAttribute("data-section");if(sectionMap[name]===false)continue;if(blocks[i].offsetHeight<10)continue;blockMap[name]=blocks[i];visibleItems.push({el:blocks[i],name:name,h:blocks[i].offsetHeight});}
+    for(var i=0;i<blocks.length;i++){var name=blocks[i].getAttribute("data-section");var resolved=sectionMap[name];if(resolved===undefined&&name&&name.indexOf("k8s_node_")===0)resolved=sec.kubernetes!==false;if(resolved===false)continue;if(blocks[i].offsetHeight<10)continue;blockMap[name]=blocks[i];visibleItems.push({el:blocks[i],name:name,h:blocks[i].offsetHeight});}
     if(!window.NasDrag||!NasDrag.applySavedOrder(blockMap,visibleItems,colL,colR)){
       var leftH=0,rightH=0;
       for(var j=0;j<visibleItems.length;j++){if(leftH<=rightH){colL.appendChild(visibleItems[j].el);leftH+=visibleItems[j].h;}else{colR.appendChild(visibleItems[j].el);rightH+=visibleItems[j].h;}}
