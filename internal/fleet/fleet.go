@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,7 +119,7 @@ func (m *Manager) pollServer(srv internal.RemoteServer) *internal.RemoteServerSt
 		LastPoll: time.Now().Format(time.RFC3339),
 	}
 
-	url := srv.URL + "/api/v1/status"
+	url := strings.TrimRight(srv.URL, "/") + "/api/v1/status"
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		result.Error = fmt.Sprintf("invalid URL: %v", err)
