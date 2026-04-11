@@ -248,6 +248,10 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/replacement-plan", s.handleReplacementPlan)
 	r.Get("/replacement-planner", s.handleReplacementPlannerPage)
 
+	// Capacity forecast
+	r.Get("/api/v1/capacity-forecast", s.handleCapacityForecast)
+	r.Get("/api/v1/disk-usage-history", s.handleDiskUsageHistory)
+
 	// Pages
 	r.Get("/settings", s.handleSettingsPage)
 	r.Get("/disk/{serial}", s.handleDiskPage)
