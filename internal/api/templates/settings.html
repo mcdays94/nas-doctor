@@ -146,7 +146,10 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <div class="card-title">API Key</div>
     <div class="card-desc">Protect this instance's API. When set, all API requests (fleet polling, service checks, etc.) require this key in the Authorization header. The dashboard UI is not affected.</div>
     <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
-      <input type="text" id="api-key-display" readonly style="flex:1;font-family:var(--font-mono);font-size:12px;letter-spacing:0.5px" placeholder="No API key set — instance is open">
+      <input type="password" id="api-key-display" readonly style="flex:1;font-family:var(--font-mono);font-size:12px;letter-spacing:0.5px" placeholder="No API key set — instance is open">
+      <button class="btn btn-secondary btn-sm" onclick="toggleAPIKeyVisibility()" title="Show/Hide">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
       <button class="btn btn-secondary btn-sm" onclick="generateAPIKey()">Generate</button>
       <button class="btn btn-secondary btn-sm" onclick="copyAPIKey()">Copy</button>
       <button class="btn btn-danger btn-sm" onclick="revokeAPIKey()">Revoke</button>
@@ -2242,6 +2245,10 @@ function addPreset(preset) {
 }
 
 // Load snapshot for target dropdowns
+function toggleAPIKeyVisibility() {
+  var el = document.getElementById("api-key-display");
+  el.type = el.type === "password" ? "text" : "password";
+}
 function generateAPIKey() {
   var key = 'nd-' + crypto.randomUUID().replace(/-/g, '');
   document.getElementById("api-key-display").value = key;

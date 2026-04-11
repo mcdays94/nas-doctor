@@ -10,14 +10,15 @@
 body{padding:0}
 .container{max-width:1200px;margin:0 auto;padding:24px}
 /* Topology layout */
-.topo-container{margin-top:24px}
-.topo-center{display:flex;flex-direction:column;align-items:center;margin-bottom:0}
-.topo-self{background:var(--surface);border:2px solid var(--accent);border-radius:16px;padding:20px 32px;text-align:center;position:relative;z-index:2}
+.topo-container{margin-top:24px;display:flex;flex-direction:column;align-items:center}
+.topo-center{display:flex;flex-direction:column;align-items:center;width:100%}
+.topo-self{background:var(--surface);border:2px solid var(--accent);border-radius:16px;padding:20px 32px;text-align:center;position:relative;z-index:2;max-width:400px}
 .topo-self .node-name{font-size:18px;font-weight:700;margin-bottom:4px}
 .topo-self .node-role{font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;font-weight:600}
-.topo-spine{width:2px;height:32px;background:var(--border);margin:0 auto}
+.topo-spine{width:2px;height:32px;background:var(--border)}
+.topo-bus{height:2px;background:var(--border);align-self:stretch;margin:0 10%}
 /* Remote nodes grid */
-.topo-nodes{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0 20px}
+.topo-nodes{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:0 20px;width:100%;margin-top:0}
 .topo-node-wrap{display:flex;flex-direction:column;align-items:center}
 .topo-drop{width:2px;height:28px;background:var(--border)}
 .node-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;width:100%;transition:border-color 0.15s,transform 0.15s;margin-bottom:16px}
@@ -190,8 +191,7 @@ body{padding:0}
     h+='</div>';
     h+='<div class="topo-spine"></div>';
     // Horizontal bus bar rendered via SVG for clean connections
-    var cols=Math.min(statuses.length,4);
-    h+='<div style="width:100%;display:flex;justify-content:center"><div style="width:'+(cols>1?'80':'0')+'%;height:2px;background:var(--border)"></div></div>';
+    if(statuses.length>1)h+='<div class="topo-bus"></div>';
     h+='</div>';
     // Remote nodes
     h+='<div class="topo-nodes">';
