@@ -78,6 +78,28 @@ body.theme-clean .drive:hover{box-shadow:0 0 0 1px rgba(0,0,0,0.15)}
 @media(max-width:800px){.chart-row{grid-template-columns:1fr}}
 .loading{text-align:center;padding:40px;color:var(--text2)}
 
+/* Capacity forecast */
+.forecast-section{margin-bottom:28px}
+.forecast-section-title{font-size:14px;font-weight:600;color:var(--text2);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px}
+.forecast-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+@media(max-width:600px){.forecast-grid{grid-template-columns:1fr}}
+.forecast-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
+.fc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.fc-mount{font-size:13px;font-weight:600}
+.fc-label{font-size:10px;color:var(--text3)}
+.fc-urg{font-size:10px;font-weight:600;padding:2px 7px;border-radius:999px}
+.fc-urg.critical{background:rgba(220,38,38,0.12);color:var(--red)}
+.fc-urg.warning{background:rgba(217,119,6,0.12);color:var(--amber)}
+.fc-urg.ok{background:rgba(34,197,94,0.1);color:var(--green)}
+.fc-bar-track{width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.06);overflow:hidden;margin-bottom:8px}
+body.theme-clean .fc-bar-track{background:rgba(0,0,0,0.06)}
+.fc-bar-fill{height:100%;border-radius:4px;transition:width 0.5s ease}
+.fc-bar-projected{height:100%;border-radius:4px;opacity:0.3;position:relative;top:-8px}
+.fc-stats{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--text2)}
+.fc-stat-val{font-weight:600;color:var(--text);font-family:var(--font-mono)}
+.fc-days{font-family:var(--font-mono);font-size:12px;font-weight:600;margin-top:6px}
+.fc-nodata{text-align:center;padding:20px;color:var(--text3);font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+
 /* Clean theme overrides */
 body.theme-clean .drive-clickable:hover{border-color:rgba(0,0,0,0.15)}
 body.theme-clean .detail-item{border-bottom-color:rgba(0,0,0,0.06)}
@@ -241,6 +263,9 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
         return true;
       });
     }
+
+    // Capacity forecast section
+    h += renderForecast();
 
     // Drive list
     h += '<div class="drives">';
@@ -433,10 +458,53 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
     });
   }
 
+  var capacityForecast = null;
+
+  function renderForecast(){
+    if(!capacityForecast||!capacityForecast.volumes||capacityForecast.volumes.length===0)return'';
+    var h='<div class="forecast-section"><div class="forecast-section-title">Capacity Forecast</div>';
+    h+='<div class="forecast-grid">';
+    var vols=capacityForecast.volumes;
+    // Sort: critical first, then warning, then ok
+    vols.sort(function(a,b){var o={critical:0,warning:1,ok:2};return(o[a.urgency]||9)-(o[b.urgency]||9);});
+    for(var i=0;i<vols.length;i++){
+      var v=vols[i];
+      var pct=Math.min(v.current_pct,100);
+      var barCol=v.current_pct>=95?"var(--red)":v.current_pct>=85?"var(--amber)":"var(--green)";
+      h+='<div class="forecast-card">';
+      h+='<div class="fc-header">';
+      h+='<div><div class="fc-mount">'+esc(v.mount_point)+'</div><div class="fc-label">'+esc(v.label||v.device)+'</div></div>';
+      h+='<span class="fc-urg '+v.urgency+'">'+v.urgency.toUpperCase()+'</span>';
+      h+='</div>';
+      // Usage bar
+      h+='<div class="fc-bar-track"><div class="fc-bar-fill" style="width:'+pct.toFixed(0)+'%;background:'+barCol+'"></div></div>';
+      // Stats row
+      h+='<div class="fc-stats">';
+      h+='<span><span class="fc-stat-val">'+v.current_pct.toFixed(1)+'%</span> used</span>';
+      h+='<span><span class="fc-stat-val">'+(v.total_gb>=1000?(v.total_gb/1000).toFixed(1)+" TB":v.total_gb.toFixed(0)+" GB")+'</span> total</span>';
+      if(v.growth_gb_per_day>0.01)h+='<span><span class="fc-stat-val">+'+v.growth_gb_per_day.toFixed(1)+'</span> GB/day</span>';
+      else if(v.growth_gb_per_day<-0.01)h+='<span><span class="fc-stat-val">'+v.growth_gb_per_day.toFixed(1)+'</span> GB/day</span>';
+      else h+='<span>Stable</span>';
+      h+='</div>';
+      // Days to full
+      h+='<div class="fc-days" style="color:'+(v.days_to_100>=0&&v.days_to_100<30?"var(--red)":v.days_to_100>=0&&v.days_to_100<90?"var(--amber)":"var(--green)")+'">';
+      if(v.days_to_100===0)h+='Full';
+      else if(v.days_to_100>0&&v.days_to_100<365)h+='Full in ~'+v.days_to_100+' days';
+      else if(v.days_to_100>=365)h+='Full in ~'+(v.days_to_100/365).toFixed(1)+' years';
+      else h+='Not filling';
+      if(v.data_points<5)h+=' <span style="font-size:10px;color:var(--text3)">(low data \u2014 '+v.data_points+' points)</span>';
+      h+='</div>';
+      h+='</div>';
+    }
+    h+='</div></div>';
+    return h;
+  }
+
   Promise.all([
     fetch("/api/v1/snapshot/latest").then(function(r){return r.json()}).catch(function(){return null}),
-    fetch("/api/v1/sparklines").then(function(r){return r.json()}).catch(function(){return null})
-  ]).then(function(r){ snapshot=r[0]; sparklines=r[1]; render(); initStatsSortBar(); });
+    fetch("/api/v1/sparklines").then(function(r){return r.json()}).catch(function(){return null}),
+    fetch("/api/v1/capacity-forecast").then(function(r){return r.json()}).catch(function(){return null})
+  ]).then(function(r){ snapshot=r[0]; sparklines=r[1]; capacityForecast=r[2]; render(); initStatsSortBar(); });
 })();
 </script>
 </body>
