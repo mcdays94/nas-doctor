@@ -32,7 +32,9 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
-            echo "value=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+            # Use latest git tag as version for main branch builds
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+            echo "value=${LATEST_TAG#v}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run tests
