@@ -76,13 +76,10 @@ func (s *Server) Router() http.Handler {
 		MaxAge:           300,
 	}))
 
-	// API routes
+	// API routes — all protected by API key when set
 	r.Route("/api/v1", func(r chi.Router) {
-		// Health is always public (load balancers, probes)
-		r.Get("/health", s.handleHealth)
-
-		// All other API routes require API key when set
 		r.Use(s.apiKeyMiddleware)
+		r.Get("/health", s.handleHealth)
 		r.Get("/status", s.handleStatus)
 		r.Get("/snapshot/latest", s.handleLatestSnapshot)
 		r.Get("/snapshot/{id}", s.handleGetSnapshot)
