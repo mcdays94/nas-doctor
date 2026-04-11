@@ -212,6 +212,8 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/fleet/servers", s.handleFleetServers)
 	r.Put("/api/v1/fleet/servers", s.handleFleetUpdateServers)
 	r.Post("/api/v1/fleet/test", s.handleFleetTestServer)
+	r.Post("/api/v1/fleet/pair", s.handleFleetPair)
+	r.Post("/api/v1/service-checks/create", s.handleCreateServiceCheck)
 	r.Post("/api/v1/findings/dismiss", s.handleDismissFinding)
 	r.Post("/api/v1/findings/restore", s.handleRestoreFinding)
 
@@ -686,6 +688,80 @@ func (s *Server) handleFleetUpdateServers(w http.ResponseWriter, r *http.Request
 }
 
 // handleFleetTestServer tests connectivity to a single server.
+// handleFleetPair registers a remote NAS Doctor instance as a fleet member.
+// Called by the remote instance when it adds us to its fleet.
+// POST /api/v1/fleet/pair
+func (s *Server) handleFleetPair(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name   string `json:"name"`
+		URL    string `json:"url"`
+		APIKey string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and url are required"})
+		return
+	}
+	settings := s.getSettings()
+	// Check if already in fleet
+	for _, srv := range settings.Fleet {
+		if strings.EqualFold(srv.URL, req.URL) {
+			writeJSON(w, http.StatusOK, map[string]interface{}{"status": "already_paired", "message": "Already in fleet"})
+			return
+		}
+	}
+	newServer := internal.RemoteServer{
+		ID:      fmt.Sprintf("srv-%d", time.Now().UnixNano()),
+		Name:    req.Name,
+		URL:     req.URL,
+		APIKey:  req.APIKey,
+		Enabled: true,
+	}
+	settings.Fleet = append(settings.Fleet, newServer)
+	data, _ := json.Marshal(settings)
+	s.store.SetConfig(settingsConfigKey, string(data))
+	if s.fleet != nil {
+		s.fleet.SetServers(settings.Fleet)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "paired", "message": "Added to fleet"})
+}
+
+// handleCreateServiceCheck creates a service check from a remote request.
+// POST /api/v1/service-checks/create
+func (s *Server) handleCreateServiceCheck(w http.ResponseWriter, r *http.Request) {
+	var check internal.ServiceCheckConfig
+	if err := json.NewDecoder(r.Body).Decode(&check); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if check.Name == "" || check.Target == "" || check.Type == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, type, and target are required"})
+		return
+	}
+	if check.IntervalSec <= 0 {
+		check.IntervalSec = 300
+	}
+	if check.TimeoutSec <= 0 {
+		check.TimeoutSec = 5
+	}
+	if check.FailureThreshold <= 0 {
+		check.FailureThreshold = 3
+	}
+	settings := s.getSettings()
+	// Check for duplicate
+	for _, existing := range settings.ServiceChecks.Checks {
+		if strings.EqualFold(existing.Target, check.Target) && strings.EqualFold(existing.Type, check.Type) {
+			writeJSON(w, http.StatusOK, map[string]interface{}{"status": "exists", "message": "Check already exists"})
+			return
+		}
+	}
+	check.Enabled = true
+	settings.ServiceChecks.Checks = append(settings.ServiceChecks.Checks, check)
+	data, _ := json.Marshal(settings)
+	s.store.SetConfig(settingsConfigKey, string(data))
+	s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "created", "message": "Service check created"})
+}
+
 func (s *Server) handleFleetTestServer(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {

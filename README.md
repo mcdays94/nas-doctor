@@ -489,7 +489,7 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 All metrics prefixed with `nasdoctor_`. Full list:
 
 <details>
-<summary>Expand metric list (80+ metrics)</summary>
+<summary>Expand metric list (90+ metrics)</summary>
 
 ```
 # System (12 gauges)
@@ -543,6 +543,16 @@ nasdoctor_tunnel_tailscale_node_online / _tx_bytes / _rx_bytes (labels: name, ip
 # Findings
 nasdoctor_findings_critical_count / _warning_count
 nasdoctor_findings_total{severity="critical|warning|info"}
+
+# Proxmox (labels: node for nodes, vmid+name+type+node for guests, storage+node+type for storage)
+nasdoctor_proxmox_node_cpu_usage / _memory_used_bytes / _memory_total_bytes / _online
+nasdoctor_proxmox_guest_cpu_usage / _memory_used_bytes / _memory_max_bytes / _running
+nasdoctor_proxmox_storage_used_bytes / _total_bytes
+
+# Kubernetes (labels vary: node, pod+namespace, deployment+namespace)
+nasdoctor_k8s_node_ready / _pod_count
+nasdoctor_k8s_pod_running / _restarts
+nasdoctor_k8s_deployment_ready_replicas / _desired_replicas
 
 # Other
 nasdoctor_update_available

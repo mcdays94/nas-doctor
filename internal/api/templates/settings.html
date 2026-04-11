@@ -1750,6 +1750,19 @@ function saveFleetServerForm() {
     serviceChecks.push(newCheck);
     renderServiceChecks();
     showToast("Service check auto-created for " + name, "success");
+    // Auto-pair: register ourselves on the remote instance
+    var pairURL = url.replace(/\/+$/, "") + "/api/v1/fleet/pair";
+    var pairHeaders = {"Content-Type": "application/json"};
+    if (apikey) pairHeaders["Authorization"] = "Bearer " + apikey;
+    if (headers) { for (var hk in headers) pairHeaders[hk] = headers[hk]; }
+    fetch("/api/v1/status").then(function(r){return r.json()}).then(function(st){
+      var mySettings = settings || {};
+      var myURL = window.location.origin;
+      fetch(pairURL, {method:"POST", headers: pairHeaders, body: JSON.stringify({name: st.hostname || "Fleet Controller", url: myURL, api_key: mySettings.api_key || ""})})
+        .then(function(r){return r.json()})
+        .then(function(d){if(d.status==="paired")showToast("Auto-paired with " + name, "success"); else if(d.status==="already_paired")showToast(name + " already knows about us", "success");})
+        .catch(function(){/* pairing is best-effort */});
+    }).catch(function(){});
   }
   saveFleetServers();
   saveSettings();
