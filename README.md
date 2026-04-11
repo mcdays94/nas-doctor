@@ -10,8 +10,9 @@
 
 <p align="center">
   <strong>Local NAS diagnostic and monitoring tool.</strong><br>
-  Run it as a Docker container on your Unraid, TrueNAS, Synology, or any Linux NAS.<br>
-  Beautiful dashboards, Prometheus metrics, webhook alerts — no cloud account required.
+  Run it as a Docker container on your Unraid, TrueNAS, Synology, Proxmox, or Kubernetes cluster.<br>
+  Beautiful dashboards, Prometheus metrics, webhook alerts — no cloud account required.<br>
+  <code>amd64</code> + <code>arm64</code> (Raspberry Pi, Apple Silicon)
 </p>
 
 > **Alpha** — NAS Doctor is in alpha. Features may be incomplete, bugs are expected, and breaking changes can occur between releases. Only tested on Unraid. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
@@ -44,6 +45,8 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 - **Logs**: Filtered dmesg and syslog errors (ATA errors, I/O errors, medium errors)
 - **Parity** (Unraid): Historical parity check speed trend analysis, error tracking
 - **Tunnels**: Cloudflared tunnel status (connections, routes) and Tailscale peer graph (IPs, online/offline, relay, exit nodes) — detects host binaries and Docker containers
+- **Proxmox VE**: Cluster status, nodes (CPU/mem/uptime), VMs + LXCs (status, resources), storage pools, HA services, recent tasks/backups — via PVE REST API with test connection
+- **Kubernetes**: Cluster monitoring for k8s, k3s, EKS, GKE, AKS — nodes (status, disk usage, pod capacity), pods grouped by node with namespace breakdown, deployments, services, PVCs, warning events. In-cluster auto-detection + external token auth
 - **OS Update Check**: Compares installed version against latest GitHub release for Unraid and TrueNAS
 
 ### Analysis Engine
@@ -112,18 +115,33 @@ Dropdown-driven notification builder with full granularity — no YAML, no compl
 - **Maintenance Windows** — scheduled suppression periods per hostname
 - **Default Cooldown** — global deduplication window per rule
 
+### API Key Authentication
+
+Per-instance API key system for securing fleet communication:
+- **Generate/Copy/Revoke** from Settings — key format `nd-{uuid}`
+- All `/api/v1/*` endpoints protected when key is set (including `/health`)
+- Dashboard UI exempt (same-origin requests pass through)
+- Fleet test validates end-to-end with API key before saving
+- Docker HEALTHCHECK and K8s probes use TCP port check (no auth needed)
+
 ### Multi-Server Fleet Monitoring
 
 Monitor all your NAS Doctor instances from a visual topology view at `/fleet`:
 - **Visual topology** with central primary node and connected remote servers
-- Per-server: platform icon, hostname, IP, uptime, health status, finding counts
-- Supports optional API key authentication per server
+- Per-server: platform icon, hostname, IP, NAS Doctor version, uptime, health status, finding counts
+- **Auto-detect connection type**: LAN (private IP) vs public hostname with tunnel detection (Cloudflare, Tailscale)
+- **Custom auth headers** per server for Cloudflare Access, Authelia, etc.
+- **Test Connection** validates NAS Doctor signature + API key end-to-end
+- **Auto-create service check** when adding a fleet server
+- **Edit/Remove** per server with collapsible form
+- **Open Dashboard** link to view remote instance directly
+- API key required for fleet polling
 
 ### Integrations
 
 | Integration | How |
 |---|---|
-| **Prometheus** | Scrape `/metrics` — 80+ gauges for system, disk, SMART, Docker, UPS, ZFS, services, tunnels, findings |
+| **Prometheus** | Scrape `/metrics` — 90+ gauges for system, disk, SMART, Docker, UPS, ZFS, services, tunnels, Proxmox, Kubernetes, findings |
 | **Grafana** | Connect via Prometheus data source |
 | **Discord** | Webhook with rich embeds, severity colors, finding details |
 | **Slack** | Webhook with blocks, severity counts, top findings |
@@ -268,6 +286,85 @@ Then open `http://your-truenas-ip:8060`.
 > - Mount `/mnt` to see all pool/dataset storage usage
 > - Parity analysis is Unraid-specific and will be skipped automatically
 > - UPS monitoring works if NUT is configured (TrueNAS has built-in NUT support)
+
+### Kubernetes (k3s / k8s)
+
+Deploy via kubectl or GitOps (ArgoCD/Flux):
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nas-doctor
+  namespace: nas-doctor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nas-doctor
+  template:
+    spec:
+      serviceAccountName: nas-doctor
+      containers:
+        - name: nas-doctor
+          image: ghcr.io/mcdays94/nas-doctor:latest
+          ports:
+            - containerPort: 8060
+          env:
+            - name: TZ
+              value: Europe/Lisbon
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            tcpSocket:
+              port: 8060
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: nas-doctor-data
+```
+
+You'll also need a ServiceAccount + ClusterRole with read access to nodes, pods, deployments, services, namespaces, PVCs, and events. See the [full K8s manifests](https://github.com/mcdays94/k3s-gitops/tree/main/apps/nas-doctor) for a complete example.
+
+> **K8s notes**:
+> - Enable **In-cluster auto-detect** in Settings → Kubernetes (uses mounted service account token)
+> - The `view` ClusterRole is NOT sufficient — nodes are cluster-scoped. Use a custom ClusterRole
+> - Multi-arch image: runs on amd64 and arm64 (Raspberry Pi) nodes
+> - No Docker socket needed — K8s integration uses the API directly
+> - Disk usage per node comes from `ephemeral-storage` capacity
+
+### Proxmox (via Ubuntu VM / LXC)
+
+Deploy via Portainer or Docker Compose on a Proxmox VM:
+
+```yaml
+services:
+  nas-doctor:
+    image: ghcr.io/mcdays94/nas-doctor:latest
+    container_name: nas-doctor
+    privileged: true
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Lisbon
+    volumes:
+      - nas-doctor-data:/data
+      - /var/log:/host/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  nas-doctor-data:
+```
+
+Then go to Settings → Proxmox VE, enter your PVE API URL (`https://proxmox:8006`), create an API token (Datacenter → Permissions → API Tokens, uncheck Privilege Separation), and click Test Connection.
+
+> **Proxmox notes**:
+> - Self-signed PVE certificates are accepted automatically
+> - Node filter dropdown auto-populated from Test Connection
+> - Display alias for friendly naming (e.g., "Proxmox LDN")
+> - Analyzer detects: node offline, memory critical, storage full, stale backups, HA errors, failed tasks
+> - SMART monitoring requires physical disk passthrough to the VM/LXC
 
 ### Build from Source
 
