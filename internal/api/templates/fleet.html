@@ -87,8 +87,10 @@ body{padding:0}
     if(p.indexOf("synology")>=0)return{cls:"synology",icon:"S"};
     if(p.indexOf("proxmox")>=0||p.indexOf("pve")>=0)return{cls:"proxmox",icon:"P"};
     if(p.indexOf("truenas")>=0||p.indexOf("freenas")>=0)return{cls:"linux",icon:"T"};
-    if(p.indexOf("linux")>=0)return{cls:"linux",icon:"L"};
-    return{cls:"unknown",icon:"?"};
+    if(p.indexOf("k3s")>=0||p.indexOf("k8s")>=0||p.indexOf("kube")>=0)return{cls:"linux",icon:"K"};
+    if(p.indexOf("alpine")>=0||p.indexOf("linux")>=0||p.indexOf("ubuntu")>=0||p.indexOf("debian")>=0)return{cls:"linux",icon:"L"};
+    if(p.indexOf("docker")>=0)return{cls:"linux",icon:"D"};
+    return{cls:"unknown",icon:"N"};
   }
 
   function parseConnection(url){
