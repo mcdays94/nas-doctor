@@ -962,44 +962,50 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     h += '</div>'; // end k8s_nodes
 
     // ======= Section: K8s Workloads (pods by node) =======
-    h += '<div class="section-block" data-section="k8s_workloads">';
+    // ======= K8s: prep pod data for per-node sections =======
+    var _k8sRunning = [], _k8sCompleted = [], _k8sProblems = [], _k8sByNode = {};
     if (k8sConnected && k8s.pods && k8s.pods.length > 0) {
-      var runningPods = k8s.pods.filter(function(p){ return p.status === 'Running'; });
-      var completedPods = k8s.pods.filter(function(p){ return p.status === 'Succeeded'; });
-      var problemPods = k8s.pods.filter(function(p){ return p.status !== 'Running' && p.status !== 'Succeeded'; });
-      var countStr = runningPods.length + ' running';
-      if (completedPods.length > 0) countStr += ', ' + completedPods.length + ' completed';
-      if (problemPods.length > 0) countStr += ', <span style="color:var(--red)">' + problemPods.length + ' issues</span>';
+      _k8sRunning = k8s.pods.filter(function(p){ return p.status === 'Running'; });
+      _k8sCompleted = k8s.pods.filter(function(p){ return p.status === 'Succeeded'; });
+      _k8sProblems = k8s.pods.filter(function(p){ return p.status !== 'Running' && p.status !== 'Succeeded'; });
+      for (var pi = 0; pi < _k8sRunning.length; pi++) { var nd = _k8sRunning[pi].node || 'unassigned'; if (!_k8sByNode[nd]) _k8sByNode[nd] = []; _k8sByNode[nd].push(_k8sRunning[pi]); }
+    }
+
+    // ======= Section: K8s Problem Pods =======
+    h += '<div class="section-block" data-section="k8s_problems">';
+    if (_k8sProblems.length > 0) {
       h += '<div>';
-      h += '<div class="section-title">' + k8sTitle + ' Workloads (' + countStr + ')</div>';
-      if (problemPods.length > 0) {
-        h += '<div style="background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.2);border-radius:calc(var(--radius)*1.5);padding:8px 12px;margin-bottom:8px">';
-        for (var pp = 0; pp < problemPods.length; pp++) { var prb = problemPods[pp]; h += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px"><span style="color:var(--red);font-weight:600">'+esc(prb.status)+'</span><span style="font-weight:500">'+esc(prb.name)+'</span><span style="color:var(--text-quaternary);font-size:11px">'+esc(prb.namespace)+'</span>'+(prb.restarts>0?'<span style="color:var(--amber);font-size:11px">'+prb.restarts+' restarts</span>':'')+'</div>'; }
-        h += '</div>';
-      }
-      var podsByNode = {}; for (var pi = 0; pi < runningPods.length; pi++) { var nd = runningPods[pi].node || 'unassigned'; if (!podsByNode[nd]) podsByNode[nd] = []; podsByNode[nd].push(runningPods[pi]); }
-      h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px">';
-      var nodeNames = Object.keys(podsByNode).sort();
-      for (var nni = 0; nni < nodeNames.length; nni++) {
-        var nodeName = nodeNames[nni]; var nodePods = podsByNode[nodeName];
-        var nodeInfo = null; for (var fi = 0; fi < (k8s.nodes||[]).length; fi++) { if (k8s.nodes[fi].name === nodeName) { nodeInfo = k8s.nodes[fi]; break; } }
-        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px">';
-        h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)"><span style="width:8px;height:8px;border-radius:50%;background:'+(nodeInfo&&nodeInfo.status==='Ready'?'var(--green)':'var(--text-quaternary)')+'"></span><span style="font-weight:600;font-size:13px">'+esc(nodeName)+'</span><span style="font-size:10px;color:var(--text-quaternary);margin-left:auto">'+nodePods.length+' pods</span>';
-        if (nodeInfo&&nodeInfo.roles) h+='<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">'+esc(nodeInfo.roles)+'</span>';
-        h += '</div>';
-        if (nodeInfo&&nodeInfo.disk_total>0){var ndu=nodeInfo.disk_total-nodeInfo.disk_allocatable,ndp=ndu/nodeInfo.disk_total*100,ndc=ndp>=90?'var(--red)':ndp>=75?'var(--amber)':'var(--green)';h+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:10px;color:var(--text-quaternary)"><span>Disk '+ndp.toFixed(0)+'%</span><div style="flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+ndp.toFixed(1)+'%;background:'+ndc+'"></div></div><span>'+(nodeInfo.disk_total>=1073741824?(nodeInfo.disk_total/1073741824).toFixed(0)+'G':(nodeInfo.disk_total/1048576).toFixed(0)+'M')+'</span></div>';}
-        var nsPods = {}; for (var npi = 0; npi < nodePods.length; npi++) { var ns = nodePods[npi].namespace; if (!nsPods[ns]) nsPods[ns] = []; nsPods[ns].push(nodePods[npi]); }
-        var nsKeys = Object.keys(nsPods).sort();
-        for (var nsk = 0; nsk < nsKeys.length; nsk++) {
-          h += '<div style="margin-bottom:4px"><div style="font-size:10px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px">' + esc(nsKeys[nsk]) + '</div>';
-          for (var npj = 0; npj < nsPods[nsKeys[nsk]].length; npj++) { var pod = nsPods[nsKeys[nsk]][npj]; h += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+esc(pod.name)+'</span><span style="color:var(--text-quaternary);font-size:10px">'+esc(pod.ready)+'</span>'+(pod.restarts>0?'<span style="color:var(--amber);font-size:10px">'+pod.restarts+'r</span>':'')+'</div>'; }
-          h += '</div>';
-        }
+      h += '<div class="section-title">' + k8sTitle + ' Problem Pods (' + _k8sProblems.length + ')</div>';
+      h += '<div style="background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.2);border-radius:calc(var(--radius)*1.5);padding:8px 12px">';
+      for (var pp = 0; pp < _k8sProblems.length; pp++) { var prb = _k8sProblems[pp]; h += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px"><span style="color:var(--red);font-weight:600">'+esc(prb.status)+'</span><span style="font-weight:500">'+esc(prb.name)+'</span><span style="color:var(--text-quaternary);font-size:11px">'+esc(prb.namespace)+'</span>'+(prb.restarts>0?'<span style="color:var(--amber);font-size:11px">'+prb.restarts+' restarts</span>':'')+'</div>'; }
+      h += '</div></div>';
+    }
+    h += '</div>'; // end k8s_problems
+
+    // ======= Sections: K8s per-node workloads (one section-block per node) =======
+    var _k8sNodeNames = Object.keys(_k8sByNode).sort();
+    for (var nni = 0; nni < _k8sNodeNames.length; nni++) {
+      var nodeName = _k8sNodeNames[nni]; var nodePods = _k8sByNode[nodeName];
+      var nodeInfo = null; for (var fi = 0; fi < (k8s ? k8s.nodes||[] : []).length; fi++) { if (k8s.nodes[fi].name === nodeName) { nodeInfo = k8s.nodes[fi]; break; } }
+      h += '<div class="section-block" data-section="k8s_node_' + nni + '">';
+      h += '<div>';
+      h += '<div class="section-title">' + esc(nodeName) + ' <span style="font-size:11px;color:var(--text-quaternary);font-weight:400">' + nodePods.length + ' pods</span>';
+      if (nodeInfo&&nodeInfo.roles) h+=' <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">'+esc(nodeInfo.roles)+'</span>';
+      h += '</div>';
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px">';
+      // Disk bar
+      if (nodeInfo&&nodeInfo.disk_total>0){var ndu=nodeInfo.disk_total-nodeInfo.disk_allocatable,ndp=ndu/nodeInfo.disk_total*100,ndc=ndp>=90?'var(--red)':ndp>=75?'var(--amber)':'var(--green)';h+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:10px;color:var(--text-quaternary)"><span>Disk '+ndp.toFixed(0)+'%</span><div style="flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+ndp.toFixed(1)+'%;background:'+ndc+'"></div></div><span>'+(nodeInfo.disk_total>=1073741824?(nodeInfo.disk_total/1073741824).toFixed(0)+'G':(nodeInfo.disk_total/1048576).toFixed(0)+'M')+'</span></div>';}
+      // Pods grouped by namespace
+      var nsPods = {}; for (var npi = 0; npi < nodePods.length; npi++) { var ns = nodePods[npi].namespace; if (!nsPods[ns]) nsPods[ns] = []; nsPods[ns].push(nodePods[npi]); }
+      var nsKeys = Object.keys(nsPods).sort();
+      for (var nsk = 0; nsk < nsKeys.length; nsk++) {
+        h += '<div style="margin-bottom:6px"><div style="font-size:10px;color:var(--text-quaternary);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px">' + esc(nsKeys[nsk]) + '</div>';
+        for (var npj = 0; npj < nsPods[nsKeys[nsk]].length; npj++) { var pod = nsPods[nsKeys[nsk]][npj]; h += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+esc(pod.name)+'</span><span style="color:var(--text-quaternary);font-size:10px">'+esc(pod.ready)+'</span>'+(pod.restarts>0?'<span style="color:var(--amber);font-size:10px">'+pod.restarts+'r</span>':'')+'</div>'; }
         h += '</div>';
       }
       h += '</div></div>';
+      h += '</div>'; // end k8s_node_N
     }
-    h += '</div>'; // end k8s_workloads
 
     // ======= Section: K8s Deployments =======
     h += '<div class="section-block" data-section="k8s_deployments">';
@@ -1133,7 +1139,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       "proxmox": sec.proxmox !== false,
       "kubernetes": sec.kubernetes !== false,
       "k8s_nodes": sec.kubernetes !== false,
-      "k8s_workloads": sec.kubernetes !== false,
+      "k8s_problems": sec.kubernetes !== false,
       "k8s_deployments": sec.kubernetes !== false,
       "k8s_events": sec.kubernetes !== false,
       "parity": sec.parity !== false
@@ -1147,7 +1153,10 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     var visibleItems = [];
     for (var i = 0; i < blocks.length; i++) {
       var name = blocks[i].getAttribute("data-section");
-      if (sectionMap[name] === false) continue;
+      // Dynamic K8s per-node sections follow the kubernetes toggle
+      var resolved = sectionMap[name];
+      if (resolved === undefined && name && name.indexOf("k8s_node_") === 0) resolved = sec.kubernetes !== false;
+      if (resolved === false) continue;
       if (blocks[i].offsetHeight < 10) continue;
       blockMap[name] = blocks[i];
       visibleItems.push({ el: blocks[i], name: name, h: blocks[i].offsetHeight });
