@@ -89,3 +89,90 @@ The Docker CI workflow on `.github/workflows/docker.yml` publishes multi-arch (a
 - **Unraid CA**: Asana form submitted, docker-templates repo at mcdays94/docker-templates
 - **TrueNAS**: PR #4804 at truenas/apps
 - **Synology**: No app catalog (Docker Compose in README)
+
+## Roadmap — Planned Features
+
+### v0.8.0 — Predictive Intelligence (branch: `dev/predictive-intelligence`)
+
+**1. Drive Replacement Planner** (new subpage: `/replacement-planner`)
+- Predict failure windows per drive using Backblaze annualized failure data + current SMART health score
+- Sort drives by urgency: "replace soon" → "monitor" → "healthy"
+- Show estimated remaining life (already computed in stats.html, move to backend)
+- Estimated replacement cost: user enters $/TB in settings, calculate per drive
+- Fleet-aware: show replacement needs across all fleet instances
+- Data source: existing SMART data (power_on_hours, reallocated_sectors, pending_sectors, temperature_c, health_passed)
+- UI: table with drive name, health score, estimated remaining life, risk tier, cost estimate
+- Implementation:
+  - `internal/analyzer/replacement.go` — replacement urgency scoring, cost estimation
+  - `internal/api/templates/replacement.html` — new subpage
+  - `internal/api/replacement_page.go` — handler
+  - Settings: add `replacement_cost_per_tb` field (float, default 0 = hidden)
+
+**2. Storage Capacity Forecasting** (on existing stats page + dashboard)
+- Track disk usage over time (new sparkline: usage_percent per mount point per snapshot)
+- Linear regression on usage history to project days until 90%/95%/100%
+- Show forecast on stats page as a "Capacity Forecast" section
+- Alert rule: "Volume X will be full in N days" (configurable threshold)
+- Data changes needed:
+  - `internal/storage/db.go` — new table `disk_usage_history(id, timestamp, mount_point, label, used_percent, used_gb, total_gb)`
+  - `internal/scheduler/` — on each scan, persist disk usage snapshot to history table
+  - `internal/storage/db.go` — `GetDiskUsageHistory(mountPoint, limit)` query
+  - `internal/api/` — new endpoint `GET /api/v1/disk-usage-history`
+- Regression: simple least-squares in Go, no dependencies needed
+- UI: chart per volume showing usage trend + projected line to 100%
+
+**3. Anomaly Detection / Trend Alerting** (enhancement to existing alerting)
+- Compute rolling 7-day baseline for CPU, memory, I/O wait, load average
+- Alert when current value deviates significantly from baseline (configurable: 2x, 3x std dev)
+- Uses existing system sparkline history data (already 30+ days stored)
+- Implementation:
+  - `internal/analyzer/anomaly.go` — baseline computation, deviation detection
+  - New finding severity: "anomaly" (rendered same as "warning" but different category)
+  - Settings: enable/disable anomaly detection, sensitivity (low/medium/high)
+
+**4. Power & Cost Monitoring** (enhancement to UPS section + fleet)
+- Read wattage from existing UPS data (`wattage_watts`, `load_percent`, `nominal_watts`)
+- User enters electricity cost in settings: `electricity_cost_kwh` (float, e.g., 0.12)
+- Calculate: monthly cost = watts × 24 × 30.44 / 1000 × $/kWh
+- Show in dashboard UPS section: "Estimated monthly cost: $XX"
+- Show in fleet view: per-server power cost column
+- No external API needed — user enters their rate manually
+
+**5. Docker Container Resource Tracking** (enhancement to Docker section)
+- Collect per-container CPU%, memory usage, network I/O, restart count
+- Uses Docker API stats endpoint (already have Docker client in collector)
+- Alert on: crash loops (restart count > N in M minutes), excessive CPU/memory
+- Show in dashboard: mini resource bars per container, sortable
+
+**6. Incident Timeline** (new subpage: `/incidents`)
+- Correlate findings by timestamp proximity across subsystems
+- Group events within a 5-minute window into an "incident"
+- Show timeline: temp spike → I/O wait → container crash → parity fail
+- Data source: existing findings with `detected_at` timestamps
+- Pure frontend rendering from existing findings data — no new storage needed
+
+### Later Features (post v0.8.0)
+
+**Public Status Page** (optional, default off)
+- Shareable `/status/public` page, no auth required
+- User selects which service checks are public in settings
+- Shows uptime bars (24h, 7d, 30d) per check
+- Clean minimal design, works as standalone page
+- Setting: `status_page_enabled` (bool, default false), `status_page_checks` (list of check IDs)
+
+**Backup Monitoring**
+- File-age monitoring: user configures backup paths + max age thresholds
+- Check most recent modification time in configured directories
+- Alert when newest file is older than threshold ("Backup overdue")
+- Works with any backup tool (Hyper Backup, Borg, Restic, rsync, rclone)
+- Settings: list of `{name, path, max_age_hours}`
+
+**Mobile PWA**
+- Add `manifest.json` for PWA install-to-homescreen
+- Optimize dashboard layout for narrow viewports
+- Pull-to-refresh, large touch targets
+
+**Plugin / Extension System**
+- Drop-in shell/Go scripts in `/data/plugins/` directory
+- NAS Doctor runs them on each scan, ingests JSON output
+- Standard schema: `{metrics: [...], findings: [...]}`

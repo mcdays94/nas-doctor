@@ -373,18 +373,59 @@ type RemoteServer struct {
 }
 
 type RemoteServerStatus struct {
-	Server        RemoteServer `json:"server"`
-	Online        bool         `json:"online"`
-	LastPoll      string       `json:"last_poll"` // ISO timestamp
-	Hostname      string       `json:"hostname"`
-	Platform      string       `json:"platform"`
-	Version       string       `json:"version"` // NAS Doctor version
-	Uptime        string       `json:"uptime"`
-	OverallHealth string       `json:"overall_health"` // healthy, warning, critical
-	CriticalCount int          `json:"critical_count"`
-	WarningCount  int          `json:"warning_count"`
-	InfoCount     int          `json:"info_count"`
-	Error         string       `json:"error,omitempty"`
+	Server        RemoteServer        `json:"server"`
+	Online        bool                `json:"online"`
+	LastPoll      string              `json:"last_poll"` // ISO timestamp
+	Hostname      string              `json:"hostname"`
+	Platform      string              `json:"platform"`
+	Version       string              `json:"version"` // NAS Doctor version
+	Uptime        string              `json:"uptime"`
+	OverallHealth string              `json:"overall_health"` // healthy, warning, critical
+	CriticalCount int                 `json:"critical_count"`
+	WarningCount  int                 `json:"warning_count"`
+	InfoCount     int                 `json:"info_count"`
+	Error         string              `json:"error,omitempty"`
+	Summary       *FleetServerSummary `json:"summary,omitempty"`
+}
+
+// FleetServerSummary holds condensed snapshot data fetched from a remote instance.
+type FleetServerSummary struct {
+	// System
+	CPUUsage   float64 `json:"cpu_usage"`
+	MemPercent float64 `json:"mem_percent"`
+	MemTotalMB int     `json:"mem_total_mb"`
+	MemUsedMB  int     `json:"mem_used_mb"`
+	CPUModel   string  `json:"cpu_model"`
+	CPUCores   int     `json:"cpu_cores"`
+	LoadAvg1   float64 `json:"load_avg_1"`
+	IOWait     float64 `json:"io_wait"`
+
+	// Drives
+	DriveCount     int     `json:"drive_count"`
+	DrivesHealthy  int     `json:"drives_healthy"`
+	DrivesWarning  int     `json:"drives_warning"`
+	DrivesCritical int     `json:"drives_critical"`
+	TotalStorageTB float64 `json:"total_storage_tb"`
+
+	// Docker
+	DockerAvailable   bool `json:"docker_available"`
+	ContainersRunning int  `json:"containers_running"`
+	ContainersTotal   int  `json:"containers_total"`
+
+	// Service checks
+	ServiceChecksUp    int `json:"service_checks_up"`
+	ServiceChecksDown  int `json:"service_checks_down"`
+	ServiceChecksTotal int `json:"service_checks_total"`
+
+	// Findings (actual text for unified view)
+	Findings []FleetFinding `json:"findings,omitempty"`
+}
+
+// FleetFinding is a single finding from a remote instance.
+type FleetFinding struct {
+	Severity string `json:"severity"`
+	Title    string `json:"title"`
+	Category string `json:"category"`
 }
 
 // ---------- OS Update ----------

@@ -179,7 +179,129 @@ func (m *Manager) pollServer(srv internal.RemoteServer) *internal.RemoteServerSt
 	result.WarningCount = statusResp.WarningCount
 	result.InfoCount = statusResp.InfoCount
 
+	// Fetch rich snapshot data (best-effort — older instances may not support this)
+	result.Summary = m.fetchSummary(srv)
+
 	return result
+}
+
+// fetchSummary fetches /api/v1/snapshot/latest from a remote instance and
+// extracts a condensed summary. Returns nil on any failure (graceful degradation).
+func (m *Manager) fetchSummary(srv internal.RemoteServer) *internal.FleetServerSummary {
+	url := strings.TrimRight(srv.URL, "/") + "/api/v1/snapshot/latest"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", "nas-doctor-fleet/1.0")
+	if srv.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+srv.APIKey)
+	}
+	for k, v := range srv.Headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil
+	}
+
+	var snap struct {
+		System struct {
+			CPUUsage   float64 `json:"cpu_usage_percent"`
+			MemPercent float64 `json:"mem_percent"`
+			MemTotalMB int     `json:"mem_total_mb"`
+			MemUsedMB  int     `json:"mem_used_mb"`
+			CPUModel   string  `json:"cpu_model"`
+			CPUCores   int     `json:"cpu_cores"`
+			LoadAvg1   float64 `json:"load_avg_1"`
+			IOWait     float64 `json:"io_wait_percent"`
+		} `json:"system"`
+		SMART []struct {
+			HealthPassed       bool    `json:"health_passed"`
+			SizeGB             float64 `json:"size_gb"`
+			ReallocatedSectors int64   `json:"reallocated_sectors"`
+			PendingSectors     int64   `json:"pending_sectors"`
+		} `json:"smart"`
+		Docker struct {
+			Available  bool `json:"available"`
+			Containers []struct {
+				State string `json:"state"`
+			} `json:"containers"`
+		} `json:"docker"`
+		ServiceChecks []struct {
+			Status string `json:"status"` // "up" or "down"
+		} `json:"service_checks"`
+		Findings []struct {
+			Severity string `json:"severity"`
+			Title    string `json:"title"`
+			Category string `json:"category"`
+		} `json:"findings"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&snap); err != nil {
+		return nil
+	}
+
+	s := &internal.FleetServerSummary{
+		CPUUsage:   snap.System.CPUUsage,
+		MemPercent: snap.System.MemPercent,
+		MemTotalMB: snap.System.MemTotalMB,
+		MemUsedMB:  snap.System.MemUsedMB,
+		CPUModel:   snap.System.CPUModel,
+		CPUCores:   snap.System.CPUCores,
+		LoadAvg1:   snap.System.LoadAvg1,
+		IOWait:     snap.System.IOWait,
+	}
+
+	// Drives
+	s.DriveCount = len(snap.SMART)
+	var totalGB float64
+	for _, d := range snap.SMART {
+		totalGB += d.SizeGB
+		if !d.HealthPassed || d.PendingSectors > 4 || d.ReallocatedSectors > 19 {
+			s.DrivesCritical++
+		} else if d.ReallocatedSectors > 0 || d.PendingSectors > 0 {
+			s.DrivesWarning++
+		} else {
+			s.DrivesHealthy++
+		}
+	}
+	s.TotalStorageTB = totalGB / 1000
+
+	// Docker
+	s.DockerAvailable = snap.Docker.Available
+	for _, c := range snap.Docker.Containers {
+		s.ContainersTotal++
+		if c.State == "running" {
+			s.ContainersRunning++
+		}
+	}
+
+	// Service checks
+	for _, sc := range snap.ServiceChecks {
+		s.ServiceChecksTotal++
+		if sc.Status == "up" {
+			s.ServiceChecksUp++
+		} else {
+			s.ServiceChecksDown++
+		}
+	}
+
+	// Findings
+	for _, f := range snap.Findings {
+		s.Findings = append(s.Findings, internal.FleetFinding{
+			Severity: f.Severity,
+			Title:    f.Title,
+			Category: f.Category,
+		})
+	}
+
+	return s
 }
 
 // GetStatuses returns the current status of all remote servers.
