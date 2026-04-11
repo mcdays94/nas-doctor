@@ -41,6 +41,7 @@ type Settings struct {
 	APIKey            string                  `json:"api_key,omitempty"` // Instance API key for fleet auth
 	Fleet             []internal.RemoteServer `json:"fleet,omitempty"`
 	DismissedFindings []string                `json:"dismissed_findings,omitempty"`
+	CostPerTB         float64                 `json:"cost_per_tb,omitempty"` // Drive replacement cost per TB (user's currency)
 }
 
 const currentSettingsVersion = 1
@@ -242,6 +243,10 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/backup", s.handleListBackups)
 	r.Get("/api/v1/db/stats", s.handleDBStats)
 	r.Get("/api/v1/sparklines", s.handleSparklines)
+
+	// Replacement planner
+	r.Get("/api/v1/replacement-plan", s.handleReplacementPlan)
+	r.Get("/replacement-planner", s.handleReplacementPlannerPage)
 
 	// Pages
 	r.Get("/settings", s.handleSettingsPage)
