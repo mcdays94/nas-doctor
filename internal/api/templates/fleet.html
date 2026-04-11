@@ -8,54 +8,130 @@
 <link rel="stylesheet" href="/css/shared.css">
 <style>
 body{padding:0}
-.container{max-width:1200px;margin:0 auto;padding:24px}
-/* Topology layout */
-.topo-container{margin-top:24px;display:flex;flex-direction:column;align-items:center}
-.topo-center{display:flex;flex-direction:column;align-items:center;width:100%}
-.topo-self{background:var(--surface);border:2px solid var(--accent);border-radius:16px;padding:20px 32px;text-align:center;position:relative;z-index:2;max-width:400px}
-.topo-self .node-name{font-size:18px;font-weight:700;margin-bottom:4px}
-.topo-self .node-role{font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;font-weight:600}
-.topo-spine{width:2px;height:32px;background:var(--border)}
-.topo-bus{height:2px;background:var(--border);align-self:stretch;margin:0 10%}
-/* Remote nodes grid */
-.topo-nodes{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:0 20px;width:100%;margin-top:0}
-.topo-node-wrap{display:flex;flex-direction:column;align-items:center}
-.topo-drop{width:2px;height:28px;background:var(--border)}
-.node-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;width:100%;transition:border-color 0.15s,transform 0.15s;margin-bottom:16px}
-.node-card:hover{border-color:var(--border-hover);transform:translateY(-2px)}
-.node-card a{text-decoration:none;color:inherit;display:block}
-.node-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.node-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.fleet-container{max-width:1200px;margin:0 auto;padding:24px}
+.fleet-container .header-left img{width:28px;height:28px;border-radius:6px}
+
+/* Fleet summary bar */
+.fleet-summary{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+.fleet-stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;flex:1;min-width:100px;text-align:center}
+.fleet-stat-val{font-size:22px;font-weight:600}
+.fleet-stat-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-top:2px}
+.val-green{color:var(--green)}.val-amber{color:var(--amber)}.val-red{color:var(--red)}.val-muted{color:var(--text3)}
+
+/* Section headers */
+.section-hdr{font-size:14px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;margin-top:28px}
+.section-hdr:first-child{margin-top:0}
+
+/* Health matrix */
+.matrix-wrap{overflow-x:auto;margin-bottom:8px}
+.matrix{width:100%;border-collapse:collapse;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.matrix th{background:var(--elevated);color:var(--text2);font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:0.5px;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+.matrix td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.04)}
+.matrix tr:last-child td{border-bottom:none}
+.matrix tr:hover td{background:rgba(255,255,255,0.02)}
+.matrix .srv-name{font-weight:600;white-space:nowrap}
+.matrix .srv-offline{color:var(--text3);font-style:italic}
+body.theme-clean .matrix td{border-bottom-color:rgba(0,0,0,0.06)}
+body.theme-clean .matrix tr:hover td{background:rgba(0,0,0,0.02)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;vertical-align:middle}
+.dot.g{background:var(--green)}.dot.a{background:var(--amber)}.dot.r{background:var(--red)}.dot.x{background:var(--text3);opacity:0.4}
+.dot-label{font-size:11px;color:var(--text2);margin-left:4px;vertical-align:middle}
+
+/* Node cards grid */
+.nodes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;margin-bottom:8px}
+@media(max-width:700px){.nodes-grid{grid-template-columns:1fr}}
+.node-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;transition:border-color 0.15s}
+.node-card:hover{border-color:var(--border-hover)}
+.node-card.offline{opacity:0.7}
+.node-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.node-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;font-weight:700}
 .node-icon.unraid{background:rgba(229,69,11,0.12);color:#e5450b}
 .node-icon.synology{background:rgba(0,114,198,0.12);color:#0072c6}
 .node-icon.linux{background:rgba(255,204,0,0.12);color:#ffcc00}
 .node-icon.proxmox{background:rgba(230,112,36,0.12);color:#e67024}
+.node-icon.truenas{background:rgba(0,150,136,0.12);color:#009688}
+.node-icon.k8s{background:rgba(50,109,230,0.12);color:#326de6}
+.node-icon.docker{background:rgba(36,150,237,0.12);color:#2496ed}
 .node-icon.unknown{background:rgba(255,255,255,0.06);color:var(--text3)}
-.node-name{font-size:14px;font-weight:600;flex:1}
+.node-name{font-size:15px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .health-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
-.health-dot.healthy{background:var(--green)}
-.health-dot.warning{background:var(--amber)}
-.health-dot.critical{background:var(--red)}
-.health-dot.offline{background:var(--text3);opacity:0.5}
-.node-meta{font-size:12px;color:var(--text2);display:flex;flex-direction:column;gap:4px;margin-top:8px}
-.node-meta-row{display:flex;align-items:center;gap:6px}
-.meta-label{color:var(--text3);min-width:45px;font-size:11px}
-.meta-val{font-family:var(--font-mono);font-size:11px;color:var(--text)}
-.node-findings{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-.pill-sm{font-size:10px;padding:2px 6px;border-radius:999px;font-weight:600}
+.health-dot.healthy{background:var(--green)}.health-dot.warning{background:var(--amber)}.health-dot.critical{background:var(--red)}.health-dot.offline{background:var(--text3);opacity:0.5}
+.node-meta-row{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);margin-bottom:3px}
+.meta-label{color:var(--text3);min-width:50px;font-size:11px}
+.meta-val{font-size:11px;color:var(--text)}
+
+/* Metric bars */
+.metric-bars{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+.metric-row{display:flex;align-items:center;gap:8px}
+.metric-label{font-size:11px;color:var(--text2);min-width:32px;text-align:right}
+.metric-track{flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,0.06);overflow:hidden}
+body.theme-clean .metric-track{background:rgba(0,0,0,0.06)}
+.metric-fill{height:100%;border-radius:3px;transition:width 0.5s ease}
+.metric-pct{font-size:11px;font-weight:600;min-width:36px;text-align:right;font-family:var(--font-mono)}
+
+/* Drive/Docker/Service mini stats */
+.node-stats{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.mini-stat{font-size:10px;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,0.04);color:var(--text2);display:flex;align-items:center;gap:4px}
+body.theme-clean .mini-stat{background:rgba(0,0,0,0.04)}
+.mini-stat .dot{width:6px;height:6px}
+
+/* Finding pills */
+.node-findings{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.pill-sm{font-size:10px;padding:2px 7px;border-radius:999px;font-weight:600}
 .pill-sm.crit{background:rgba(220,38,38,0.1);color:var(--red)}
 .pill-sm.warn{background:rgba(217,119,6,0.1);color:var(--amber)}
 .pill-sm.info{background:rgba(94,106,210,0.1);color:var(--accent)}
+
+/* Node footer */
+.node-footer{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
+.node-uptime{font-size:11px;color:var(--text3)}
+.node-link{font-size:11px;color:var(--accent);text-decoration:none}
+.node-link:hover{color:var(--accent-hover)}
 .node-error{font-size:12px;color:var(--red);margin-top:8px;font-style:italic}
+
+/* Unified findings */
+.findings-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.finding-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:12px}
+.finding-sev{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.finding-sev.critical{background:var(--red)}.finding-sev.warning{background:var(--amber)}.finding-sev.info{background:var(--accent)}
+.finding-server{font-size:11px;color:var(--text3);min-width:100px;font-weight:500}
+.finding-title{flex:1;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.finding-cat{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.3px}
+
+/* ── Topology ── */
+.topo{margin-bottom:8px;display:flex;flex-direction:column;align-items:center}
+.topo-lan{border:1px solid var(--border);border-radius:12px;padding:14px 18px 12px;position:relative;width:100%;max-width:100%}
+.topo-lan-label{position:absolute;top:-9px;left:18px;background:var(--bg);padding:0 8px;font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
+.topo-lan-nodes{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.topo-node{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:8px;min-width:140px;transition:border-color 0.15s}
+.topo-node:hover{border-color:var(--border-hover)}
+.topo-node.offline{opacity:0.5}
+.topo-node-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0}
+.topo-node-info{min-width:0}
+.topo-node-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topo-node-sub{font-size:10px;color:var(--text3);display:flex;align-items:center;gap:4px}
+.topo-ctrl-badge{font-size:9px;background:var(--accent);color:#fff;padding:1px 5px;border-radius:4px;font-weight:600;letter-spacing:0.3px}
+.topo-spine{width:2px;height:24px;background:var(--border);flex-shrink:0}
+.topo-bus{height:2px;background:var(--border);align-self:stretch;margin:0 12%}
+.topo-branches{display:flex;gap:20px;width:100%;justify-content:center;flex-wrap:wrap}
+.topo-branch{display:flex;flex-direction:column;align-items:center;flex:1;min-width:180px;max-width:400px}
+.topo-branch-drop{width:2px;height:20px;background:var(--border)}
+.topo-link-label{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;padding:2px 6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin:-4px 0}
+
+/* Empty state */
 .empty{text-align:center;padding:60px 20px;color:var(--text2)}
 .empty-title{font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px}
+
+/* Ember overrides */
+body.theme-ember .node-name,.theme-ember .fleet-stat-val,.theme-ember .section-hdr{font-family:var(--font-serif)}
+body.theme-ember .meta-val,.theme-ember .metric-pct,.theme-ember .finding-cat{font-family:var(--font-mono)}
 </style>
 </head>
 <body>
-<div class="container">
+<div class="fleet-container">
   <div class="header">
     <div class="header-left">
-      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="" style="width:28px;height:28px;border-radius:6px">NAS Doctor</a><span class="logo-slogan">Sleep tight knowing your server never does.</span>
+      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a><span class="logo-slogan">Sleep tight knowing your server never does.</span>
       <span class="page-title">Fleet</span>
     </div>
     <div class="nav-links">
@@ -75,9 +151,9 @@ body{padding:0}
   function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
   try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
   fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
-  fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
+  fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor \u2014 "+d.hostname;}).catch(function(){});
 })();
-(function() {
+(function(){
   "use strict";
   function esc(s){var d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
 
@@ -86,135 +162,393 @@ body{padding:0}
     if(p.indexOf("unraid")>=0)return{cls:"unraid",icon:"U"};
     if(p.indexOf("synology")>=0)return{cls:"synology",icon:"S"};
     if(p.indexOf("proxmox")>=0||p.indexOf("pve")>=0)return{cls:"proxmox",icon:"P"};
-    if(p.indexOf("truenas")>=0||p.indexOf("freenas")>=0)return{cls:"linux",icon:"T"};
-    if(p.indexOf("k3s")>=0||p.indexOf("k8s")>=0||p.indexOf("kube")>=0)return{cls:"linux",icon:"K"};
+    if(p.indexOf("truenas")>=0||p.indexOf("freenas")>=0)return{cls:"truenas",icon:"T"};
+    if(p.indexOf("k3s")>=0||p.indexOf("k8s")>=0||p.indexOf("kube")>=0)return{cls:"k8s",icon:"K"};
+    if(p.indexOf("docker")>=0)return{cls:"docker",icon:"D"};
     if(p.indexOf("alpine")>=0||p.indexOf("linux")>=0||p.indexOf("ubuntu")>=0||p.indexOf("debian")>=0)return{cls:"linux",icon:"L"};
-    if(p.indexOf("docker")>=0)return{cls:"linux",icon:"D"};
     return{cls:"unknown",icon:"N"};
   }
 
-  function parseConnection(url){
+  function barColor(pct){
+    if(pct>=90)return"var(--red)";
+    if(pct>=70)return"var(--amber)";
+    return"var(--green)";
+  }
+
+  function healthDot(h){
+    if(h==="critical")return'<span class="dot r"></span>';
+    if(h==="warning")return'<span class="dot a"></span>';
+    if(h==="healthy")return'<span class="dot g"></span>';
+    return'<span class="dot x"></span>';
+  }
+
+  /* ── Topology helpers ── */
+  function parseSubnet(url){
     try{
       var u=new URL(url);
       var host=u.hostname;
-      var port=u.port?":"+u.port:"";
-      // Detect if local (private IP) vs public hostname
-      var isLocal=/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|localhost|127\.)/.test(host);
-      var tunnelType="";
-      if(!isLocal){
-        // Heuristic: if it's a public hostname, try to detect tunnel
-        if(host.indexOf(".trycloudflare.com")>=0||host.indexOf("cloudflare")>=0)tunnelType="cfd";
-        // Tailscale IPs are in 100.x.x.x range
-        if(/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host))tunnelType="tailscale";
-      }
-      return{host:host,port:port,isLocal:isLocal,tunnelType:tunnelType,display:host+port};
-    }catch(e){return{host:url,port:"",isLocal:false,tunnelType:"",display:url};}
+      // Private IP detection with subnet grouping
+      var m;
+      if((m=host.match(/^(192\.168\.\d+)\.\d+$/)))return{subnet:m[1]+".x",label:m[1]+".x",type:"lan"};
+      if((m=host.match(/^(10\.\d+\.\d+)\.\d+$/)))return{subnet:m[1]+".x",label:m[1]+".x",type:"lan"};
+      if((m=host.match(/^(172\.(1[6-9]|2\d|3[01])\.\d+)\.\d+$/)))return{subnet:m[1]+".x",label:m[1]+".x",type:"lan"};
+      if(host==="localhost"||host==="127.0.0.1")return{subnet:"localhost",label:"Localhost",type:"lan"};
+      // Tailscale CGNAT
+      if(/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host))return{subnet:"tailscale",label:"Tailscale",type:"vpn"};
+      // Cloudflare tunnel
+      if(host.indexOf(".trycloudflare.com")>=0||host.indexOf("cloudflare")>=0)return{subnet:"cfd-"+host,label:"Cloudflare Tunnel",type:"tunnel"};
+      // Any other hostname = remote/WAN
+      return{subnet:"remote-"+host,label:host,type:"wan"};
+    }catch(e){return{subnet:"unknown",label:"Unknown",type:"wan"};}
   }
 
-  function renderNode(s){
-    var healthClass=s.online?(s.overall_health||"healthy"):"offline";
-    var p=platformIcon(s.platform||"");
-    var url=s.server.url||"#";
-    var conn=parseConnection(url);
-    var h='<div class="node-branch"></div>';
-    h+='<div class="node-card">';
-    h+='<a href="'+esc(url)+'" target="_blank">';
-    h+='<div class="node-header">';
-    h+='<div class="node-icon '+p.cls+'">'+p.icon+'</div>';
-    h+='<div class="node-name">'+esc(s.server.name||s.hostname||"Unknown")+'</div>';
-    h+='<div class="health-dot '+healthClass+'" title="'+esc(healthClass)+'"></div>';
-    h+='</div>';
-    if(s.online){
-      h+='<div class="node-meta">';
-      if(s.hostname&&s.hostname!==s.server.name){
-        h+='<div class="node-meta-row"><span class="meta-label">Host</span><span class="meta-val">'+esc(s.hostname)+'</span></div>';
-      }
-      h+='<div class="node-meta-row"><span class="meta-label">'+(conn.isLocal?"LAN":"Endpoint")+'</span><span class="meta-val">'+esc(conn.display)+'</span></div>';
-      if(conn.tunnelType){
-        var tLabel=conn.tunnelType==="cfd"?"Cloudflare Tunnel":conn.tunnelType==="tailscale"?"Tailscale":"Tunnel";
-        h+='<div class="node-meta-row"><span class="meta-label">Via</span><span class="meta-val" style="color:var(--accent)">'+esc(tLabel)+'</span></div>';
-      }
-      h+='<div class="node-meta-row"><span class="meta-label">OS</span><span class="meta-val">'+esc(s.platform||"unknown")+'</span></div>';
-      h+='<div class="node-meta-row"><span class="meta-label">Up</span><span class="meta-val">'+esc(s.uptime||"—")+'</span></div>';
-      if(s.version)h+='<div class="node-meta-row"><span class="meta-label">Ver</span><span class="meta-val" style="font-family:var(--font-mono)">'+esc(s.version)+'</span></div>';
-      h+='</div>';
-      if(s.critical_count>0||s.warning_count>0||s.info_count>0){
-        h+='<div class="node-findings">';
-        if(s.critical_count>0)h+='<span class="pill-sm crit">'+s.critical_count+' crit</span>';
-        if(s.warning_count>0)h+='<span class="pill-sm warn">'+s.warning_count+' warn</span>';
-        if(s.info_count>0)h+='<span class="pill-sm info">'+s.info_count+' info</span>';
+  function renderTopology(nodes){
+    // Group nodes by subnet
+    var groups={};
+    var selfSubnet=null;
+    for(var i=0;i<nodes.length;i++){
+      var n=nodes[i];
+      var sub=n.isSelf?parseSubnet("http://192.168.1.1"):parseSubnet(n.server.url||"");
+      if(n.isSelf)selfSubnet=sub.subnet;
+      if(!groups[sub.subnet])groups[sub.subnet]={label:sub.label,type:sub.type,nodes:[],isSelfGroup:false};
+      if(n.isSelf)groups[sub.subnet].isSelfGroup=true;
+      groups[sub.subnet].nodes.push(n);
+    }
+    // Separate primary (self's LAN) from other groups
+    var primaryKey=selfSubnet||Object.keys(groups)[0];
+    var primary=groups[primaryKey];
+    var others=[];
+    for(var k in groups){if(k!==primaryKey)others.push(groups[k]);}
+
+    var h='<div class="topo">';
+    // Primary LAN group
+    h+=renderLanGroup(primary, true);
+    // If there are remote groups, draw spine + bus + branches
+    if(others.length>0){
+      h+='<div class="topo-spine"></div>';
+      if(others.length>1)h+='<div class="topo-bus"></div>';
+      h+='<div class="topo-branches">';
+      for(var b=0;b<others.length;b++){
+        var g=others[b];
+        h+='<div class="topo-branch">';
+        h+='<div class="topo-branch-drop"></div>';
+        var linkLabel=g.type==="lan"?"LAN":g.type==="vpn"?"VPN":g.type==="tunnel"?"Tunnel":"WAN";
+        h+='<div class="topo-link-label">'+linkLabel+'</div>';
+        h+='<div class="topo-branch-drop"></div>';
+        h+=renderLanGroup(g, false);
         h+='</div>';
       }
-      h+='<div style="margin-top:8px;display:flex;gap:6px">';
-      h+='<a href="'+esc(url)+'" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none" onclick="event.stopPropagation()">Open Dashboard &rarr;</a>';
       h+='</div>';
-    } else {
-      h+='<div class="node-meta">';
-      h+='<div class="node-meta-row"><span class="meta-label">'+(conn.isLocal?"LAN":"Endpoint")+'</span><span class="meta-val">'+esc(conn.display)+'</span></div>';
-      if(conn.tunnelType){var tl2=conn.tunnelType==="cfd"?"Cloudflare Tunnel":conn.tunnelType==="tailscale"?"Tailscale":"Tunnel";h+='<div class="node-meta-row"><span class="meta-label">Via</span><span class="meta-val" style="color:var(--accent)">'+esc(tl2)+'</span></div>';}
-      h+='</div>';
-      h+='<div class="node-error">'+esc(s.error||"Offline")+'</div>';
     }
-    h+='</a></div>';
+    h+='</div>';
     return h;
   }
 
-  function render(statuses, selfStatus){
+  function renderLanGroup(group, isPrimary){
+    var h='<div class="topo-lan">';
+    h+='<span class="topo-lan-label">'+esc(group.label)+(isPrimary?" \u2014 Primary":"")+'</span>';
+    h+='<div class="topo-lan-nodes">';
+    for(var i=0;i<group.nodes.length;i++){
+      var n=group.nodes[i];
+      var p=platformIcon(n.platform||"");
+      var healthClass=n.online?(n.overall_health||"healthy"):"offline";
+      h+='<div class="topo-node'+(n.online?'':' offline')+'">';
+      h+='<div class="topo-node-icon node-icon '+p.cls+'">'+p.icon+'</div>';
+      h+='<div class="topo-node-info">';
+      h+='<div class="topo-node-name">'+esc(n.server.name||n.hostname||"?")+'</div>';
+      h+='<div class="topo-node-sub">';
+      h+='<span class="health-dot '+healthClass+'" style="width:7px;height:7px"></span>';
+      h+=n.online?esc(n.overall_health||"healthy"):'<span style="color:var(--red)">offline</span>';
+      if(n.isSelf)h+=' <span class="topo-ctrl-badge">CTRL</span>';
+      h+='</div>';
+      h+='</div>';
+      h+='</div>';
+    }
+    h+='</div></div>';
+    return h;
+  }
+
+  function fmtMem(mb){
+    if(!mb)return"?";
+    return mb>=1024?(mb/1024).toFixed(1)+" GB":mb+" MB";
+  }
+
+  /* Build the "self" node from local status + snapshot data */
+  function buildSelfNode(status, snapshot){
+    // Detect local IP for topology subnet grouping
+    var selfIP="127.0.0.1";
+    if(snapshot&&snapshot.network&&snapshot.network.interfaces){
+      for(var ni=0;ni<snapshot.network.interfaces.length;ni++){
+        var iface=snapshot.network.interfaces[ni];
+        if(iface.state==="UP"&&iface.ipv4&&iface.ipv4.indexOf("127.")!==0){selfIP=iface.ipv4.split("/")[0];break;}
+      }
+    }
+    var n = {
+      server: {name: status.hostname||"This Server", url: "http://"+selfIP+":8060"},
+      online: true, hostname: status.hostname, platform: status.platform,
+      version: status.version, uptime: status.uptime,
+      overall_health: status.overall_health,
+      critical_count: status.critical_count, warning_count: status.warning_count, info_count: status.info_count,
+      isSelf: true
+    };
+    if(snapshot){
+      var sys = snapshot.system||{};
+      var sm = snapshot.smart||[];
+      var dk = snapshot.docker||{};
+      var sc = snapshot.service_checks||[];
+      var findings = snapshot.findings||[];
+      n.summary = {
+        cpu_usage: sys.cpu_usage_percent||0, mem_percent: sys.mem_percent||0,
+        mem_total_mb: sys.mem_total_mb||0, mem_used_mb: sys.mem_used_mb||0,
+        cpu_model: sys.cpu_model||"", cpu_cores: sys.cpu_cores||0,
+        load_avg_1: sys.load_avg_1||0, io_wait: sys.io_wait_percent||0,
+        drive_count: sm.length, drives_healthy: 0, drives_warning: 0, drives_critical: 0,
+        total_storage_tb: 0,
+        docker_available: dk.available||false, containers_running: 0, containers_total: 0,
+        service_checks_up: 0, service_checks_down: 0, service_checks_total: sc.length,
+        findings: []
+      };
+      var totalGB = 0;
+      for(var i=0;i<sm.length;i++){
+        totalGB += (sm[i].size_gb||0);
+        if(!sm[i].health_passed||sm[i].pending_sectors>4||sm[i].reallocated_sectors>19) n.summary.drives_critical++;
+        else if(sm[i].reallocated_sectors>0||sm[i].pending_sectors>0) n.summary.drives_warning++;
+        else n.summary.drives_healthy++;
+      }
+      n.summary.total_storage_tb = totalGB / 1000;
+      var ctrs = dk.containers||[];
+      n.summary.containers_total = ctrs.length;
+      for(var c=0;c<ctrs.length;c++){if(ctrs[c].state==="running")n.summary.containers_running++;}
+      for(var s=0;s<sc.length;s++){if(sc[s].status==="up")n.summary.service_checks_up++;else n.summary.service_checks_down++;}
+      for(var f=0;f<findings.length;f++){
+        n.summary.findings.push({severity:findings[f].severity,title:findings[f].title,category:findings[f].category});
+      }
+    }
+    return n;
+  }
+
+  /* ── Render health matrix ── */
+  function renderMatrix(nodes){
+    var h='<div class="matrix-wrap"><table class="matrix">';
+    h+='<thead><tr><th>Server</th><th>Status</th><th>Health</th><th>CPU</th><th>Memory</th><th>Drives</th><th>Docker</th><th>Services</th><th>Findings</th><th>Uptime</th></tr></thead><tbody>';
+    for(var i=0;i<nodes.length;i++){
+      var n=nodes[i], s=n.summary;
+      var online=n.online;
+      h+='<tr>';
+      h+='<td class="srv-name'+(online?'':' srv-offline')+'">'+esc(n.server.name||n.hostname||"?")+'</td>';
+      // Status
+      h+='<td>'+(online?'<span class="dot g"></span><span class="dot-label">Online</span>':'<span class="dot x"></span><span class="dot-label" style="color:var(--red)">Offline</span>')+'</td>';
+      if(!online){h+='<td colspan="8" style="color:var(--text3);font-style:italic">'+esc(n.error||"Unreachable")+'</td></tr>';continue;}
+      // Health
+      h+='<td>'+healthDot(n.overall_health)+'<span class="dot-label">'+(n.overall_health||"?")+'</span></td>';
+      // CPU
+      if(s&&s.cpu_usage>0){h+='<td><span style="font-family:var(--font-mono);font-size:11px;color:'+barColor(s.cpu_usage)+'">'+s.cpu_usage.toFixed(0)+'%</span></td>';}
+      else{h+='<td style="color:var(--text3)">&mdash;</td>';}
+      // Memory
+      if(s&&s.mem_percent>0){h+='<td><span style="font-family:var(--font-mono);font-size:11px;color:'+barColor(s.mem_percent)+'">'+s.mem_percent.toFixed(0)+'%</span></td>';}
+      else{h+='<td style="color:var(--text3)">&mdash;</td>';}
+      // Drives
+      if(s&&s.drive_count>0){
+        var dStr=s.drives_healthy+'<span class="dot g" style="margin-left:4px"></span>';
+        if(s.drives_warning>0)dStr+=' '+s.drives_warning+'<span class="dot a" style="margin-left:2px"></span>';
+        if(s.drives_critical>0)dStr+=' '+s.drives_critical+'<span class="dot r" style="margin-left:2px"></span>';
+        h+='<td>'+dStr+'</td>';
+      }else{h+='<td style="color:var(--text3)">&mdash;</td>';}
+      // Docker
+      if(s&&s.docker_available){h+='<td style="font-family:var(--font-mono);font-size:11px">'+s.containers_running+'/'+s.containers_total+'</td>';}
+      else{h+='<td style="color:var(--text3)">&mdash;</td>';}
+      // Services
+      if(s&&s.service_checks_total>0){
+        var svColor=s.service_checks_down>0?"var(--amber)":"var(--green)";
+        h+='<td style="font-family:var(--font-mono);font-size:11px;color:'+svColor+'">'+s.service_checks_up+'/'+s.service_checks_total+'</td>';
+      }else{h+='<td style="color:var(--text3)">&mdash;</td>';}
+      // Findings
+      var fc=n.critical_count||0, fw=n.warning_count||0, fi=n.info_count||0;
+      if(fc+fw+fi>0){
+        var pills='';
+        if(fc>0)pills+='<span class="pill-sm crit">'+fc+'</span> ';
+        if(fw>0)pills+='<span class="pill-sm warn">'+fw+'</span> ';
+        if(fi>0)pills+='<span class="pill-sm info">'+fi+'</span>';
+        h+='<td>'+pills+'</td>';
+      }else{h+='<td><span class="dot g"></span><span class="dot-label">Clean</span></td>';}
+      // Uptime
+      h+='<td style="font-size:11px;white-space:nowrap">'+esc(n.uptime||"\u2014")+'</td>';
+      h+='</tr>';
+    }
+    h+='</tbody></table></div>';
+    return h;
+  }
+
+  /* ── Render node card ── */
+  function renderNodeCard(n){
+    var p=platformIcon(n.platform||"");
+    var healthClass=n.online?(n.overall_health||"healthy"):"offline";
+    var s=n.summary;
+    var url=n.isSelf?"/":n.server.url||"#";
+    var h='<div class="node-card'+(n.online?'':' offline')+'">';
+    h+='<div class="node-header">';
+    h+='<div class="node-icon '+p.cls+'">'+p.icon+'</div>';
+    h+='<div class="node-name">'+esc(n.server.name||n.hostname||"Unknown")+(n.isSelf?' <span style="color:var(--text3);font-weight:400;font-size:11px">(this server)</span>':'')+'</div>';
+    h+='<div class="health-dot '+healthClass+'" title="'+esc(healthClass)+'"></div>';
+    h+='</div>';
+
+    if(!n.online){
+      h+='<div class="node-error">'+esc(n.error||"Offline")+'</div>';
+      h+='</div>';
+      return h;
+    }
+
+    // Metric bars (CPU + Memory)
+    if(s&&(s.cpu_usage>0||s.mem_percent>0)){
+      h+='<div class="metric-bars">';
+      if(s.cpu_usage>0){
+        h+='<div class="metric-row">';
+        h+='<span class="metric-label">CPU</span>';
+        h+='<div class="metric-track"><div class="metric-fill" style="width:'+Math.min(100,s.cpu_usage).toFixed(0)+'%;background:'+barColor(s.cpu_usage)+'"></div></div>';
+        h+='<span class="metric-pct" style="color:'+barColor(s.cpu_usage)+'">'+s.cpu_usage.toFixed(0)+'%</span>';
+        h+='</div>';
+      }
+      if(s.mem_percent>0){
+        h+='<div class="metric-row">';
+        h+='<span class="metric-label">MEM</span>';
+        h+='<div class="metric-track"><div class="metric-fill" style="width:'+Math.min(100,s.mem_percent).toFixed(0)+'%;background:'+barColor(s.mem_percent)+'"></div></div>';
+        h+='<span class="metric-pct" style="color:'+barColor(s.mem_percent)+'">'+s.mem_percent.toFixed(0)+'%</span>';
+        h+='</div>';
+      }
+      h+='</div>';
+    }
+
+    // Mini stats row (drives, docker, services)
+    var hasStats=s&&(s.drive_count>0||s.docker_available||s.service_checks_total>0);
+    if(hasStats){
+      h+='<div class="node-stats">';
+      if(s.drive_count>0){
+        var dColor=s.drives_critical>0?"r":s.drives_warning>0?"a":"g";
+        h+='<div class="mini-stat"><span class="dot '+dColor+'"></span>'+s.drive_count+' drives';
+        if(s.total_storage_tb>0)h+=' ('+s.total_storage_tb.toFixed(1)+' TB)';
+        h+='</div>';
+      }
+      if(s.docker_available){
+        h+='<div class="mini-stat"><span class="dot '+(s.containers_running===s.containers_total?"g":"a")+'"></span>'+s.containers_running+'/'+s.containers_total+' containers</div>';
+      }
+      if(s.service_checks_total>0){
+        h+='<div class="mini-stat"><span class="dot '+(s.service_checks_down>0?"r":"g")+'"></span>'+s.service_checks_up+'/'+s.service_checks_total+' services</div>';
+      }
+      h+='</div>';
+    }
+
+    // Finding pills
+    var fc=n.critical_count||0, fw=n.warning_count||0, fi=n.info_count||0;
+    if(fc+fw+fi>0){
+      h+='<div class="node-findings">';
+      if(fc>0)h+='<span class="pill-sm crit">'+fc+' critical</span>';
+      if(fw>0)h+='<span class="pill-sm warn">'+fw+' warning</span>';
+      if(fi>0)h+='<span class="pill-sm info">'+fi+' info</span>';
+      h+='</div>';
+    }
+
+    // Footer
+    h+='<div class="node-footer">';
+    h+='<span class="node-uptime">';
+    if(n.uptime)h+='Up '+esc(n.uptime);
+    if(n.version)h+=(n.uptime?' \u00B7 ':'')+esc(n.version);
+    if(s&&s.cpu_model)h+=(n.uptime||n.version?' \u00B7 ':'')+esc(s.cpu_cores)+' cores';
+    h+='</span>';
+    h+='<a href="'+esc(url)+'" '+(n.isSelf?'':'target="_blank" ')+' class="node-link">'+(n.isSelf?"Dashboard":"Open")+" \u2192</a>";
+    h+='</div>';
+    h+='</div>';
+    return h;
+  }
+
+  /* ── Render unified findings ── */
+  function renderFindings(nodes){
+    var all=[];
+    for(var i=0;i<nodes.length;i++){
+      var n=nodes[i];
+      if(!n.online||!n.summary||!n.summary.findings)continue;
+      for(var j=0;j<n.summary.findings.length;j++){
+        var f=n.summary.findings[j];
+        all.push({severity:f.severity,title:f.title,category:f.category,server:n.server.name||n.hostname||"?"});
+      }
+    }
+    if(all.length===0)return'<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px">No findings across the fleet.</div>';
+    // Sort: critical first, then warning, then info
+    var sevOrder={critical:0,warning:1,info:2};
+    all.sort(function(a,b){return(sevOrder[a.severity]||9)-(sevOrder[b.severity]||9);});
+    var h='<div class="findings-list">';
+    for(var k=0;k<all.length;k++){
+      var f=all[k];
+      h+='<div class="finding-row">';
+      h+='<span class="finding-sev '+esc(f.severity)+'"></span>';
+      h+='<span class="finding-server">'+esc(f.server)+'</span>';
+      h+='<span class="finding-title">'+esc(f.title)+'</span>';
+      h+='<span class="finding-cat">'+esc(f.category)+'</span>';
+      h+='</div>';
+    }
+    h+='</div>';
+    return h;
+  }
+
+  /* ── Main render ── */
+  function render(fleetStatuses, selfStatus, selfSnapshot){
     var app=document.getElementById("app");
-    if(!statuses||statuses.length===0){
+    if((!fleetStatuses||fleetStatuses.length===0)&&!selfStatus){
       app.innerHTML='<div class="empty"><div class="empty-title">No remote servers configured</div><p>Add remote NAS Doctor instances in <a href="/settings" style="color:var(--accent)">Settings</a> to monitor your fleet from here.</p></div>';
       return;
     }
-    var selfName=selfStatus?selfStatus.hostname:"This Server";
-    var selfPlatform=selfStatus?selfStatus.platform:"";
-    var selfP=platformIcon(selfPlatform);
-    var h='<div class="topo-container">';
-    // Center node (this server)
-    h+='<div class="topo-center">';
-    h+='<div class="topo-self">';
-    h+='<div class="node-icon '+selfP.cls+'" style="margin:0 auto 8px;width:44px;height:44px;font-size:22px">'+selfP.icon+'</div>';
-    h+='<div class="node-name">'+esc(selfName)+'</div>';
-    h+='<div class="node-role">Primary &middot; Fleet Controller</div>';
-    if(selfStatus){
-      // Get local IP from network interfaces
-      var selfIP="";
-      if(selfStatus.network&&selfStatus.network.interfaces){
-        for(var ni=0;ni<selfStatus.network.interfaces.length;ni++){
-          var iface=selfStatus.network.interfaces[ni];
-          if(iface.state==="UP"&&iface.ipv4&&iface.ipv4.indexOf("127.")!==0){selfIP=iface.ipv4.split("/")[0];break;}
-        }
-      }
-      h+='<div style="font-size:11px;color:var(--text2);margin-top:6px">';
-      if(selfIP)h+=esc(selfIP)+' &middot; ';
-      h+=esc(selfPlatform)+' &middot; Up '+esc(selfStatus.uptime||"—");
-      if(selfStatus.version)h+=' &middot; <span style="font-family:var(--font-mono)">'+esc(selfStatus.version)+'</span>';
-      h+='</div>';
+
+    // Build unified node list: self + remotes
+    var nodes=[];
+    if(selfStatus){nodes.push(buildSelfNode(selfStatus,selfSnapshot));}
+    for(var i=0;i<(fleetStatuses||[]).length;i++){nodes.push(fleetStatuses[i]);}
+
+    // Compute fleet-wide totals
+    var totalServers=nodes.length, online=0, offline=0, totalCrit=0, totalWarn=0, totalInfo=0;
+    for(var j=0;j<nodes.length;j++){
+      if(nodes[j].online)online++;else offline++;
+      totalCrit+=(nodes[j].critical_count||0);
+      totalWarn+=(nodes[j].warning_count||0);
+      totalInfo+=(nodes[j].info_count||0);
     }
+
+    var h='';
+    // Fleet summary bar
+    h+='<div class="fleet-summary">';
+    h+='<div class="fleet-stat"><div class="fleet-stat-val">'+totalServers+'</div><div class="fleet-stat-label">Servers</div></div>';
+    h+='<div class="fleet-stat"><div class="fleet-stat-val val-green">'+online+'</div><div class="fleet-stat-label">Online</div></div>';
+    if(offline>0)h+='<div class="fleet-stat"><div class="fleet-stat-val val-red">'+offline+'</div><div class="fleet-stat-label">Offline</div></div>';
+    if(totalCrit>0)h+='<div class="fleet-stat"><div class="fleet-stat-val val-red">'+totalCrit+'</div><div class="fleet-stat-label">Critical</div></div>';
+    if(totalWarn>0)h+='<div class="fleet-stat"><div class="fleet-stat-val val-amber">'+totalWarn+'</div><div class="fleet-stat-label">Warnings</div></div>';
+    if(totalCrit===0&&totalWarn===0)h+='<div class="fleet-stat"><div class="fleet-stat-val val-green">0</div><div class="fleet-stat-label">Issues</div></div>';
     h+='</div>';
-    h+='<div class="topo-spine"></div>';
-    // Horizontal bus bar rendered via SVG for clean connections
-    if(statuses.length>1)h+='<div class="topo-bus"></div>';
+
+    // Topology
+    h+='<div class="section-hdr">Network Topology</div>';
+    h+=renderTopology(nodes);
+
+    // Health matrix
+    h+='<div class="section-hdr">Health Matrix</div>';
+    h+=renderMatrix(nodes);
+
+    // Node cards
+    h+='<div class="section-hdr">Node Overview</div>';
+    h+='<div class="nodes-grid">';
+    for(var k=0;k<nodes.length;k++){h+=renderNodeCard(nodes[k]);}
     h+='</div>';
-    // Remote nodes
-    h+='<div class="topo-nodes">';
-    for(var i=0;i<statuses.length;i++){
-      h+='<div class="topo-node-wrap">';
-      h+='<div class="topo-drop"></div>';
-      h+=renderNode(statuses[i]);
-      h+='</div>';
-    }
-    h+='</div>';
-    h+='</div>';
+
+    // Unified findings
+    h+='<div class="section-hdr">Fleet Findings</div>';
+    h+=renderFindings(nodes);
+
     app.innerHTML=h;
   }
 
   function load(){
     Promise.all([
       fetch("/api/v1/fleet").then(function(r){return r.json()}).catch(function(){return[];}),
-      fetch("/api/v1/status").then(function(r){return r.json()}).catch(function(){return null;})
-    ]).then(function(results){
-      render(results[0],results[1]);
-    });
+      fetch("/api/v1/status").then(function(r){return r.json()}).catch(function(){return null;}),
+      fetch("/api/v1/snapshot/latest").then(function(r){return r.json()}).catch(function(){return null;})
+    ]).then(function(r){render(r[0],r[1],r[2]);});
   }
 
   load();
