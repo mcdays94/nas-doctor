@@ -7,45 +7,85 @@
 After every merge to `main` that includes code changes (not just docs):
 
 1. Determine the version bump:
-   - Patch (`v0.4.x`) for bug fixes
+   - Patch (`v0.7.x`) for bug fixes
    - Minor (`v0.x.0`) for new features
    - Major (`vX.0.0`) for breaking changes
 2. Tag: `git tag v<version> && git push origin v<version>`
 3. Create release: `gh release create v<version> --title "v<version> — <summary>" --notes "<notes>"`
+4. Update latest tag: `git tag -f latest && git push -f origin latest`
 
-The Docker CI workflow on `.github/workflows/docker.yml` publishes to GHCR on every push to `main` with `latest` tag, and on version tags with semver tags (`0.4.0`, `0.4`).
+The Docker CI workflow on `.github/workflows/docker.yml` publishes multi-arch (amd64+arm64) images to GHCR on every push to `main` with `latest` tag, and on version tags with semver tags.
 
 **Never push to main without tagging a version afterward.**
 
+**Use dev branches for testing — never push untested code to prod tags.**
+
 ## Versioning
 
-- Current: semver (`v0.2.0`, `v0.3.0`, `v0.3.1`, `v0.4.0`, `v0.4.1`)
+- Current: v0.7.0
 - Main branch is protected — all changes go through PRs
 - Docker images: `ghcr.io/mcdays94/nas-doctor:{latest,version,major.minor}`
+- Multi-arch: linux/amd64, linux/arm64 (Raspberry Pi, Apple Silicon)
+- RC tags (`v0.x.0-rc1`) for pre-release testing
 
 ## Architecture
 
 - Go backend, single binary, embedded HTML templates
+- Multi-stage Dockerfile with Go cross-compilation (no pre-compiled binaries)
 - 3 dashboard themes: midnight (default), clean, ember — each is a self-contained HTML file
-- Subpages (alerts, settings, stats, fleet, disk_detail) share `/css/shared.css` design system
+- Subpages: alerts, settings, stats, fleet, disk_detail, service_checks, parity
+- All subpages share `/css/shared.css` design system
 - SQLite database at `/data/nas-doctor.db`
 - Charts: custom vanilla JS library at `/js/charts.js` (no dependencies)
+- API key authentication: all `/api/v1/*` except `/health` protected when key is set
+- `/api/v1/health` is always public (Docker HEALTHCHECK, K8s probes, load balancers)
 
 ## Platform Support
 
-- **Tested**: Unraid, Synology DSM
-- **Untested**: TrueNAS SCALE, QNAP, Proxmox, generic Linux
-- The app must be platform-aware: detect the OS and adapt behavior (disk paths, SMART parsing, network interfaces, volume mounts)
-- Synology uses `/volume<#>` for data, `/dev/mapper/cachedev_*` devices
-- Unraid uses `/mnt/disk<#>`, `/mnt/cache`, md arrays
+- **Tested**: Unraid, Synology DSM (community), Proxmox (VM), Kubernetes (k3s)
+- **Untested**: TrueNAS SCALE, QNAP, generic Linux
+- The app must be platform-aware: detect the OS and adapt behavior
+- Synology: `/volume<#>` for data, `/dev/mapper/cachedev_*` devices
+- Unraid: `/mnt/disk<#>`, `/mnt/cache`, md arrays
+- Proxmox: PVE REST API integration (nodes, VMs, LXCs, storage, HA, tasks)
+- Kubernetes: K8s API integration (nodes, pods, deployments, services, PVCs, events)
 
 ## Key Files
 
-- `internal/collector/platform.go` — **centralized platform detection singleton** (Unraid, Synology, TrueNAS, QNAP, Proxmox, Linux). Detected once, cached for process lifetime. All collectors use `GetPlatform().IsUnraid()` etc.
-- `internal/collector/` — data collection (SMART, disk, docker, network, UPS, system, parity)
-- `internal/analyzer/` — diagnostic rules engine, Backblaze thresholds
-- `internal/api/` — HTTP handlers, embedded templates, chart library
+- `internal/collector/platform.go` — centralized platform detection singleton
+- `internal/collector/` — data collection (SMART, disk, docker, network, UPS, system, parity, tunnels, proxmox, kubernetes)
+- `internal/analyzer/` — diagnostic rules engine, Backblaze thresholds, Proxmox rules, K8s rules
+- `internal/api/` — HTTP handlers, embedded templates, API key middleware
 - `internal/api/styles.go` — shared CSS design system
-- `internal/api/templates/` — all HTML templates
-- `internal/scheduler/` — scan scheduling, alert lifecycle, notification policies
-- `internal/notifier/` — webhook delivery (Discord, Slack, Gotify, Ntfy, generic)
+- `internal/api/templates/` — all HTML templates (10 pages)
+- `internal/scheduler/` — scan scheduling, notification rules, service checks (independent 30s loop)
+- `internal/notifier/` — webhook delivery (Discord, Slack, Gotify, Ntfy, generic) + Prometheus exporter (90+ metrics)
+- `internal/fleet/` — multi-server fleet polling with custom headers
+- `internal/logfwd/` — log forwarding (Loki, HTTP JSON, syslog)
+- `internal/storage/` — SQLite database layer
+- `internal/demo/` — mock data (drives, Docker, ZFS, UPS, tunnels, Proxmox, K8s)
+
+## Integrations
+
+- **Proxmox VE**: REST API collector, settings UI with test connection + node auto-detect + alias
+- **Kubernetes**: API collector (in-cluster + external), nodes/pods/deployments/services/PVCs/events
+- **Cloudflared**: Tunnel detection (host + Docker), status, connections, routes
+- **Tailscale**: Peer graph, online status, TX/RX, exit nodes
+- **Fleet**: Multi-instance monitoring with custom auth headers, NAS Doctor signature validation
+- **Prometheus**: 90+ gauges covering all subsystems
+- **Log Forwarding**: Loki push, HTTP JSON, syslog (RFC 5424)
+
+## Important Patterns
+
+- **Never use `lsof -ti:PORT | xargs kill`** — it kills the user's browser. Use `pkill -f "nas-doctor"` instead
+- **Fleet servers persist via settings DB** — `buildSettingsPayload()` must use live `fleetServers` variable, not stale `base.fleet`
+- **Section toggles**: Must be in `sectionMap` in all 3 themes AND in `secIds` in settings.html
+- **Auto-enable sections**: When an integration is enabled (Proxmox, K8s), auto-set the section toggle to true
+- **Settings load on startup**: Proxmox + K8s configs must be applied to collector at startup from persisted settings
+- **Orphaned checks**: Match by target URL too, not just name (fleet auto-created checks have different names)
+
+## App Store Submissions
+
+- **Unraid CA**: Asana form submitted, docker-templates repo at mcdays94/docker-templates
+- **TrueNAS**: PR #4804 at truenas/apps
+- **Synology**: No app catalog (Docker Compose in README)
