@@ -17,19 +17,21 @@ const (
 type Category string
 
 const (
-	CategorySystem  Category = "system"
-	CategoryDisk    Category = "disk"
-	CategorySMART   Category = "smart"
-	CategoryDocker  Category = "docker"
-	CategoryNetwork Category = "network"
-	CategoryService Category = "service"
-	CategoryMemory  Category = "memory"
-	CategoryThermal Category = "thermal"
-	CategoryLogs    Category = "logs"
-	CategoryParity  Category = "parity"
-	CategoryZFS     Category = "zfs"
-	CategoryUPS     Category = "ups"
-	CategoryGPU     Category = "gpu"
+	CategorySystem    Category = "system"
+	CategoryDisk      Category = "disk"
+	CategorySMART     Category = "smart"
+	CategoryDocker    Category = "docker"
+	CategoryNetwork   Category = "network"
+	CategoryService   Category = "service"
+	CategoryMemory    Category = "memory"
+	CategoryThermal   Category = "thermal"
+	CategoryLogs      Category = "logs"
+	CategoryParity    Category = "parity"
+	CategoryZFS       Category = "zfs"
+	CategoryUPS       Category = "ups"
+	CategoryGPU       Category = "gpu"
+	CategoryBackup    Category = "backup"
+	CategorySpeedTest Category = "speedtest"
 )
 
 // ---------- Snapshot (one complete diagnostic run) ----------
@@ -53,6 +55,8 @@ type Snapshot struct {
 	Proxmox    *ProxmoxInfo         `json:"proxmox,omitempty"`
 	Kubernetes *KubeInfo            `json:"kubernetes,omitempty"`
 	GPU        *GPUInfo             `json:"gpu,omitempty"`
+	Backup     *BackupInfo          `json:"backup,omitempty"`
+	SpeedTest  *SpeedTestInfo       `json:"speed_test,omitempty"`
 	Services   []ServiceCheckResult `json:"service_checks,omitempty"`
 	Findings   []Finding            `json:"findings"`
 }
@@ -457,6 +461,50 @@ type GPUDevice struct {
 	PCIeBus     string  `json:"pcie_bus"`        // "00:02.0"
 	EncoderPct  float64 `json:"encoder_percent"` // video encoder utilization (transcoding)
 	DecoderPct  float64 `json:"decoder_percent"` // video decoder utilization
+}
+
+// ---------- Backup Monitoring ----------
+
+type BackupInfo struct {
+	Available bool        `json:"available"`
+	Jobs      []BackupJob `json:"jobs"`
+}
+
+type BackupJob struct {
+	Provider      string    `json:"provider"`       // "borg", "restic", "pbs", "duplicati", "rclone"
+	Name          string    `json:"name"`           // job/repo name
+	Repository    string    `json:"repository"`     // repo path or URL
+	LastRun       time.Time `json:"last_run"`       // timestamp of last backup attempt
+	LastSuccess   time.Time `json:"last_success"`   // timestamp of last successful backup
+	Status        string    `json:"status"`         // "ok", "warning", "stale", "failed", "running"
+	SizeBytes     int64     `json:"size_bytes"`     // total repo/backup size
+	FilesCount    int       `json:"files_count"`    // number of files in last snapshot
+	Duration      float64   `json:"duration_secs"`  // how long the last backup took
+	SnapshotCount int       `json:"snapshot_count"` // number of snapshots/archives in the repo
+	ErrorMessage  string    `json:"error_message,omitempty"`
+	Schedule      string    `json:"schedule,omitempty"`    // cron expression or "daily", "hourly"
+	Compression   string    `json:"compression,omitempty"` // "lz4", "zstd", "none"
+	Encrypted     bool      `json:"encrypted"`
+}
+
+// ---------- Network Speed Test ----------
+
+type SpeedTestInfo struct {
+	Available bool             `json:"available"`
+	Latest    *SpeedTestResult `json:"latest,omitempty"`
+}
+
+type SpeedTestResult struct {
+	Timestamp    time.Time `json:"timestamp"`
+	DownloadMbps float64   `json:"download_mbps"`
+	UploadMbps   float64   `json:"upload_mbps"`
+	LatencyMs    float64   `json:"latency_ms"`
+	JitterMs     float64   `json:"jitter_ms"`
+	ServerName   string    `json:"server_name"`
+	ServerID     int       `json:"server_id"`
+	ISP          string    `json:"isp"`
+	ExternalIP   string    `json:"external_ip"`
+	ResultURL    string    `json:"result_url,omitempty"` // speedtest.net result link
 }
 
 // ---------- ZFS ----------

@@ -130,6 +130,16 @@ type Metrics struct {
 	k8sDeployReady   *prometheus.GaugeVec
 	k8sDeployDesired *prometheus.GaugeVec
 
+	// ── Backup ──
+	backupLastSuccess *prometheus.GaugeVec
+	backupSizeBytes   *prometheus.GaugeVec
+	backupStatus      *prometheus.GaugeVec
+
+	// ── Speed Test ──
+	speedtestDownload prometheus.Gauge
+	speedtestUpload   prometheus.Gauge
+	speedtestLatency  prometheus.Gauge
+
 	// ── GPU ──
 	gpuUsagePct    *prometheus.GaugeVec
 	gpuMemUsedMB   *prometheus.GaugeVec
@@ -316,6 +326,17 @@ func NewMetrics() *Metrics {
 	m.gpuEncoderPct = gaugeVec(ns, "gpu", "encoder_percent", "GPU video encoder utilization", gpuLabels)
 	m.gpuDecoderPct = gaugeVec(ns, "gpu", "decoder_percent", "GPU video decoder utilization", gpuLabels)
 
+	// ── Backup ──
+	backupLabels := []string{"provider", "name"}
+	m.backupLastSuccess = gaugeVec(ns, "backup", "last_success_timestamp", "Backup last success unix timestamp", backupLabels)
+	m.backupSizeBytes = gaugeVec(ns, "backup", "size_bytes", "Backup total size in bytes", backupLabels)
+	m.backupStatus = gaugeVec(ns, "backup", "status", "Backup status (1=ok, 0.5=warning, 0=stale/failed)", backupLabels)
+
+	// ── Speed Test ──
+	m.speedtestDownload = gauge(ns, "speedtest", "download_mbps", "Latest speed test download in Mbps")
+	m.speedtestUpload = gauge(ns, "speedtest", "upload_mbps", "Latest speed test upload in Mbps")
+	m.speedtestLatency = gauge(ns, "speedtest", "latency_ms", "Latest speed test latency in ms")
+
 	// ── Findings ──
 	m.findingsTotal = gaugeVec(ns, "findings", "total", "Findings by severity", []string{"severity"})
 	m.findingsCritical = gauge(ns, "findings", "critical_count", "Critical finding count")
@@ -360,6 +381,8 @@ func NewMetrics() *Metrics {
 		m.gpuUsagePct, m.gpuMemUsedMB, m.gpuMemTotalMB, m.gpuMemPct,
 		m.gpuTemperature, m.gpuPowerW, m.gpuPowerMaxW, m.gpuFanPct,
 		m.gpuEncoderPct, m.gpuDecoderPct,
+		m.backupLastSuccess, m.backupSizeBytes, m.backupStatus,
+		m.speedtestDownload, m.speedtestUpload, m.speedtestLatency,
 		m.findingsTotal, m.findingsCritical, m.findingsWarning,
 		m.collectionDuration, m.lastCollectionTime, m.updateAvailable,
 	}
@@ -659,6 +682,35 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 			m.k8sDeployReady.With(l).Set(float64(d.ReadyReplicas))
 			m.k8sDeployDesired.With(l).Set(float64(d.Replicas))
 		}
+	}
+
+	// ── Backup ──
+	m.backupLastSuccess.Reset()
+	m.backupSizeBytes.Reset()
+	m.backupStatus.Reset()
+	if snap.Backup != nil && snap.Backup.Available {
+		for _, job := range snap.Backup.Jobs {
+			l := prometheus.Labels{"provider": job.Provider, "name": job.Name}
+			if !job.LastSuccess.IsZero() {
+				m.backupLastSuccess.With(l).Set(float64(job.LastSuccess.Unix()))
+			}
+			m.backupSizeBytes.With(l).Set(float64(job.SizeBytes))
+			switch job.Status {
+			case "ok":
+				m.backupStatus.With(l).Set(1)
+			case "warning":
+				m.backupStatus.With(l).Set(0.5)
+			default: // stale, failed
+				m.backupStatus.With(l).Set(0)
+			}
+		}
+	}
+
+	// ── Speed Test ──
+	if snap.SpeedTest != nil && snap.SpeedTest.Available && snap.SpeedTest.Latest != nil {
+		m.speedtestDownload.Set(snap.SpeedTest.Latest.DownloadMbps)
+		m.speedtestUpload.Set(snap.SpeedTest.Latest.UploadMbps)
+		m.speedtestLatency.Set(snap.SpeedTest.Latest.LatencyMs)
 	}
 
 	// ── Findings ──

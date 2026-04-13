@@ -176,6 +176,23 @@ func (s *Scheduler) Start() {
 			}
 		}
 	}()
+
+	// Independent speed test loop — default 4h interval
+	go func() {
+		// Run first test 2 minutes after startup
+		time.Sleep(2 * time.Minute)
+		s.runSpeedTest()
+		ticker := time.NewTicker(4 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.runSpeedTest()
+			case <-s.stop:
+				return
+			}
+		}
+	}()
 }
 
 // UpdateInterval dynamically changes the scan interval without restarting.
@@ -737,6 +754,34 @@ const defaultCheckIntervalSec = 300 // 5 minutes
 // runDueServiceChecks is called every 30s by the independent service check
 // loop. It checks each configured check's per-check interval and only
 // executes those whose interval has elapsed since their last run.
+// runSpeedTest executes a network speed test and stores the result.
+func (s *Scheduler) runSpeedTest() {
+	s.logger.Info("running speed test")
+	result := collector.RunSpeedTest()
+	if result == nil {
+		s.logger.Info("speed test: no speedtest tool available (install speedtest or speedtest-cli)")
+		return
+	}
+	s.logger.Info("speed test complete",
+		"download", fmt.Sprintf("%.1f Mbps", result.DownloadMbps),
+		"upload", fmt.Sprintf("%.1f Mbps", result.UploadMbps),
+		"latency", fmt.Sprintf("%.1f ms", result.LatencyMs),
+	)
+	// Store in DB
+	if err := s.store.SaveSpeedTest("speedtest-"+time.Now().Format("20060102-150405"), result); err != nil {
+		s.logger.Warn("failed to save speed test result", "error", err)
+	}
+	// Update the cached snapshot's speed test field
+	s.mu.Lock()
+	if s.latest != nil {
+		s.latest.SpeedTest = &internal.SpeedTestInfo{
+			Available: true,
+			Latest:    result,
+		}
+	}
+	s.mu.Unlock()
+}
+
 func (s *Scheduler) runDueServiceChecks() {
 	s.mu.RLock()
 	checks := make([]internal.ServiceCheckConfig, len(s.serviceChecks))

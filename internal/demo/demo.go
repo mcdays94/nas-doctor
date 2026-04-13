@@ -33,6 +33,8 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.Proxmox = demoProxmox()
 	snap.Kubernetes = demoKubernetes()
 	snap.GPU = demoGPU()
+	snap.Backup = demoBackup()
+	snap.SpeedTest = demoSpeedTest()
 
 	return snap
 }
@@ -507,6 +509,76 @@ func demoGPU() *internal.GPUInfo {
 				ClockMHz: 1450, MemClockMHz: 0, PCIeBus: "00:02.0",
 				EncoderPct: 5, DecoderPct: 15,
 			},
+		},
+	}
+}
+
+func demoBackup() *internal.BackupInfo {
+	now := time.Now()
+	return &internal.BackupInfo{
+		Available: true,
+		Jobs: []internal.BackupJob{
+			{
+				Provider:      "borg",
+				Name:          "daily-borg",
+				Repository:    "/mnt/backup/borg-repo",
+				LastRun:       now.Add(-6 * time.Hour),
+				LastSuccess:   now.Add(-6 * time.Hour),
+				Status:        "ok",
+				SizeBytes:     2_576_980_377_600, // 2.4 TB
+				FilesCount:    284_520,
+				Duration:      1845,
+				SnapshotCount: 14,
+				Schedule:      "daily",
+				Compression:   "lz4",
+				Encrypted:     true,
+			},
+			{
+				Provider:      "restic",
+				Name:          "hourly-restic",
+				Repository:    "s3:s3.amazonaws.com/my-backup-bucket",
+				LastRun:       now.Add(-1 * time.Hour),
+				LastSuccess:   now.Add(-1 * time.Hour),
+				Status:        "ok",
+				SizeBytes:     955_835_801_600, // 890 GB
+				FilesCount:    42_180,
+				Duration:      312,
+				SnapshotCount: 168,
+				Schedule:      "hourly",
+				Compression:   "zstd",
+				Encrypted:     true,
+			},
+			{
+				Provider:      "pbs",
+				Name:          "proxmox-backup",
+				Repository:    "pbs.local:datastore1",
+				LastRun:       now.Add(-72 * time.Hour),
+				LastSuccess:   now.Add(-72 * time.Hour),
+				Status:        "stale",
+				SizeBytes:     5_476_083_302_400, // 5.1 TB
+				FilesCount:    0,
+				Duration:      7200,
+				SnapshotCount: 30,
+				Schedule:      "daily",
+				Compression:   "zstd",
+				Encrypted:     false,
+			},
+		},
+	}
+}
+
+func demoSpeedTest() *internal.SpeedTestInfo {
+	now := time.Now()
+	return &internal.SpeedTestInfo{
+		Available: true,
+		Latest: &internal.SpeedTestResult{
+			Timestamp:    now.Add(-15 * time.Minute),
+			DownloadMbps: 940,
+			UploadMbps:   450,
+			LatencyMs:    8,
+			JitterMs:     1.2,
+			ServerName:   "Lisbon",
+			ISP:          "MEO",
 		},
 	}
 }

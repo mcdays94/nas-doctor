@@ -176,6 +176,21 @@ func (d *DB) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_container_stats_ts ON container_stats_history(timestamp DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_container_stats_name ON container_stats_history(name, timestamp DESC)`,
 
+		// --- Speed test history ---
+		`CREATE TABLE IF NOT EXISTS speedtest_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+			download_mbps REAL,
+			upload_mbps REAL,
+			latency_ms REAL,
+			jitter_ms REAL,
+			server_name TEXT,
+			isp TEXT,
+			timestamp DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_speedtest_ts ON speedtest_history(timestamp DESC)`,
+
 		// --- Notification log ---
 		`CREATE TABLE IF NOT EXISTS notification_log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -360,6 +375,11 @@ func (d *DB) SaveSnapshot(snap *internal.Snapshot) error {
 		return fmt.Errorf("save container history: %w", err)
 	}
 
+	// Store speed test history
+	if err := d.saveSpeedTestHistory(tx, snap); err != nil {
+		return fmt.Errorf("save speedtest history: %w", err)
+	}
+
 	return tx.Commit()
 }
 
@@ -483,6 +503,69 @@ func (d *DB) GetContainerHistory(hours int) ([]ContainerHistoryPoint, error) {
 	for rows.Next() {
 		var p ContainerHistoryPoint
 		if err := rows.Scan(&p.Timestamp, &p.Name, &p.Image, &p.CPUPct, &p.MemMB, &p.MemPct, &p.NetIn, &p.NetOut, &p.BlockRead, &p.BlockWrite); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
+}
+
+func (d *DB) saveSpeedTestHistory(tx *sql.Tx, snap *internal.Snapshot) error {
+	if snap.SpeedTest == nil || !snap.SpeedTest.Available || snap.SpeedTest.Latest == nil {
+		return nil
+	}
+	r := snap.SpeedTest.Latest
+	_, err := tx.Exec(
+		`INSERT INTO speedtest_history (snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		snap.ID, r.DownloadMbps, r.UploadMbps, r.LatencyMs, r.JitterMs, r.ServerName, r.ISP, snap.Timestamp,
+	)
+	return err
+}
+
+// SpeedTestHistoryPoint represents a single speed test history data point.
+type SpeedTestHistoryPoint struct {
+	Timestamp    time.Time `json:"timestamp"`
+	DownloadMbps float64   `json:"download_mbps"`
+	UploadMbps   float64   `json:"upload_mbps"`
+	LatencyMs    float64   `json:"latency_ms"`
+	JitterMs     float64   `json:"jitter_ms"`
+	ServerName   string    `json:"server_name"`
+	ISP          string    `json:"isp"`
+}
+
+// SaveSpeedTest inserts a single speed test result row.
+func (d *DB) SaveSpeedTest(snapshotID string, result *internal.SpeedTestResult) error {
+	if result == nil {
+		return nil
+	}
+	_, err := d.db.Exec(
+		`INSERT INTO speedtest_history (snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		snapshotID, result.DownloadMbps, result.UploadMbps, result.LatencyMs, result.JitterMs, result.ServerName, result.ISP, result.Timestamp,
+	)
+	return err
+}
+
+// GetSpeedTestHistory returns speed test history for the given time range.
+func (d *DB) GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error) {
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	rows, err := d.db.Query(
+		`SELECT timestamp, download_mbps, upload_mbps, latency_ms, jitter_ms, COALESCE(server_name, ''), COALESCE(isp, '')
+		 FROM speedtest_history
+		 WHERE timestamp >= ?
+		 ORDER BY timestamp ASC`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []SpeedTestHistoryPoint
+	for rows.Next() {
+		var p SpeedTestHistoryPoint
+		if err := rows.Scan(&p.Timestamp, &p.DownloadMbps, &p.UploadMbps, &p.LatencyMs, &p.JitterMs, &p.ServerName, &p.ISP); err != nil {
 			return nil, err
 		}
 		points = append(points, p)
@@ -1518,7 +1601,7 @@ func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 
 	// Explicitly delete from history tables for the snapshots being pruned,
 	// in case foreign_keys or CASCADE is not fully honoured at runtime.
-	for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history"} {
+	for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history", "speedtest_history"} {
 		_, err := tx.Exec(fmt.Sprintf(
 			`DELETE FROM %s WHERE snapshot_id IN (%s)`, table, pruneQuery,
 		), keepMin, cutoff)
@@ -1898,7 +1981,7 @@ func (d *DB) PruneToSizeMB(targetMB float64) (int, error) {
 		if err != nil {
 			return totalPruned, err
 		}
-		for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history"} {
+		for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history", "speedtest_history"} {
 			d.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE snapshot_id IN (
 				SELECT id FROM snapshots ORDER BY timestamp ASC LIMIT ?
 			)`, table), batchSize)

@@ -186,6 +186,16 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 		snap.ZFS = zfsInfo
 	}
 
+	// Backup monitoring (Borg, Restic, PBS, Duplicati)
+	c.logger.Info("collecting backup info")
+	backupInfo := collectBackups()
+	if backupInfo != nil && backupInfo.Available {
+		snap.Backup = backupInfo
+	}
+
+	// Speed test: not collected here (runs on its own schedule via scheduler)
+	// snap.SpeedTest is populated by the scheduler's speed test loop
+
 	snap.Duration = time.Since(start).Seconds()
 	c.logger.Info("collection complete", "duration", fmt.Sprintf("%.1fs", snap.Duration))
 	return snap, nil
