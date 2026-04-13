@@ -1297,7 +1297,6 @@ function testWebhook() {
 function testRule() {
   var webhookName = (document.getElementById("nr-webhook") || {}).value;
   if (!webhookName) { showToast("Select a webhook first", "error"); return; }
-  // Find the webhook config
   var wh = null;
   for (var i = 0; i < webhooks.length; i++) {
     if (webhooks[i].name === webhookName) { wh = webhooks[i]; break; }
@@ -1309,25 +1308,75 @@ function testRule() {
   var condSel = document.getElementById("nr-condition");
   var condLabel = condSel && condSel.options[condSel.selectedIndex] ? condSel.options[condSel.selectedIndex].text : cond;
   var targetSel = document.getElementById("nr-target");
-  var targetLabel = targetSel && targetSel.value ? targetSel.options[targetSel.selectedIndex].text : "all";
+  var targetLabel = targetSel && targetSel.value ? targetSel.options[targetSel.selectedIndex].text : "all targets";
   var val = (document.getElementById("nr-value") || {}).value || "";
   var ruleName = (document.getElementById("nr-name") || {}).value || "Unnamed rule";
 
-  // Build a description that matches the rule
-  var desc = 'Test notification for rule "' + ruleName + '": ' + condLabel;
-  if (targetLabel !== "all") desc += ' on ' + targetLabel;
-  if (val) desc += ' (threshold: ' + val + ')';
+  // Map category to a Finding category constant
+  var catMap = {findings:"system",disk_space:"disk",disk_temp:"smart",smart:"smart",service:"service",parity:"parity",ups:"ups",docker:"docker",system:"system",zfs:"zfs",tunnels:"network",update:"system"};
+  var findingCat = catMap[cat] || "system";
 
-  showToast("Sending test notification via " + webhookName + "...", "info");
+  // Build a severity based on the condition
+  var severity = "warning";
+  if (cond === "critical" || cond === "down" || cond === "health_fails" || cond === "on_battery") severity = "critical";
+  if (cond === "any" || cond === "available" || cond === "category") severity = "info";
+
+  // Build a realistic title and description that simulate what the rule would fire
+  var titles = {
+    critical: "Critical finding detected",
+    warning: "Warning threshold reached",
+    any: "New finding detected",
+    category: "Finding in category: " + (targetSel && targetSel.value ? targetSel.value : cat),
+    free_below: "Disk space low on " + targetLabel + " — " + (val || "10") + "% free",
+    above: "Disk temperature high on " + targetLabel + " — " + (val || "55") + "\u00b0C",
+    avg_above: "Average disk temperature high — " + (val || "50") + "\u00b0C",
+    health_fails: "SMART health check failed on " + targetLabel,
+    reallocated_above: "Reallocated sectors detected on " + targetLabel + " — " + (val || "1") + " sectors",
+    pending_above: "Pending sectors detected on " + targetLabel + " — " + (val || "1") + " sectors",
+    crc_above: "CRC errors on " + targetLabel + " — " + (val || "1") + " errors",
+    power_hours_above: "Drive age warning on " + targetLabel + " — " + (val || "40000") + " hours",
+    down: "Service down: " + targetLabel,
+    degraded: "Service degraded: " + targetLabel + " — partial speed failure",
+    latency_above: "High latency on " + targetLabel + " — over " + (val || "500") + "ms",
+    download_below: "Download speed low: " + targetLabel + " — below " + (val || "800") + " Mbps",
+    upload_below: "Upload speed low: " + targetLabel + " — below " + (val || "400") + " Mbps",
+    errors: "Parity check errors detected",
+    speed_below: "Parity speed below " + (val || "50") + " MB/s",
+    on_battery: "UPS switched to battery power",
+    battery_below: "UPS battery low — " + (val || "20") + "%",
+    load_above: "Load above threshold — " + (val || "80") + "%",
+    stopped: "Container stopped: " + targetLabel,
+    cpu_above: "CPU usage high — " + (val || "90") + "%",
+    mem_above: "Memory usage high — " + (val || "90") + "%",
+    iowait_above: "I/O wait high — " + (val || "20") + "%",
+    degraded_pool: "ZFS pool degraded: " + targetLabel,
+    scrub_errors: "ZFS scrub errors on " + targetLabel,
+    usage_above: "Usage above " + (val || "80") + "% on " + targetLabel,
+    cloudflared_down: "Cloudflared tunnel down: " + targetLabel,
+    tailscale_offline: "Tailscale node offline: " + targetLabel,
+    available: "Platform update available"
+  };
+
+  var title = titles[cond] || condLabel + " on " + targetLabel;
+  var description = "TEST — This simulates what the notification rule \"" + ruleName + "\" would send when triggered. Condition: " + condLabel + " on " + targetLabel + (val ? " (threshold: " + val + ")" : "") + ".";
+
+  showToast("Sending test via " + webhookName + "...", "info");
   fetch("/api/v1/settings/test-webhook", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      name: wh.name,
-      url: wh.url,
-      type: wh.type || "generic",
-      enabled: true,
-      secret: wh.secret || ""
+      name: wh.name, url: wh.url, type: wh.type || "generic",
+      enabled: true, secret: wh.secret || "",
+      finding: {
+        severity: severity,
+        category: findingCat,
+        title: title,
+        description: description,
+        evidence: ["Rule: " + ruleName, "Condition: " + condLabel, "Target: " + targetLabel, val ? "Threshold: " + val : null].filter(Boolean),
+        impact: "This is a test notification. No action required.",
+        action: "Verify this notification arrived correctly in " + webhookName + ".",
+        priority: severity === "critical" ? "immediate" : "short-term"
+      }
     })
   })
   .then(function(r) {

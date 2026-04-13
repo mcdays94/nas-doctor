@@ -871,12 +871,16 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	var wh internal.WebhookConfig
-	if err := json.Unmarshal(body, &wh); err != nil {
+	var payload struct {
+		internal.WebhookConfig
+		Finding *internal.Finding `json:"finding,omitempty"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
 
+	wh := payload.WebhookConfig
 	if wh.URL == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "webhook url is required"})
 		return
@@ -884,19 +888,30 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	// Force enabled for the test
 	wh.Enabled = true
 
-	testFindings := []internal.Finding{
-		{
-			ID:          "test-001",
-			Severity:    internal.SeverityInfo,
-			Category:    internal.CategorySystem,
-			Title:       "Test Notification",
-			Description: "This is a test notification from NAS Doctor to verify your webhook configuration is working correctly.",
-			Evidence:    []string{"Triggered manually via settings page"},
-			Impact:      "None — this is a test.",
-			Action:      "No action required.",
-			Priority:    "low",
-			Cost:        "none",
-		},
+	var testFindings []internal.Finding
+	if payload.Finding != nil && payload.Finding.Title != "" {
+		// Use the caller-provided finding (from notification rule test)
+		f := *payload.Finding
+		f.ID = "test-rule-001"
+		if f.Severity == "" {
+			f.Severity = internal.SeverityWarning
+		}
+		testFindings = []internal.Finding{f}
+	} else {
+		// Default generic test finding (from webhook test button)
+		testFindings = []internal.Finding{
+			{
+				ID:          "test-001",
+				Severity:    internal.SeverityInfo,
+				Category:    internal.CategorySystem,
+				Title:       "Test Notification",
+				Description: "This is a test notification from NAS Doctor to verify your webhook configuration is working correctly.",
+				Evidence:    []string{"Triggered manually via settings page"},
+				Impact:      "None — this is a test.",
+				Action:      "No action required.",
+				Priority:    "low",
+			},
+		}
 	}
 
 	// Create a temporary notifier with just this webhook.
