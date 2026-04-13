@@ -70,7 +70,7 @@ export default {
       const html = await fetchAsset(env, url, request, pageFile);
       if (html !== null) {
         return new Response(injectBanner(html, platform, path), {
-          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300", ...platformCookie(platform) },
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache", ...platformCookie(platform) },
         });
       }
     }

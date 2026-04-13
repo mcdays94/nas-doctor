@@ -17,7 +17,7 @@ function bannerHTML(currentPlatform: Platform, currentPath: string): string {
 
   const buttons = PLATFORMS.map((p) => {
     const active = p.key === currentPlatform;
-    return `<a href="?platform=${p.key}" class="dp-btn${active ? " dp-active" : ""}">${p.icon} ${p.label}</a>`;
+    return `<a href="#" onclick="document.cookie='nas_demo_platform=${p.key};path=/;max-age=86400;SameSite=Lax';window.location.href=window.location.pathname+'?platform=${p.key}&_='+Date.now();return false" class="dp-btn${active ? " dp-active" : ""}">${p.icon} ${p.label}</a>`;
   }).join("");
 
   return `
