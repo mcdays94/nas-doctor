@@ -11,7 +11,12 @@ DEMO_MODE = "true"
 directory = "./captured"
 binding = "ASSETS"
 
-# Custom domain — creates DNS record + SSL cert automatically
+# Custom domain
 [[routes]]
 pattern = "nasdoctordemo.mdias.info"
 custom_domain = true
+
+# KV namespace for demo API data (seeded from real Go binary captures)
+[[kv_namespaces]]
+binding = "DEMO_DATA"
+id = "REDACTED_KV_NAMESPACE_ID"
