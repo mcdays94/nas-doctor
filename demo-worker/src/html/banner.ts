@@ -8,6 +8,7 @@ import { Platform } from "../data/platforms";
 const PLATFORMS: { key: Platform; label: string; icon: string }[] = [
   { key: "unraid", label: "Unraid", icon: "💾" },
   { key: "synology", label: "Synology", icon: "📦" },
+  { key: "truenas", label: "TrueNAS", icon: "🐠" },
   { key: "proxmox", label: "Proxmox VE", icon: "🖥️" },
   { key: "kubernetes", label: "Kubernetes", icon: "☸️" },
 ];

@@ -3,7 +3,7 @@
  * Each platform has different drives, containers, sections, and system characteristics.
  */
 
-export type Platform = "unraid" | "synology" | "proxmox" | "kubernetes";
+export type Platform = "unraid" | "synology" | "truenas" | "proxmox" | "kubernetes";
 
 export function getPlatformFromRequest(request: Request, url: URL): Platform {
   // Check query param first
@@ -19,7 +19,7 @@ export function getPlatformFromRequest(request: Request, url: URL): Platform {
 }
 
 function isValidPlatform(s: string): s is Platform {
-  return ["unraid", "synology", "proxmox", "kubernetes"].includes(s);
+  return ["unraid", "synology", "truenas", "proxmox", "kubernetes"].includes(s);
 }
 
 export interface PlatformProfile {
@@ -138,6 +138,26 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
     hasKubernetes: false,
     hasTunnels: false,
     hasTailscale: true,
+    hasGPU: false,
+  },
+
+  truenas: {
+    hostname: "truenas-scale",
+    platform: "TrueNAS SCALE 24.10",
+    osVersion: "TrueNAS-SCALE-24.10",
+    cpuModel: "Intel Xeon E-2278G",
+    cpuCores: 8,
+    ramGB: 64,
+    uptimeSecs: 120 * 86400,
+    drives: [],
+    containers: [],
+    hasZFS: true,
+    hasUPS: true,
+    hasParity: false,
+    hasProxmox: false,
+    hasKubernetes: false,
+    hasTunnels: false,
+    hasTailscale: false,
     hasGPU: false,
   },
 
