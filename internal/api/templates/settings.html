@@ -366,7 +366,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         <div class="form-row">
           <div>
             <label for="nr-target">On which target <span style="font-size:10px;color:var(--text3)">(leave blank for all)</span></label>
-            <select id="nr-target" onchange="updateRulePreview()"><option value="">Any / All</option></select>
+            <select id="nr-target" onchange="filterConditionsForTarget();updateRulePreview()"><option value="">Any / All</option></select>
           </div>
           <div id="nr-value-wrap">
             <label for="nr-value" id="nr-value-label">Threshold value</label>
@@ -2138,7 +2138,7 @@ var CONDITION_MAP = {
   disk_space: [{v:"free_below",l:"Free space below %"}],
   disk_temp:  [{v:"above",l:"Single disk temp above \u00b0C"},{v:"avg_above",l:"Average disk temp above \u00b0C"}],
   smart:      [{v:"health_fails",l:"SMART health fails"},{v:"reallocated_above",l:"Reallocated sectors above"},{v:"pending_above",l:"Pending sectors above"},{v:"crc_above",l:"CRC errors above"},{v:"power_hours_above",l:"Power-on hours above"}],
-  service:    [{v:"down",l:"Service goes down"},{v:"degraded",l:"Service degraded (speed checks)"},{v:"latency_above",l:"Latency above (ms)"},{v:"download_below",l:"Download speed below (Mbps)"},{v:"upload_below",l:"Upload speed below (Mbps)"}],
+  service:    [{v:"down",l:"Goes down"},{v:"degraded",l:"Degraded (partial failure)"},{v:"latency_above",l:"Latency above (ms)"},{v:"download_below",l:"Download below (Mbps)"},{v:"upload_below",l:"Upload below (Mbps)"}],
   parity:     [{v:"errors",l:"Parity check has errors"},{v:"speed_below",l:"Parity speed below MB/s"}],
   ups:        [{v:"on_battery",l:"UPS switches to battery"},{v:"battery_below",l:"Battery below %"},{v:"load_above",l:"Load above %"}],
   docker:     [{v:"stopped",l:"Container stops"}],
@@ -2160,6 +2160,43 @@ function onRuleCategoryChange() {
     condSel.appendChild(o);
   }
   populateTargetDropdown(cat);
+  filterConditionsForTarget();
+  updateValueHint();
+}
+// When a service check target is selected, filter conditions to match the check type
+function filterConditionsForTarget() {
+  var cat = document.getElementById("nr-category").value;
+  if (cat !== "service") return;
+  var targetSel = document.getElementById("nr-target");
+  var condSel = document.getElementById("nr-condition");
+  if (!targetSel || !condSel) return;
+  // Determine if the selected target is a speed check
+  var targetName = targetSel.value;
+  var isSpeed = false;
+  if (_snapshotCache && _snapshotCache.service_checks) {
+    for (var i = 0; i < _snapshotCache.service_checks.length; i++) {
+      var sc = _snapshotCache.service_checks[i];
+      if ((sc.name === targetName || sc.key === targetName) && sc.type === "speed") { isSpeed = true; break; }
+    }
+  }
+  // Speed checks: show degraded, down, download_below, upload_below — hide latency_above
+  // Non-speed checks: show down, latency_above — hide degraded, download_below, upload_below
+  var prevVal = condSel.value;
+  condSel.innerHTML = "";
+  var allOpts = CONDITION_MAP.service || [];
+  var speedOnly = {degraded:1, download_below:1, upload_below:1, down:1};
+  var nonSpeedOnly = {down:1, latency_above:1};
+  for (var j = 0; j < allOpts.length; j++) {
+    var opt = allOpts[j];
+    if (isSpeed && !speedOnly[opt.v]) continue;
+    if (!isSpeed && targetName && !nonSpeedOnly[opt.v]) continue;
+    // "Any/All" target: show everything
+    var o = document.createElement("option"); o.value = opt.v; o.textContent = opt.l;
+    condSel.appendChild(o);
+  }
+  if (prevVal) condSel.value = prevVal;
+  // If previous value isn't in the filtered list, pick the first option
+  if (condSel.selectedIndex < 0 && condSel.options.length > 0) condSel.selectedIndex = 0;
   updateValueHint();
 }
 function updateValueHint() {
