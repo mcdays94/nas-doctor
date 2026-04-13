@@ -170,28 +170,21 @@ function transformForPlatform(endpoint: string, data: unknown, platform: Platfor
   if (endpoint === "notifications_log") return buildNotificationLog();
   if (endpoint === "settings") return transformSettings(data as Record<string, unknown>, PROFILES[platform]);
   if (endpoint === "status") return transformStatus(data as Record<string, unknown>, PROFILES[platform]);
+  if (endpoint === "disks") return buildDisksAPI(PROFILES[platform]);
+  if (endpoint === "smart_trends") return buildSmartTrends(PROFILES[platform]);
+  if (endpoint === "replacement_plan") return buildReplacementPlan(PROFILES[platform]);
+  if (endpoint === "capacity_forecast") return buildCapacityForecast(PROFILES[platform]);
+  if (endpoint === "sparklines") return transformSparklines(data as Record<string, unknown>, PROFILES[platform]);
 
   if (platform === "unraid") return data; // unraid IS the seed for other endpoints
 
   const p = PROFILES[platform];
 
   switch (endpoint) {
-    case "status":
-      return transformStatus(data as Record<string, unknown>, p);
-    case "settings":
-      return transformSettings(data as Record<string, unknown>, p);
     case "snapshot":
       return transformSnapshot(data as Record<string, unknown>, p, platform);
-    case "sparklines":
-      return transformSparklines(data as Record<string, unknown>, p);
-    case "disks":
-      return buildDisks(p);
-    case "smart_trends":
-      return buildSmartTrends(p);
-    case "service_checks":
-      return buildServiceChecks();
     default:
-      return data; // fleet, alerts, incidents, etc. are shared
+      return data; // everything else either handled above or passed through
   }
 }
 
@@ -341,26 +334,100 @@ function transformSparklines(d: Record<string, unknown>, p: PlatformProfile): Re
   return { ...d, disks: diskSparklines };
 }
 
-function buildDisks(p: PlatformProfile): unknown[] {
-  return p.drives.map((dr, i) => {
-    const usedPct = clamp(jitter(dr.usedPct, 3, hashStr(dr.serial) + i), 0, 99);
-    return {
-      device: `/dev/${dr.device}`, serial: dr.serial, model: dr.model,
-      type: dr.type, size_gb: round2(dr.sizeGB),
-      used_percent: round2(usedPct), temperature_c: Math.round(clamp(jitter(dr.temp, 8, hashStr(dr.serial) + 50 + i), 22, 58)),
-      health_passed: true, power_on_hours: dr.poh,
-    };
-  });
+// /api/v1/disks — matches real Go app format
+function buildDisksAPI(p: PlatformProfile): unknown[] {
+  return p.drives.map((dr, i) => ({
+    device: `/dev/${dr.device}`,
+    serial: dr.serial,
+    model: dr.model,
+    last_temperature: Math.round(clamp(jitter(dr.temp, 8, hashStr(dr.serial) + 50 + i), 22, 58)),
+    last_health_passed: true,
+    power_on_hours: dr.poh + Math.floor(Date.now() / 3600000) % 100,
+    data_points: 78,
+  }));
 }
 
+// /api/v1/smart/trends — matches real Go app format
 function buildSmartTrends(p: PlatformProfile): unknown[] {
   return p.drives.map((dr) => ({
-    serial: dr.serial, model: dr.model, type: dr.type,
+    serial: dr.serial,
+    model: dr.model,
+    device: `/dev/${dr.device}`,
+    type: dr.type,
     attributes: [
-      { name: "temperature_celsius", values: Array.from({ length: 30 }, (_, d) => ({ date: new Date(Date.now() - (29 - d) * 86400000).toISOString().split("T")[0], value: Math.round(clamp(jitter(dr.temp, 6, hashStr(dr.serial) + d), 22, 55)) })) },
-      { name: "power_on_hours", values: Array.from({ length: 30 }, (_, d) => ({ date: new Date(Date.now() - (29 - d) * 86400000).toISOString().split("T")[0], value: dr.poh + d * 24 })) },
+      { id: 194, name: "temperature_celsius", values: Array.from({ length: 30 }, (_, d) => ({ date: new Date(Date.now() - (29 - d) * 86400000).toISOString().split("T")[0], raw: Math.round(clamp(jitter(dr.temp, 6, hashStr(dr.serial) + d), 22, 55)) })) },
+      { id: 9, name: "power_on_hours", values: Array.from({ length: 30 }, (_, d) => ({ date: new Date(Date.now() - (29 - d) * 86400000).toISOString().split("T")[0], raw: dr.poh + d * 24 })) },
+      { id: 5, name: "reallocated_sector_ct", values: Array.from({ length: 30 }, (_, d) => ({ date: new Date(Date.now() - (29 - d) * 86400000).toISOString().split("T")[0], raw: 0 })) },
+      ...(dr.type !== "hdd" ? [{ id: 177, name: "wear_leveling_count", values: Array.from({ length: 30 }, (_, d) => ({ date: new Date(Date.now() - (29 - d) * 86400000).toISOString().split("T")[0], raw: Math.round(100 - dr.poh / 500) })) }] : []),
     ],
   }));
+}
+
+// /api/v1/replacement-plan — matches real Go app format
+function buildReplacementPlan(p: PlatformProfile): unknown {
+  const drives = p.drives.map((dr, i) => {
+    const years = dr.poh / 8766;
+    const healthScore = Math.round(clamp(100 - years * 8 - (dr.temp > 40 ? 10 : 0), 20, 100));
+    const urgency = healthScore < 40 ? "replace_now" : healthScore < 60 ? "replace_soon" : healthScore < 80 ? "monitor" : "healthy";
+    return {
+      device: `/dev/${dr.device}`, model: dr.model, serial: dr.serial,
+      array_slot: dr.label, disk_type: dr.type,
+      size_gb: round2(dr.sizeGB), health_score: healthScore, health_passed: true,
+      urgency, urgency_label: urgency.replace("_", " "),
+      risk_factors: [
+        ...(years > 3 ? [`Age: ${years.toFixed(1)} years`] : []),
+        ...(dr.temp > 40 ? [`Temperature: ${dr.temp}°C`] : []),
+        ...(dr.poh > 40000 ? ["High power-on hours"] : []),
+      ],
+      failure_mult: round2(years > 4 ? 2.5 : years > 3 ? 1.5 : 1.0),
+      remaining_years: round2(Math.max(0, 6 - years)),
+      life_used_pct: round2(clamp(years / 6 * 100, 0, 100)),
+      age_bracket: years > 4 ? "wear-out" : years > 1 ? "normal" : "infant",
+      temp_rating: dr.temp > 45 ? "hot" : dr.temp > 38 ? "warm" : "cool",
+      cost_estimate: round2(dr.type === "nvme" ? dr.sizeGB * 0.06 : dr.type === "ssd" ? dr.sizeGB * 0.05 : dr.sizeGB * 0.015),
+      power_on_hours: dr.poh, temp_c: dr.temp,
+      reallocated: 0, pending: 0, crc_errors: 0,
+    };
+  });
+  drives.sort((a, b) => a.health_score - b.health_score);
+  return {
+    drives,
+    total_drives: drives.length,
+    replace_now: drives.filter(d => d.urgency === "replace_now").length,
+    replace_soon: drives.filter(d => d.urgency === "replace_soon").length,
+    monitor: drives.filter(d => d.urgency === "monitor").length,
+    healthy: drives.filter(d => d.urgency === "healthy").length,
+    total_cost: round2(drives.filter(d => d.urgency !== "healthy").reduce((s, d) => s + d.cost_estimate, 0)),
+    total_cost_all: round2(drives.reduce((s, d) => s + d.cost_estimate, 0)),
+    cost_configured: true,
+    data_version: 1,
+  };
+}
+
+// /api/v1/capacity-forecast — matches real Go app format
+function buildCapacityForecast(p: PlatformProfile): unknown {
+  const now = Date.now();
+  const volumes = p.drives.filter(d => d.usedPct > 0).map((dr, i) => {
+    const growthGBPerDay = round2(dr.sizeGB * (0.001 + hash(hashStr(dr.serial) + 42) * 0.003));
+    const currentUsedGB = round2(dr.usedPct / 100 * dr.sizeGB);
+    const remainingGB = dr.sizeGB - currentUsedGB;
+    const daysTo90 = dr.usedPct < 90 ? Math.round((0.9 * dr.sizeGB - currentUsedGB) / growthGBPerDay) : 0;
+    return {
+      mount_point: dr.mount, label: dr.label, device: `/dev/${dr.device}`,
+      total_gb: round2(dr.sizeGB),
+      current_pct: round2(dr.usedPct),
+      current_used_gb: currentUsedGB,
+      growth_gb_per_day: growthGBPerDay,
+      days_to_90: daysTo90,
+    };
+  });
+  return {
+    volumes,
+    total_volumes: volumes.length,
+    critical: volumes.filter(v => v.days_to_90 > 0 && v.days_to_90 < 30).length,
+    warning: volumes.filter(v => v.days_to_90 >= 30 && v.days_to_90 < 90).length,
+    ok: volumes.filter(v => v.days_to_90 === 0 || v.days_to_90 >= 90).length,
+  };
 }
 
 function hoursAgo(h: number): string {
