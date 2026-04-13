@@ -66,6 +66,8 @@ type DashboardSections struct {
 	ContainerMetrics bool `json:"container_metrics"`
 	MergedContainers bool `json:"merged_containers"` // Combine Docker list + container metrics into one section
 	MergedDrives     bool `json:"merged_drives"`     // Combine SMART + storage into one card per drive
+	Backup           bool `json:"backup"`
+	SpeedTest        bool `json:"speed_test"`
 }
 
 // BackupSettings controls automatic backup of the application database.
@@ -187,6 +189,8 @@ func defaultSettings() Settings {
 			ContainerMetrics: false,
 			MergedContainers: true,
 			MergedDrives:     true,
+			Backup:           true,
+			SpeedTest:        true,
 		},
 		ChartRangeHours: 1,
 	}
@@ -207,6 +211,7 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/history/system", s.handleSystemHistory)
 	r.Get("/api/v1/history/gpu", s.handleGPUHistory)
 	r.Get("/api/v1/history/containers", s.handleContainerHistory)
+	r.Get("/api/v1/history/speedtest", s.handleSpeedTestHistory)
 	r.Get("/api/v1/notifications/log", s.handleNotificationLog)
 	r.Get("/api/v1/service-checks", s.handleServiceChecks)
 	r.Get("/api/v1/service-checks/history", s.handleServiceCheckHistory)
@@ -1051,6 +1056,30 @@ func (s *Server) handleContainerHistory(w http.ResponseWriter, r *http.Request) 
 	}
 	if points == nil {
 		points = []storage.ContainerHistoryPoint{}
+	}
+	writeJSON(w, http.StatusOK, points)
+}
+
+// handleSpeedTestHistory returns speed test history for chart rendering.
+// GET /api/v1/history/speedtest?hours=N
+func (s *Server) handleSpeedTestHistory(w http.ResponseWriter, r *http.Request) {
+	hoursStr := r.URL.Query().Get("hours")
+	hours := 1
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 {
+			hours = h
+		}
+	}
+	if hours > 720 { // cap at 30 days
+		hours = 720
+	}
+	points, err := s.store.GetSpeedTestHistory(hours)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get speed test history: " + err.Error()})
+		return
+	}
+	if points == nil {
+		points = []storage.SpeedTestHistoryPoint{}
 	}
 	writeJSON(w, http.StatusOK, points)
 }

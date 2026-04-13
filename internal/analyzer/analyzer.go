@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
 )
@@ -51,6 +52,10 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 
 	if snap.GPU != nil && snap.GPU.Available {
 		findings = append(findings, analyzeGPU(snap.GPU)...)
+	}
+
+	if snap.Backup != nil && snap.Backup.Available {
+		findings = append(findings, analyzeBackups(snap.Backup)...)
 	}
 
 	// Cross-correlation: combine related findings
@@ -1328,4 +1333,114 @@ func analyzeGPU(gpu *internal.GPUInfo) []internal.Finding {
 	}
 
 	return findings
+}
+
+// ── Backup rules ────────────────────────────────────────────────────
+
+func analyzeBackups(backup *internal.BackupInfo) []internal.Finding {
+	var findings []internal.Finding
+
+	for _, job := range backup.Jobs {
+		name := job.Name
+		if name == "" {
+			name = job.Provider
+		}
+
+		switch job.Status {
+		case "failed":
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategoryBackup,
+				Title:       fmt.Sprintf("Backup failed: %s (%s)", name, job.Provider),
+				Description: fmt.Sprintf("Backup job '%s' (%s) has failed. %s", name, job.Provider, job.ErrorMessage),
+				Evidence: []string{
+					fmt.Sprintf("Provider: %s", job.Provider),
+					fmt.Sprintf("Repository: %s", job.Repository),
+					fmt.Sprintf("Error: %s", job.ErrorMessage),
+				},
+				Impact:   "No recent backup available. Data loss risk if a failure occurs.",
+				Action:   "Investigate the backup error and re-run the job. Check repository access and disk space.",
+				Priority: "immediate",
+			})
+
+		case "stale":
+			age := formatBackupAge(job.LastSuccess)
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategoryBackup,
+				Title:       fmt.Sprintf("Backup stale: %s (%s) — last success %s ago", name, job.Provider, age),
+				Description: fmt.Sprintf("Backup job '%s' (%s) has not completed successfully in over 48 hours. Last success was %s ago.", name, job.Provider, age),
+				Evidence: []string{
+					fmt.Sprintf("Provider: %s", job.Provider),
+					fmt.Sprintf("Last success: %s", job.LastSuccess.Format("2006-01-02 15:04")),
+					fmt.Sprintf("Snapshots: %d", job.SnapshotCount),
+				},
+				Impact:   "Backup data is stale. Recovery point objective (RPO) exceeded.",
+				Action:   "Check if the backup schedule is running. Verify repository connectivity and credentials.",
+				Priority: "immediate",
+			})
+
+		case "warning":
+			age := formatBackupAge(job.LastSuccess)
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategoryBackup,
+				Title:       fmt.Sprintf("Backup aging: %s (%s) — last success %s ago", name, job.Provider, age),
+				Description: fmt.Sprintf("Backup job '%s' (%s) last succeeded %s ago (>24h). The job may be delayed or encountering intermittent issues.", name, job.Provider, age),
+				Evidence: []string{
+					fmt.Sprintf("Provider: %s", job.Provider),
+					fmt.Sprintf("Last success: %s", job.LastSuccess.Format("2006-01-02 15:04")),
+					fmt.Sprintf("Snapshots: %d", job.SnapshotCount),
+				},
+				Impact:   "Backup freshness degraded. Recovery may be missing recent changes.",
+				Action:   "Monitor the next scheduled run. Check logs for intermittent errors.",
+				Priority: "short-term",
+			})
+
+		case "ok":
+			sizeStr := formatBackupSize(job.SizeBytes)
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityInfo,
+				Category:    internal.CategoryBackup,
+				Title:       fmt.Sprintf("Backup healthy: %s (%s) — %d snapshots, %s", name, job.Provider, job.SnapshotCount, sizeStr),
+				Description: fmt.Sprintf("Backup job '%s' (%s) is healthy with %d snapshots totaling %s.", name, job.Provider, job.SnapshotCount, sizeStr),
+				Evidence: []string{
+					fmt.Sprintf("Provider: %s", job.Provider),
+					fmt.Sprintf("Snapshots: %d", job.SnapshotCount),
+					fmt.Sprintf("Total size: %s", sizeStr),
+					fmt.Sprintf("Schedule: %s", job.Schedule),
+				},
+				Impact:   "None — backup is operating normally.",
+				Action:   "No action required.",
+				Priority: "medium-term",
+			})
+		}
+	}
+
+	return findings
+}
+
+func formatBackupAge(t time.Time) string {
+	if t.IsZero() {
+		return "unknown"
+	}
+	d := time.Since(t)
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+func formatBackupSize(bytes int64) string {
+	if bytes <= 0 {
+		return "unknown"
+	}
+	gb := float64(bytes) / (1024 * 1024 * 1024)
+	if gb >= 1024 {
+		return fmt.Sprintf("%.1f TB", gb/1024)
+	}
+	return fmt.Sprintf("%.1f GB", gb)
 }

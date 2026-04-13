@@ -1336,6 +1336,35 @@ body {
     }
     html += '</div>'; // end section-block ups
 
+    // ==== Section: Backup Monitoring ====
+    html += '<div class="section-block" data-section="backup">';
+    var backup = snapshot ? snapshot.backup : null;
+    if (backup && backup.available && backup.jobs && backup.jobs.length > 0) {
+      html += '<div class="section"><div class="section-title">Backup Jobs (' + backup.jobs.length + ')</div>';
+      for (var bi = 0; bi < backup.jobs.length; bi++) {
+        var bj = backup.jobs[bi];
+        var statusClass = bj.status === 'ok' ? 'td-healthy' : bj.status === 'warning' ? 'td-warn' : 'td-crit';
+        var provLabel = bj.provider.toUpperCase();
+        html += '<div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:12px;margin-bottom:6px">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+        html += '<div style="display:flex;align-items:center;gap:8px">';
+        html += '<span style="font-weight:600;font-size:13px;color:#171717">' + escapeHTML(bj.name) + '</span>';
+        html += '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,0.04);color:#808080">' + provLabel + '</span>';
+        html += '</div>';
+        html += '<span class="' + statusClass + '" style="font-size:12px;font-weight:600">' + bj.status.toUpperCase() + '</span>';
+        html += '</div>';
+        html += '<div style="display:flex;gap:16px;font-size:12px;color:#808080;flex-wrap:wrap">';
+        if (bj.snapshot_count) html += '<span>Snapshots: <strong style="color:#171717">' + bj.snapshot_count + '</strong></span>';
+        if (bj.size_bytes > 0) html += '<span>Size: <strong style="color:#171717">' + fmtBytes(bj.size_bytes) + '</strong></span>';
+        if (bj.last_success) { var age = Math.round((Date.now() - new Date(bj.last_success).getTime()) / 3600000); html += '<span>Last: <strong style="color:#171717">' + (age < 1 ? '<1h ago' : age + 'h ago') + '</strong></span>'; }
+        if (bj.encrypted) html += '<span style="color:#9ca3af">Encrypted</span>';
+        html += '</div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+
     // ==== Section: Network ====
     html += '<div class="section-block" data-section="network">';
     if (snapshot && snapshot.network && snapshot.network.interfaces && snapshot.network.interfaces.length > 0) {
@@ -1353,6 +1382,31 @@ body {
       html += '</table></div></div>';
     }
     html += '</div>'; // end section-block network
+
+    // ==== Section: Speed Test ====
+    html += '<div class="section-block" data-section="speedtest">';
+    var st = snapshot ? snapshot.speed_test : null;
+    if (st && st.available && st.latest) {
+      var r = st.latest;
+      html += '<div class="section"><div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Speed Test<div class="st-range-btns" style="display:flex;gap:4px">';
+      html += '<button class="st-range-btn' + (_chartRange === 1 ? ' active' : '') + '" data-hours="1" onclick="loadSpeedTestChart(1,true)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,0.12);background:' + (_chartRange === 1 ? 'rgba(0,0,0,0.04)' : 'transparent') + ';color:' + (_chartRange === 1 ? '#171717' : '#9ca3af') + ';cursor:pointer">1H</button>';
+      html += '<button class="st-range-btn' + (_chartRange === 24 ? ' active' : '') + '" data-hours="24" onclick="loadSpeedTestChart(24,true)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,0.12);background:' + (_chartRange === 24 ? 'rgba(0,0,0,0.04)' : 'transparent') + ';color:' + (_chartRange === 24 ? '#171717' : '#9ca3af') + ';cursor:pointer">1D</button>';
+      html += '<button class="st-range-btn' + (_chartRange === 168 ? ' active' : '') + '" data-hours="168" onclick="loadSpeedTestChart(168,true)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,0.12);background:' + (_chartRange === 168 ? 'rgba(0,0,0,0.04)' : 'transparent') + ';color:' + (_chartRange === 168 ? '#171717' : '#9ca3af') + ';cursor:pointer">1W</button>';
+      html += '</div></div>';
+      html += '<div style="display:flex;gap:16px;font-size:13px;color:#808080;flex-wrap:wrap;margin-bottom:12px">';
+      html += '<span>Download: <strong style="color:#171717;font-size:15px">' + r.download_mbps.toFixed(0) + ' Mbps</strong></span>';
+      html += '<span>Upload: <strong style="color:#171717;font-size:15px">' + r.upload_mbps.toFixed(0) + ' Mbps</strong></span>';
+      html += '<span>Latency: <strong style="color:#171717">' + r.latency_ms.toFixed(1) + ' ms</strong></span>';
+      if (r.jitter_ms) html += '<span>Jitter: <strong style="color:#171717">' + r.jitter_ms.toFixed(1) + ' ms</strong></span>';
+      html += '</div>';
+      html += '<div style="font-size:11px;color:#9ca3af;margin-bottom:8px">';
+      if (r.server_name) html += 'Server: ' + escapeHTML(r.server_name) + ' &middot; ';
+      if (r.isp) html += 'ISP: ' + escapeHTML(r.isp);
+      html += '</div>';
+      html += '<canvas id="speedtest-chart" style="width:100%;height:80px"></canvas>';
+      html += '</div>';
+    }
+    html += '</div>';
 
     // ==== Section: Service Checks ====
     html += '<div class="section-block" data-section="services">';
@@ -1583,11 +1637,7 @@ body {
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
     var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
-<<<<<<< HEAD
-    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "container_metrics": sec.container_metrics !== false, "zfs": sec.zfs !== false, "gpu": sec.gpu !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "parity": sec.parity !== false };
-=======
-    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "k8s_nodes": sec.kubernetes !== false, "k8s_problems": sec.kubernetes !== false, "k8s_deployments": sec.kubernetes !== false, "k8s_events": sec.kubernetes !== false, "parity": sec.parity !== false };
->>>>>>> 293df38 (feat: K8s per-node sections in clean + ember themes, README cleanup)
+    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "container_metrics": sec.container_metrics !== false, "zfs": sec.zfs !== false, "gpu": sec.gpu !== false, "ups": sec.ups !== false, "backup": sec.backup !== false, "services": true, "network": sec.network !== false, "speedtest": sec.speedtest !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "k8s_nodes": sec.kubernetes !== false, "k8s_problems": sec.kubernetes !== false, "k8s_deployments": sec.kubernetes !== false, "k8s_events": sec.kubernetes !== false, "parity": sec.parity !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var blockMap={};var visibleItems=[];
@@ -1688,6 +1738,7 @@ body {
     _chartRange = (_cachedStatus && _cachedStatus.chart_range_hours) || 1;
     loadGPUChart(_chartRange);
     loadContainerChart(_chartRange);
+    loadSpeedTestChart(_chartRange);
   }
 
   function _saveChartRange(hours) {
@@ -1696,7 +1747,7 @@ body {
   }
 
   window.loadContainerChart = function loadContainerChart(hours, save) {
-    if (save) { _saveChartRange(hours); loadGPUChart(hours); }
+    if (save) { _saveChartRange(hours); loadGPUChart(hours); loadSpeedTestChart(hours); }
     var btns = document.querySelectorAll(".cmetrics-range-btn");
     for (var b = 0; b < btns.length; b++) {
       var btn = btns[b];
@@ -1750,6 +1801,28 @@ body {
           var labels = data.map(function(p) { var d = new Date(p.timestamp); if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (hours <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
           try { NasChart.area("gpu-chart-" + idx, { datasets: [{ data: usageData, color: "#6366f1", label: "GPU %" }], labels: labels, yMax: 100, width: el.offsetWidth || 400, height: 60, showDots: false, margins: { top: 4, bottom: 16, left: 30, right: 8 } }); } catch(e) {}
         }
+      }).catch(function() {});
+  }
+
+  window.loadSpeedTestChart = function loadSpeedTestChart(hours, save) {
+    if (save) { _saveChartRange(hours); loadGPUChart(hours); loadContainerChart(hours); }
+    var btns = document.querySelectorAll(".st-range-btn");
+    for (var b = 0; b < btns.length; b++) {
+      var btn = btns[b];
+      if (parseInt(btn.getAttribute("data-hours")) === hours) {
+        btn.style.background = "rgba(0,0,0,0.04)"; btn.style.color = "#171717";
+      } else {
+        btn.style.background = "transparent"; btn.style.color = "#9ca3af";
+      }
+    }
+    fetch("/api/v1/history/speedtest?hours=" + hours)
+      .then(function(r) { return r.json(); })
+      .then(function(points) {
+        if (!points || !points.length || !window.NasChart) return;
+        var dlData = points.map(function(p) { return p.download_mbps; });
+        var ulData = points.map(function(p) { return p.upload_mbps; });
+        var labels = points.map(function(p) { var d = new Date(p.timestamp); if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (hours <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
+        try { NasChart.area("speedtest-chart", { datasets: [{ data: dlData, color: "#3b82f6", label: "Download" }, { data: ulData, color: "#6366f1", label: "Upload" }], labels: labels, width: document.getElementById("speedtest-chart").offsetWidth || 400, height: 80, showDots: true, margins: { top: 4, bottom: 16, left: 40, right: 8 } }); } catch(e) {}
       }).catch(function() {});
   }
 

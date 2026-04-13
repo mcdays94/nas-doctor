@@ -862,6 +862,36 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     }
     h += '</div>'; // end section-block ups
 
+    // ======= Section: Backup Monitoring =======
+    h += '<div class="section-block" data-section="backup">';
+    var backup = sn ? sn.backup : null;
+    if (backup && backup.available && backup.jobs && backup.jobs.length > 0) {
+      h += '<div>';
+      h += '<div class="section-title">Backup Jobs (' + backup.jobs.length + ')</div>';
+      for (var bi = 0; bi < backup.jobs.length; bi++) {
+        var bj = backup.jobs[bi];
+        var statusClass = bj.status === 'ok' ? 'td-healthy' : bj.status === 'warning' ? 'td-warn' : 'td-crit';
+        var provLabel = bj.provider.toUpperCase();
+        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px;margin-bottom:6px">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+        h += '<div style="display:flex;align-items:center;gap:8px">';
+        h += '<span style="font-weight:600;font-size:13px;color:var(--text-primary)">' + esc(bj.name) + '</span>';
+        h += '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg-elevated);color:var(--text-tertiary)">' + provLabel + '</span>';
+        h += '</div>';
+        h += '<span class="' + statusClass + '" style="font-size:12px;font-weight:600">' + bj.status.toUpperCase() + '</span>';
+        h += '</div>';
+        h += '<div style="display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);flex-wrap:wrap">';
+        if (bj.snapshot_count) h += '<span>Snapshots: <strong style="color:var(--text-primary)">' + bj.snapshot_count + '</strong></span>';
+        if (bj.size_bytes > 0) h += '<span>Size: <strong style="color:var(--text-primary)">' + fmtBytes(bj.size_bytes) + '</strong></span>';
+        if (bj.last_success) { var age = Math.round((Date.now() - new Date(bj.last_success).getTime()) / 3600000); h += '<span>Last: <strong style="color:var(--text-primary)">' + (age < 1 ? '<1h ago' : age + 'h ago') + '</strong></span>'; }
+        if (bj.encrypted) h += '<span style="color:var(--text-quaternary)">Encrypted</span>';
+        h += '</div>';
+        h += '</div>';
+      }
+      h += '</div>';
+    }
+    h += '</div>';
+
     // ======= Section: Network =======
     h += '<div class="section-block" data-section="network">';
     var net = sn ? sn.network : null;
@@ -890,6 +920,32 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '</div>';
     }
     h += '</div>'; // end section-block network
+
+    // ======= Section: Speed Test =======
+    h += '<div class="section-block" data-section="speedtest">';
+    var st = sn ? sn.speed_test : null;
+    if (st && st.available && st.latest) {
+      var r = st.latest;
+      h += '<div>';
+      h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Speed Test<div class="st-range-btns" style="display:flex;gap:4px">';
+      h += '<button class="st-range-btn' + (_chartRange === 1 ? ' active' : '') + '" data-hours="1" onclick="loadSpeedTestChart(1,true)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:' + (_chartRange === 1 ? 'var(--bg-elevated)' : 'transparent') + ';color:' + (_chartRange === 1 ? 'var(--text-secondary)' : 'var(--text-tertiary)') + ';cursor:pointer">1H</button>';
+      h += '<button class="st-range-btn' + (_chartRange === 24 ? ' active' : '') + '" data-hours="24" onclick="loadSpeedTestChart(24,true)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:' + (_chartRange === 24 ? 'var(--bg-elevated)' : 'transparent') + ';color:' + (_chartRange === 24 ? 'var(--text-secondary)' : 'var(--text-tertiary)') + ';cursor:pointer">1D</button>';
+      h += '<button class="st-range-btn' + (_chartRange === 168 ? ' active' : '') + '" data-hours="168" onclick="loadSpeedTestChart(168,true)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:' + (_chartRange === 168 ? 'var(--bg-elevated)' : 'transparent') + ';color:' + (_chartRange === 168 ? 'var(--text-secondary)' : 'var(--text-tertiary)') + ';cursor:pointer">1W</button>';
+      h += '</div></div>';
+      h += '<div style="display:flex;gap:16px;font-size:13px;color:var(--text-tertiary);flex-wrap:wrap;margin-bottom:12px">';
+      h += '<span>Download: <strong style="color:var(--text-primary);font-size:15px">' + r.download_mbps.toFixed(0) + ' Mbps</strong></span>';
+      h += '<span>Upload: <strong style="color:var(--text-primary);font-size:15px">' + r.upload_mbps.toFixed(0) + ' Mbps</strong></span>';
+      h += '<span>Latency: <strong style="color:var(--text-primary)">' + r.latency_ms.toFixed(1) + ' ms</strong></span>';
+      if (r.jitter_ms) h += '<span>Jitter: <strong style="color:var(--text-primary)">' + r.jitter_ms.toFixed(1) + ' ms</strong></span>';
+      h += '</div>';
+      h += '<div style="font-size:11px;color:var(--text-quaternary);margin-bottom:8px">';
+      if (r.server_name) h += 'Server: ' + esc(r.server_name) + ' &middot; ';
+      if (r.isp) h += 'ISP: ' + esc(r.isp);
+      h += '</div>';
+      h += '<canvas id="speedtest-chart" style="width:100%;height:80px"></canvas>';
+      h += '</div>';
+    }
+    h += '</div>';
 
     // ======= Section: Service Checks =======
     h += '<div class="section-block" data-section="services">';
@@ -1251,6 +1307,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     _chartRange = (statusData && statusData.chart_range_hours) || 1;
     loadGPUChart(_chartRange);
     loadContainerChart(_chartRange);
+    loadSpeedTestChart(_chartRange);
   }
 
   function _saveChartRange(hours) {
@@ -1259,7 +1316,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
   }
 
   window.loadGPUChart = function loadGPUChart(hours, save) {
-    if (save) { _saveChartRange(hours); loadContainerChart(hours); }
+    if (save) { _saveChartRange(hours); loadContainerChart(hours); loadSpeedTestChart(hours); }
     var btns = document.querySelectorAll(".gpu-range-btn");
     for (var b = 0; b < btns.length; b++) {
       var btn = btns[b];
@@ -1289,7 +1346,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
   }
 
   window.loadContainerChart = function loadContainerChart(hours, save) {
-    if (save) { _saveChartRange(hours); loadGPUChart(hours); }
+    if (save) { _saveChartRange(hours); loadGPUChart(hours); loadSpeedTestChart(hours); }
     var btns = document.querySelectorAll(".cmetrics-range-btn");
     for (var b = 0; b < btns.length; b++) {
       var btn = btns[b];
@@ -1320,6 +1377,28 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       .catch(function() {});
   }
 
+  window.loadSpeedTestChart = function loadSpeedTestChart(hours, save) {
+    if (save) { _saveChartRange(hours); loadGPUChart(hours); loadContainerChart(hours); }
+    var btns = document.querySelectorAll(".st-range-btn");
+    for (var b = 0; b < btns.length; b++) {
+      var btn = btns[b];
+      if (parseInt(btn.getAttribute("data-hours")) === hours) {
+        btn.style.background = "var(--bg-elevated)"; btn.style.color = "var(--text-secondary)";
+      } else {
+        btn.style.background = "transparent"; btn.style.color = "var(--text-tertiary)";
+      }
+    }
+    fetch("/api/v1/history/speedtest?hours=" + hours)
+      .then(function(r) { return r.json(); })
+      .then(function(points) {
+        if (!points || !points.length || !window.NasChart) return;
+        var dlData = points.map(function(p) { return p.download_mbps; });
+        var ulData = points.map(function(p) { return p.upload_mbps; });
+        var labels = points.map(function(p) { var d = new Date(p.timestamp); if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (hours <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
+        try { NasChart.area("speedtest-chart", { datasets: [{ data: dlData, color: "#3b82f6", label: "Download" }, { data: ulData, color: "#8b5cf6", label: "Upload" }], labels: labels, width: document.getElementById("speedtest-chart").offsetWidth || 400, height: 80, showDots: true, margins: { top: 4, bottom: 16, left: 40, right: 8 } }); } catch(e) {}
+      }).catch(function() {});
+  }
+
   function distributeSections() {
     var staging = document.getElementById("section-staging");
     var colL = document.getElementById("col-left");
@@ -1336,8 +1415,10 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       "zfs": sec.zfs !== false,
       "gpu": sec.gpu !== false,
       "ups": sec.ups !== false,
+      "backup": sec.backup !== false,
       "services": true,
       "network": sec.network !== false,
+      "speedtest": sec.speedtest !== false,
       "tunnels": sec.tunnels !== false,
       "proxmox": sec.proxmox !== false,
       "kubernetes": sec.kubernetes !== false,
