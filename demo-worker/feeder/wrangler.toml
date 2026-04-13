@@ -1,0 +1,14 @@
+name = "nas-doctor-demo-feeder"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+account_id = "9993650612175c36066a397a94466033"
+workers_dev = true
+
+# Run every 5 minutes to keep demo data fresh
+[triggers]
+crons = ["*/5 * * * *"]
+
+# Same KV namespace as the demo worker
+[[kv_namespaces]]
+binding = "DEMO_DATA"
+id = "8a68c1992ad443de8f415f8dc6158428"
