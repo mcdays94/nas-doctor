@@ -1,22 +1,23 @@
 name: Deploy Demo Worker
 
 on:
-  # Deploy on new releases
   release:
     types: [published]
-  # Deploy on push to main (keeps demo current)
   push:
     branches: [main]
     paths:
       - 'demo-worker/**'
       - 'internal/api/templates/**'
       - '.github/workflows/demo-deploy.yml'
-  # Manual trigger
   workflow_dispatch:
+
+env:
+  KV_NAMESPACE_ID: 'REDACTED_KV_NAMESPACE_ID'
+  CF_ACCOUNT_ID: 'REDACTED_CF_ACCOUNT_ID'
 
 jobs:
   deploy:
-    name: Capture & Deploy Demo
+    name: Capture, Seed KV & Deploy
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,38 +31,52 @@ jobs:
       - name: Build NAS Doctor
         run: go build -o nas-doctor ./cmd/nas-doctor
 
-      - name: Run demo & capture pages
+      - name: Run demo & capture everything
         run: |
-          # Start in demo mode
           ./nas-doctor --demo &
           SERVER_PID=$!
-          
-          # Wait for server to be ready
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:8060/api/v1/health > /dev/null 2>&1; then
-              break
-            fi
+            curl -sf http://localhost:8060/api/v1/health > /dev/null 2>&1 && break
             sleep 1
           done
-          
-          # Capture all HTML pages
-          mkdir -p demo-worker/captured/api
-          curl -sf http://localhost:8060/ -o demo-worker/captured/midnight.html
-          curl -sf http://localhost:8060/theme/clean -o demo-worker/captured/clean.html
-          curl -sf http://localhost:8060/theme/ember -o demo-worker/captured/ember.html
-          curl -sf http://localhost:8060/settings -o demo-worker/captured/settings.html
-          curl -sf http://localhost:8060/alerts -o demo-worker/captured/alerts.html
-          curl -sf http://localhost:8060/fleet -o demo-worker/captured/fleet.html
-          curl -sf http://localhost:8060/stats -o demo-worker/captured/stats.html
-          curl -sf http://localhost:8060/parity -o demo-worker/captured/parity.html
-          curl -sf http://localhost:8060/service-checks -o demo-worker/captured/service_checks.html
+
+          # Capture HTML pages into _pages/ (so asset server doesn't bypass Worker)
+          mkdir -p demo-worker/captured/_pages demo-worker/captured/api
+          curl -sf http://localhost:8060/ -o demo-worker/captured/_pages/midnight.html
+          curl -sf http://localhost:8060/theme/clean -o demo-worker/captured/_pages/clean.html
+          curl -sf http://localhost:8060/theme/ember -o demo-worker/captured/_pages/ember.html
+          curl -sf http://localhost:8060/settings -o demo-worker/captured/_pages/settings.html
+          curl -sf http://localhost:8060/alerts -o demo-worker/captured/_pages/alerts.html
+          curl -sf http://localhost:8060/fleet -o demo-worker/captured/_pages/fleet.html
+          curl -sf http://localhost:8060/stats -o demo-worker/captured/_pages/stats.html
+          curl -sf http://localhost:8060/parity -o demo-worker/captured/_pages/parity.html
+          curl -sf http://localhost:8060/service-checks -o demo-worker/captured/_pages/service_checks.html
+          curl -sf http://localhost:8060/api/v1/report -o demo-worker/captured/_pages/report.html
+
+          # Capture static assets
           curl -sf http://localhost:8060/js/charts.js -o demo-worker/captured/charts.js
           curl -sf http://localhost:8060/css/shared.css -o demo-worker/captured/shared.css
-          curl -sf http://localhost:8060/api/v1/report -o demo-worker/captured/report.html
-          
-          echo "Captured $(ls demo-worker/captured/*.html demo-worker/captured/*.js demo-worker/captured/*.css | wc -l) static files"
-          
-          # Stop demo server
+
+          # Capture ALL API responses (these seed the KV namespace)
+          curl -sf http://localhost:8060/api/v1/status -o demo-worker/captured/api/status.json
+          curl -sf http://localhost:8060/api/v1/snapshot/latest -o demo-worker/captured/api/snapshot.json
+          curl -sf http://localhost:8060/api/v1/settings -o demo-worker/captured/api/settings.json
+          curl -sf http://localhost:8060/api/v1/sparklines -o demo-worker/captured/api/sparklines.json
+          curl -sf 'http://localhost:8060/api/v1/history/gpu?hours=24' -o demo-worker/captured/api/gpu_history.json
+          curl -sf 'http://localhost:8060/api/v1/history/containers?hours=24' -o demo-worker/captured/api/container_history.json
+          curl -sf http://localhost:8060/api/v1/history/system -o demo-worker/captured/api/system_history.json
+          curl -sf http://localhost:8060/api/v1/alerts -o demo-worker/captured/api/alerts.json
+          curl -sf http://localhost:8060/api/v1/service-checks -o demo-worker/captured/api/service_checks.json
+          curl -sf http://localhost:8060/api/v1/fleet -o demo-worker/captured/api/fleet.json
+          curl -sf http://localhost:8060/api/v1/notifications/log -o demo-worker/captured/api/notifications_log.json
+          curl -sf http://localhost:8060/api/v1/incidents/timeline -o demo-worker/captured/api/incidents.json
+          curl -sf http://localhost:8060/api/v1/db/stats -o demo-worker/captured/api/db_stats.json
+          curl -sf http://localhost:8060/api/v1/disks -o demo-worker/captured/api/disks.json
+          curl -sf http://localhost:8060/api/v1/replacement-plan -o demo-worker/captured/api/replacement_plan.json
+          curl -sf http://localhost:8060/api/v1/capacity-forecast -o demo-worker/captured/api/capacity_forecast.json
+          curl -sf http://localhost:8060/api/v1/smart/trends -o demo-worker/captured/api/smart_trends.json
+
+          echo "Captured $(ls demo-worker/captured/_pages/*.html | wc -l) pages + $(ls demo-worker/captured/api/*.json | wc -l) API responses"
           kill $SERVER_PID 2>/dev/null || true
 
       - name: Set up Node.js
@@ -69,18 +84,42 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
+      # ── Seed KV with captured API data ──
+      - name: Seed KV namespace
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npm install -g wrangler
+          for f in demo-worker/captured/api/*.json; do
+            key="api:unraid:$(basename "$f" .json)"
+            echo "Seeding KV: $key ($(wc -c < "$f") bytes)"
+            wrangler kv key put --namespace-id=$KV_NAMESPACE_ID --remote "$key" --path "$f"
+            # Also seed as base data for the feeder
+            wrangler kv key put --namespace-id=$KV_NAMESPACE_ID --remote "seed:unraid:$(basename "$f" .json)" --path "$f"
+          done
+
+      # ── Deploy demo Worker ──
+      - name: Install demo Worker deps
         working-directory: demo-worker
         run: npm install
 
-      - name: Type check
-        working-directory: demo-worker
-        run: npx tsc --noEmit
-
-      - name: Deploy to Cloudflare
+      - name: Deploy demo Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: 'REDACTED_CF_ACCOUNT_ID'
+          accountId: ${{ env.CF_ACCOUNT_ID }}
           workingDirectory: demo-worker
+          command: deploy
+
+      # ── Deploy feeder Worker ──
+      - name: Install feeder deps
+        working-directory: demo-worker/feeder
+        run: npm install
+
+      - name: Deploy feeder Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CF_ACCOUNT_ID }}
+          workingDirectory: demo-worker/feeder
           command: deploy
