@@ -62,6 +62,7 @@ export default {
       "/stats": "_pages/stats.html",
       "/parity": "_pages/parity.html",
       "/service-checks": "_pages/service_checks.html",
+      "/replacement-planner": "_pages/replacement_planner.html",
     };
 
     const pageFile = pageMap[path];
@@ -166,7 +167,16 @@ async function handleAPI(path: string, url: URL, platform: Platform, env: Env): 
     data = await env.DEMO_DATA.get(`api:unraid:${kvKey}`, "text");
   }
 
-  if (data) return json(JSON.parse(data));
+  if (data) {
+    let parsed = JSON.parse(data);
+
+    // Patch settings: force theme to midnight (subpages read theme from settings)
+    if (kvKey === "settings" && parsed.theme) {
+      parsed.theme = "midnight";
+    }
+
+    return json(parsed);
+  }
 
   // Final fallback: empty
   return json(path.includes("history") || path.includes("alerts") || path.includes("fleet") ? [] : {});

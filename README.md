@@ -18,6 +18,7 @@
 > **Alpha** — NAS Doctor is in alpha. Features may be incomplete, bugs are expected, and breaking changes can occur between releases. Only tested on Unraid. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
 <p align="center">
+  <a href="https://nasdoctordemo.mdias.info"><img src="https://img.shields.io/badge/Live%20Demo-nasdoctordemo.mdias.info-6366f1?style=flat-square&logo=cloudflare&logoColor=white" alt="Live Demo"></a>
   <a href="https://buymeacoffee.com/miguelcaetanodias"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg?style=flat-square&logo=buy-me-a-coffee" alt="Buy Me A Coffee"></a>
 </p>
 
@@ -624,9 +625,11 @@ NAS Doctor is designed to be invisible on your system:
 
 ---
 
-## Demo Mode
+## Demo
 
-Preview all themes with realistic mock data (no NAS needed):
+**[Live demo: nasdoctordemo.mdias.info](https://nasdoctordemo.mdias.info)** — switch between Unraid, Synology, Proxmox, and Kubernetes using the toolbar at the top. Read-only; all data is generated automatically. See [demo-worker/README.md](demo-worker/README.md) for how it works.
+
+To run locally with mock data (no NAS needed):
 
 ```bash
 go build -o nas-doctor ./cmd/nas-doctor
