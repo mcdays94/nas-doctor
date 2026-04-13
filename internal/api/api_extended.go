@@ -60,6 +60,7 @@ type DashboardSections struct {
 	Tunnels      bool `json:"tunnels"`
 	Proxmox      bool `json:"proxmox"`
 	Kubernetes   bool `json:"kubernetes"`
+	GPU          bool `json:"gpu"`
 	MergedDrives bool `json:"merged_drives"` // Combine SMART + storage into one card per drive
 }
 
@@ -178,6 +179,7 @@ func defaultSettings() Settings {
 			Parity:       true,
 			Network:      true,
 			Tunnels:      true,
+			GPU:          true,
 			MergedDrives: true,
 		},
 	}
@@ -194,6 +196,7 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/disks", s.handleListDisks)
 	r.Get("/api/v1/disks/{serial}", s.handleGetDisk)
 	r.Get("/api/v1/history/system", s.handleSystemHistory)
+	r.Get("/api/v1/history/gpu", s.handleGPUHistory)
 	r.Get("/api/v1/notifications/log", s.handleNotificationLog)
 	r.Get("/api/v1/service-checks", s.handleServiceChecks)
 	r.Get("/api/v1/service-checks/history", s.handleServiceCheckHistory)
@@ -990,6 +993,30 @@ func (s *Server) handleSystemHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if points == nil {
 		points = []storage.SystemHistoryPoint{}
+	}
+	writeJSON(w, http.StatusOK, points)
+}
+
+// handleGPUHistory returns historical GPU metrics for chart rendering.
+// GET /api/v1/history/gpu?hours=1 (default 1, accepts 1/24/168)
+func (s *Server) handleGPUHistory(w http.ResponseWriter, r *http.Request) {
+	hoursStr := r.URL.Query().Get("hours")
+	hours := 1
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 {
+			hours = h
+		}
+	}
+	if hours > 720 { // cap at 30 days
+		hours = 720
+	}
+	points, err := s.store.GetGPUHistory(hours)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get GPU history: " + err.Error()})
+		return
+	}
+	if points == nil {
+		points = []storage.GPUHistoryPoint{}
 	}
 	writeJSON(w, http.StatusOK, points)
 }

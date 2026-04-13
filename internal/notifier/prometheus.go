@@ -125,6 +125,18 @@ type Metrics struct {
 	k8sDeployReady   *prometheus.GaugeVec
 	k8sDeployDesired *prometheus.GaugeVec
 
+	// ── GPU ──
+	gpuUsagePct    *prometheus.GaugeVec
+	gpuMemUsedMB   *prometheus.GaugeVec
+	gpuMemTotalMB  *prometheus.GaugeVec
+	gpuMemPct      *prometheus.GaugeVec
+	gpuTemperature *prometheus.GaugeVec
+	gpuPowerW      *prometheus.GaugeVec
+	gpuPowerMaxW   *prometheus.GaugeVec
+	gpuFanPct      *prometheus.GaugeVec
+	gpuEncoderPct  *prometheus.GaugeVec
+	gpuDecoderPct  *prometheus.GaugeVec
+
 	// ── Findings ──
 	findingsTotal    *prometheus.GaugeVec
 	findingsCritical prometheus.Gauge
@@ -281,6 +293,19 @@ func NewMetrics() *Metrics {
 	m.k8sDeployReady = gaugeVec(ns, "k8s", "deployment_ready_replicas", "K8s deployment ready replicas", k8sDepLabels)
 	m.k8sDeployDesired = gaugeVec(ns, "k8s", "deployment_desired_replicas", "K8s deployment desired replicas", k8sDepLabels)
 
+	// ── GPU ──
+	gpuLabels := []string{"index", "name", "vendor"}
+	m.gpuUsagePct = gaugeVec(ns, "gpu", "usage_percent", "GPU core utilization", gpuLabels)
+	m.gpuMemUsedMB = gaugeVec(ns, "gpu", "mem_used_mb", "GPU VRAM used MB", gpuLabels)
+	m.gpuMemTotalMB = gaugeVec(ns, "gpu", "mem_total_mb", "GPU VRAM total MB", gpuLabels)
+	m.gpuMemPct = gaugeVec(ns, "gpu", "mem_percent", "GPU VRAM utilization", gpuLabels)
+	m.gpuTemperature = gaugeVec(ns, "gpu", "temperature_celsius", "GPU temperature", gpuLabels)
+	m.gpuPowerW = gaugeVec(ns, "gpu", "power_watts", "GPU power draw", gpuLabels)
+	m.gpuPowerMaxW = gaugeVec(ns, "gpu", "power_max_watts", "GPU power limit", gpuLabels)
+	m.gpuFanPct = gaugeVec(ns, "gpu", "fan_percent", "GPU fan speed", gpuLabels)
+	m.gpuEncoderPct = gaugeVec(ns, "gpu", "encoder_percent", "GPU video encoder utilization", gpuLabels)
+	m.gpuDecoderPct = gaugeVec(ns, "gpu", "decoder_percent", "GPU video decoder utilization", gpuLabels)
+
 	// ── Findings ──
 	m.findingsTotal = gaugeVec(ns, "findings", "total", "Findings by severity", []string{"severity"})
 	m.findingsCritical = gauge(ns, "findings", "critical_count", "Critical finding count")
@@ -320,6 +345,9 @@ func NewMetrics() *Metrics {
 		m.pveStorageUsed, m.pveStorageTotal,
 		m.k8sNodeReady, m.k8sNodePods, m.k8sPodRunning, m.k8sPodRestarts,
 		m.k8sDeployReady, m.k8sDeployDesired,
+		m.gpuUsagePct, m.gpuMemUsedMB, m.gpuMemTotalMB, m.gpuMemPct,
+		m.gpuTemperature, m.gpuPowerW, m.gpuPowerMaxW, m.gpuFanPct,
+		m.gpuEncoderPct, m.gpuDecoderPct,
 		m.findingsTotal, m.findingsCritical, m.findingsWarning,
 		m.collectionDuration, m.lastCollectionTime, m.updateAvailable,
 	}
@@ -449,6 +477,33 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 		m.upsTemperature.Set(snap.UPS.Temperature)
 		m.upsOnBattery.Set(boolToFloat(snap.UPS.OnBattery))
 		m.upsLowBattery.Set(boolToFloat(snap.UPS.LowBattery))
+	}
+
+	// ── GPU ──
+	if snap.GPU != nil && snap.GPU.Available {
+		m.gpuUsagePct.Reset()
+		m.gpuMemUsedMB.Reset()
+		m.gpuMemTotalMB.Reset()
+		m.gpuMemPct.Reset()
+		m.gpuTemperature.Reset()
+		m.gpuPowerW.Reset()
+		m.gpuPowerMaxW.Reset()
+		m.gpuFanPct.Reset()
+		m.gpuEncoderPct.Reset()
+		m.gpuDecoderPct.Reset()
+		for _, g := range snap.GPU.GPUs {
+			l := prometheus.Labels{"index": fmt.Sprintf("%d", g.Index), "name": g.Name, "vendor": g.Vendor}
+			m.gpuUsagePct.With(l).Set(g.UsagePct)
+			m.gpuMemUsedMB.With(l).Set(g.MemUsedMB)
+			m.gpuMemTotalMB.With(l).Set(g.MemTotalMB)
+			m.gpuMemPct.With(l).Set(g.MemPct)
+			m.gpuTemperature.With(l).Set(float64(g.Temperature))
+			m.gpuPowerW.With(l).Set(g.PowerW)
+			m.gpuPowerMaxW.With(l).Set(g.PowerMaxW)
+			m.gpuFanPct.With(l).Set(g.FanPct)
+			m.gpuEncoderPct.With(l).Set(g.EncoderPct)
+			m.gpuDecoderPct.With(l).Set(g.DecoderPct)
+		}
 	}
 
 	// ── ZFS ──

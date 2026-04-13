@@ -709,6 +709,40 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     h += '</div>'; // end section-block zfs
 
     // ======= Section: UPS =======
+    // ======= Section: GPU =======
+    h += '<div class="section-block" data-section="gpu">';
+    var gpuInfo = sn ? sn.gpu : null;
+    if (gpuInfo && gpuInfo.available && gpuInfo.gpus && gpuInfo.gpus.length > 0) {
+      h += '<div>';
+      h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">GPU' + (gpuInfo.gpus.length > 1 ? 's (' + gpuInfo.gpus.length + ')' : '') + '<div class="gpu-range-btns" style="display:flex;gap:4px">';
+      h += '<button class="gpu-range-btn active" data-hours="1" onclick="loadGPUChart(1)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer">1H</button>';
+      h += '<button class="gpu-range-btn" data-hours="24" onclick="loadGPUChart(24)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text-tertiary);cursor:pointer">1D</button>';
+      h += '<button class="gpu-range-btn" data-hours="168" onclick="loadGPUChart(168)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text-tertiary);cursor:pointer">1W</button>';
+      h += '</div></div>';
+      for (var gi = 0; gi < gpuInfo.gpus.length; gi++) {
+        var g = gpuInfo.gpus[gi];
+        var gName = g.name || (g.vendor + ' GPU ' + g.index);
+        var tempClass = g.temperature_c >= 95 ? 'td-crit' : g.temperature_c >= 85 ? 'td-warn' : 'td-healthy';
+        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px;margin-bottom:6px">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+        h += '<span style="font-weight:600;font-size:13px;color:var(--text-primary)">' + esc(gName) + '</span>';
+        h += '<span style="font-size:11px;color:var(--text-quaternary);text-transform:uppercase">' + esc(g.vendor) + (g.driver ? ' · ' + esc(g.driver) : '') + '</span>';
+        h += '</div>';
+        h += '<div style="display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);flex-wrap:wrap;margin-bottom:8px">';
+        h += '<span>GPU: <strong style="color:var(--text-primary)">' + (g.usage_percent || 0).toFixed(0) + '%</strong></span>';
+        h += '<span class="' + tempClass + '">Temp: <strong>' + (g.temperature_c || 0) + '°C</strong></span>';
+        if (g.mem_total_mb > 0) h += '<span>VRAM: <strong style="color:var(--text-primary)">' + (g.mem_used_mb || 0).toFixed(0) + ' / ' + (g.mem_total_mb || 0).toFixed(0) + ' MB</strong></span>';
+        if (g.power_watts > 0) h += '<span>Power: <strong style="color:var(--text-primary)">' + (g.power_watts || 0).toFixed(0) + 'W' + (g.power_max_watts > 0 ? ' / ' + (g.power_max_watts).toFixed(0) + 'W' : '') + '</strong></span>';
+        if (g.fan_percent > 0) h += '<span>Fan: ' + (g.fan_percent || 0).toFixed(0) + '%</span>';
+        if (g.encoder_percent > 0 || g.decoder_percent > 0) h += '<span>Enc/Dec: ' + (g.encoder_percent || 0).toFixed(0) + '% / ' + (g.decoder_percent || 0).toFixed(0) + '%</span>';
+        h += '</div>';
+        h += '<canvas id="gpu-chart-' + gi + '" style="width:100%;height:60px"></canvas>';
+        h += '</div>';
+      }
+      h += '</div>';
+    }
+    h += '</div>'; // end section-block gpu
+
     h += '<div class="section-block" data-section="ups">';
     var ups = sn ? sn.ups : null;
     if (ups && ups.available) {
@@ -1118,6 +1152,62 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         }
       })
       .catch(function() {});
+    // Load GPU charts on initial render
+    loadGPUChart(1);
+  }
+
+  window.loadGPUChart = function loadGPUChart(hours) {
+    // Update button active states
+    var btns = document.querySelectorAll(".gpu-range-btn");
+    for (var b = 0; b < btns.length; b++) {
+      var btn = btns[b];
+      if (parseInt(btn.getAttribute("data-hours")) === hours) {
+        btn.style.background = "var(--bg-elevated)";
+        btn.style.color = "var(--text-secondary)";
+        btn.classList.add("active");
+      } else {
+        btn.style.background = "transparent";
+        btn.style.color = "var(--text-tertiary)";
+        btn.classList.remove("active");
+      }
+    }
+    fetch("/api/v1/history/gpu?hours=" + hours)
+      .then(function(r) { return r.json(); })
+      .then(function(points) {
+        if (!points || !points.length || !window.NasChart) return;
+        // Group by gpu_index
+        var byGPU = {};
+        for (var i = 0; i < points.length; i++) {
+          var p = points[i];
+          if (!byGPU[p.gpu_index]) byGPU[p.gpu_index] = [];
+          byGPU[p.gpu_index].push(p);
+        }
+        for (var idx in byGPU) {
+          var canvasId = "gpu-chart-" + idx;
+          var el = document.getElementById(canvasId);
+          if (!el) continue;
+          var data = byGPU[idx];
+          var usageData = data.map(function(p) { return p.usage_percent; });
+          var labels = data.map(function(p) {
+            var d = new Date(p.timestamp);
+            if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2);
+            if (hours <= 24) return d.getHours() + ":00";
+            return (d.getMonth()+1) + "/" + d.getDate();
+          });
+          try {
+            NasChart.area(canvasId, {
+              datasets: [{ data: usageData, color: "#8b5cf6", label: "GPU %" }],
+              labels: labels,
+              yMax: 100,
+              width: el.offsetWidth || 400,
+              height: 60,
+              showDots: false,
+              margins: { top: 4, bottom: 16, left: 30, right: 8 }
+            });
+          } catch(e) {}
+        }
+      })
+      .catch(function() {});
   }
 
   function distributeSections() {
@@ -1133,6 +1223,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       "drives": sec.disk_space !== false || sec.smart !== false,
       "docker": sec.docker !== false,
       "zfs": sec.zfs !== false,
+      "gpu": sec.gpu !== false,
       "ups": sec.ups !== false,
       "services": true,
       "network": sec.network !== false,

@@ -169,6 +169,13 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 		}
 	}
 
+	// GPU (Nvidia / AMD / Intel)
+	c.logger.Info("collecting GPU info")
+	gpuInfo := collectGPU()
+	if gpuInfo != nil && gpuInfo.Available {
+		snap.GPU = gpuInfo
+	}
+
 	// ZFS (if available)
 	c.logger.Info("collecting ZFS info")
 	zfsInfo, err := collectZFS()

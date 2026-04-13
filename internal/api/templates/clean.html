@@ -1191,6 +1191,40 @@ body {
 
     html += '</div>'; // end section-block zfs
 
+    // ==== Section: GPU ====
+    html += '<div class="section-block" data-section="gpu">';
+    var gpuInfo = snapshot ? snapshot.gpu : null;
+    if (gpuInfo && gpuInfo.available && gpuInfo.gpus && gpuInfo.gpus.length > 0) {
+      html += '<div>';
+      html += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">GPU' + (gpuInfo.gpus.length > 1 ? 's (' + gpuInfo.gpus.length + ')' : '') + '<div class="gpu-range-btns" style="display:flex;gap:4px">';
+      html += '<button class="gpu-range-btn active" data-hours="1" onclick="loadGPUChart(1)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,0.12);background:rgba(0,0,0,0.04);color:#171717;cursor:pointer">1H</button>';
+      html += '<button class="gpu-range-btn" data-hours="24" onclick="loadGPUChart(24)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,0.12);background:transparent;color:#999;cursor:pointer">1D</button>';
+      html += '<button class="gpu-range-btn" data-hours="168" onclick="loadGPUChart(168)" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,0.12);background:transparent;color:#999;cursor:pointer">1W</button>';
+      html += '</div></div>';
+      for (var gi = 0; gi < gpuInfo.gpus.length; gi++) {
+        var g = gpuInfo.gpus[gi];
+        var gName = g.name || (g.vendor + ' GPU ' + g.index);
+        var tempClass = g.temperature_c >= 95 ? 'color:#dc2626' : g.temperature_c >= 85 ? 'color:#d97706' : 'color:#171717';
+        html += '<div style="background:#fff;border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:14px;margin-bottom:6px">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+        html += '<span style="font-weight:600;font-size:13px;color:#171717">' + escapeHTML(gName) + '</span>';
+        html += '<span style="font-size:11px;color:#999;text-transform:uppercase">' + escapeHTML(g.vendor) + (g.driver ? ' &middot; ' + escapeHTML(g.driver) : '') + '</span>';
+        html += '</div>';
+        html += '<div style="display:flex;gap:16px;font-size:12px;color:#666;flex-wrap:wrap;margin-bottom:8px">';
+        html += '<span>GPU: <strong style="color:#171717">' + (g.usage_percent || 0).toFixed(0) + '%</strong></span>';
+        html += '<span style="' + tempClass + '">Temp: <strong>' + (g.temperature_c || 0) + '&deg;C</strong></span>';
+        if (g.mem_total_mb > 0) html += '<span>VRAM: <strong style="color:#171717">' + (g.mem_used_mb || 0).toFixed(0) + ' / ' + (g.mem_total_mb || 0).toFixed(0) + ' MB</strong></span>';
+        if (g.power_watts > 0) html += '<span>Power: <strong style="color:#171717">' + (g.power_watts || 0).toFixed(0) + 'W' + (g.power_max_watts > 0 ? ' / ' + (g.power_max_watts).toFixed(0) + 'W' : '') + '</strong></span>';
+        if (g.fan_percent > 0) html += '<span>Fan: ' + (g.fan_percent || 0).toFixed(0) + '%</span>';
+        if (g.encoder_percent > 0 || g.decoder_percent > 0) html += '<span>Enc/Dec: ' + (g.encoder_percent || 0).toFixed(0) + '% / ' + (g.decoder_percent || 0).toFixed(0) + '%</span>';
+        html += '</div>';
+        html += '<canvas id="gpu-chart-' + gi + '" style="width:100%;height:60px"></canvas>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    html += '</div>'; // end section-block gpu
+
     // ==== Section: UPS ====
     html += '<div class="section-block" data-section="ups">';
     if (snapshot && snapshot.ups && snapshot.ups.available) {
@@ -1445,7 +1479,7 @@ body {
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
     var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
-    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "parity": sec.parity !== false };
+    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "gpu": sec.gpu !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "parity": sec.parity !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var blockMap={};var visibleItems=[];
@@ -1484,6 +1518,34 @@ body {
               try { NasChart.sparkline("spark-temp-" + i, { data: temps, color: clr, width: 60, height: 20 }); } catch(e) {}
             }
           }
+        }
+      }).catch(function() {});
+    loadGPUChart(1);
+  }
+
+  window.loadGPUChart = function loadGPUChart(hours) {
+    var btns = document.querySelectorAll(".gpu-range-btn");
+    for (var b = 0; b < btns.length; b++) {
+      var btn = btns[b];
+      if (parseInt(btn.getAttribute("data-hours")) === hours) {
+        btn.style.background = "rgba(0,0,0,0.04)"; btn.style.color = "#171717";
+      } else {
+        btn.style.background = "transparent"; btn.style.color = "#999";
+      }
+    }
+    fetch("/api/v1/history/gpu?hours=" + hours)
+      .then(function(r) { return r.json(); })
+      .then(function(points) {
+        if (!points || !points.length || !window.NasChart) return;
+        var byGPU = {};
+        for (var i = 0; i < points.length; i++) { var p = points[i]; if (!byGPU[p.gpu_index]) byGPU[p.gpu_index] = []; byGPU[p.gpu_index].push(p); }
+        for (var idx in byGPU) {
+          var el = document.getElementById("gpu-chart-" + idx);
+          if (!el) continue;
+          var data = byGPU[idx];
+          var usageData = data.map(function(p) { return p.usage_percent; });
+          var labels = data.map(function(p) { var d = new Date(p.timestamp); if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (hours <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
+          try { NasChart.area("gpu-chart-" + idx, { datasets: [{ data: usageData, color: "#6366f1", label: "GPU %" }], labels: labels, yMax: 100, width: el.offsetWidth || 400, height: 60, showDots: false, margins: { top: 4, bottom: 16, left: 30, right: 8 } }); } catch(e) {}
         }
       }).catch(function() {});
   }

@@ -29,6 +29,7 @@ const (
 	CategoryParity  Category = "parity"
 	CategoryZFS     Category = "zfs"
 	CategoryUPS     Category = "ups"
+	CategoryGPU     Category = "gpu"
 )
 
 // ---------- Snapshot (one complete diagnostic run) ----------
@@ -51,6 +52,7 @@ type Snapshot struct {
 	Tunnels    *TunnelInfo          `json:"tunnels,omitempty"`
 	Proxmox    *ProxmoxInfo         `json:"proxmox,omitempty"`
 	Kubernetes *KubeInfo            `json:"kubernetes,omitempty"`
+	GPU        *GPUInfo             `json:"gpu,omitempty"`
 	Services   []ServiceCheckResult `json:"service_checks,omitempty"`
 	Findings   []Finding            `json:"findings"`
 }
@@ -422,6 +424,35 @@ type UPSInfo struct {
 	LowBattery   bool    `json:"low_battery"`
 	LastTransfer string  `json:"last_transfer"` // reason for last transfer to battery
 	LastEvent    string  `json:"last_event"`
+}
+
+// ---------- GPU ----------
+
+// GPUInfo aggregates all detected GPU devices.
+type GPUInfo struct {
+	Available bool        `json:"available"`
+	GPUs      []GPUDevice `json:"gpus"`
+}
+
+// GPUDevice represents a single GPU (Nvidia, AMD, or Intel).
+type GPUDevice struct {
+	Index       int     `json:"index"`
+	Name        string  `json:"name"`            // "NVIDIA GeForce RTX 3090"
+	Vendor      string  `json:"vendor"`          // "nvidia", "amd", "intel"
+	Driver      string  `json:"driver"`          // driver version
+	UsagePct    float64 `json:"usage_percent"`   // GPU core utilization 0-100
+	MemUsedMB   float64 `json:"mem_used_mb"`     // VRAM used
+	MemTotalMB  float64 `json:"mem_total_mb"`    // VRAM total
+	MemPct      float64 `json:"mem_percent"`     // VRAM utilization 0-100
+	Temperature int     `json:"temperature_c"`   // core temperature
+	FanPct      float64 `json:"fan_percent"`     // fan speed 0-100
+	PowerW      float64 `json:"power_watts"`     // current power draw
+	PowerMaxW   float64 `json:"power_max_watts"` // TDP / power limit
+	ClockMHz    int     `json:"clock_mhz"`       // current GPU clock
+	MemClockMHz int     `json:"mem_clock_mhz"`   // current memory clock
+	PCIeBus     string  `json:"pcie_bus"`        // "00:02.0"
+	EncoderPct  float64 `json:"encoder_percent"` // video encoder utilization (transcoding)
+	DecoderPct  float64 `json:"decoder_percent"` // video decoder utilization
 }
 
 // ---------- ZFS ----------
