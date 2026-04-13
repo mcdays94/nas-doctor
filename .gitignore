@@ -50,3 +50,6 @@ take-screenshots.mjs
 
 # Empty dirs
 web/
+demo-worker/node_modules/
+demo-worker/captured/api/
+demo-worker/.wrangler/

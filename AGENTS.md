@@ -106,15 +106,54 @@ The Docker CI workflow on `.github/workflows/docker.yml` publishes multi-arch (a
    - Settings: GPU section toggle in dashboard sections
    - Demo: RTX 4060 + Intel UHD 730 mock data with 48h hourly history
 
+2. **Per-Container Resource Metrics** — full stack implementation:
+   - Collector: extend `docker stats` with NetIO/BlockIO parsing (`parseDockerBytes()`)
+   - Model: `NetIn`/`NetOut`/`BlockRead`/`BlockWrite` on `ContainerInfo`
+   - Storage: `container_stats_history` table with save/get/prune
+   - API: `GET /api/v1/history/containers?hours=N` endpoint
+   - Analyzer: enhanced Docker rules (CPU >200% critical, memory >95% critical)
+   - Prometheus: 5 new per-container gauges (mem_pct, net_in/out, block_read/write)
+   - Dashboard: container metric cards with CPU/Mem/Net/Disk + area charts
+   - Merged container view (default ON) — combines Docker list + metrics in one section
+   - Settings: `merged_containers` toggle, `container_metrics` standalone toggle (default OFF)
+   - Demo: realistic net/block I/O mock data with hourly jitter
+
+3. **Chart Range Persistence** — 1H/1D/1W saved to server config:
+   - `PUT /api/v1/settings/chart-range` endpoint
+   - All chart sections (GPU + containers) sync to same range
+   - `chart_range_hours` in `statusResponse` so dashboards read on load
+
+4. **Scroll Fade Edges** — gradient overlays on horizontal scroll:
+   - `NasScrollFade` JS utility auto-detects overflow-x:auto containers
+   - Background color auto-detected from parent for seamless gradients
+   - Shows/hides based on scroll position with `ResizeObserver`
+
+5. **Section Resize** — custom drag handle at bottom center:
+   - Drag to shrink/grow, bottom gradient fade when content overflows
+   - Double-click handle to reset
+   - Heights persisted via `PUT /api/v1/settings/section-heights`
+   - `section_heights` map in settings + `statusResponse`
+
 ### Remaining Features (in order)
-2. **Per-Container Resource Metrics** — CPU/mem/net per Docker container with history charts (like Beszel)
-3. **Backup Monitoring** — detect PBS, Borg, Restic, Duplicati; track last successful backup
-4. **Network Speed Test History** — periodic speedtest with graphs
-5. **ZFS Scrub Scheduling** — trigger/schedule scrubs from settings UI
-6. **Power Consumption Tracking** — IPMI/smart plugs, watts + monthly cost estimate
+6. **Backup Monitoring** — detect PBS, Borg, Restic, Duplicati; track last successful backup
+7. **Network Speed Test History** — periodic speedtest with graphs
+8. **ZFS Scrub Scheduling** — trigger/schedule scrubs from settings UI
+9. **Power Consumption Tracking** — IPMI/smart plugs, watts + monthly cost estimate
 
 ### Implementation Pattern (same for each feature)
 Model (`models.go`) → Collector (`collector/<feature>.go`) → Wire (`collector.go`) → Analyzer rules → Demo data (`demo.go` + `main.go` history loop) → Prometheus gauges → Dashboard sections (3 themes + sectionMap) → Settings toggle (`api_extended.go` + `settings.html` secIds/payload) → Storage history table (if charts needed)
+
+## Live Demo
+
+- **URL**: https://nas-doctor-demo.mdias-info.workers.dev (custom domain: nasdoctordemo.mdias.info pending CNAME)
+- **Architecture**: Cloudflare Worker with static HTML (captured at build time) + dynamic API data generation
+- **Source**: `demo-worker/` directory
+- **Deploy**: `cd demo-worker && npx wrangler deploy` (or via GH Action on release)
+- **GH Action**: `.github/workflows/demo-deploy.yml` — builds Go binary, runs demo, captures pages, deploys worker
+- **Platform Switcher**: `?platform=unraid|synology|proxmox|kubernetes` (cookie persisted)
+- **Security**: All POST/PUT/DELETE blocked with 403; chart-range/section-heights return graceful no-ops; settings page has disabled inputs
+- **Data**: Time-varying via deterministic noise seeded by `Date.now()`; different data per platform profile
+- **Auto-update**: GH Action triggers on release publish + push to main when demo-worker/ or templates change
 
 ### Also on this branch (pre-existing)
 - Nav bar standardization fix (commit `4a0b832` on `dev/predictive-intelligence`, carried forward)

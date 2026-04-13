@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NAS Doctor</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="stylesheet" href="/css/shared.css">
+<style>
+/* Summary counters */
+.summary-bar{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.summary-stat{padding:12px 20px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--border);font-size:13px;display:flex;align-items:center;gap:8px;flex:1;min-width:100px}
+.summary-stat .stat-count{font-size:22px;font-weight:700}
+.summary-stat.up .stat-count{color:var(--green)}
+.summary-stat.down .stat-count{color:var(--red)}
+.summary-stat.total .stat-count{color:var(--accent)}
+/* Heartbeat badge cards — 4-col grid, 3 rows visible then scroll */
+.badges-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-height:calc(92px * 3 + 10px * 2);overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;margin-bottom:20px;padding-bottom:4px;box-sizing:border-box}
+@media(max-width:1100px){.badges-row{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:800px){.badges-row{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:500px){.badges-row{grid-template-columns:1fr}}
+.badge-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;cursor:pointer;transition:border-color 0.15s;min-height:68px;min-width:0;overflow:hidden}
+.badge-card:hover,.badge-card.active{border-color:var(--accent)}
+.badge-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.badge-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.badge-dot.up{background:var(--green)}
+.badge-dot.down{background:var(--red)}
+.badge-name{font-weight:600;font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.badge-pct{font-size:12px;font-weight:600}
+.badge-pct.good{color:var(--green)}.badge-pct.warn{color:var(--amber)}.badge-pct.bad{color:var(--red)}
+.badge-meta{font-size:11px;color:var(--text3);display:flex;gap:8px}
+.heartbeat{display:flex;gap:1px;align-items:center;height:20px;overflow:hidden;margin-top:6px}
+.hb-dot{width:3px;height:14px;border-radius:1px;flex-shrink:0}
+.hb-dot.up{background:var(--green)}.hb-dot.down{background:var(--red)}.hb-dot.empty{background:var(--border);opacity:0.3}
+/* Filter bar */
+.filter-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+.filter-bar select,.filter-bar input{font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text)}
+.filter-bar select{min-width:120px}
+.filter-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
+/* Log table */
+.log-panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.log-table{width:100%;font-size:12px;border-collapse:collapse}
+.log-table th{text-align:left;padding:8px 12px;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0}
+.log-table td{padding:6px 12px;border-bottom:1px solid var(--border)}
+.log-table .status-up{color:var(--green);font-weight:600}
+.log-table .status-down{color:var(--red);font-weight:600}
+.log-table tr:hover{background:var(--bg-elevated)}
+.log-empty{padding:40px;text-align:center;color:var(--text3)}
+/* Pagination */
+.pagination{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--text2)}
+.pagination button{font-family:inherit;font-size:12px;padding:5px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);cursor:pointer}
+.pagination button:disabled{opacity:0.4;cursor:default}
+.pagination button:not(:disabled):hover{border-color:var(--accent)}
+.actions-bar{display:flex;justify-content:flex-end;gap:8px;margin-bottom:16px}
+/* Expandable log detail */
+.log-table tr{cursor:pointer}
+.log-table tr:hover{background:var(--bg-elevated)}
+.log-detail-row td{padding:0!important;border-bottom:1px solid var(--border)}
+.log-detail{padding:12px 16px;background:var(--bg-elevated);font-size:12px;display:none}
+.log-detail.open{display:block}
+.log-detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.log-detail-item{padding:6px 8px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)}
+.log-detail-item .ld-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.3px}
+.log-detail-item .ld-val{font-size:13px;font-weight:600;margin-top:2px}
+/* Orphan badge */
+.orphan-badge{font-size:9px;padding:1px 6px;border-radius:999px;background:rgba(217,119,6,0.12);color:var(--amber);margin-left:6px}
+.btn-delete-check{font-size:10px;padding:2px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--red);cursor:pointer;margin-left:auto}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="header-left">
+      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a><span class="logo-slogan">Sleep tight knowing your server never does.</span>
+      <span class="page-title">Service Checks</span>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link">Dashboard</a>
+      <a href="/alerts" class="nav-link">Alerts</a>
+      <a href="/service-checks" class="nav-link active">Services</a>
+      <a href="/stats" class="nav-link">Stats</a>
+      <a href="/fleet" class="nav-link">Fleet</a>
+      <a href="/replacement-planner" class="nav-link">Planner</a>
+      <a href="/settings" class="nav-link" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
+      <a href="https://github.com/mcdays94/nas-doctor" class="nav-link" target="_blank" title="GitHub"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.02 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.82.58C20.56 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
+    </div>
+  </div>
+
+  <!-- Summary counters -->
+  <div class="summary-bar">
+    <div class="summary-stat total"><span class="stat-count" id="sum-total">-</span><span>Total</span></div>
+    <div class="summary-stat up"><span class="stat-count" id="sum-up">-</span><span>Up</span></div>
+    <div class="summary-stat down"><span class="stat-count" id="sum-down">-</span><span>Down</span></div>
+  </div>
+
+  <!-- Heartbeat badge cards (one per check) -->
+  <div class="badges-row" id="badges-row"></div>
+
+  <!-- Actions -->
+  <div class="actions-bar">
+    <button class="btn btn-secondary btn-sm" onclick="runAllChecks()">Run All Checks</button>
+    <a href="/settings" class="btn btn-secondary btn-sm" style="text-decoration:none">Configure</a>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="filter-bar">
+    <div><span class="filter-label">Check</span><br>
+      <select id="f-check" onchange="applyFilters()"><option value="">All checks</option></select></div>
+    <div><span class="filter-label">Status</span><br>
+      <select id="f-status" onchange="applyFilters()"><option value="">All</option><option value="up">Up</option><option value="down">Down</option></select></div>
+    <div><span class="filter-label">Time range</span><br>
+      <select id="f-range" onchange="applyFilters()"><option value="1h">Last hour</option><option value="6h">Last 6 hours</option><option value="24h" selected>Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></div>
+    <div style="margin-left:auto;align-self:flex-end">
+      <span id="log-count" style="font-size:12px;color:var(--text3)"></span>
+    </div>
+  </div>
+
+  <!-- Paginated log table -->
+  <div class="log-panel">
+    <table class="log-table">
+      <thead><tr><th>Time</th><th>Check</th><th>Type</th><th>Status</th><th>Latency</th><th>Error</th></tr></thead>
+      <tbody id="log-body"><tr><td colspan="6" class="log-empty">Loading...</td></tr></tbody>
+    </table>
+    <div class="pagination">
+      <span id="page-info"></span>
+      <div style="display:flex;gap:6px">
+        <button id="btn-prev" onclick="prevPage()" disabled>&larr; Prev</button>
+        <button id="btn-next" onclick="nextPage()" disabled>Next &rarr;</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/charts.js"></script>
+<script>
+(function(){
+  function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
+  try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
+  fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
+  fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
+})();
+(function(){
+  "use strict";
+  var PAGE_SIZE=25;
+  var checksData=[];       // latest status per check (deduplicated)
+  var configuredKeys={};   // keys from settings (non-orphaned)
+  var historyCache={};     // key -> history[]
+  var allLogs=[];          // merged+filtered log entries for the table
+  var currentPage=0;
+  var activeFilter="";
+
+  function esc(s){var d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
+  function fetchJSON(url){return fetch(url).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()});}
+  function pillClass(t){t=(t||"").toLowerCase();if(t==="http")return"pill-http";if(t==="tcp")return"pill-tcp";if(t==="dns")return"pill-dns";if(t==="ping")return"pill-ping";if(t==="smb"||t==="nfs")return"pill-smb";return"pill-http";}
+  function fmtInterval(sec){if(sec<60)return sec+"s";if(sec<3600)return Math.floor(sec/60)+"m";return Math.floor(sec/3600)+"h";}
+  function faviconHTML(type,target){
+    if((type||"").toLowerCase()!=="http")return"";
+    try{var u=new URL(target);return'<img src="https://www.google.com/s2/favicons?domain='+encodeURIComponent(u.hostname)+'&sz=16" width="16" height="16" style="border-radius:3px;flex-shrink:0" onerror="this.style.display=\'none\'">';}
+    catch(e){return"";}
+  }
+
+  // ── Summary counters ──
+  function renderSummary(){
+    var up=0,down=0;
+    for(var i=0;i<checksData.length;i++){if(checksData[i].status==="up")up++;else down++;}
+    document.getElementById("sum-total").textContent=checksData.length;
+    document.getElementById("sum-up").textContent=up;
+    document.getElementById("sum-down").textContent=down;
+  }
+
+  // ── Heartbeat badge cards ──
+  function buildHeartbeat(hist){
+    var N=60,h='<div class="heartbeat">';
+    if(!hist||hist.length===0){for(var d=0;d<N;d++)h+='<div class="hb-dot empty"></div>';h+='</div>';return h;}
+    var count=Math.min(hist.length,N);var pad=N-count;
+    for(var d=0;d<pad;d++)h+='<div class="hb-dot empty"></div>';
+    for(var d=count-1;d>=0;d--){
+      var e=hist[d];var isUp=e.status==="up";
+      h+='<div class="hb-dot '+(isUp?"up":"down")+'" title="'+(e.response_ms||0)+'ms"></div>';
+    }
+    h+='</div>';return h;
+  }
+
+  function renderBadges(){
+    var container=document.getElementById("badges-row");
+    if(checksData.length===0){container.innerHTML='<div style="padding:20px;color:var(--text3);font-size:13px">No service checks configured. <a href="/settings" style="color:var(--accent)">Add checks</a></div>';return;}
+    var h="";
+    for(var i=0;i<checksData.length;i++){
+      var c=checksData[i];
+      var hist=historyCache[c.key]||[];
+      var total=hist.length,up=0;for(var j=0;j<total;j++){if(hist[j].status==="up")up++;}
+      var pct=total>0?up/total*100:100;
+      var pctCls=pct>=99?"good":pct>=90?"warn":"bad";
+      var isUp=c.status==="up";
+      var isActive=(activeFilter===c.key);
+      h+='<div class="badge-card'+(isActive?" active":"")+'" onclick="filterByCheck(\''+esc(c.key)+'\')">';
+      h+='<div class="badge-top">';
+      h+='<div class="badge-dot '+(isUp?"up":"down")+'"></div>';
+      h+=faviconHTML(c.type,c.target);
+      h+='<div class="badge-name">'+esc(c.name)+'</div>';
+      h+='<span class="pill '+pillClass(c.type)+'" style="font-size:9px;padding:1px 5px">'+esc((c.type||"").toUpperCase())+'</span>';
+      h+='</div>';
+      h+=buildHeartbeat(hist);
+      var isOrphan = !configuredKeys[c.key] && !configuredKeys[(c.name||"").toLowerCase()];
+      h+='<div class="badge-meta" style="margin-top:6px">';
+      h+='<span class="badge-pct '+pctCls+'">'+pct.toFixed(1)+'%</span>';
+      h+='<span>'+(isUp?(c.response_ms||0)+'ms':'DOWN')+'</span>';
+      if(c.interval_sec)h+='<span>every '+fmtInterval(c.interval_sec)+'</span>';
+      if(isOrphan)h+='<span class="orphan-badge">orphaned</span><button class="btn-delete-check" onclick="event.stopPropagation();deleteCheck(\''+esc(c.key)+'\')">Delete</button>';
+      h+='</div>';
+      h+='</div>';
+    }
+    container.innerHTML=h;
+  }
+
+  // ── Filter + paginated log table ──
+  function getTimeRangeMs(){
+    var v=document.getElementById("f-range").value;
+    if(v==="1h")return 3600000;if(v==="6h")return 21600000;if(v==="24h")return 86400000;
+    if(v==="7d")return 604800000;if(v==="30d")return 2592000000;return 86400000;
+  }
+
+  window.applyFilters=function(){
+    var checkKey=document.getElementById("f-check").value;
+    var status=document.getElementById("f-status").value;
+    var rangeMs=getTimeRangeMs();
+    var cutoff=Date.now()-rangeMs;
+    allLogs=[];
+    for(var key in historyCache){
+      if(checkKey&&key!==checkKey)continue;
+      var hist=historyCache[key];
+      for(var i=0;i<hist.length;i++){
+        var e=hist[i];
+        if(status&&e.status!==status)continue;
+        var ts=e.checked_at?new Date(e.checked_at).getTime():0;
+        if(ts<cutoff)continue;
+        allLogs.push(e);
+      }
+    }
+    allLogs.sort(function(a,b){return(b.checked_at||"").localeCompare(a.checked_at||"");});
+    currentPage=0;
+    renderLogTable();
+  };
+
+  function renderLogTable(){
+    var tbody=document.getElementById("log-body");
+    var total=allLogs.length;
+    var pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
+    if(currentPage>=pages)currentPage=pages-1;
+    if(currentPage<0)currentPage=0;
+    var start=currentPage*PAGE_SIZE;
+    var end=Math.min(start+PAGE_SIZE,total);
+    document.getElementById("log-count").textContent=total+" entries";
+    document.getElementById("page-info").textContent="Page "+(currentPage+1)+" of "+pages;
+    document.getElementById("btn-prev").disabled=(currentPage===0);
+    document.getElementById("btn-next").disabled=(currentPage>=pages-1);
+    if(total===0){
+      tbody.innerHTML='<tr><td colspan="6" class="log-empty">No log entries match the current filters.</td></tr>';
+      return;
+    }
+    var h="";
+    for(var i=start;i<end;i++){
+      var e=allLogs[i];
+      var ts=e.checked_at?new Date(e.checked_at).toLocaleString():"—";
+      var rid="log-detail-"+i;
+      h+='<tr onclick="toggleLogDetail(\''+rid+'\')">';
+      h+='<td>'+esc(ts)+'</td>';
+      h+='<td>'+faviconHTML(e.type,e.target)+esc(e.name||"—")+'</td>';
+      h+='<td><span class="pill '+pillClass(e.type)+'" style="font-size:9px;padding:1px 5px">'+esc((e.type||"").toUpperCase())+'</span></td>';
+      h+='<td class="status-'+e.status+'">'+esc(e.status)+'</td>';
+      h+='<td>'+(e.response_ms!=null?e.response_ms+' ms':'—')+'</td>';
+      h+='<td style="color:var(--text3);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(e.error||"—")+'</td>';
+      h+='</tr>';
+      // Expandable detail row
+      h+='<tr class="log-detail-row"><td colspan="6"><div class="log-detail" id="'+rid+'">';
+      h+='<div class="log-detail-grid">';
+      h+='<div class="log-detail-item"><div class="ld-label">Check Name</div><div class="ld-val">'+esc(e.name||"—")+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Type</div><div class="ld-val">'+esc((e.type||"").toUpperCase())+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Target</div><div class="ld-val" style="font-size:11px;font-family:var(--font-mono);word-break:break-all">'+esc(e.target||"—")+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Status</div><div class="ld-val" style="color:'+(e.status==="up"?"var(--green)":"var(--red)")+'">'+esc(e.status||"—")+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Response Time</div><div class="ld-val">'+(e.response_ms!=null?e.response_ms+' ms':'—')+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Checked At</div><div class="ld-val" style="font-size:11px">'+esc(ts)+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Consecutive Failures</div><div class="ld-val">'+(e.consecutive_failures||0)+' / '+(e.failure_threshold||1)+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Check Key</div><div class="ld-val" style="font-size:10px;font-family:var(--font-mono);word-break:break-all;color:var(--text3)">'+esc(e.key||"—")+'</div></div>';
+      if(e.error)h+='<div class="log-detail-item" style="grid-column:1/-1"><div class="ld-label">Error</div><div class="ld-val" style="font-size:12px;color:var(--red);font-weight:400;word-break:break-all">'+esc(e.error)+'</div></div>';
+      // Type-specific details
+      if((e.type||"").toLowerCase()==="http"){
+        h+='<div class="log-detail-item"><div class="ld-label">Expected Status</div><div class="ld-val">'+(e.expected_status_min||200)+' – '+(e.expected_status_max||399)+'</div></div>';
+      }
+      if((e.type||"").toLowerCase()==="dns"){
+        h+='<div class="log-detail-item"><div class="ld-label">DNS Lookup</div><div class="ld-val">'+esc(e.target||"")+'</div></div>';
+      }
+      if((e.type||"").toLowerCase()==="ping"){
+        h+='<div class="log-detail-item"><div class="ld-label">RTT</div><div class="ld-val">'+(e.response_ms||0)+' ms</div></div>';
+      }
+      h+='</div></div></td></tr>';
+    }
+    tbody.innerHTML=h;
+  }
+
+  window.prevPage=function(){if(currentPage>0){currentPage--;renderLogTable();}};
+  window.nextPage=function(){currentPage++;renderLogTable();};
+  window.toggleLogDetail=function(id){var el=document.getElementById(id);if(el)el.classList.toggle("open");};
+
+  window.filterByCheck=function(key){
+    var sel=document.getElementById("f-check");
+    if(activeFilter===key){activeFilter="";sel.value="";}
+    else{activeFilter=key;sel.value=key;}
+    applyFilters();
+    renderBadges();
+  };
+
+  window.runAllChecks=function(){
+    fetch("/api/v1/service-checks/run",{method:"POST"}).then(function(){setTimeout(loadAll,2000);}).catch(function(){});
+  };
+
+  window.deleteCheck=function(key){
+    if(!confirm("Delete all history for this orphaned check?"))return;
+    fetch("/api/v1/service-checks/"+encodeURIComponent(key),{method:"DELETE"}).then(function(){loadAll();}).catch(function(){});
+  };
+
+  // ── Data loading ──
+  function populateCheckFilter(){
+    var sel=document.getElementById("f-check");
+    var existing=sel.value;
+    sel.innerHTML='<option value="">All checks</option>';
+    for(var i=0;i<checksData.length;i++){
+      var c=checksData[i];
+      sel.innerHTML+='<option value="'+esc(c.key)+'">'+esc(c.name)+'</option>';
+    }
+    sel.value=existing||"";
+  }
+
+  function loadAll(){
+    fetchJSON("/api/v1/service-checks").then(function(data){
+      // Deduplicate by key
+      var seen={};checksData=[];
+      var raw=data||[];
+      for(var i=0;i<raw.length;i++){if(!seen[raw[i].key]){seen[raw[i].key]=true;checksData.push(raw[i]);}}
+      return fetchJSON("/api/v1/settings");
+    }).then(function(settings){
+      var cfgChecks=(settings.service_checks&&settings.service_checks.checks)||[];
+      configuredKeys={};
+      var cfgMap={};var cfgTargets={};
+      for(var i=0;i<cfgChecks.length;i++){
+        cfgMap[cfgChecks[i].name.toLowerCase()]=cfgChecks[i];
+        configuredKeys[cfgChecks[i].name.toLowerCase()]=true;
+        // Also key by target URL for matching
+        if(cfgChecks[i].target)cfgTargets[cfgChecks[i].target.toLowerCase()]=true;
+      }
+      for(var i=0;i<checksData.length;i++){
+        var cfg=cfgMap[(checksData[i].name||"").toLowerCase()];
+        var targetMatch=cfgTargets[(checksData[i].target||"").toLowerCase()];
+        if(cfg||targetMatch){
+          if(cfg)checksData[i].interval_sec=cfg.interval_sec||300;
+          configuredKeys[checksData[i].key]=true;
+          configuredKeys[(checksData[i].name||"").toLowerCase()]=true;
+        }
+      }
+      renderSummary();
+      populateCheckFilter();
+      // Load history for all checks then render
+      var promises=[];
+      for(var i=0;i<checksData.length;i++){
+        (function(idx){
+          var key=checksData[idx].key;
+          if(!historyCache[key]){
+            promises.push(fetchJSON("/api/v1/service-checks/history?key="+encodeURIComponent(key)+"&limit=500").then(function(data){historyCache[key]=data;}).catch(function(){historyCache[key]=[];}));
+          }
+        })(i);
+      }
+      Promise.all(promises).then(function(){
+        renderBadges();
+        applyFilters();
+      });
+    }).catch(function(err){
+      console.error("Failed to load:",err);
+      document.getElementById("badges-row").innerHTML='<div style="padding:20px;color:var(--red)">Failed to load service checks</div>';
+    });
+  }
+
+  loadAll();
+  setInterval(loadAll,60000);
+})();
+</script>
+</body>
+</html>

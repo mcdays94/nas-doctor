@@ -1,0 +1,86 @@
+name: Deploy Demo Worker
+
+on:
+  # Deploy on new releases
+  release:
+    types: [published]
+  # Deploy on push to main (keeps demo current)
+  push:
+    branches: [main]
+    paths:
+      - 'demo-worker/**'
+      - 'internal/api/templates/**'
+      - '.github/workflows/demo-deploy.yml'
+  # Manual trigger
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Capture & Deploy Demo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Build NAS Doctor
+        run: go build -o nas-doctor ./cmd/nas-doctor
+
+      - name: Run demo & capture pages
+        run: |
+          # Start in demo mode
+          ./nas-doctor --demo &
+          SERVER_PID=$!
+          
+          # Wait for server to be ready
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8060/api/v1/health > /dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          
+          # Capture all HTML pages
+          mkdir -p demo-worker/captured/api
+          curl -sf http://localhost:8060/ -o demo-worker/captured/midnight.html
+          curl -sf http://localhost:8060/theme/clean -o demo-worker/captured/clean.html
+          curl -sf http://localhost:8060/theme/ember -o demo-worker/captured/ember.html
+          curl -sf http://localhost:8060/settings -o demo-worker/captured/settings.html
+          curl -sf http://localhost:8060/alerts -o demo-worker/captured/alerts.html
+          curl -sf http://localhost:8060/fleet -o demo-worker/captured/fleet.html
+          curl -sf http://localhost:8060/stats -o demo-worker/captured/stats.html
+          curl -sf http://localhost:8060/parity -o demo-worker/captured/parity.html
+          curl -sf http://localhost:8060/service-checks -o demo-worker/captured/service_checks.html
+          curl -sf http://localhost:8060/js/charts.js -o demo-worker/captured/charts.js
+          curl -sf http://localhost:8060/css/shared.css -o demo-worker/captured/shared.css
+          curl -sf http://localhost:8060/api/v1/report -o demo-worker/captured/report.html
+          
+          echo "Captured $(ls demo-worker/captured/*.html demo-worker/captured/*.js demo-worker/captured/*.css | wc -l) static files"
+          
+          # Stop demo server
+          kill $SERVER_PID 2>/dev/null || true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: demo-worker
+        run: npm install
+
+      - name: Type check
+        working-directory: demo-worker
+        run: npx tsc --noEmit
+
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: '9993650612175c36066a397a94466033'
+          workingDirectory: demo-worker
+          command: deploy
