@@ -15,7 +15,7 @@ import { generateSparklines } from "./api/sparklines";
 import { generateGPUHistory, generateContainerHistory, generateSystemHistory } from "./api/history";
 import { generateSettings } from "./api/settings";
 import { generateAlerts } from "./api/alerts";
-import { generateServiceChecks } from "./api/service-checks";
+import { generateServiceChecks, generateServiceCheckHistory } from "./api/service-checks";
 import { generateFleet } from "./api/fleet";
 import { generateDisks, generateDiskDetail } from "./api/disks";
 import { generateSmartTrends } from "./api/smart";
@@ -194,7 +194,10 @@ function handleAPI(path: string, url: URL, platform: Platform): Response {
 
   // Service checks
   if (path === "/api/v1/service-checks") return json(generateServiceChecks());
-  if (path === "/api/v1/service-checks/history") return json([]);
+  if (path === "/api/v1/service-checks/history") {
+    const key = url.searchParams.get("key") || "";
+    return json(generateServiceCheckHistory(key));
+  }
 
   // Disks
   if (path === "/api/v1/disks") return json(generateDisks(platform));
@@ -206,7 +209,12 @@ function handleAPI(path: string, url: URL, platform: Platform): Response {
 
   // Fleet
   if (path === "/api/v1/fleet") return json(generateFleet());
-  if (path === "/api/v1/fleet/servers") return json([]);
+  if (path === "/api/v1/fleet/servers") return json([
+    { name: "Backup NAS", url: "http://192.168.1.50:8060" },
+    { name: "Media Server", url: "http://192.168.1.51:8060" },
+    { name: "Proxmox Node 1", url: "http://10.0.0.10:8060" },
+    { name: "Remote Backup", url: "http://192.168.50.10:8060" },
+  ]);
 
   // Notifications & DB
   if (path === "/api/v1/notifications/log") return json(generateNotificationLog());
