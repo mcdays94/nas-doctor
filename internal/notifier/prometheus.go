@@ -44,10 +44,15 @@ type Metrics struct {
 	smartSizeBytes    *prometheus.GaugeVec
 
 	// ── Docker ──
-	containerCPU   *prometheus.GaugeVec
-	containerMem   *prometheus.GaugeVec
-	containerState *prometheus.GaugeVec
-	containerTotal prometheus.Gauge
+	containerCPU        *prometheus.GaugeVec
+	containerMem        *prometheus.GaugeVec
+	containerMemPct     *prometheus.GaugeVec
+	containerNetIn      *prometheus.GaugeVec
+	containerNetOut     *prometheus.GaugeVec
+	containerBlockRead  *prometheus.GaugeVec
+	containerBlockWrite *prometheus.GaugeVec
+	containerState      *prometheus.GaugeVec
+	containerTotal      prometheus.Gauge
 
 	// ── Network ──
 	netInterfaceUp  *prometheus.GaugeVec
@@ -125,6 +130,28 @@ type Metrics struct {
 	k8sDeployReady   *prometheus.GaugeVec
 	k8sDeployDesired *prometheus.GaugeVec
 
+	// ── Backup ──
+	backupLastSuccess *prometheus.GaugeVec
+	backupSizeBytes   *prometheus.GaugeVec
+	backupStatus      *prometheus.GaugeVec
+
+	// ── Speed Test ──
+	speedtestDownload prometheus.Gauge
+	speedtestUpload   prometheus.Gauge
+	speedtestLatency  prometheus.Gauge
+
+	// ── GPU ──
+	gpuUsagePct    *prometheus.GaugeVec
+	gpuMemUsedMB   *prometheus.GaugeVec
+	gpuMemTotalMB  *prometheus.GaugeVec
+	gpuMemPct      *prometheus.GaugeVec
+	gpuTemperature *prometheus.GaugeVec
+	gpuPowerW      *prometheus.GaugeVec
+	gpuPowerMaxW   *prometheus.GaugeVec
+	gpuFanPct      *prometheus.GaugeVec
+	gpuEncoderPct  *prometheus.GaugeVec
+	gpuDecoderPct  *prometheus.GaugeVec
+
 	// ── Findings ──
 	findingsTotal    *prometheus.GaugeVec
 	findingsCritical prometheus.Gauge
@@ -192,6 +219,11 @@ func NewMetrics() *Metrics {
 	containerLabels := []string{"name", "image"}
 	m.containerCPU = gaugeVec(ns, "docker", "container_cpu_percent", "Container CPU usage", containerLabels)
 	m.containerMem = gaugeVec(ns, "docker", "container_memory_bytes", "Container memory usage in bytes", containerLabels)
+	m.containerMemPct = gaugeVec(ns, "docker", "container_memory_percent", "Container memory usage percent", containerLabels)
+	m.containerNetIn = gaugeVec(ns, "docker", "container_net_in_bytes", "Container cumulative network bytes received", containerLabels)
+	m.containerNetOut = gaugeVec(ns, "docker", "container_net_out_bytes", "Container cumulative network bytes sent", containerLabels)
+	m.containerBlockRead = gaugeVec(ns, "docker", "container_block_read_bytes", "Container cumulative block bytes read", containerLabels)
+	m.containerBlockWrite = gaugeVec(ns, "docker", "container_block_write_bytes", "Container cumulative block bytes written", containerLabels)
 	m.containerState = gaugeVec(ns, "docker", "container_running", "Container running state (1=running, 0=stopped)", containerLabels)
 	m.containerTotal = gauge(ns, "docker", "container_count", "Total container count")
 
@@ -281,6 +313,30 @@ func NewMetrics() *Metrics {
 	m.k8sDeployReady = gaugeVec(ns, "k8s", "deployment_ready_replicas", "K8s deployment ready replicas", k8sDepLabels)
 	m.k8sDeployDesired = gaugeVec(ns, "k8s", "deployment_desired_replicas", "K8s deployment desired replicas", k8sDepLabels)
 
+	// ── GPU ──
+	gpuLabels := []string{"index", "name", "vendor"}
+	m.gpuUsagePct = gaugeVec(ns, "gpu", "usage_percent", "GPU core utilization", gpuLabels)
+	m.gpuMemUsedMB = gaugeVec(ns, "gpu", "mem_used_mb", "GPU VRAM used MB", gpuLabels)
+	m.gpuMemTotalMB = gaugeVec(ns, "gpu", "mem_total_mb", "GPU VRAM total MB", gpuLabels)
+	m.gpuMemPct = gaugeVec(ns, "gpu", "mem_percent", "GPU VRAM utilization", gpuLabels)
+	m.gpuTemperature = gaugeVec(ns, "gpu", "temperature_celsius", "GPU temperature", gpuLabels)
+	m.gpuPowerW = gaugeVec(ns, "gpu", "power_watts", "GPU power draw", gpuLabels)
+	m.gpuPowerMaxW = gaugeVec(ns, "gpu", "power_max_watts", "GPU power limit", gpuLabels)
+	m.gpuFanPct = gaugeVec(ns, "gpu", "fan_percent", "GPU fan speed", gpuLabels)
+	m.gpuEncoderPct = gaugeVec(ns, "gpu", "encoder_percent", "GPU video encoder utilization", gpuLabels)
+	m.gpuDecoderPct = gaugeVec(ns, "gpu", "decoder_percent", "GPU video decoder utilization", gpuLabels)
+
+	// ── Backup ──
+	backupLabels := []string{"provider", "name"}
+	m.backupLastSuccess = gaugeVec(ns, "backup", "last_success_timestamp", "Backup last success unix timestamp", backupLabels)
+	m.backupSizeBytes = gaugeVec(ns, "backup", "size_bytes", "Backup total size in bytes", backupLabels)
+	m.backupStatus = gaugeVec(ns, "backup", "status", "Backup status (1=ok, 0.5=warning, 0=stale/failed)", backupLabels)
+
+	// ── Speed Test ──
+	m.speedtestDownload = gauge(ns, "speedtest", "download_mbps", "Latest speed test download in Mbps")
+	m.speedtestUpload = gauge(ns, "speedtest", "upload_mbps", "Latest speed test upload in Mbps")
+	m.speedtestLatency = gauge(ns, "speedtest", "latency_ms", "Latest speed test latency in ms")
+
 	// ── Findings ──
 	m.findingsTotal = gaugeVec(ns, "findings", "total", "Findings by severity", []string{"severity"})
 	m.findingsCritical = gauge(ns, "findings", "critical_count", "Critical finding count")
@@ -301,7 +357,9 @@ func NewMetrics() *Metrics {
 		m.smartHealthy, m.smartTemp, m.smartTempMax, m.smartReallocated, m.smartPending,
 		m.smartOffline, m.smartUDMACRC, m.smartCmdTimeout, m.smartSpinRetry,
 		m.smartPowerOnHours, m.smartSizeBytes,
-		m.containerCPU, m.containerMem, m.containerState, m.containerTotal,
+		m.containerCPU, m.containerMem, m.containerMemPct,
+		m.containerNetIn, m.containerNetOut, m.containerBlockRead, m.containerBlockWrite,
+		m.containerState, m.containerTotal,
 		m.netInterfaceUp, m.netInterfaceMTU,
 		m.upsBatteryPct, m.upsBatteryV, m.upsInputV, m.upsOutputV,
 		m.upsLoadPct, m.upsRuntimeMins, m.upsWattage, m.upsTemperature,
@@ -320,6 +378,11 @@ func NewMetrics() *Metrics {
 		m.pveStorageUsed, m.pveStorageTotal,
 		m.k8sNodeReady, m.k8sNodePods, m.k8sPodRunning, m.k8sPodRestarts,
 		m.k8sDeployReady, m.k8sDeployDesired,
+		m.gpuUsagePct, m.gpuMemUsedMB, m.gpuMemTotalMB, m.gpuMemPct,
+		m.gpuTemperature, m.gpuPowerW, m.gpuPowerMaxW, m.gpuFanPct,
+		m.gpuEncoderPct, m.gpuDecoderPct,
+		m.backupLastSuccess, m.backupSizeBytes, m.backupStatus,
+		m.speedtestDownload, m.speedtestUpload, m.speedtestLatency,
 		m.findingsTotal, m.findingsCritical, m.findingsWarning,
 		m.collectionDuration, m.lastCollectionTime, m.updateAvailable,
 	}
@@ -368,6 +431,11 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 	m.smartSizeBytes.Reset()
 	m.containerCPU.Reset()
 	m.containerMem.Reset()
+	m.containerMemPct.Reset()
+	m.containerNetIn.Reset()
+	m.containerNetOut.Reset()
+	m.containerBlockRead.Reset()
+	m.containerBlockWrite.Reset()
 	m.containerState.Reset()
 	m.netInterfaceUp.Reset()
 	m.netInterfaceMTU.Reset()
@@ -426,6 +494,11 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 		if running {
 			m.containerCPU.With(l).Set(c.CPU)
 			m.containerMem.With(l).Set(c.MemMB * 1024 * 1024)
+			m.containerMemPct.With(l).Set(c.MemPct)
+			m.containerNetIn.With(l).Set(c.NetIn)
+			m.containerNetOut.With(l).Set(c.NetOut)
+			m.containerBlockRead.With(l).Set(c.BlockRead)
+			m.containerBlockWrite.With(l).Set(c.BlockWrite)
 		}
 	}
 
@@ -449,6 +522,33 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 		m.upsTemperature.Set(snap.UPS.Temperature)
 		m.upsOnBattery.Set(boolToFloat(snap.UPS.OnBattery))
 		m.upsLowBattery.Set(boolToFloat(snap.UPS.LowBattery))
+	}
+
+	// ── GPU ──
+	if snap.GPU != nil && snap.GPU.Available {
+		m.gpuUsagePct.Reset()
+		m.gpuMemUsedMB.Reset()
+		m.gpuMemTotalMB.Reset()
+		m.gpuMemPct.Reset()
+		m.gpuTemperature.Reset()
+		m.gpuPowerW.Reset()
+		m.gpuPowerMaxW.Reset()
+		m.gpuFanPct.Reset()
+		m.gpuEncoderPct.Reset()
+		m.gpuDecoderPct.Reset()
+		for _, g := range snap.GPU.GPUs {
+			l := prometheus.Labels{"index": fmt.Sprintf("%d", g.Index), "name": g.Name, "vendor": g.Vendor}
+			m.gpuUsagePct.With(l).Set(g.UsagePct)
+			m.gpuMemUsedMB.With(l).Set(g.MemUsedMB)
+			m.gpuMemTotalMB.With(l).Set(g.MemTotalMB)
+			m.gpuMemPct.With(l).Set(g.MemPct)
+			m.gpuTemperature.With(l).Set(float64(g.Temperature))
+			m.gpuPowerW.With(l).Set(g.PowerW)
+			m.gpuPowerMaxW.With(l).Set(g.PowerMaxW)
+			m.gpuFanPct.With(l).Set(g.FanPct)
+			m.gpuEncoderPct.With(l).Set(g.EncoderPct)
+			m.gpuDecoderPct.With(l).Set(g.DecoderPct)
+		}
 	}
 
 	// ── ZFS ──
@@ -582,6 +682,35 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 			m.k8sDeployReady.With(l).Set(float64(d.ReadyReplicas))
 			m.k8sDeployDesired.With(l).Set(float64(d.Replicas))
 		}
+	}
+
+	// ── Backup ──
+	m.backupLastSuccess.Reset()
+	m.backupSizeBytes.Reset()
+	m.backupStatus.Reset()
+	if snap.Backup != nil && snap.Backup.Available {
+		for _, job := range snap.Backup.Jobs {
+			l := prometheus.Labels{"provider": job.Provider, "name": job.Name}
+			if !job.LastSuccess.IsZero() {
+				m.backupLastSuccess.With(l).Set(float64(job.LastSuccess.Unix()))
+			}
+			m.backupSizeBytes.With(l).Set(float64(job.SizeBytes))
+			switch job.Status {
+			case "ok":
+				m.backupStatus.With(l).Set(1)
+			case "warning":
+				m.backupStatus.With(l).Set(0.5)
+			default: // stale, failed
+				m.backupStatus.With(l).Set(0)
+			}
+		}
+	}
+
+	// ── Speed Test ──
+	if snap.SpeedTest != nil && snap.SpeedTest.Available && snap.SpeedTest.Latest != nil {
+		m.speedtestDownload.Set(snap.SpeedTest.Latest.DownloadMbps)
+		m.speedtestUpload.Set(snap.SpeedTest.Latest.UploadMbps)
+		m.speedtestLatency.Set(snap.SpeedTest.Latest.LatencyMs)
 	}
 
 	// ── Findings ──

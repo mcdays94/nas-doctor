@@ -90,89 +90,70 @@ The Docker CI workflow on `.github/workflows/docker.yml` publishes multi-arch (a
 - **TrueNAS**: PR #4804 at truenas/apps
 - **Synology**: No app catalog (Docker Compose in README)
 
-## Roadmap — Planned Features
+## Current Work-in-Progress
 
-### v0.8.0 — Predictive Intelligence (branch: `dev/predictive-intelligence`)
+**Branch**: `dev/new-features` (at `55c8ed8`, based on `dev/predictive-intelligence`)
 
-**1. Drive Replacement Planner** (new subpage: `/replacement-planner`)
-- Predict failure windows per drive using Backblaze annualized failure data + current SMART health score
-- Sort drives by urgency: "replace soon" → "monitor" → "healthy"
-- Show estimated remaining life (already computed in stats.html, move to backend)
-- Estimated replacement cost: user enters $/TB in settings, calculate per drive
-- Fleet-aware: show replacement needs across all fleet instances
-- Data source: existing SMART data (power_on_hours, reallocated_sectors, pending_sectors, temperature_c, health_passed)
-- UI: table with drive name, health score, estimated remaining life, risk tier, cost estimate
-- Implementation:
-  - `internal/analyzer/replacement.go` — replacement urgency scoring, cost estimation
-  - `internal/api/templates/replacement.html` — new subpage
-  - `internal/api/replacement_page.go` — handler
-  - Settings: add `replacement_cost_per_tb` field (float, default 0 = hidden)
+### Completed
+1. **GPU Monitoring** — full stack implementation:
+   - Collector: Nvidia (`nvidia-smi`), AMD (`rocm-smi` + sysfs), Intel (i915/xe sysfs)
+   - Model: `GPUInfo`/`GPUDevice` structs, `CategoryGPU`, `Snapshot.GPU` field
+   - Analyzer: temperature (>85/95°C), VRAM exhaustion (>95%), power limit rules
+   - Storage: `gpu_history` table with per-GPU time-series metrics
+   - API: `GET /api/v1/history/gpu?hours=N` endpoint (1/24/168)
+   - Dashboard: GPU section in all 3 themes with area charts and 1H/1D/1W toggle buttons
+   - Prometheus: 10 GPU gauges (usage, temp, VRAM, power, fan, encoder, decoder)
+   - Settings: GPU section toggle in dashboard sections
+   - Demo: RTX 4060 + Intel UHD 730 mock data with 48h hourly history
 
-**2. Storage Capacity Forecasting** (on existing stats page + dashboard)
-- Track disk usage over time (new sparkline: usage_percent per mount point per snapshot)
-- Linear regression on usage history to project days until 90%/95%/100%
-- Show forecast on stats page as a "Capacity Forecast" section
-- Alert rule: "Volume X will be full in N days" (configurable threshold)
-- Data changes needed:
-  - `internal/storage/db.go` — new table `disk_usage_history(id, timestamp, mount_point, label, used_percent, used_gb, total_gb)`
-  - `internal/scheduler/` — on each scan, persist disk usage snapshot to history table
-  - `internal/storage/db.go` — `GetDiskUsageHistory(mountPoint, limit)` query
-  - `internal/api/` — new endpoint `GET /api/v1/disk-usage-history`
-- Regression: simple least-squares in Go, no dependencies needed
-- UI: chart per volume showing usage trend + projected line to 100%
+2. **Per-Container Resource Metrics** — full stack implementation:
+   - Collector: extend `docker stats` with NetIO/BlockIO parsing (`parseDockerBytes()`)
+   - Model: `NetIn`/`NetOut`/`BlockRead`/`BlockWrite` on `ContainerInfo`
+   - Storage: `container_stats_history` table with save/get/prune
+   - API: `GET /api/v1/history/containers?hours=N` endpoint
+   - Analyzer: enhanced Docker rules (CPU >200% critical, memory >95% critical)
+   - Prometheus: 5 new per-container gauges (mem_pct, net_in/out, block_read/write)
+   - Dashboard: container metric cards with CPU/Mem/Net/Disk + area charts
+   - Merged container view (default ON) — combines Docker list + metrics in one section
+   - Settings: `merged_containers` toggle, `container_metrics` standalone toggle (default OFF)
+   - Demo: realistic net/block I/O mock data with hourly jitter
 
-**3. Anomaly Detection / Trend Alerting** (enhancement to existing alerting)
-- Compute rolling 7-day baseline for CPU, memory, I/O wait, load average
-- Alert when current value deviates significantly from baseline (configurable: 2x, 3x std dev)
-- Uses existing system sparkline history data (already 30+ days stored)
-- Implementation:
-  - `internal/analyzer/anomaly.go` — baseline computation, deviation detection
-  - New finding severity: "anomaly" (rendered same as "warning" but different category)
-  - Settings: enable/disable anomaly detection, sensitivity (low/medium/high)
+3. **Chart Range Persistence** — 1H/1D/1W saved to server config:
+   - `PUT /api/v1/settings/chart-range` endpoint
+   - All chart sections (GPU + containers) sync to same range
+   - `chart_range_hours` in `statusResponse` so dashboards read on load
 
-**4. Power & Cost Monitoring** (enhancement to UPS section + fleet)
-- Read wattage from existing UPS data (`wattage_watts`, `load_percent`, `nominal_watts`)
-- User enters electricity cost in settings: `electricity_cost_kwh` (float, e.g., 0.12)
-- Calculate: monthly cost = watts × 24 × 30.44 / 1000 × $/kWh
-- Show in dashboard UPS section: "Estimated monthly cost: $XX"
-- Show in fleet view: per-server power cost column
-- No external API needed — user enters their rate manually
+4. **Scroll Fade Edges** — gradient overlays on horizontal scroll:
+   - `NasScrollFade` JS utility auto-detects overflow-x:auto containers
+   - Background color auto-detected from parent for seamless gradients
+   - Shows/hides based on scroll position with `ResizeObserver`
 
-**5. Docker Container Resource Tracking** (enhancement to Docker section)
-- Collect per-container CPU%, memory usage, network I/O, restart count
-- Uses Docker API stats endpoint (already have Docker client in collector)
-- Alert on: crash loops (restart count > N in M minutes), excessive CPU/memory
-- Show in dashboard: mini resource bars per container, sortable
+5. **Section Resize** — custom drag handle at bottom center:
+   - Drag to shrink/grow, bottom gradient fade when content overflows
+   - Double-click handle to reset
+   - Heights persisted via `PUT /api/v1/settings/section-heights`
+   - `section_heights` map in settings + `statusResponse`
 
-**6. Incident Timeline** (new subpage: `/incidents`)
-- Correlate findings by timestamp proximity across subsystems
-- Group events within a 5-minute window into an "incident"
-- Show timeline: temp spike → I/O wait → container crash → parity fail
-- Data source: existing findings with `detected_at` timestamps
-- Pure frontend rendering from existing findings data — no new storage needed
+### Remaining Features (in order)
+6. **Backup Monitoring** — detect PBS, Borg, Restic, Duplicati; track last successful backup
+7. **Network Speed Test History** — periodic speedtest with graphs
+8. **ZFS Scrub Scheduling** — trigger/schedule scrubs from settings UI
+9. **Power Consumption Tracking** — IPMI/smart plugs, watts + monthly cost estimate
 
-### Later Features (post v0.8.0)
+### Implementation Pattern (same for each feature)
+Model (`models.go`) → Collector (`collector/<feature>.go`) → Wire (`collector.go`) → Analyzer rules → Demo data (`demo.go` + `main.go` history loop) → Prometheus gauges → Dashboard sections (3 themes + sectionMap) → Settings toggle (`api_extended.go` + `settings.html` secIds/payload) → Storage history table (if charts needed)
 
-**Public Status Page** (optional, default off)
-- Shareable `/status/public` page, no auth required
-- User selects which service checks are public in settings
-- Shows uptime bars (24h, 7d, 30d) per check
-- Clean minimal design, works as standalone page
-- Setting: `status_page_enabled` (bool, default false), `status_page_checks` (list of check IDs)
+## Live Demo
 
-**Backup Monitoring**
-- File-age monitoring: user configures backup paths + max age thresholds
-- Check most recent modification time in configured directories
-- Alert when newest file is older than threshold ("Backup overdue")
-- Works with any backup tool (Hyper Backup, Borg, Restic, rsync, rclone)
-- Settings: list of `{name, path, max_age_hours}`
+- **URL**: https://nas-doctor-demo.mdias-info.workers.dev (custom domain: nasdoctordemo.mdias.info pending CNAME)
+- **Architecture**: Cloudflare Worker with static HTML (captured at build time) + dynamic API data generation
+- **Source**: `demo-worker/` directory
+- **Deploy**: `cd demo-worker && npx wrangler deploy` (or via GH Action on release)
+- **GH Action**: `.github/workflows/demo-deploy.yml` — builds Go binary, runs demo, captures pages, deploys worker
+- **Platform Switcher**: `?platform=unraid|synology|proxmox|kubernetes` (cookie persisted)
+- **Security**: All POST/PUT/DELETE blocked with 403; chart-range/section-heights return graceful no-ops; settings page has disabled inputs
+- **Data**: Time-varying via deterministic noise seeded by `Date.now()`; different data per platform profile
+- **Auto-update**: GH Action triggers on release publish + push to main when demo-worker/ or templates change
 
-**Mobile PWA**
-- Add `manifest.json` for PWA install-to-homescreen
-- Optimize dashboard layout for narrow viewports
-- Pull-to-refresh, large touch targets
-
-**Plugin / Extension System**
-- Drop-in shell/Go scripts in `/data/plugins/` directory
-- NAS Doctor runs them on each scan, ingests JSON output
-- Standard schema: `{metrics: [...], findings: [...]}`
+### Also on this branch (pre-existing)
+- Nav bar standardization fix (commit `4a0b832` on `dev/predictive-intelligence`, carried forward)

@@ -17,18 +17,21 @@ const (
 type Category string
 
 const (
-	CategorySystem  Category = "system"
-	CategoryDisk    Category = "disk"
-	CategorySMART   Category = "smart"
-	CategoryDocker  Category = "docker"
-	CategoryNetwork Category = "network"
-	CategoryService Category = "service"
-	CategoryMemory  Category = "memory"
-	CategoryThermal Category = "thermal"
-	CategoryLogs    Category = "logs"
-	CategoryParity  Category = "parity"
-	CategoryZFS     Category = "zfs"
-	CategoryUPS     Category = "ups"
+	CategorySystem    Category = "system"
+	CategoryDisk      Category = "disk"
+	CategorySMART     Category = "smart"
+	CategoryDocker    Category = "docker"
+	CategoryNetwork   Category = "network"
+	CategoryService   Category = "service"
+	CategoryMemory    Category = "memory"
+	CategoryThermal   Category = "thermal"
+	CategoryLogs      Category = "logs"
+	CategoryParity    Category = "parity"
+	CategoryZFS       Category = "zfs"
+	CategoryUPS       Category = "ups"
+	CategoryGPU       Category = "gpu"
+	CategoryBackup    Category = "backup"
+	CategorySpeedTest Category = "speedtest"
 )
 
 // ---------- Snapshot (one complete diagnostic run) ----------
@@ -51,6 +54,9 @@ type Snapshot struct {
 	Tunnels    *TunnelInfo          `json:"tunnels,omitempty"`
 	Proxmox    *ProxmoxInfo         `json:"proxmox,omitempty"`
 	Kubernetes *KubeInfo            `json:"kubernetes,omitempty"`
+	GPU        *GPUInfo             `json:"gpu,omitempty"`
+	Backup     *BackupInfo          `json:"backup,omitempty"`
+	SpeedTest  *SpeedTestInfo       `json:"speed_test,omitempty"`
 	Services   []ServiceCheckResult `json:"service_checks,omitempty"`
 	Findings   []Finding            `json:"findings"`
 }
@@ -185,12 +191,13 @@ type TailscaleNode struct {
 // ---------- Service Checks ----------
 
 const (
-	ServiceCheckHTTP = "http"
-	ServiceCheckTCP  = "tcp"
-	ServiceCheckDNS  = "dns"
-	ServiceCheckSMB  = "smb"
-	ServiceCheckNFS  = "nfs"
-	ServiceCheckPing = "ping"
+	ServiceCheckHTTP  = "http"
+	ServiceCheckTCP   = "tcp"
+	ServiceCheckDNS   = "dns"
+	ServiceCheckSMB   = "smb"
+	ServiceCheckNFS   = "nfs"
+	ServiceCheckPing  = "ping"
+	ServiceCheckSpeed = "speed"
 )
 
 type ServiceCheckConfig struct {
@@ -207,6 +214,11 @@ type ServiceCheckConfig struct {
 	ExpectedMin      int               `json:"expected_status_min,omitempty"`
 	ExpectedMax      int               `json:"expected_status_max,omitempty"`
 	Headers          map[string]string `json:"headers,omitempty"` // custom request headers for HTTP checks
+
+	// Speed check specific fields
+	ContractedDownMbps float64 `json:"contracted_down_mbps,omitempty"` // expected minimum download speed
+	ContractedUpMbps   float64 `json:"contracted_up_mbps,omitempty"`   // expected minimum upload speed
+	MarginPct          float64 `json:"margin_pct,omitempty"`           // acceptable margin of error (e.g. 10 = ±10%)
 }
 
 type ServiceCheckResult struct {
@@ -214,13 +226,20 @@ type ServiceCheckResult struct {
 	Name                string   `json:"name"`
 	Type                string   `json:"type"`
 	Target              string   `json:"target"`
-	Status              string   `json:"status"` // up, down
+	Status              string   `json:"status"` // up, degraded, down
 	ResponseMS          int64    `json:"response_ms"`
 	Error               string   `json:"error,omitempty"`
 	CheckedAt           string   `json:"checked_at"`
 	ConsecutiveFailures int      `json:"consecutive_failures"`
 	FailureThreshold    int      `json:"failure_threshold"`
 	FailureSeverity     Severity `json:"failure_severity"`
+
+	// Speed check specific fields (populated when Type == "speed")
+	DownloadMbps float64 `json:"download_mbps,omitempty"`
+	UploadMbps   float64 `json:"upload_mbps,omitempty"`
+	LatencyMs    float64 `json:"latency_ms,omitempty"`
+	DownloadOK   *bool   `json:"download_ok,omitempty"` // nil for non-speed checks
+	UploadOK     *bool   `json:"upload_ok,omitempty"`
 }
 
 // ---------- System ----------
@@ -303,15 +322,19 @@ type DockerInfo struct {
 }
 
 type ContainerInfo struct {
-	ID     string  `json:"id"`
-	Name   string  `json:"name"`
-	Image  string  `json:"image"`
-	Status string  `json:"status"` // running, exited, etc.
-	State  string  `json:"state"`
-	CPU    float64 `json:"cpu_percent"`
-	MemMB  float64 `json:"mem_mb"`
-	MemPct float64 `json:"mem_percent"`
-	Uptime string  `json:"uptime"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Image      string  `json:"image"`
+	Status     string  `json:"status"` // running, exited, etc.
+	State      string  `json:"state"`
+	CPU        float64 `json:"cpu_percent"`
+	MemMB      float64 `json:"mem_mb"`
+	MemPct     float64 `json:"mem_percent"`
+	NetIn      float64 `json:"net_in_bytes"`      // cumulative bytes received
+	NetOut     float64 `json:"net_out_bytes"`     // cumulative bytes sent
+	BlockRead  float64 `json:"block_read_bytes"`  // cumulative bytes read
+	BlockWrite float64 `json:"block_write_bytes"` // cumulative bytes written
+	Uptime     string  `json:"uptime"`
 }
 
 // ---------- Network ----------
@@ -463,6 +486,79 @@ type UPSInfo struct {
 	LowBattery   bool    `json:"low_battery"`
 	LastTransfer string  `json:"last_transfer"` // reason for last transfer to battery
 	LastEvent    string  `json:"last_event"`
+}
+
+// ---------- GPU ----------
+
+// GPUInfo aggregates all detected GPU devices.
+type GPUInfo struct {
+	Available bool        `json:"available"`
+	GPUs      []GPUDevice `json:"gpus"`
+}
+
+// GPUDevice represents a single GPU (Nvidia, AMD, or Intel).
+type GPUDevice struct {
+	Index       int     `json:"index"`
+	Name        string  `json:"name"`            // "NVIDIA GeForce RTX 3090"
+	Vendor      string  `json:"vendor"`          // "nvidia", "amd", "intel"
+	Driver      string  `json:"driver"`          // driver version
+	UsagePct    float64 `json:"usage_percent"`   // GPU core utilization 0-100
+	MemUsedMB   float64 `json:"mem_used_mb"`     // VRAM used
+	MemTotalMB  float64 `json:"mem_total_mb"`    // VRAM total
+	MemPct      float64 `json:"mem_percent"`     // VRAM utilization 0-100
+	Temperature int     `json:"temperature_c"`   // core temperature
+	FanPct      float64 `json:"fan_percent"`     // fan speed 0-100
+	PowerW      float64 `json:"power_watts"`     // current power draw
+	PowerMaxW   float64 `json:"power_max_watts"` // TDP / power limit
+	ClockMHz    int     `json:"clock_mhz"`       // current GPU clock
+	MemClockMHz int     `json:"mem_clock_mhz"`   // current memory clock
+	PCIeBus     string  `json:"pcie_bus"`        // "00:02.0"
+	EncoderPct  float64 `json:"encoder_percent"` // video encoder utilization (transcoding)
+	DecoderPct  float64 `json:"decoder_percent"` // video decoder utilization
+}
+
+// ---------- Backup Monitoring ----------
+
+type BackupInfo struct {
+	Available bool        `json:"available"`
+	Jobs      []BackupJob `json:"jobs"`
+}
+
+type BackupJob struct {
+	Provider      string    `json:"provider"`       // "borg", "restic", "pbs", "duplicati", "rclone"
+	Name          string    `json:"name"`           // job/repo name
+	Repository    string    `json:"repository"`     // repo path or URL
+	LastRun       time.Time `json:"last_run"`       // timestamp of last backup attempt
+	LastSuccess   time.Time `json:"last_success"`   // timestamp of last successful backup
+	Status        string    `json:"status"`         // "ok", "warning", "stale", "failed", "running"
+	SizeBytes     int64     `json:"size_bytes"`     // total repo/backup size
+	FilesCount    int       `json:"files_count"`    // number of files in last snapshot
+	Duration      float64   `json:"duration_secs"`  // how long the last backup took
+	SnapshotCount int       `json:"snapshot_count"` // number of snapshots/archives in the repo
+	ErrorMessage  string    `json:"error_message,omitempty"`
+	Schedule      string    `json:"schedule,omitempty"`    // cron expression or "daily", "hourly"
+	Compression   string    `json:"compression,omitempty"` // "lz4", "zstd", "none"
+	Encrypted     bool      `json:"encrypted"`
+}
+
+// ---------- Network Speed Test ----------
+
+type SpeedTestInfo struct {
+	Available bool             `json:"available"`
+	Latest    *SpeedTestResult `json:"latest,omitempty"`
+}
+
+type SpeedTestResult struct {
+	Timestamp    time.Time `json:"timestamp"`
+	DownloadMbps float64   `json:"download_mbps"`
+	UploadMbps   float64   `json:"upload_mbps"`
+	LatencyMs    float64   `json:"latency_ms"`
+	JitterMs     float64   `json:"jitter_ms"`
+	ServerName   string    `json:"server_name"`
+	ServerID     int       `json:"server_id"`
+	ISP          string    `json:"isp"`
+	ExternalIP   string    `json:"external_ip"`
+	ResultURL    string    `json:"result_url,omitempty"` // speedtest.net result link
 }
 
 // ---------- ZFS ----------

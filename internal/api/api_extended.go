@@ -41,6 +41,9 @@ type Settings struct {
 	APIKey            string                  `json:"api_key,omitempty"` // Instance API key for fleet auth
 	Fleet             []internal.RemoteServer `json:"fleet,omitempty"`
 	DismissedFindings []string                `json:"dismissed_findings,omitempty"`
+	CostPerTB         float64                 `json:"cost_per_tb,omitempty"`     // Drive replacement cost per TB (user's currency)
+	ChartRangeHours   int                     `json:"chart_range_hours"`         // Persisted chart time range (1, 24, 168)
+	SectionHeights    map[string]int          `json:"section_heights,omitempty"` // Persisted section resize heights (section name → px)
 }
 
 const currentSettingsVersion = 1
@@ -48,18 +51,23 @@ const currentSettingsVersion = 1
 // DashboardSections controls which sections appear on the dashboard.
 // All default to true (visible). Users can hide sections they don't use.
 type DashboardSections struct {
-	Findings     bool `json:"findings"`
-	DiskSpace    bool `json:"disk_space"`
-	SMART        bool `json:"smart"`
-	Docker       bool `json:"docker"`
-	ZFS          bool `json:"zfs"`
-	UPS          bool `json:"ups"`
-	Parity       bool `json:"parity"`
-	Network      bool `json:"network"`
-	Tunnels      bool `json:"tunnels"`
-	Proxmox      bool `json:"proxmox"`
-	Kubernetes   bool `json:"kubernetes"`
-	MergedDrives bool `json:"merged_drives"` // Combine SMART + storage into one card per drive
+	Findings         bool `json:"findings"`
+	DiskSpace        bool `json:"disk_space"`
+	SMART            bool `json:"smart"`
+	Docker           bool `json:"docker"`
+	ZFS              bool `json:"zfs"`
+	UPS              bool `json:"ups"`
+	Parity           bool `json:"parity"`
+	Network          bool `json:"network"`
+	Tunnels          bool `json:"tunnels"`
+	Proxmox          bool `json:"proxmox"`
+	Kubernetes       bool `json:"kubernetes"`
+	GPU              bool `json:"gpu"`
+	ContainerMetrics bool `json:"container_metrics"`
+	MergedContainers bool `json:"merged_containers"` // Combine Docker list + container metrics into one section
+	MergedDrives     bool `json:"merged_drives"`     // Combine SMART + storage into one card per drive
+	Backup           bool `json:"backup"`
+	SpeedTest        bool `json:"speed_test"`
 }
 
 // BackupSettings controls automatic backup of the application database.
@@ -168,17 +176,23 @@ func defaultSettings() Settings {
 			IntervalH: 168, // weekly
 		},
 		Sections: DashboardSections{
-			Findings:     true,
-			DiskSpace:    true,
-			SMART:        true,
-			Docker:       true,
-			ZFS:          true,
-			UPS:          true,
-			Parity:       true,
-			Network:      true,
-			Tunnels:      true,
-			MergedDrives: true,
+			Findings:         true,
+			DiskSpace:        true,
+			SMART:            true,
+			Docker:           true,
+			ZFS:              true,
+			UPS:              true,
+			Parity:           true,
+			Network:          true,
+			Tunnels:          true,
+			GPU:              true,
+			ContainerMetrics: false,
+			MergedContainers: true,
+			MergedDrives:     true,
+			Backup:           true,
+			SpeedTest:        true,
 		},
+		ChartRangeHours: 1,
 	}
 }
 
@@ -190,9 +204,14 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/settings", s.handleGetSettings)
 	r.Put("/api/v1/settings", s.handleUpdateSettings)
 	r.Post("/api/v1/settings/test-webhook", s.handleTestWebhook)
+	r.Put("/api/v1/settings/chart-range", s.handleSetChartRange)
+	r.Put("/api/v1/settings/section-heights", s.handleSetSectionHeights)
 	r.Get("/api/v1/disks", s.handleListDisks)
 	r.Get("/api/v1/disks/{serial}", s.handleGetDisk)
 	r.Get("/api/v1/history/system", s.handleSystemHistory)
+	r.Get("/api/v1/history/gpu", s.handleGPUHistory)
+	r.Get("/api/v1/history/containers", s.handleContainerHistory)
+	r.Get("/api/v1/history/speedtest", s.handleSpeedTestHistory)
 	r.Get("/api/v1/notifications/log", s.handleNotificationLog)
 	r.Get("/api/v1/service-checks", s.handleServiceChecks)
 	r.Get("/api/v1/service-checks/history", s.handleServiceCheckHistory)
@@ -242,6 +261,14 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/backup", s.handleListBackups)
 	r.Get("/api/v1/db/stats", s.handleDBStats)
 	r.Get("/api/v1/sparklines", s.handleSparklines)
+
+	// Replacement planner
+	r.Get("/api/v1/replacement-plan", s.handleReplacementPlan)
+	r.Get("/replacement-planner", s.handleReplacementPlannerPage)
+
+	// Capacity forecast
+	r.Get("/api/v1/capacity-forecast", s.handleCapacityForecast)
+	r.Get("/api/v1/disk-usage-history", s.handleDiskUsageHistory)
 
 	// Pages
 	r.Get("/settings", s.handleSettingsPage)
@@ -445,7 +472,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		serviceNames[strings.ToLower(check.Name)] = struct{}{}
 		switch check.Type {
-		case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing:
+		case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing, internal.ServiceCheckSpeed:
 			// valid
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid service check type: " + check.Type})
@@ -844,12 +871,16 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	var wh internal.WebhookConfig
-	if err := json.Unmarshal(body, &wh); err != nil {
+	var payload struct {
+		internal.WebhookConfig
+		Finding *internal.Finding `json:"finding,omitempty"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
 
+	wh := payload.WebhookConfig
 	if wh.URL == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "webhook url is required"})
 		return
@@ -857,19 +888,30 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	// Force enabled for the test
 	wh.Enabled = true
 
-	testFindings := []internal.Finding{
-		{
-			ID:          "test-001",
-			Severity:    internal.SeverityInfo,
-			Category:    internal.CategorySystem,
-			Title:       "Test Notification",
-			Description: "This is a test notification from NAS Doctor to verify your webhook configuration is working correctly.",
-			Evidence:    []string{"Triggered manually via settings page"},
-			Impact:      "None — this is a test.",
-			Action:      "No action required.",
-			Priority:    "low",
-			Cost:        "none",
-		},
+	var testFindings []internal.Finding
+	if payload.Finding != nil && payload.Finding.Title != "" {
+		// Use the caller-provided finding (from notification rule test)
+		f := *payload.Finding
+		f.ID = "test-rule-001"
+		if f.Severity == "" {
+			f.Severity = internal.SeverityWarning
+		}
+		testFindings = []internal.Finding{f}
+	} else {
+		// Default generic test finding (from webhook test button)
+		testFindings = []internal.Finding{
+			{
+				ID:          "test-001",
+				Severity:    internal.SeverityInfo,
+				Category:    internal.CategorySystem,
+				Title:       "Test Notification",
+				Description: "This is a test notification from NAS Doctor to verify your webhook configuration is working correctly.",
+				Evidence:    []string{"Triggered manually via settings page"},
+				Impact:      "None — this is a test.",
+				Action:      "No action required.",
+				Priority:    "low",
+			},
+		}
 	}
 
 	// Create a temporary notifier with just this webhook.
@@ -983,6 +1025,139 @@ func (s *Server) handleSystemHistory(w http.ResponseWriter, r *http.Request) {
 		points = []storage.SystemHistoryPoint{}
 	}
 	writeJSON(w, http.StatusOK, points)
+}
+
+// handleGPUHistory returns historical GPU metrics for chart rendering.
+// GET /api/v1/history/gpu?hours=1 (default 1, accepts 1/24/168)
+func (s *Server) handleGPUHistory(w http.ResponseWriter, r *http.Request) {
+	hoursStr := r.URL.Query().Get("hours")
+	hours := 1
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 {
+			hours = h
+		}
+	}
+	if hours > 720 { // cap at 30 days
+		hours = 720
+	}
+	points, err := s.store.GetGPUHistory(hours)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get GPU history: " + err.Error()})
+		return
+	}
+	if points == nil {
+		points = []storage.GPUHistoryPoint{}
+	}
+	writeJSON(w, http.StatusOK, points)
+}
+
+// handleContainerHistory returns per-container resource metrics history.
+// GET /api/v1/history/containers?hours=N
+func (s *Server) handleContainerHistory(w http.ResponseWriter, r *http.Request) {
+	hoursStr := r.URL.Query().Get("hours")
+	hours := 1
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 {
+			hours = h
+		}
+	}
+	if hours > 720 { // cap at 30 days
+		hours = 720
+	}
+	points, err := s.store.GetContainerHistory(hours)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get container history: " + err.Error()})
+		return
+	}
+	if points == nil {
+		points = []storage.ContainerHistoryPoint{}
+	}
+	writeJSON(w, http.StatusOK, points)
+}
+
+// handleSpeedTestHistory returns speed test history for chart rendering.
+// GET /api/v1/history/speedtest?hours=N
+func (s *Server) handleSpeedTestHistory(w http.ResponseWriter, r *http.Request) {
+	hoursStr := r.URL.Query().Get("hours")
+	hours := 1
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 {
+			hours = h
+		}
+	}
+	if hours > 720 { // cap at 30 days
+		hours = 720
+	}
+	points, err := s.store.GetSpeedTestHistory(hours)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get speed test history: " + err.Error()})
+		return
+	}
+	if points == nil {
+		points = []storage.SpeedTestHistoryPoint{}
+	}
+	writeJSON(w, http.StatusOK, points)
+}
+
+// handleSetChartRange persists the user's preferred chart time range (1, 24, 168 hours).
+// PUT /api/v1/settings/chart-range
+func (s *Server) handleSetChartRange(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Hours int `json:"hours"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	// Validate — only allow known ranges
+	switch body.Hours {
+	case 1, 24, 168:
+		// ok
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hours must be 1, 24, or 168"})
+		return
+	}
+	settings := s.getSettings()
+	settings.ChartRangeHours = body.Hours
+	data, err := json.Marshal(settings)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to marshal settings"})
+		return
+	}
+	if err := s.store.SetConfig(settingsConfigKey, string(data)); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"chart_range_hours": body.Hours})
+}
+
+// handleSetSectionHeights persists user's section resize heights.
+// PUT /api/v1/settings/section-heights
+func (s *Server) handleSetSectionHeights(w http.ResponseWriter, r *http.Request) {
+	var body map[string]int
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	// Sanitize: only keep positive heights, cap at 2000px
+	clean := make(map[string]int, len(body))
+	for k, v := range body {
+		if v > 0 && v < 2000 && len(k) < 64 {
+			clean[k] = v
+		}
+	}
+	settings := s.getSettings()
+	settings.SectionHeights = clean
+	data, err := json.Marshal(settings)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to marshal settings"})
+		return
+	}
+	if err := s.store.SetConfig(settingsConfigKey, string(data)); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, clean)
 }
 
 // ---------- Notification log handler ----------

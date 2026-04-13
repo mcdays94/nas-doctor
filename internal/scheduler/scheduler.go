@@ -176,6 +176,23 @@ func (s *Scheduler) Start() {
 			}
 		}
 	}()
+
+	// Independent speed test loop — default 4h interval
+	go func() {
+		// Run first test 2 minutes after startup
+		time.Sleep(2 * time.Minute)
+		s.runSpeedTest()
+		ticker := time.NewTicker(4 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.runSpeedTest()
+			case <-s.stop:
+				return
+			}
+		}
+	}()
 }
 
 // UpdateInterval dynamically changes the scan interval without restarting.
@@ -737,6 +754,34 @@ const defaultCheckIntervalSec = 300 // 5 minutes
 // runDueServiceChecks is called every 30s by the independent service check
 // loop. It checks each configured check's per-check interval and only
 // executes those whose interval has elapsed since their last run.
+// runSpeedTest executes a network speed test and stores the result.
+func (s *Scheduler) runSpeedTest() {
+	s.logger.Info("running speed test")
+	result := collector.RunSpeedTest()
+	if result == nil {
+		s.logger.Info("speed test: no speedtest tool available (install speedtest or speedtest-cli)")
+		return
+	}
+	s.logger.Info("speed test complete",
+		"download", fmt.Sprintf("%.1f Mbps", result.DownloadMbps),
+		"upload", fmt.Sprintf("%.1f Mbps", result.UploadMbps),
+		"latency", fmt.Sprintf("%.1f ms", result.LatencyMs),
+	)
+	// Store in DB
+	if err := s.store.SaveSpeedTest("speedtest-"+time.Now().Format("20060102-150405"), result); err != nil {
+		s.logger.Warn("failed to save speed test result", "error", err)
+	}
+	// Update the cached snapshot's speed test field
+	s.mu.Lock()
+	if s.latest != nil {
+		s.latest.SpeedTest = &internal.SpeedTestInfo{
+			Available: true,
+			Latest:    result,
+		}
+	}
+	s.mu.Unlock()
+}
+
 func (s *Scheduler) runDueServiceChecks() {
 	s.mu.RLock()
 	checks := make([]internal.ServiceCheckConfig, len(s.serviceChecks))
@@ -924,6 +969,52 @@ func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) inter
 		}
 		result.Status = "up"
 
+	case internal.ServiceCheckSpeed:
+		// Run a speed test and compare against contracted speeds
+		stResult := collector.RunSpeedTest()
+		if stResult == nil {
+			result.Error = "no speedtest tool available (install speedtest or speedtest-cli)"
+			break
+		}
+
+		result.DownloadMbps = stResult.DownloadMbps
+		result.UploadMbps = stResult.UploadMbps
+		result.LatencyMs = stResult.LatencyMs
+		result.ResponseMS = int64(stResult.LatencyMs)
+
+		// Apply margin of error (default 10%)
+		margin := check.MarginPct
+		if margin <= 0 {
+			margin = 10
+		}
+		marginFactor := 1 - (margin / 100)
+
+		dlThreshold := check.ContractedDownMbps * marginFactor
+		ulThreshold := check.ContractedUpMbps * marginFactor
+
+		dlOK := check.ContractedDownMbps <= 0 || stResult.DownloadMbps >= dlThreshold
+		ulOK := check.ContractedUpMbps <= 0 || stResult.UploadMbps >= ulThreshold
+		result.DownloadOK = &dlOK
+		result.UploadOK = &ulOK
+
+		switch {
+		case dlOK && ulOK:
+			result.Status = "up"
+		case dlOK || ulOK:
+			result.Status = "degraded"
+			which := "upload"
+			if !dlOK {
+				which = "download"
+			}
+			result.Error = fmt.Sprintf("%s below contracted speed (%.0f/%.0f Mbps, threshold %.0f with %.0f%% margin)",
+				which, stResult.DownloadMbps, stResult.UploadMbps,
+				check.ContractedDownMbps, margin)
+		default:
+			result.Error = fmt.Sprintf("both download and upload below contracted speed (%.0f/%.0f Mbps, contracted %.0f/%.0f with %.0f%% margin)",
+				stResult.DownloadMbps, stResult.UploadMbps,
+				check.ContractedDownMbps, check.ContractedUpMbps, margin)
+		}
+
 	default:
 		result.Error = "unsupported service check type"
 	}
@@ -939,7 +1030,7 @@ func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) inter
 
 func isSupportedServiceCheckType(checkType string) bool {
 	switch strings.ToLower(strings.TrimSpace(checkType)) {
-	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing:
+	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing, internal.ServiceCheckSpeed:
 		return true
 	default:
 		return false
@@ -1288,10 +1379,25 @@ func evalService(cond, target string, val float64, services []internal.ServiceCh
 				out = append(out, synth("rule:svc-down:"+sc.Key, internal.SeverityWarning, internal.CategoryService,
 					"Service down: "+sc.Name, fmt.Sprintf("%s (%s) — %s", sc.Target, sc.Type, sc.Error)))
 			}
+		case "degraded":
+			if sc.Status == "degraded" {
+				out = append(out, synth("rule:svc-degraded:"+sc.Key, internal.SeverityWarning, internal.CategoryService,
+					"Service degraded: "+sc.Name, fmt.Sprintf("%s (%s) — %s", sc.Target, sc.Type, sc.Error)))
+			}
 		case "latency_above":
 			if val > 0 && float64(sc.ResponseMS) > val {
 				out = append(out, synth("rule:svc-latency:"+sc.Key, internal.SeverityWarning, internal.CategoryService,
 					"Service latency high: "+sc.Name, fmt.Sprintf("%dms exceeds threshold %.0fms", sc.ResponseMS, val)))
+			}
+		case "download_below":
+			if sc.Type == internal.ServiceCheckSpeed && val > 0 && sc.DownloadMbps < val {
+				out = append(out, synth("rule:svc-dl:"+sc.Key, internal.SeverityWarning, internal.CategorySpeedTest,
+					"Download speed below threshold: "+sc.Name, fmt.Sprintf("%.0f Mbps < %.0f Mbps threshold", sc.DownloadMbps, val)))
+			}
+		case "upload_below":
+			if sc.Type == internal.ServiceCheckSpeed && val > 0 && sc.UploadMbps < val {
+				out = append(out, synth("rule:svc-ul:"+sc.Key, internal.SeverityWarning, internal.CategorySpeedTest,
+					"Upload speed below threshold: "+sc.Name, fmt.Sprintf("%.0f Mbps < %.0f Mbps threshold", sc.UploadMbps, val)))
 			}
 		}
 	}

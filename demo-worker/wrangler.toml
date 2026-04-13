@@ -1,0 +1,22 @@
+name = "nas-doctor-demo"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+account_id = "9993650612175c36066a397a94466033"
+workers_dev = false
+
+[vars]
+DEMO_MODE = "true"
+
+[assets]
+directory = "./captured"
+binding = "ASSETS"
+
+# Custom domain
+[[routes]]
+pattern = "nasdoctordemo.mdias.info"
+custom_domain = true
+
+# KV namespace for demo API data (seeded from real Go binary captures)
+[[kv_namespaces]]
+binding = "DEMO_DATA"
+id = "8a68c1992ad443de8f415f8dc6158428"

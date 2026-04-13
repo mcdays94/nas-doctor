@@ -199,6 +199,8 @@ type statusResponse struct {
 	InfoCount         int                `json:"info_count"`
 	OverallHealth     string             `json:"overall_health"`
 	Sections          *DashboardSections `json:"sections,omitempty"`
+	ChartRangeHours   int                `json:"chart_range_hours"`
+	SectionHeights    map[string]int     `json:"section_heights,omitempty"`
 	DismissedFindings []string           `json:"dismissed_findings,omitempty"`
 }
 
@@ -251,8 +253,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Include section visibility and dismissed findings from settings
+	// Include section visibility, chart range, and dismissed findings from settings
 	resp.Sections = &settings.Sections
+	resp.ChartRangeHours = settings.ChartRangeHours
+	if resp.ChartRangeHours == 0 {
+		resp.ChartRangeHours = 1
+	}
+	resp.SectionHeights = settings.SectionHeights
 	resp.DismissedFindings = settings.DismissedFindings
 
 	writeJSON(w, http.StatusOK, resp)
