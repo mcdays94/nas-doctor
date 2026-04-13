@@ -7,7 +7,7 @@
 After every merge to `main` that includes code changes (not just docs):
 
 1. Determine the version bump:
-   - Patch (`v0.7.x`) for bug fixes
+   - Patch (`v0.8.x`) for bug fixes
    - Minor (`v0.x.0`) for new features
    - Major (`vX.0.0`) for breaking changes
 2. Tag: `git tag v<version> && git push origin v<version>`
@@ -22,7 +22,7 @@ The Docker CI workflow on `.github/workflows/docker.yml` publishes multi-arch (a
 
 ## Versioning
 
-- Current: v0.7.0
+- Current: v0.8.0
 - Main branch is protected — all changes go through PRs
 - Docker images: `ghcr.io/mcdays94/nas-doctor:{latest,version,major.minor}`
 - Multi-arch: linux/amd64, linux/arm64 (Raspberry Pi, Apple Silicon)
@@ -33,7 +33,7 @@ The Docker CI workflow on `.github/workflows/docker.yml` publishes multi-arch (a
 - Go backend, single binary, embedded HTML templates
 - Multi-stage Dockerfile with Go cross-compilation (no pre-compiled binaries)
 - 3 dashboard themes: midnight (default), clean, ember — each is a self-contained HTML file
-- Subpages: alerts, settings, stats, fleet, disk_detail, service_checks, parity
+- Subpages: alerts, settings, stats, fleet, disk_detail, service_checks, parity, replacement-planner
 - All subpages share `/css/shared.css` design system
 - SQLite database at `/data/nas-doctor.db`
 - Charts: custom vanilla JS library at `/js/charts.js` (no dependencies)
@@ -53,17 +53,17 @@ The Docker CI workflow on `.github/workflows/docker.yml` publishes multi-arch (a
 ## Key Files
 
 - `internal/collector/platform.go` — centralized platform detection singleton
-- `internal/collector/` — data collection (SMART, disk, docker, network, UPS, system, parity, tunnels, proxmox, kubernetes)
-- `internal/analyzer/` — diagnostic rules engine, Backblaze thresholds, Proxmox rules, K8s rules
+- `internal/collector/` — data collection (SMART, disk, docker, network, UPS, system, parity, tunnels, proxmox, kubernetes, gpu, backup, speedtest)
+- `internal/analyzer/` — diagnostic rules engine, Backblaze thresholds, Proxmox rules, K8s rules, backup staleness
 - `internal/api/` — HTTP handlers, embedded templates, API key middleware
 - `internal/api/styles.go` — shared CSS design system
-- `internal/api/templates/` — all HTML templates (10 pages)
-- `internal/scheduler/` — scan scheduling, notification rules, service checks (independent 30s loop)
+- `internal/api/templates/` — all HTML templates (11 pages)
+- `internal/scheduler/` — scan scheduling, notification rules, service checks (independent 30s loop), speed test (independent 4h loop)
 - `internal/notifier/` — webhook delivery (Discord, Slack, Gotify, Ntfy, generic) + Prometheus exporter (90+ metrics)
 - `internal/fleet/` — multi-server fleet polling with custom headers
 - `internal/logfwd/` — log forwarding (Loki, HTTP JSON, syslog)
 - `internal/storage/` — SQLite database layer
-- `internal/demo/` — mock data (drives, Docker, ZFS, UPS, tunnels, Proxmox, K8s)
+- `internal/demo/` — mock data (drives, Docker, ZFS, UPS, tunnels, Proxmox, K8s, GPU, backup, speedtest)
 
 ## Integrations
 
@@ -83,77 +83,46 @@ The Docker CI workflow on `.github/workflows/docker.yml` publishes multi-arch (a
 - **Auto-enable sections**: When an integration is enabled (Proxmox, K8s), auto-set the section toggle to true
 - **Settings load on startup**: Proxmox + K8s configs must be applied to collector at startup from persisted settings
 - **Orphaned checks**: Match by target URL too, not just name (fleet auto-created checks have different names)
+- **Service check types**: http, tcp, dns, ping, smb, nfs, speed — must be in BOTH `isSupportedServiceCheckType()` in scheduler AND the API handler validation switch in `handleUpdateSettings()`
+- **Speed checks**: Use `status: "degraded"` (not just up/down) — CSS `.status-dot.degraded` and `.pill-speed` must exist
 
 ## App Store Submissions
 
 - **Unraid CA**: Asana form submitted, docker-templates repo at mcdays94/docker-templates
-- **TrueNAS**: PR #4804 at truenas/apps
+- **TrueNAS**: PR #4804 at truenas/apps — open, 0 reviews (as of Apr 2026)
 - **Synology**: No app catalog (Docker Compose in README)
 
-## Current Work-in-Progress
+## v0.8.0 Features (released)
 
-**Branch**: `dev/new-features` (at `55c8ed8`, based on `dev/predictive-intelligence`)
+1. **GPU Monitoring** — Nvidia/AMD/Intel with usage/temp/VRAM/power charts
+2. **Per-Container Resource Metrics** — CPU/mem/net/block I/O per container with merged view
+3. **Backup Monitoring** — Borg, Restic, PBS, Duplicati detection + stale/failed alerts
+4. **Network Speed Test** — Periodic speedtest with download/upload/latency charts (4h schedule)
+5. **Speed Service Check** — New check type: contracted speed vs actual with margin %, three-state (up/degraded/down)
+6. **Chart Range Persistence** — 1H/1D/1W synced across all chart sections, saved to config
+7. **Scroll Fade Edges** — Gradient overlays on horizontal scroll containers
+8. **Section Resize** — Drag handle, heights persist to config, bottom fade on overflow
+9. **Notification Rule UX** — Live preview, contextual hints, context-aware conditions per check type
+10. **Test Notifications** — Context-specific test on both webhooks and notification rules
 
-### Completed
-1. **GPU Monitoring** — full stack implementation:
-   - Collector: Nvidia (`nvidia-smi`), AMD (`rocm-smi` + sysfs), Intel (i915/xe sysfs)
-   - Model: `GPUInfo`/`GPUDevice` structs, `CategoryGPU`, `Snapshot.GPU` field
-   - Analyzer: temperature (>85/95°C), VRAM exhaustion (>95%), power limit rules
-   - Storage: `gpu_history` table with per-GPU time-series metrics
-   - API: `GET /api/v1/history/gpu?hours=N` endpoint (1/24/168)
-   - Dashboard: GPU section in all 3 themes with area charts and 1H/1D/1W toggle buttons
-   - Prometheus: 10 GPU gauges (usage, temp, VRAM, power, fan, encoder, decoder)
-   - Settings: GPU section toggle in dashboard sections
-   - Demo: RTX 4060 + Intel UHD 730 mock data with 48h hourly history
+## Remaining Features (planned)
 
-2. **Per-Container Resource Metrics** — full stack implementation:
-   - Collector: extend `docker stats` with NetIO/BlockIO parsing (`parseDockerBytes()`)
-   - Model: `NetIn`/`NetOut`/`BlockRead`/`BlockWrite` on `ContainerInfo`
-   - Storage: `container_stats_history` table with save/get/prune
-   - API: `GET /api/v1/history/containers?hours=N` endpoint
-   - Analyzer: enhanced Docker rules (CPU >200% critical, memory >95% critical)
-   - Prometheus: 5 new per-container gauges (mem_pct, net_in/out, block_read/write)
-   - Dashboard: container metric cards with CPU/Mem/Net/Disk + area charts
-   - Merged container view (default ON) — combines Docker list + metrics in one section
-   - Settings: `merged_containers` toggle, `container_metrics` standalone toggle (default OFF)
-   - Demo: realistic net/block I/O mock data with hourly jitter
+- **Export Reports** — Rework the diagnostic report to include all v0.8.0 features (GPU, backup, speed test, container metrics). Currently removed from UI.
+- **ZFS Scrub Scheduling** — trigger/schedule scrubs from settings UI
+- **Power Consumption Tracking** — IPMI/smart plugs, watts + monthly cost estimate
 
-3. **Chart Range Persistence** — 1H/1D/1W saved to server config:
-   - `PUT /api/v1/settings/chart-range` endpoint
-   - All chart sections (GPU + containers) sync to same range
-   - `chart_range_hours` in `statusResponse` so dashboards read on load
+## Implementation Pattern (same for each feature)
 
-4. **Scroll Fade Edges** — gradient overlays on horizontal scroll:
-   - `NasScrollFade` JS utility auto-detects overflow-x:auto containers
-   - Background color auto-detected from parent for seamless gradients
-   - Shows/hides based on scroll position with `ResizeObserver`
-
-5. **Section Resize** — custom drag handle at bottom center:
-   - Drag to shrink/grow, bottom gradient fade when content overflows
-   - Double-click handle to reset
-   - Heights persisted via `PUT /api/v1/settings/section-heights`
-   - `section_heights` map in settings + `statusResponse`
-
-### Remaining Features (in order)
-6. **Backup Monitoring** — detect PBS, Borg, Restic, Duplicati; track last successful backup
-7. **Network Speed Test History** — periodic speedtest with graphs
-8. **ZFS Scrub Scheduling** — trigger/schedule scrubs from settings UI
-9. **Power Consumption Tracking** — IPMI/smart plugs, watts + monthly cost estimate
-
-### Implementation Pattern (same for each feature)
 Model (`models.go`) → Collector (`collector/<feature>.go`) → Wire (`collector.go`) → Analyzer rules → Demo data (`demo.go` + `main.go` history loop) → Prometheus gauges → Dashboard sections (3 themes + sectionMap) → Settings toggle (`api_extended.go` + `settings.html` secIds/payload) → Storage history table (if charts needed)
 
 ## Live Demo
 
-- **URL**: https://nas-doctor-demo.mdias-info.workers.dev (custom domain: nasdoctordemo.mdias.info pending CNAME)
-- **Architecture**: Cloudflare Worker with static HTML (captured at build time) + dynamic API data generation
-- **Source**: `demo-worker/` directory
+- **URL**: https://nasdoctordemo.mdias.info
+- **Architecture**: Cloudflare Worker (KV-backed) + feeder cron Worker. See `demo-worker/README.md`.
+- **Source**: `demo-worker/` (demo Worker) + `demo-worker/feeder/` (data generator)
 - **Deploy**: `cd demo-worker && npx wrangler deploy` (or via GH Action on release)
-- **GH Action**: `.github/workflows/demo-deploy.yml` — builds Go binary, runs demo, captures pages, deploys worker
-- **Platform Switcher**: `?platform=unraid|synology|proxmox|kubernetes` (cookie persisted)
+- **GH Action**: `.github/workflows/demo-deploy.yml` — builds Go binary, runs demo, captures pages, seeds KV, deploys both Workers
+- **Platform Switcher**: `?platform=unraid|synology|truenas|proxmox|kubernetes` (cookie persisted)
 - **Security**: All POST/PUT/DELETE blocked with 403; chart-range/section-heights return graceful no-ops; settings page has disabled inputs
-- **Data**: Time-varying via deterministic noise seeded by `Date.now()`; different data per platform profile
+- **Data**: Feeder cron (every 5 min) reads seed data from KV, applies time-based jitter + platform transformation, writes back. All data originated from real Go binary.
 - **Auto-update**: GH Action triggers on release publish + push to main when demo-worker/ or templates change
-
-### Also on this branch (pre-existing)
-- Nav bar standardization fix (commit `4a0b832` on `dev/predictive-intelligence`, carried forward)
