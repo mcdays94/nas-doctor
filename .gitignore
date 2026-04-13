@@ -42,11 +42,17 @@ AGENT-CONTEXT.md
 # Reference files
 unraid-diagnostic-report.pdf
 
-# Node (dev dependency)
-node_modules/
-package.json
-package-lock.json
+# Node (root dev dependency only)
+/node_modules/
+/package.json
+/package-lock.json
 take-screenshots.mjs
+
+# Keep demo-worker package files tracked
+!demo-worker/package.json
+!demo-worker/package-lock.json
+!demo-worker/feeder/package.json
+!demo-worker/feeder/package-lock.json
 
 # Empty dirs
 web/
