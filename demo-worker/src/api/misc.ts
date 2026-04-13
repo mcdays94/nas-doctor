@@ -1,5 +1,5 @@
 import { Platform, PROFILES } from "../data/platforms";
-import { hash, clamp, hoursAgo } from "../data/noise";
+import { hash, clamp, jitter, hoursAgo } from "../data/noise";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -178,4 +178,69 @@ function generateCapacityForecast(platform: Platform) {
         ?.estimated_full_date || null,
     },
   };
+}
+
+export function generateNotificationLog() {
+  return [
+    {
+      id: 1,
+      webhook_name: "Discord - #nas-alerts",
+      webhook_type: "discord",
+      status: "success",
+      findings_count: 3,
+      error: "",
+      timestamp: hoursAgo(0.9),
+      latency_ms: 245,
+    },
+    {
+      id: 2,
+      webhook_name: "Slack - #infrastructure",
+      webhook_type: "slack",
+      status: "success",
+      findings_count: 1,
+      error: "",
+      timestamp: hoursAgo(0.9),
+      latency_ms: 312,
+    },
+    {
+      id: 3,
+      webhook_name: "Ntfy - phone alerts",
+      webhook_type: "ntfy",
+      status: "success",
+      findings_count: 1,
+      error: "",
+      timestamp: hoursAgo(0.9),
+      latency_ms: 189,
+    },
+    {
+      id: 4,
+      webhook_name: "Discord - #nas-alerts",
+      webhook_type: "discord",
+      status: "success",
+      findings_count: 2,
+      error: "",
+      timestamp: hoursAgo(6.9),
+      latency_ms: 198,
+    },
+    {
+      id: 5,
+      webhook_name: "Discord - #nas-alerts",
+      webhook_type: "discord",
+      status: "failed",
+      findings_count: 4,
+      error: "HTTP 429: rate limited",
+      timestamp: hoursAgo(12.5),
+      latency_ms: 0,
+    },
+    {
+      id: 6,
+      webhook_name: "Slack - #infrastructure",
+      webhook_type: "slack",
+      status: "success",
+      findings_count: 1,
+      error: "",
+      timestamp: hoursAgo(24.1),
+      latency_ms: 287,
+    },
+  ];
 }

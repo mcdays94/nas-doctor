@@ -20,7 +20,7 @@ import { generateFleet } from "./api/fleet";
 import { generateDisks, generateDiskDetail } from "./api/disks";
 import { generateSmartTrends } from "./api/smart";
 import { generateIncidents } from "./api/incidents";
-import { generateMisc } from "./api/misc";
+import { generateMisc, generateNotificationLog } from "./api/misc";
 import { Platform, getPlatformFromRequest } from "./data/platforms";
 import { injectBanner } from "./html/banner";
 
@@ -209,7 +209,7 @@ function handleAPI(path: string, url: URL, platform: Platform): Response {
   if (path === "/api/v1/fleet/servers") return json([]);
 
   // Notifications & DB
-  if (path === "/api/v1/notifications/log") return json([]);
+  if (path === "/api/v1/notifications/log") return json(generateNotificationLog());
   if (path === "/api/v1/db/stats") return json({ size_bytes: 4_521_984, snapshots: 78, oldest: new Date(Date.now() - 30 * 86400000).toISOString() });
   if (path === "/api/v1/backup") return json([]);
   if (path === "/api/v1/icons") return json({ icons: ["default", "blue", "green", "red"], current: "default" });

@@ -462,90 +462,111 @@ function generateFindings(
   platform: Platform,
   disks: { device: string; label: string; used_percent: number }[],
   smart: { device: string; model: string; temperature_c: number; power_on_hours: number }[],
-  docker: { containers: { name: string; state: string }[] }
+  docker: { containers: { name: string; state: string; cpu_percent: number; mem_percent: number }[] }
 ) {
-  const findings: Array<{
-    id: string;
-    severity: string;
-    category: string;
-    title: string;
-    detail: string;
-    device: string;
-    recommendation: string;
-  }> = [];
+  type Finding = { id: string; severity: string; category: string; title: string; description: string; evidence: string[]; impact: string; action: string; priority: string };
+  const findings: Finding[] = [];
   let idx = 1;
+  const f = (severity: string, category: string, title: string, description: string, evidence: string[], impact: string, action: string, priority: string) => {
+    findings.push({ id: `finding-${idx++}`, severity, category, title, description, evidence, impact, action, priority });
+  };
 
-  // Disk usage findings
+  // ── Disk usage (data-driven) ──
   for (const d of disks) {
     if (d.used_percent > 85) {
-      findings.push({
-        id: `finding-${idx++}`,
-        severity: "critical",
-        category: "disk",
-        title: `High disk usage on ${d.label}`,
-        detail: `${d.label} (${d.device}) is ${d.used_percent.toFixed(1)}% full`,
-        device: d.device,
-        recommendation: "Free up space or expand the volume",
-      });
-    } else if (d.used_percent > 75) {
-      findings.push({
-        id: `finding-${idx++}`,
-        severity: "warning",
-        category: "disk",
-        title: `Disk usage elevated on ${d.label}`,
-        detail: `${d.label} (${d.device}) is ${d.used_percent.toFixed(1)}% full`,
-        device: d.device,
-        recommendation: "Monitor disk usage and plan for expansion",
-      });
+      f("critical", "disk", `High disk usage on ${d.label} (${d.used_percent.toFixed(0)}%)`,
+        `${d.label} (${d.device}) is ${d.used_percent.toFixed(1)}% full. At current growth rate, the volume will be completely full within 45 days.`,
+        [`Used: ${d.used_percent.toFixed(1)}%`, `Device: ${d.device}`],
+        "Write operations will fail when the volume is full, potentially causing data corruption in databases and application crashes.",
+        "Free up space by removing old snapshots, clearing temp files, or expanding the volume. Consider migrating large datasets to a larger drive.",
+        "immediate");
+    } else if (d.used_percent > 70) {
+      f("warning", "disk", `Disk usage elevated on ${d.label} (${d.used_percent.toFixed(0)}%)`,
+        `${d.label} (${d.device}) is ${d.used_percent.toFixed(1)}% full.`,
+        [`Used: ${d.used_percent.toFixed(1)}%`, `Device: ${d.device}`],
+        "May run out of space within 90 days if growth continues at the current rate.",
+        "Monitor disk usage trends and plan for expansion or cleanup.",
+        "short-term");
     }
   }
 
-  // Temperature findings
+  // ── SMART warnings (data-driven) ──
   for (const s of smart) {
-    if (s.temperature_c > 50) {
-      findings.push({
-        id: `finding-${idx++}`,
-        severity: "warning",
-        category: "smart",
-        title: `Elevated temperature on ${s.model}`,
-        detail: `${s.device} is at ${s.temperature_c}°C`,
-        device: s.device,
-        recommendation: "Check airflow and cooling",
-      });
+    if (s.temperature_c > 48) {
+      f("warning", "smart", `Elevated temperature on ${s.model} (${s.temperature_c}°C)`,
+        `${s.device} is running at ${s.temperature_c}°C, above the recommended 45°C threshold for long-term reliability.`,
+        [`Temperature: ${s.temperature_c}°C`, `Device: ${s.device}`, `Power-on: ${s.power_on_hours.toLocaleString()}h`],
+        "Sustained high temperatures reduce drive lifespan and increase the risk of data errors.",
+        "Check case airflow, fan speeds, and ambient temperature. Consider adding a drive cooling fan.",
+        "short-term");
+    }
+    if (s.power_on_hours > 35000) {
+      f("info", "smart", `High power-on hours: ${s.model} (${s.power_on_hours.toLocaleString()}h)`,
+        `${s.device} has been running for ${s.power_on_hours.toLocaleString()} hours. Drives of this model have a Backblaze annualized failure rate of 1.8% after 40,000 hours.`,
+        [`Power-on hours: ${s.power_on_hours.toLocaleString()}`, `Model: ${s.model}`],
+        "Risk of unexpected failure increases with age. Data loss possible if no redundancy.",
+        "Consider proactive replacement. Ensure backups are current and tested.",
+        "medium-term");
     }
   }
 
-  // Power-on hours
-  for (const s of smart) {
-    if (s.power_on_hours > 40000) {
-      findings.push({
-        id: `finding-${idx++}`,
-        severity: "info",
-        category: "smart",
-        title: `High power-on hours for ${s.model}`,
-        detail: `${s.device} has ${s.power_on_hours.toLocaleString()} power-on hours`,
-        device: s.device,
-        recommendation: "Consider proactive replacement",
-      });
-    }
-  }
-
-  // Stopped containers
+  // ── Docker (data-driven) ──
   for (const c of docker.containers) {
     if (c.state === "exited") {
-      findings.push({
-        id: `finding-${idx++}`,
-        severity: "info",
-        category: "docker",
-        title: `Container ${c.name} is stopped`,
-        detail: `Container ${c.name} is in exited state`,
-        device: "",
-        recommendation: "Restart the container if it should be running",
-      });
+      f("warning", "docker", `Container '${c.name}' is stopped`,
+        `Container ${c.name} has been in exited state for over 3 days. It may have crashed or been manually stopped.`,
+        [`State: exited`, `Container: ${c.name}`],
+        "If this container provides a service (DNS, monitoring, etc.), that service is currently unavailable.",
+        "Check container logs with 'docker logs " + c.name + "'. Restart if needed.",
+        "short-term");
+    }
+    if (c.cpu_percent > 80) {
+      f("warning", "docker", `High CPU: Container '${c.name}' (${c.cpu_percent.toFixed(0)}%)`,
+        `Container ${c.name} is using ${c.cpu_percent.toFixed(1)}% CPU.`,
+        [`CPU: ${c.cpu_percent.toFixed(1)}%`, `Memory: ${c.mem_percent.toFixed(1)}%`],
+        "May starve other containers and system processes.",
+        "Check if the container is healthy. Set CPU limits if needed.",
+        "short-term");
     }
   }
 
-  return findings.slice(0, 7);
+  // ── Guaranteed findings (ensure every platform has rich data) ──
+  // Always add a critical finding for service check failure
+  f("critical", "service_check", "Service check failed: Pi-hole DNS (12 consecutive failures)",
+    "Pi-hole DNS at http://10.0.1.53/admin has been unreachable for 60 minutes. DNS resolution may be affected for devices using Pi-hole.",
+    ["URL: http://10.0.1.53/admin", "Failures: 12 consecutive", "Last success: 60 min ago"],
+    "Devices configured to use Pi-hole for DNS will fail to resolve domains, causing widespread connectivity issues.",
+    "Check if the Pi-hole container/VM is running. Verify network connectivity to 10.0.1.53. Restart the service if needed.",
+    "immediate");
+
+  // Always add a warning about fleet server offline
+  f("warning", "fleet", "Fleet server 'Remote Backup' is offline",
+    "The fleet server at http://192.168.50.10:8080 has not responded in 48 hours. Last successful poll was 2 days ago.",
+    ["Server: Remote Backup", "URL: http://192.168.50.10:8080", "Last seen: 48h ago"],
+    "Cannot monitor the remote backup server's health. Backup integrity is unknown.",
+    "Check network connectivity to the remote site. Verify the NAS Doctor instance is running on the backup server.",
+    "short-term");
+
+  // Always add an info about successful scan
+  f("info", "system", "Diagnostic scan completed successfully",
+    "Scheduled 6-hour diagnostic scan completed. All subsystems were checked including SMART, Docker, network, and storage.",
+    [`Duration: 4.2s`, `Checks: ${14 + disks.length + smart.length + docker.containers.length}`, `Next scan: in 6h`],
+    "No immediate action required. System is being monitored.",
+    "Review findings above and address any warnings or critical issues.",
+    "none");
+
+  // Always add info about NVMe wear
+  const nvme = smart.find(s => s.device.includes("nvme"));
+  if (nvme) {
+    f("info", "smart", `NVMe wear leveling at ${Math.round(100 - (nvme.power_on_hours || 0) / 500)}% remaining life`,
+      `${nvme.device} (${nvme.model}) has used approximately ${Math.round((nvme.power_on_hours || 0) / 500)}% of its rated write endurance.`,
+      [`Wear: ${Math.round((nvme.power_on_hours || 0) / 500)}%`, `Power-on: ${(nvme.power_on_hours || 0).toLocaleString()}h`],
+      "NVMe drives have a finite write endurance. Monitoring ensures timely replacement.",
+      "No action needed at current wear level. Plan replacement when wear exceeds 80%.",
+      "long-term");
+  }
+
+  return findings;
 }
 
 function round2(n: number): number {

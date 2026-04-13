@@ -4,140 +4,123 @@ import { hoursAgo } from "../data/noise";
 export function generateIncidents(platform: Platform) {
   const p = PROFILES[platform];
 
-  const incidents: Array<{
-    id: string;
-    type: string;
-    severity: string;
-    title: string;
-    description: string;
-    timestamp: string;
-    resolved: boolean;
-    resolved_at: string | null;
-    source: string;
-    affected_entity: string;
-  }> = [];
-
-  // Disk space warning — recent
-  const highDisk = p.drives.find((d) => d.usedPct > 75);
-  if (highDisk) {
-    incidents.push({
+  return [
+    // ── Active: service check failure ──
+    {
       id: "inc-001",
+      type: "service_check",
+      severity: "critical",
+      title: "Service check failed: Pi-hole DNS",
+      description: "Pi-hole DNS at http://10.0.1.53/admin has been unreachable for 60 minutes. 12 consecutive failures detected. DNS resolution may be affected for clients using Pi-hole.",
+      timestamp: hoursAgo(1),
+      resolved: false,
+      resolved_at: null,
+      source: "service_checks",
+      affected_entity: "service:Pi-hole DNS",
+    },
+    // ── Active: disk space ──
+    {
+      id: "inc-002",
       type: "threshold_breach",
       severity: "warning",
-      title: `Disk usage exceeded 75% on ${highDisk.label}`,
-      description: `${highDisk.label} (${highDisk.model}) reached ${highDisk.usedPct}% utilization. Current trajectory suggests full within 90 days.`,
+      title: `Disk usage exceeded threshold on ${p.drives[0].label}`,
+      description: `${p.drives[0].label} (${p.drives[0].model}) reached ${p.drives[0].usedPct}% utilization. Current growth rate: ~0.3% per day. Projected full in approximately 60 days.`,
       timestamp: hoursAgo(18),
       resolved: false,
       resolved_at: null,
       source: "disk_analyzer",
-      affected_entity: `/dev/${highDisk.device}`,
-    });
-  }
-
-  // Container restart
-  incidents.push({
-    id: "inc-002",
-    type: "container_event",
-    severity: "info",
-    title: "Container 'plex' restarted unexpectedly",
-    description: "Container exited with code 137 (OOM killed) and was automatically restarted by Docker.",
-    timestamp: hoursAgo(48),
-    resolved: true,
-    resolved_at: hoursAgo(47.9),
-    source: "docker_monitor",
-    affected_entity: "container:plex",
-  });
-
-  // Temperature spike — resolved
-  incidents.push({
-    id: "inc-003",
-    type: "threshold_breach",
-    severity: "warning",
-    title: "Drive temperature exceeded 50°C threshold",
-    description: `NVMe cache drive reached 53°C during heavy transcoding. Temperature normalized after workload decreased.`,
-    timestamp: hoursAgo(96),
-    resolved: true,
-    resolved_at: hoursAgo(94),
-    source: "smart_monitor",
-    affected_entity: `/dev/${p.drives[p.drives.length - 1].device}`,
-  });
-
-  // Network interface flap
-  incidents.push({
-    id: "inc-004",
-    type: "network_event",
-    severity: "warning",
-    title: "Network interface eth0 link flapped",
-    description: "Interface went down for 2.3 seconds then recovered. Possible cable or switch issue.",
-    timestamp: hoursAgo(168),
-    resolved: true,
-    resolved_at: hoursAgo(167.99),
-    source: "network_monitor",
-    affected_entity: "interface:eth0",
-  });
-
-  // UPS event
-  if (p.hasUPS) {
-    incidents.push({
+      affected_entity: `/dev/${p.drives[0].device}`,
+    },
+    // ── Active: fleet server offline ──
+    {
+      id: "inc-003",
+      type: "fleet_event",
+      severity: "warning",
+      title: "Fleet server 'Remote Backup' went offline",
+      description: "The fleet server at http://192.168.50.10:8080 stopped responding 48 hours ago. Possible causes: network outage, server down, or NAS Doctor service stopped.",
+      timestamp: hoursAgo(48),
+      resolved: false,
+      resolved_at: null,
+      source: "fleet_poller",
+      affected_entity: "fleet:Remote Backup",
+    },
+    // ── Resolved: container OOM restart ──
+    {
+      id: "inc-004",
+      type: "container_event",
+      severity: "warning",
+      title: `Container '${p.containers[0]?.name || "plex"}' restarted (OOM killed)`,
+      description: `Container exited with code 137 (out of memory). Docker automatically restarted it. The container used 2.8 GB of its 3 GB limit before being killed.`,
+      timestamp: hoursAgo(36),
+      resolved: true,
+      resolved_at: hoursAgo(35.9),
+      source: "docker_monitor",
+      affected_entity: `container:${p.containers[0]?.name || "plex"}`,
+    },
+    // ── Resolved: temperature spike ──
+    {
       id: "inc-005",
+      type: "threshold_breach",
+      severity: "warning",
+      title: "NVMe temperature exceeded 50°C threshold",
+      description: `Cache drive reached 53°C during heavy I/O (transcoding + backup). Temperature normalized to 42°C after workload decreased.`,
+      timestamp: hoursAgo(96),
+      resolved: true,
+      resolved_at: hoursAgo(94),
+      source: "smart_monitor",
+      affected_entity: `/dev/${p.drives[p.drives.length - 1].device}`,
+    },
+    // ── Resolved: network flap ──
+    {
+      id: "inc-006",
+      type: "network_event",
+      severity: "warning",
+      title: "Network interface eth0 link flapped",
+      description: "Interface went down for 2.3 seconds then recovered. Correlated with switch firmware upgrade in progress on the upstream Ubiquiti switch.",
+      timestamp: hoursAgo(168),
+      resolved: true,
+      resolved_at: hoursAgo(167.99),
+      source: "network_monitor",
+      affected_entity: "interface:eth0",
+    },
+    // ── Resolved: UPS event ──
+    {
+      id: "inc-007",
       type: "power_event",
       severity: "critical",
       title: "UPS switched to battery — mains power lost",
-      description: "Utility power lost at 03:42. UPS ran on battery for 12 minutes before power was restored.",
+      description: "Utility power lost at 03:42 AM. UPS (CyberPower CP1500PFCLCD) ran on battery for 12 minutes at 35% load before mains power was restored.",
       timestamp: hoursAgo(360),
       resolved: true,
       resolved_at: hoursAgo(359.8),
       source: "ups_monitor",
       affected_entity: "ups:CyberPower CP1500PFCLCD",
-    });
-  }
-
-  // Stopped container
-  const stopped = p.containers.find((c) => c.state === "exited");
-  if (stopped) {
-    incidents.push({
-      id: "inc-006",
-      type: "container_event",
-      severity: "info",
-      title: `Container '${stopped.name}' stopped`,
-      description: `Container ${stopped.name} exited cleanly (code 0) and has not been restarted.`,
-      timestamp: hoursAgo(72),
-      resolved: false,
-      resolved_at: null,
-      source: "docker_monitor",
-      affected_entity: `container:${stopped.name}`,
-    });
-  }
-
-  // Scan completed
-  incidents.push({
-    id: "inc-007",
-    type: "system_event",
-    severity: "info",
-    title: "Full diagnostic scan completed",
-    description: "Scheduled 6-hour scan completed successfully. 3 warnings, 0 critical issues found.",
-    timestamp: hoursAgo(2),
-    resolved: true,
-    resolved_at: hoursAgo(1.95),
-    source: "scheduler",
-    affected_entity: "system",
-  });
-
-  // Parity check
-  if (p.hasParity) {
-    incidents.push({
+    },
+    // ── Info: successful parity check ──
+    {
       id: "inc-008",
-      type: "parity_event",
+      type: "system_event",
       severity: "info",
-      title: "Parity check completed successfully",
-      description: "Monthly parity check finished in 14h 22m with 0 errors. Average speed: 95 MB/s.",
-      timestamp: hoursAgo(168),
+      title: "Scheduled diagnostic scan completed",
+      description: "6-hour diagnostic scan completed successfully in 4.2 seconds. All subsystems checked. 2 warnings, 1 critical issue detected.",
+      timestamp: hoursAgo(2),
       resolved: true,
-      resolved_at: hoursAgo(154),
-      source: "parity_monitor",
-      affected_entity: "parity:md0",
-    });
-  }
-
-  return incidents.slice(0, 8);
+      resolved_at: hoursAgo(1.95),
+      source: "scheduler",
+      affected_entity: "system",
+    },
+    // ── Info: webhook delivery ──
+    {
+      id: "inc-009",
+      type: "notification_event",
+      severity: "info",
+      title: "Alert notification delivered to Discord",
+      description: "Critical alert 'Service check failed: Pi-hole DNS' was successfully delivered to Discord webhook '#nas-alerts'. Delivery took 245ms.",
+      timestamp: hoursAgo(0.9),
+      resolved: true,
+      resolved_at: hoursAgo(0.89),
+      source: "notifier",
+      affected_entity: "webhook:Discord - #nas-alerts",
+    },
+  ];
 }
