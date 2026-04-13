@@ -394,6 +394,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         </div>
         <div class="webhook-form-actions">
           <button class="btn btn-primary" onclick="saveRule()">Save Rule</button>
+          <button class="btn btn-success btn-sm" onclick="testRule()">Test</button>
           <button class="btn btn-secondary" onclick="cancelRuleForm()">Cancel</button>
         </div>
       </div>
@@ -1290,6 +1291,50 @@ function testWebhook() {
     return r.json();
   })
   .then(function(data) { showToast(data.message || "Test sent! Check your destination.", "success"); })
+  .catch(function(e) { showToast("Error: " + e.message, "error"); });
+}
+
+function testRule() {
+  var webhookName = (document.getElementById("nr-webhook") || {}).value;
+  if (!webhookName) { showToast("Select a webhook first", "error"); return; }
+  // Find the webhook config
+  var wh = null;
+  for (var i = 0; i < webhooks.length; i++) {
+    if (webhooks[i].name === webhookName) { wh = webhooks[i]; break; }
+  }
+  if (!wh || !wh.url) { showToast("Webhook not found or has no URL", "error"); return; }
+
+  var cat = (document.getElementById("nr-category") || {}).value || "system";
+  var cond = (document.getElementById("nr-condition") || {}).value || "any";
+  var condSel = document.getElementById("nr-condition");
+  var condLabel = condSel && condSel.options[condSel.selectedIndex] ? condSel.options[condSel.selectedIndex].text : cond;
+  var targetSel = document.getElementById("nr-target");
+  var targetLabel = targetSel && targetSel.value ? targetSel.options[targetSel.selectedIndex].text : "all";
+  var val = (document.getElementById("nr-value") || {}).value || "";
+  var ruleName = (document.getElementById("nr-name") || {}).value || "Unnamed rule";
+
+  // Build a description that matches the rule
+  var desc = 'Test notification for rule "' + ruleName + '": ' + condLabel;
+  if (targetLabel !== "all") desc += ' on ' + targetLabel;
+  if (val) desc += ' (threshold: ' + val + ')';
+
+  showToast("Sending test notification via " + webhookName + "...", "info");
+  fetch("/api/v1/settings/test-webhook", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: wh.name,
+      url: wh.url,
+      type: wh.type || "generic",
+      enabled: true,
+      secret: wh.secret || ""
+    })
+  })
+  .then(function(r) {
+    if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Test failed"); });
+    return r.json();
+  })
+  .then(function(data) { showToast(data.message || "Test sent! Check " + webhookName + ".", "success"); })
   .catch(function(e) { showToast("Error: " + e.message, "error"); });
 }
 
