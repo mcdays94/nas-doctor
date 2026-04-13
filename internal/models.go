@@ -305,15 +305,19 @@ type DockerInfo struct {
 }
 
 type ContainerInfo struct {
-	ID     string  `json:"id"`
-	Name   string  `json:"name"`
-	Image  string  `json:"image"`
-	Status string  `json:"status"` // running, exited, etc.
-	State  string  `json:"state"`
-	CPU    float64 `json:"cpu_percent"`
-	MemMB  float64 `json:"mem_mb"`
-	MemPct float64 `json:"mem_percent"`
-	Uptime string  `json:"uptime"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Image      string  `json:"image"`
+	Status     string  `json:"status"` // running, exited, etc.
+	State      string  `json:"state"`
+	CPU        float64 `json:"cpu_percent"`
+	MemMB      float64 `json:"mem_mb"`
+	MemPct     float64 `json:"mem_percent"`
+	NetIn      float64 `json:"net_in_bytes"`      // cumulative bytes received
+	NetOut     float64 `json:"net_out_bytes"`     // cumulative bytes sent
+	BlockRead  float64 `json:"block_read_bytes"`  // cumulative bytes read
+	BlockWrite float64 `json:"block_write_bytes"` // cumulative bytes written
+	Uptime     string  `json:"uptime"`
 }
 
 // ---------- Network ----------

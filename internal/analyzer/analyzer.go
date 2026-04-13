@@ -474,21 +474,57 @@ func analyzeDocker(docker internal.DockerInfo) []internal.Finding {
 		if c.State == "exited" || c.State == "dead" {
 			exitedCount++
 		}
-		if c.CPU > 80 {
+		// CPU rules: critical >200% (multi-core pinned), warning >80%
+		if c.CPU > 200 {
+			highCPU++
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategoryDocker,
+				Title:       fmt.Sprintf("Extreme CPU: Container '%s' (%.0f%%)", c.Name, c.CPU),
+				Description: fmt.Sprintf("Container '%s' (%s) is consuming %.1f%% CPU across multiple cores.", c.Name, c.Image, c.CPU),
+				Evidence:    []string{fmt.Sprintf("CPU: %.1f%%, Memory: %.0f MB (%.1f%%)", c.CPU, c.MemMB, c.MemPct)},
+				Impact:      "Severely starving other containers and host processes. May cause system instability.",
+				Action:      "Investigate the container workload immediately. Apply CPU limits (--cpus) or restart if stuck.",
+				Priority:    "immediate",
+			})
+		} else if c.CPU > 80 {
 			highCPU++
 			findings = append(findings, internal.Finding{
 				Severity:    internal.SeverityWarning,
 				Category:    internal.CategoryDocker,
 				Title:       fmt.Sprintf("High CPU: Container '%s' (%.0f%%)", c.Name, c.CPU),
 				Description: fmt.Sprintf("Container '%s' (%s) is using %.1f%% CPU.", c.Name, c.Image, c.CPU),
-				Evidence:    []string{fmt.Sprintf("CPU: %.1f%%, Memory: %.0f MB", c.CPU, c.MemMB)},
+				Evidence:    []string{fmt.Sprintf("CPU: %.1f%%, Memory: %.0f MB (%.1f%%)", c.CPU, c.MemMB, c.MemPct)},
 				Impact:      "May starve other containers and system processes",
 				Action:      "Check if the container is healthy. Set CPU limits if needed.",
 				Priority:    "short-term",
 			})
 		}
-		if c.MemPct > 80 {
+		// Memory rules: critical >95%, warning >80%
+		if c.MemPct > 95 {
 			highMem++
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategoryDocker,
+				Title:       fmt.Sprintf("Memory Exhaustion: Container '%s' (%.0f%%)", c.Name, c.MemPct),
+				Description: fmt.Sprintf("Container '%s' (%s) is using %.1f%% of available memory (%.0f MB).", c.Name, c.Image, c.MemPct, c.MemMB),
+				Evidence:    []string{fmt.Sprintf("Memory: %.0f MB (%.1f%%), CPU: %.1f%%", c.MemMB, c.MemPct, c.CPU)},
+				Impact:      "Imminent OOM kill risk. Container or host may become unresponsive.",
+				Action:      "Set memory limits (--memory). Investigate memory leaks. Restart the container.",
+				Priority:    "immediate",
+			})
+		} else if c.MemPct > 80 {
+			highMem++
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategoryDocker,
+				Title:       fmt.Sprintf("High Memory: Container '%s' (%.0f%%)", c.Name, c.MemPct),
+				Description: fmt.Sprintf("Container '%s' (%s) is using %.1f%% of available memory (%.0f MB).", c.Name, c.Image, c.MemPct, c.MemMB),
+				Evidence:    []string{fmt.Sprintf("Memory: %.0f MB (%.1f%%), CPU: %.1f%%", c.MemMB, c.MemPct, c.CPU)},
+				Impact:      "May trigger OOM killer if usage continues to grow.",
+				Action:      "Monitor memory trends. Set memory limits or investigate the workload.",
+				Priority:    "short-term",
+			})
 		}
 	}
 

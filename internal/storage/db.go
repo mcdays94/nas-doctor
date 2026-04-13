@@ -156,6 +156,26 @@ func (d *DB) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_gpu_history_ts ON gpu_history(timestamp DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_gpu_history_gpu ON gpu_history(gpu_index, timestamp DESC)`,
 
+		// --- Container stats history ---
+		`CREATE TABLE IF NOT EXISTS container_stats_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+			container_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			image TEXT,
+			cpu_pct REAL,
+			mem_mb REAL,
+			mem_pct REAL,
+			net_in_bytes REAL,
+			net_out_bytes REAL,
+			block_read_bytes REAL,
+			block_write_bytes REAL,
+			timestamp DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_container_stats_ts ON container_stats_history(timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_container_stats_name ON container_stats_history(name, timestamp DESC)`,
+
 		// --- Notification log ---
 		`CREATE TABLE IF NOT EXISTS notification_log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -335,6 +355,11 @@ func (d *DB) SaveSnapshot(snap *internal.Snapshot) error {
 		return fmt.Errorf("save gpu history: %w", err)
 	}
 
+	// Store container stats history
+	if err := d.saveContainerHistory(tx, snap); err != nil {
+		return fmt.Errorf("save container history: %w", err)
+	}
+
 	return tx.Commit()
 }
 
@@ -400,6 +425,69 @@ func (d *DB) saveGPUHistory(tx *sql.Tx, snap *internal.Snapshot) error {
 		}
 	}
 	return nil
+}
+
+func (d *DB) saveContainerHistory(tx *sql.Tx, snap *internal.Snapshot) error {
+	if !snap.Docker.Available {
+		return nil
+	}
+	for _, c := range snap.Docker.Containers {
+		if c.State != "running" {
+			continue // only track running containers
+		}
+		_, err := tx.Exec(
+			`INSERT INTO container_stats_history (snapshot_id, container_id, name, image, cpu_pct, mem_mb, mem_pct, net_in_bytes, net_out_bytes, block_read_bytes, block_write_bytes, timestamp)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snap.ID, c.ID, c.Name, c.Image,
+			c.CPU, c.MemMB, c.MemPct,
+			c.NetIn, c.NetOut, c.BlockRead, c.BlockWrite,
+			snap.Timestamp,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ContainerHistoryPoint represents a single time-series data point for a container.
+type ContainerHistoryPoint struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Name       string    `json:"name"`
+	Image      string    `json:"image"`
+	CPUPct     float64   `json:"cpu_percent"`
+	MemMB      float64   `json:"mem_mb"`
+	MemPct     float64   `json:"mem_percent"`
+	NetIn      float64   `json:"net_in_bytes"`
+	NetOut     float64   `json:"net_out_bytes"`
+	BlockRead  float64   `json:"block_read_bytes"`
+	BlockWrite float64   `json:"block_write_bytes"`
+}
+
+// GetContainerHistory returns container stats history for the given time range.
+func (d *DB) GetContainerHistory(hours int) ([]ContainerHistoryPoint, error) {
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	rows, err := d.db.Query(
+		`SELECT timestamp, name, image, cpu_pct, mem_mb, mem_pct, net_in_bytes, net_out_bytes, block_read_bytes, block_write_bytes
+		 FROM container_stats_history
+		 WHERE timestamp >= ?
+		 ORDER BY name ASC, timestamp ASC`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []ContainerHistoryPoint
+	for rows.Next() {
+		var p ContainerHistoryPoint
+		if err := rows.Scan(&p.Timestamp, &p.Name, &p.Image, &p.CPUPct, &p.MemMB, &p.MemPct, &p.NetIn, &p.NetOut, &p.BlockRead, &p.BlockWrite); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
 }
 
 // GPUHistoryPoint represents a single time-series data point for a GPU.
@@ -1430,7 +1518,7 @@ func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 
 	// Explicitly delete from history tables for the snapshots being pruned,
 	// in case foreign_keys or CASCADE is not fully honoured at runtime.
-	for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history"} {
+	for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history"} {
 		_, err := tx.Exec(fmt.Sprintf(
 			`DELETE FROM %s WHERE snapshot_id IN (%s)`, table, pruneQuery,
 		), keepMin, cutoff)
@@ -1810,7 +1898,7 @@ func (d *DB) PruneToSizeMB(targetMB float64) (int, error) {
 		if err != nil {
 			return totalPruned, err
 		}
-		for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history"} {
+		for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history"} {
 			d.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE snapshot_id IN (
 				SELECT id FROM snapshots ORDER BY timestamp ASC LIMIT ?
 			)`, table), batchSize)
