@@ -87,16 +87,16 @@ export default {
     // ── HTML pages: serve from static assets with banner injection ──
     // Map page routes to captured filenames
     const pageMap: Record<string, string> = {
-      "/": "midnight.html",
-      "/theme/midnight": "midnight.html",
-      "/theme/clean": "clean.html",
-      "/theme/ember": "ember.html",
-      "/settings": "settings.html",
-      "/alerts": "alerts.html",
-      "/fleet": "fleet.html",
-      "/stats": "stats.html",
-      "/parity": "parity.html",
-      "/service-checks": "service_checks.html",
+      "/": "_pages/midnight.html",
+      "/theme/midnight": "_pages/midnight.html",
+      "/theme/clean": "_pages/clean.html",
+      "/theme/ember": "_pages/ember.html",
+      "/settings": "_pages/settings.html",
+      "/alerts": "_pages/alerts.html",
+      "/fleet": "_pages/fleet.html",
+      "/stats": "_pages/stats.html",
+      "/parity": "_pages/parity.html",
+      "/service-checks": "_pages/service_checks.html",
     };
 
     const pageFile = pageMap[path];
@@ -126,7 +126,7 @@ export default {
 
     // ── Report page ──
     if (path === "/api/v1/report") {
-      const text = await fetchAsset(env, url, request, "report.html");
+      const text = await fetchAsset(env, url, request, "_pages/report.html");
       if (text !== null) return new Response(text, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
@@ -141,7 +141,7 @@ export default {
 
     // ── Fallback: serve index as default ──
     if (!path.includes(".")) {
-      const html = await fetchAsset(env, url, request, "midnight.html");
+      const html = await fetchAsset(env, url, request, "_pages/midnight.html");
       if (html !== null) {
         const injected = injectBanner(html, platform, path);
         return new Response(injected, { headers: { "Content-Type": "text/html; charset=utf-8", ...platformCookie(platform) } });
