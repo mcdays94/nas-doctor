@@ -354,7 +354,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           </div>
           <div>
             <label for="nr-condition">Condition</label>
-            <select id="nr-condition"></select>
+            <select id="nr-condition" onchange="updateValueHint()"></select>
           </div>
         </div>
         <div class="form-row">
@@ -363,8 +363,9 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             <select id="nr-target"><option value="">Any / All</option></select>
           </div>
           <div>
-            <label for="nr-value">Threshold value</label>
+            <label for="nr-value" id="nr-value-label">Threshold value</label>
             <input type="number" id="nr-value" placeholder="e.g. 55" step="any">
+            <div id="nr-value-hint" style="font-size:10px;color:var(--text3);margin-top:2px"></div>
           </div>
         </div>
         <div class="form-row">
@@ -430,7 +431,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         </div>
       </div>
       <div class="form-row">
-        <div>
+        <div id="sc-target-wrap">
           <label for="sc-target">Target</label>
           <input type="text" id="sc-target" placeholder="https://nas.local/health, 192.168.1.10, or host:port">
         </div>
@@ -462,6 +463,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         <div>
           <label for="sc-threshold">Failure threshold</label>
           <input type="number" id="sc-threshold" min="1" max="20" value="1">
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">Number of consecutive failures before alerting</div>
         </div>
         <div>
           <label for="sc-severity">Failure severity</label>
@@ -1413,14 +1415,16 @@ function onServiceTypeChange() {
   var portWrap = document.getElementById("sc-port-wrap");
   var headersWrap = document.getElementById("sc-headers-wrap");
   var speedWrap = document.getElementById("sc-speed-wrap");
-  var targetRow = document.getElementById("sc-target") ? document.getElementById("sc-target").closest(".form-row") : null;
+  var targetWrap = document.getElementById("sc-target-wrap");
   if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
   if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
   if (headersWrap) headersWrap.style.display = (type === "http") ? "block" : "none";
   if (speedWrap) speedWrap.style.display = (type === "speed") ? "block" : "none";
+  // Hide target field for speed checks — speedtest auto-selects the best server
+  if (targetWrap) targetWrap.style.display = (type === "speed") ? "none" : "";
   var targetInput = document.getElementById("sc-target");
   if (targetInput) {
-    if (type === "speed") { targetInput.placeholder = "speedtest (auto-filled)"; targetInput.value = targetInput.value || "speedtest"; }
+    if (type === "speed") { targetInput.value = "speedtest"; }
     else if (type === "ping") targetInput.placeholder = "e.g. 8.8.8.8 or gateway.local";
     else if (type === "dns") targetInput.placeholder = "e.g. google.com";
     else targetInput.placeholder = "https://nas.local/health, 192.168.1.10, or host:port";
@@ -1469,12 +1473,14 @@ function cancelServiceCheckForm() {
 
 function saveServiceCheck() {
   var name = document.getElementById("sc-name").value.trim();
+  var type = document.getElementById("sc-type").value;
   var target = document.getElementById("sc-target").value.trim();
-  if (!name || !target) {
+  // Speed checks don't need a target — auto-set it
+  if (type === "speed") { target = "speedtest"; }
+  if (!name || (!target && type !== "speed")) {
     showToast("Name and target are required", "error");
     return;
   }
-  var type = document.getElementById("sc-type").value;
   var sc = {
     name: name,
     type: type,
@@ -2125,7 +2131,7 @@ var CONDITION_MAP = {
   disk_space: [{v:"free_below",l:"Free space below %"}],
   disk_temp:  [{v:"above",l:"Single disk temp above \u00b0C"},{v:"avg_above",l:"Average disk temp above \u00b0C"}],
   smart:      [{v:"health_fails",l:"SMART health fails"},{v:"reallocated_above",l:"Reallocated sectors above"},{v:"pending_above",l:"Pending sectors above"},{v:"crc_above",l:"CRC errors above"},{v:"power_hours_above",l:"Power-on hours above"}],
-  service:    [{v:"down",l:"Service goes down"},{v:"latency_above",l:"Latency above (ms)"}],
+  service:    [{v:"down",l:"Service goes down"},{v:"degraded",l:"Service degraded (speed checks)"},{v:"latency_above",l:"Latency above (ms)"},{v:"download_below",l:"Download speed below (Mbps)"},{v:"upload_below",l:"Upload speed below (Mbps)"}],
   parity:     [{v:"errors",l:"Parity check has errors"},{v:"speed_below",l:"Parity speed below MB/s"}],
   ups:        [{v:"on_battery",l:"UPS switches to battery"},{v:"battery_below",l:"Battery below %"},{v:"load_above",l:"Load above %"}],
   docker:     [{v:"stopped",l:"Container stops"}],
@@ -2134,7 +2140,7 @@ var CONDITION_MAP = {
   tunnels:    [{v:"cloudflared_down",l:"Cloudflared tunnel down"},{v:"tailscale_offline",l:"Tailscale node offline"}],
   update:     [{v:"available",l:"Platform update available"}]
 };
-var NEEDS_VALUE = {free_below:1,above:1,avg_above:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,latency_above:1,speed_below:1,battery_below:1,load_above:1,cpu_above:1,mem_above:1,iowait_above:1,usage_above:1};
+var NEEDS_VALUE = {free_below:1,above:1,avg_above:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,latency_above:1,speed_below:1,battery_below:1,load_above:1,cpu_above:1,mem_above:1,iowait_above:1,usage_above:1,download_below:1,upload_below:1};
 var NEEDS_TARGET = {above:1,health_fails:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,down:1,latency_above:1,stopped:1,degraded:1,scrub_errors:1,usage_above:1,cloudflared_down:1,tailscale_offline:1,free_below:1,category:1};
 
 function onRuleCategoryChange() {
@@ -2147,6 +2153,50 @@ function onRuleCategoryChange() {
     condSel.appendChild(o);
   }
   populateTargetDropdown(cat);
+  updateValueHint();
+}
+function updateValueHint() {
+  var cond = document.getElementById("nr-condition").value;
+  var label = document.getElementById("nr-value-label");
+  var input = document.getElementById("nr-value");
+  var hint = document.getElementById("nr-value-hint");
+  if (!label || !input || !hint) return;
+  var hints = {
+    free_below:       {label:"Threshold (%)",       placeholder:"e.g. 10",  hint:"Alert when free space drops below this percentage"},
+    above:            {label:"Temperature (\u00b0C)",placeholder:"e.g. 55",  hint:"Alert when drive temperature exceeds this value"},
+    avg_above:        {label:"Temperature (\u00b0C)",placeholder:"e.g. 50",  hint:"Alert when average temperature across all drives exceeds this"},
+    reallocated_above:{label:"Sector count",         placeholder:"e.g. 0",   hint:"Alert when reallocated sector count exceeds this (0 = any)"},
+    pending_above:    {label:"Sector count",         placeholder:"e.g. 0",   hint:"Alert when pending sector count exceeds this"},
+    crc_above:        {label:"Error count",          placeholder:"e.g. 0",   hint:"Alert when CRC error count exceeds this"},
+    power_hours_above:{label:"Hours",                placeholder:"e.g. 40000",hint:"Alert when drive power-on hours exceed this"},
+    latency_above:    {label:"Latency (ms)",         placeholder:"e.g. 500", hint:"Alert when service response time exceeds this many milliseconds"},
+    download_below:   {label:"Download (Mbps)",      placeholder:"e.g. 800", hint:"Alert when speed test download falls below this (in Mbps)"},
+    upload_below:     {label:"Upload (Mbps)",        placeholder:"e.g. 400", hint:"Alert when speed test upload falls below this (in Mbps)"},
+    speed_below:      {label:"Speed (MB/s)",         placeholder:"e.g. 50",  hint:"Alert when parity check speed falls below this"},
+    battery_below:    {label:"Battery (%)",          placeholder:"e.g. 20",  hint:"Alert when UPS battery level drops below this percentage"},
+    load_above:       {label:"Load / %",             placeholder:"e.g. 80",  hint:"Alert when value exceeds this threshold"},
+    cpu_above:        {label:"CPU (%)",              placeholder:"e.g. 90",  hint:"Alert when CPU usage exceeds this percentage"},
+    mem_above:        {label:"Memory (%)",           placeholder:"e.g. 90",  hint:"Alert when memory usage exceeds this percentage"},
+    iowait_above:     {label:"I/O Wait (%)",         placeholder:"e.g. 20",  hint:"Alert when I/O wait exceeds this percentage"},
+    usage_above:      {label:"Usage (%)",            placeholder:"e.g. 80",  hint:"Alert when usage exceeds this percentage"},
+  };
+  var h = hints[cond];
+  if (h) {
+    label.textContent = h.label;
+    input.placeholder = h.placeholder;
+    hint.textContent = h.hint;
+    input.parentElement.style.display = "";
+  } else if (NEEDS_VALUE[cond]) {
+    label.textContent = "Threshold value";
+    input.placeholder = "";
+    hint.textContent = "";
+    input.parentElement.style.display = "";
+  } else {
+    label.textContent = "Threshold value";
+    input.placeholder = "";
+    hint.textContent = "";
+    input.parentElement.style.display = "none";
+  }
 }
 
 function populateTargetDropdown(cat) {

@@ -1379,10 +1379,25 @@ func evalService(cond, target string, val float64, services []internal.ServiceCh
 				out = append(out, synth("rule:svc-down:"+sc.Key, internal.SeverityWarning, internal.CategoryService,
 					"Service down: "+sc.Name, fmt.Sprintf("%s (%s) — %s", sc.Target, sc.Type, sc.Error)))
 			}
+		case "degraded":
+			if sc.Status == "degraded" {
+				out = append(out, synth("rule:svc-degraded:"+sc.Key, internal.SeverityWarning, internal.CategoryService,
+					"Service degraded: "+sc.Name, fmt.Sprintf("%s (%s) — %s", sc.Target, sc.Type, sc.Error)))
+			}
 		case "latency_above":
 			if val > 0 && float64(sc.ResponseMS) > val {
 				out = append(out, synth("rule:svc-latency:"+sc.Key, internal.SeverityWarning, internal.CategoryService,
 					"Service latency high: "+sc.Name, fmt.Sprintf("%dms exceeds threshold %.0fms", sc.ResponseMS, val)))
+			}
+		case "download_below":
+			if sc.Type == internal.ServiceCheckSpeed && val > 0 && sc.DownloadMbps < val {
+				out = append(out, synth("rule:svc-dl:"+sc.Key, internal.SeverityWarning, internal.CategorySpeedTest,
+					"Download speed below threshold: "+sc.Name, fmt.Sprintf("%.0f Mbps < %.0f Mbps threshold", sc.DownloadMbps, val)))
+			}
+		case "upload_below":
+			if sc.Type == internal.ServiceCheckSpeed && val > 0 && sc.UploadMbps < val {
+				out = append(out, synth("rule:svc-ul:"+sc.Key, internal.SeverityWarning, internal.CategorySpeedTest,
+					"Upload speed below threshold: "+sc.Name, fmt.Sprintf("%.0f Mbps < %.0f Mbps threshold", sc.UploadMbps, val)))
 			}
 		}
 	}
