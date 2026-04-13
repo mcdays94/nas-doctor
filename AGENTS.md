@@ -89,3 +89,32 @@ The Docker CI workflow on `.github/workflows/docker.yml` publishes multi-arch (a
 - **Unraid CA**: Asana form submitted, docker-templates repo at mcdays94/docker-templates
 - **TrueNAS**: PR #4804 at truenas/apps
 - **Synology**: No app catalog (Docker Compose in README)
+
+## Current Work-in-Progress
+
+**Branch**: `dev/new-features` (at `55c8ed8`, based on `dev/predictive-intelligence`)
+
+### Completed
+1. **GPU Monitoring** — full stack implementation:
+   - Collector: Nvidia (`nvidia-smi`), AMD (`rocm-smi` + sysfs), Intel (i915/xe sysfs)
+   - Model: `GPUInfo`/`GPUDevice` structs, `CategoryGPU`, `Snapshot.GPU` field
+   - Analyzer: temperature (>85/95°C), VRAM exhaustion (>95%), power limit rules
+   - Storage: `gpu_history` table with per-GPU time-series metrics
+   - API: `GET /api/v1/history/gpu?hours=N` endpoint (1/24/168)
+   - Dashboard: GPU section in all 3 themes with area charts and 1H/1D/1W toggle buttons
+   - Prometheus: 10 GPU gauges (usage, temp, VRAM, power, fan, encoder, decoder)
+   - Settings: GPU section toggle in dashboard sections
+   - Demo: RTX 4060 + Intel UHD 730 mock data with 48h hourly history
+
+### Remaining Features (in order)
+2. **Per-Container Resource Metrics** — CPU/mem/net per Docker container with history charts (like Beszel)
+3. **Backup Monitoring** — detect PBS, Borg, Restic, Duplicati; track last successful backup
+4. **Network Speed Test History** — periodic speedtest with graphs
+5. **ZFS Scrub Scheduling** — trigger/schedule scrubs from settings UI
+6. **Power Consumption Tracking** — IPMI/smart plugs, watts + monthly cost estimate
+
+### Implementation Pattern (same for each feature)
+Model (`models.go`) → Collector (`collector/<feature>.go`) → Wire (`collector.go`) → Analyzer rules → Demo data (`demo.go` + `main.go` history loop) → Prometheus gauges → Dashboard sections (3 themes + sectionMap) → Settings toggle (`api_extended.go` + `settings.html` secIds/payload) → Storage history table (if charts needed)
+
+### Also on this branch (pre-existing)
+- Nav bar standardization fix (commit `4a0b832` on `dev/predictive-intelligence`, carried forward)
