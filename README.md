@@ -63,14 +63,6 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 - OS significantly out of date → **Security vulnerability risk**
 - And more...
 
-### Export Reports
-
-Click **Export Report** on the dashboard to generate a professional, print-ready diagnostic report. Open in your browser and Print -> Save as PDF.
-
-<p>
-  <img src="screenshots/report-cover.jpg" alt="Report Cover Page" width="420">
-</p>
-
 ### Alerts & Incident Management
 
 Dedicated `/alerts` page with:
@@ -450,7 +442,7 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `/api/v1/snapshot/{id}` | GET | Specific snapshot by ID |
 | `/api/v1/snapshots` | GET | List recent snapshots |
 | `/api/v1/scan` | POST | Trigger immediate diagnostic scan |
-| `/api/v1/report` | GET | Generate print-ready HTML diagnostic report |
+| `/api/v1/history/speedtest` | GET | Speed test history (query: `?hours=N`) |
 | `/api/v1/settings` | GET/PUT | Read/write application settings |
 | `/api/v1/settings/test-webhook` | POST | Send test notification to a webhook |
 | `/api/v1/sparklines` | GET | Condensed system + SMART history for charts |
