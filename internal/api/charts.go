@@ -31,7 +31,10 @@ function prepCanvas(id,opts){
   var el=typeof id==="string"?document.getElementById(id):id;
   if(!el) return null;
   var parent=el.parentElement||document.body;
-  var w=opts&&opts.width?opts.width:parent.clientWidth||300;
+  var pw=parent.clientWidth||300;
+  var cs=getComputedStyle(parent);
+  pw-=(parseFloat(cs.paddingLeft)||0)+(parseFloat(cs.paddingRight)||0);
+  var w=opts&&opts.width?opts.width:pw;
   var h=opts&&opts.height?opts.height:el.getAttribute("height")?parseInt(el.getAttribute("height"),10):200;
   var dpr=window.devicePixelRatio||1;
   el.width=w*dpr; el.height=h*dpr;
