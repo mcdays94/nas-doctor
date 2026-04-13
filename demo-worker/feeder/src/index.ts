@@ -165,6 +165,9 @@ export default {
 function transformForPlatform(endpoint: string, data: unknown, platform: Platform): unknown {
   // These are always generated fresh for ALL platforms (not from seed)
   if (endpoint === "service_checks") return buildServiceChecks();
+  if (endpoint === "alerts") return buildAlerts(PROFILES[platform]);
+  if (endpoint === "incidents") return buildIncidents(PROFILES[platform]);
+  if (endpoint === "notifications_log") return buildNotificationLog();
   if (endpoint === "settings") return transformSettings(data as Record<string, unknown>, PROFILES[platform]);
   if (endpoint === "status") return transformStatus(data as Record<string, unknown>, PROFILES[platform]);
 
@@ -360,6 +363,82 @@ function buildSmartTrends(p: PlatformProfile): unknown[] {
   }));
 }
 
+function hoursAgo(h: number): string {
+  return new Date(Date.now() - h * 3600000).toISOString();
+}
+
+function buildAlerts(p: PlatformProfile): unknown[] {
+  const alerts: unknown[] = [];
+  let id = 1;
+  const a = (title: string, sev: string, cat: string, status: string, firstH: number, lastH: number, count: number, ack: boolean, snoozed: boolean, snoozedUntil: string | null = null) => {
+    alerts.push({ id: `alert-${id++}`, title, severity: sev, category: cat, status, first_seen: hoursAgo(firstH), last_seen: hoursAgo(lastH), count, acknowledged: ack, snoozed, snoozed_until: snoozedUntil });
+  };
+
+  // Active critical
+  a("Service check failed: Pi-hole Admin (12 consecutive failures)", "critical", "service_check", "active", 1, 0.08, 12, false, false);
+  a("Service check failed: Local DNS (8 consecutive failures)", "critical", "service_check", "active", 0.8, 0.08, 8, false, false);
+
+  // Active critical — disk
+  const highDisk = p.drives.find(d => d.usedPct > 80) || p.drives[0];
+  a(`Disk usage critical on ${highDisk.label} (${highDisk.usedPct}%)`, highDisk.usedPct > 80 ? "critical" : "warning", "disk", "active", 72, 0.5, 14, false, false);
+
+  // Active warning — fleet
+  a("Fleet server 'Remote Backup' offline for 48 hours", "warning", "fleet", "active", 48, 0.5, 96, false, false);
+
+  // Active warning — SMART
+  const oldDrive = p.drives.find(d => d.poh > 25000) || p.drives[0];
+  a(`Drive aging: ${oldDrive.model} has ${oldDrive.poh.toLocaleString()} power-on hours`, "warning", "smart", "active", 168, 6, 7, true, false);
+
+  // Active warning — container stopped
+  const stopped = p.containers.find(c => c.state === "exited");
+  if (stopped) a(`Container '${stopped.name}' has been stopped for 3+ days`, "warning", "docker", "active", 96, 1, 48, false, false);
+
+  // Active warning — snoozed
+  a(`Container '${p.containers[0]?.name || "plex"}' memory usage above 80%`, "warning", "docker", "active", 48, 2, 24, false, true, hoursAgo(-4));
+
+  // Resolved critical — UPS
+  a("UPS switched to battery power — mains restored after 12 min", "critical", "ups", "resolved", 360, 359.8, 1, true, false);
+
+  // Resolved warning — temperature
+  a("NVMe temperature exceeded 50°C threshold", "warning", "smart", "resolved", 240, 192, 3, true, false);
+
+  // Resolved warning — network
+  a("Network interface eth0 link flapped (2.3s outage)", "warning", "network", "resolved", 168, 167.99, 1, true, false);
+
+  // Resolved info — scan
+  a("Diagnostic scan completed — 3 warnings found", "info", "system", "resolved", 2, 1.95, 1, false, false);
+
+  return alerts;
+}
+
+function buildIncidents(p: PlatformProfile): unknown[] {
+  return [
+    { id: "inc-001", type: "service_check", severity: "critical", title: "Service check failed: Pi-hole Admin", description: "Pi-hole at http://10.0.1.53/admin unreachable for 60 min. 12 consecutive failures. DNS resolution affected for Pi-hole clients.", timestamp: hoursAgo(1), resolved: false, resolved_at: null, source: "service_checks", affected_entity: "service:Pi-hole Admin" },
+    { id: "inc-002", type: "service_check", severity: "critical", title: "DNS resolution check failed: Local DNS", description: "Local DNS at 10.0.1.53 is not resolving queries. 8 consecutive failures.", timestamp: hoursAgo(0.8), resolved: false, resolved_at: null, source: "service_checks", affected_entity: "service:Local DNS (Pi-hole)" },
+    { id: "inc-003", type: "threshold_breach", severity: "warning", title: `Disk usage exceeded threshold on ${p.drives[0].label}`, description: `${p.drives[0].label} (${p.drives[0].model}) at ${p.drives[0].usedPct}%. Growth rate ~0.3%/day. Projected full in ~60 days.`, timestamp: hoursAgo(18), resolved: false, resolved_at: null, source: "disk_analyzer", affected_entity: `/dev/${p.drives[0].device}` },
+    { id: "inc-004", type: "fleet_event", severity: "warning", title: "Fleet server 'Remote Backup' went offline", description: "Fleet server at http://192.168.50.10:8060 stopped responding 48h ago.", timestamp: hoursAgo(48), resolved: false, resolved_at: null, source: "fleet_poller", affected_entity: "fleet:Remote Backup" },
+    { id: "inc-005", type: "container_event", severity: "warning", title: `Container '${p.containers[0]?.name || "plex"}' restarted (OOM killed)`, description: "Exited with code 137 (out of memory). Auto-restarted by Docker.", timestamp: hoursAgo(36), resolved: true, resolved_at: hoursAgo(35.9), source: "docker_monitor", affected_entity: `container:${p.containers[0]?.name || "plex"}` },
+    { id: "inc-006", type: "threshold_breach", severity: "warning", title: "NVMe temperature exceeded 50°C", description: "Cache drive hit 53°C during heavy I/O. Normalized to 42°C after load decreased.", timestamp: hoursAgo(96), resolved: true, resolved_at: hoursAgo(94), source: "smart_monitor", affected_entity: `/dev/${p.drives[p.drives.length - 1].device}` },
+    { id: "inc-007", type: "network_event", severity: "warning", title: "Network interface eth0 link flapped", description: "Interface down for 2.3s then recovered. Correlated with upstream switch firmware upgrade.", timestamp: hoursAgo(168), resolved: true, resolved_at: hoursAgo(167.99), source: "network_monitor", affected_entity: "interface:eth0" },
+    { id: "inc-008", type: "power_event", severity: "critical", title: "UPS switched to battery — mains power lost", description: "Utility power lost at 03:42 AM. UPS ran on battery for 12 min at 35% load before mains restored.", timestamp: hoursAgo(360), resolved: true, resolved_at: hoursAgo(359.8), source: "ups_monitor", affected_entity: "ups:CyberPower CP1500PFCLCD" },
+    { id: "inc-009", type: "notification_event", severity: "info", title: "Alert delivered to Discord", description: "Critical alert 'Pi-hole Admin failed' delivered to Discord #nas-alerts. Latency: 245ms.", timestamp: hoursAgo(0.9), resolved: true, resolved_at: hoursAgo(0.89), source: "notifier", affected_entity: "webhook:Discord - #nas-alerts" },
+    { id: "inc-010", type: "system_event", severity: "info", title: "Diagnostic scan completed", description: "6-hour scan completed in 4.2s. All subsystems checked. 3 warnings, 2 critical issues found.", timestamp: hoursAgo(2), resolved: true, resolved_at: hoursAgo(1.95), source: "scheduler", affected_entity: "system" },
+  ];
+}
+
+function buildNotificationLog(): unknown[] {
+  return [
+    { id: 1, webhook_name: "Discord - #nas-alerts", webhook_type: "discord", status: "success", findings_count: 3, error: "", timestamp: hoursAgo(0.9), latency_ms: 245 },
+    { id: 2, webhook_name: "Slack - #infrastructure", webhook_type: "slack", status: "success", findings_count: 1, error: "", timestamp: hoursAgo(0.9), latency_ms: 312 },
+    { id: 3, webhook_name: "Ntfy - phone alerts", webhook_type: "ntfy", status: "success", findings_count: 1, error: "", timestamp: hoursAgo(0.9), latency_ms: 189 },
+    { id: 4, webhook_name: "Discord - #nas-alerts", webhook_type: "discord", status: "success", findings_count: 2, error: "", timestamp: hoursAgo(6.9), latency_ms: 198 },
+    { id: 5, webhook_name: "Discord - #nas-alerts", webhook_type: "discord", status: "failed", findings_count: 4, error: "HTTP 429: rate limited", timestamp: hoursAgo(12.5), latency_ms: 0 },
+    { id: 6, webhook_name: "Slack - #infrastructure", webhook_type: "slack", status: "success", findings_count: 1, error: "", timestamp: hoursAgo(24.1), latency_ms: 287 },
+    { id: 7, webhook_name: "Ntfy - phone alerts", webhook_type: "ntfy", status: "success", findings_count: 2, error: "", timestamp: hoursAgo(24.2), latency_ms: 201 },
+    { id: 8, webhook_name: "Discord - #nas-alerts", webhook_type: "discord", status: "success", findings_count: 5, error: "", timestamp: hoursAgo(48), latency_ms: 178 },
+  ];
+}
+
 function buildServiceChecks(): unknown[] {
   const now = new Date().toISOString();
   const checks: unknown[] = [];
@@ -377,22 +456,39 @@ function buildServiceChecks(): unknown[] {
     });
   };
 
-  // ── User-configured checks ──
-  sc("sc-gateway", "Gateway", "ping", "10.0.1.1", true, 2, "critical");
+  // ── Ping checks ──
+  sc("sc-gateway", "Gateway", "ping", "10.0.1.1", true, 1, "critical");
+  sc("sc-dns-cf", "Cloudflare DNS", "ping", "1.1.1.1", true, 12, "critical");
+  sc("sc-dns-google", "Google DNS", "ping", "8.8.8.8", true, 18, "info");
+  sc("sc-switch", "Core Switch", "ping", "10.0.1.2", true, 1, "warning");
+
+  // ── HTTP checks ──
   sc("sc-nas-doctor", "NAS Doctor", "http", "http://localhost:8060/api/v1/health", true, 8, "critical");
   sc("sc-plex", "Plex Media Server", "http", "http://localhost:32400/web", true, 42, "warning");
-  sc("sc-pihole", "Pi-hole DNS", "http", "http://10.0.1.53/admin", false, 0, "critical", 12);
   sc("sc-nextcloud", "Nextcloud", "http", "https://cloud.example.com/status.php", true, 185, "warning");
   sc("sc-grafana", "Grafana", "http", "http://localhost:3000/api/health", true, 18, "warning");
   sc("sc-router", "Router Admin", "http", "http://10.0.1.1", true, 5, "warning");
-  sc("sc-dns-ext", "External DNS", "ping", "1.1.1.1", true, 12, "critical");
-  sc("sc-google-dns", "Google DNS", "ping", "8.8.8.8", true, 15, "info");
   sc("sc-home-assistant", "Home Assistant", "http", "http://10.0.1.55:8123", true, 35, "warning");
-  sc("sc-adguard", "AdGuard Home", "http", "http://10.0.1.53:3000", false, 0, "warning", 8);
+  sc("sc-pihole", "Pi-hole Admin", "http", "http://10.0.1.53/admin", false, 0, "critical", 12);
 
-  // ── Fleet-auto-created checks (created when servers are added to fleet) ──
-  sc("fleet-http-10.0.1.50:8060", "Fleet: Backup NAS", "http", "http://192.168.1.50:8060/api/v1/health", true, 22, "critical");
-  sc("fleet-http-10.0.1.51:8060", "Fleet: Media Server", "http", "http://192.168.1.51:8060/api/v1/health", true, 18, "critical");
+  // ── TCP checks ──
+  sc("sc-ssh", "SSH Server", "tcp", "10.0.1.50:22", true, 3, "critical");
+  sc("sc-mariadb", "MariaDB", "tcp", "10.0.1.50:3306", true, 2, "warning");
+  sc("sc-redis", "Redis Cache", "tcp", "10.0.1.50:6379", true, 1, "info");
+  sc("sc-mqtt", "MQTT Broker", "tcp", "10.0.1.55:1883", true, 2, "warning");
+
+  // ── DNS checks ──
+  sc("sc-dns-local", "Local DNS (Pi-hole)", "dns", "10.0.1.53", false, 0, "critical", 8);
+  sc("sc-dns-resolve", "Public DNS Resolution", "dns", "1.1.1.1", true, 15, "critical");
+
+  // ── SMB / NFS checks ──
+  sc("sc-smb-media", "SMB: Media Share", "smb", "//10.0.1.50/media", true, 8, "warning");
+  sc("sc-smb-backup", "SMB: Backup Share", "smb", "//10.0.1.50/backups", true, 12, "warning");
+  sc("sc-nfs-docker", "NFS: Docker Volumes", "nfs", "10.0.1.50:/mnt/cache/appdata", true, 5, "critical");
+
+  // ── Fleet-auto-created checks ──
+  sc("fleet-http-192.168.1.50:8060", "Fleet: Backup NAS", "http", "http://192.168.1.50:8060/api/v1/health", true, 22, "critical");
+  sc("fleet-http-192.168.1.51:8060", "Fleet: Media Server", "http", "http://192.168.1.51:8060/api/v1/health", true, 18, "critical");
   sc("fleet-http-10.0.0.10:8060", "Fleet: Proxmox Node 1", "http", "http://10.0.0.10:8060/api/v1/health", true, 28, "critical");
   sc("fleet-http-192.168.50.10:8060", "Fleet: Remote Backup", "http", "http://192.168.50.10:8060/api/v1/health", false, 0, "critical", 576);
 
