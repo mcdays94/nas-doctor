@@ -12,10 +12,9 @@
   <strong>Local NAS diagnostic and monitoring tool.</strong><br>
   Run it as a Docker container on your Unraid, TrueNAS, Synology, Proxmox, or Kubernetes cluster.<br>
   Beautiful dashboards, Prometheus metrics, webhook alerts — no cloud account required.<br>
-  <code>amd64</code> + <code>arm64</code> (Raspberry Pi, Apple Silicon)
 </p>
 
-> **Alpha** — NAS Doctor is in alpha. Features may be incomplete, bugs are expected, and breaking changes can occur between releases. Only tested on Unraid. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
+> **Alpha** — NAS Doctor is in alpha. Features may be incomplete, bugs are expected, and breaking changes can occur between releases. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
 <p align="center">
   <a href="https://nasdoctordemo.mdias.info"><img src="https://img.shields.io/badge/Live%20Demo-nasdoctordemo.mdias.info-6366f1?style=flat-square&logo=cloudflare&logoColor=white" alt="Live Demo"></a>
