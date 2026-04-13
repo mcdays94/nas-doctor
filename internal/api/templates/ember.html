@@ -442,6 +442,27 @@ body {
   transition:height 0.15s ease;
 }
 
+/* Scroll fade overlays */
+.sf{position:absolute;pointer-events:none;z-index:2;opacity:0;transition:opacity 0.25s}
+.sf-h{top:0;bottom:0;width:40px}
+.sf-v{left:0;right:0;height:40px}
+.sf-l{left:0;border-radius:inherit}
+.sf-r{right:0;border-radius:inherit}
+.sf-b{bottom:0;border-radius:inherit}
+.sf.show{opacity:1}
+
+/* Section resize */
+.section-block{position:relative}
+.section-block.sb-resized{overflow:hidden;scrollbar-width:thin}
+.section-block.sb-resized::-webkit-scrollbar{width:5px}
+.section-block.sb-resized::-webkit-scrollbar-track{background:transparent}
+.section-block.sb-resized::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.sb-handle{position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);width:48px;height:8px;cursor:ns-resize;z-index:3;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.15s}
+.section-block:hover .sb-handle{opacity:1}
+.sb-handle::after{content:'';width:32px;height:3px;border-radius:2px;background:var(--border);transition:background 0.15s}
+.sb-handle:hover::after{background:var(--text-tertiary)}
+.sb-handle:active::after{background:var(--blue)}
+
 .col-right {
   display: flex;
   flex-direction: column;
@@ -1055,6 +1076,41 @@ td.mono {
     return d.innerHTML;
   }
 
+  function fmtBytes(b) {
+    if (!b || b <= 0) return "0 B";
+    var units = ["B", "KB", "MB", "GB", "TB"];
+    var i = 0;
+    while (b >= 1024 && i < units.length - 1) { b /= 1024; i++; }
+    return b.toFixed(i === 0 ? 0 : 1) + " " + units[i];
+  }
+
+  var _chartRange = 1;
+
+  function _renderContainerCard(cm, idx) {
+    var h = "";
+    var cpuClass = cm.cpu_percent > 200 ? "td-crit" : cm.cpu_percent > 80 ? "td-warn" : "td-healthy";
+    var memClass = cm.mem_percent > 95 ? "td-crit" : cm.mem_percent > 80 ? "td-warn" : "td-healthy";
+    h += "<div class=\"card-static\" style=\"margin-bottom:6px;padding:12px\">";
+    h += "<div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:6px\">";
+    h += "<span style=\"font-weight:600;font-size:13px;color:var(--text-primary)\">" + esc(cm.name) + "</span>";
+    h += "<span style=\"font-size:11px;color:var(--text-tertiary);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">" + esc(cm.image) + "</span>";
+    h += "</div>";
+    h += "<div style=\"display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);flex-wrap:wrap;margin-bottom:8px\">";
+    h += "<span class=\"" + cpuClass + "\">CPU: <strong>" + (cm.cpu_percent || 0).toFixed(1) + "%</strong></span>";
+    h += "<span class=\"" + memClass + "\">Mem: <strong>" + (cm.mem_mb || 0).toFixed(0) + " MB (" + (cm.mem_percent || 0).toFixed(1) + "%)</strong></span>";
+    if (cm.net_in_bytes > 0 || cm.net_out_bytes > 0) h += "<span>Net: <strong style=\"color:var(--text-primary)\">" + fmtBytes(cm.net_in_bytes) + " / " + fmtBytes(cm.net_out_bytes) + "</strong></span>";
+    if (cm.block_read_bytes > 0 || cm.block_write_bytes > 0) h += "<span>Disk: <strong style=\"color:var(--text-primary)\">" + fmtBytes(cm.block_read_bytes) + " / " + fmtBytes(cm.block_write_bytes) + "</strong></span>";
+    h += "</div>";
+    h += "<canvas id=\"cmetrics-chart-" + idx + "\" data-container=\"" + esc(cm.name) + "\" style=\"width:100%;height:60px\"></canvas>";
+    h += "</div>";
+    return h;
+  }
+
+  function _rangeBtn(hours, cls, onclick) {
+    var active = _chartRange === hours;
+    return "<button class=\"" + cls + (active ? " active" : "") + "\" data-hours=\"" + hours + "\" onclick=\"" + onclick + "(" + hours + ",true)\" style=\"font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:" + (active ? "var(--surface-200)" : "transparent") + ";color:" + (active ? "var(--text-primary)" : "var(--text-tertiary)") + ";cursor:pointer\">" + (hours === 1 ? "1H" : hours === 24 ? "1D" : "1W") + "</button>";
+  }
+
   function fmtPct(n) {
     if (n == null) return "-";
     return n.toFixed(1) + "%";
@@ -1490,32 +1546,62 @@ td.mono {
 
     /* ==== Section: Docker ==== */
     html += "<div class=\"section-block\" data-section=\"docker\">";
-    html += "<div class=\"section\" style=\"margin-top:0\">";
-    html += "<div class=\"section-title\">Docker</div>";
+    var mergedContainers = (_cachedStatus && _cachedStatus.sections && _cachedStatus.sections.merged_containers);
     if (snapshot && snapshot.docker && snapshot.docker.available && snapshot.docker.containers && snapshot.docker.containers.length > 0) {
-      html += "<div class=\"table-wrap\">";
-      html += "<table>";
-      html += "<thead><tr>";
-      html += "<th>Name</th><th>State</th><th>CPU</th><th>Mem</th>";
-      html += "</tr></thead>";
-      html += "<tbody>";
-      for (var c = 0; c < snapshot.docker.containers.length; c++) {
-        var ct = snapshot.docker.containers[c];
-        html += "<tr title=\"" + esc(ct.image || "") + "\">";
-        html += "<td style=\"font-weight:500;font-size:12px\">" + esc(ct.name) + "</td>";
-        html += "<td style=\"" + containerColor(ct.state) + ";font-size:12px\"><span class=\"status-dot " + containerDot(ct.state) + "\"></span>" + esc(ct.state) + "</td>";
-        html += "<td class=\"mono\">" + fmtPct(ct.cpu_percent) + "</td>";
-        html += "<td class=\"mono\">" + (ct.mem_mb != null ? ct.mem_mb.toFixed(0) + "M" : "-") + "</td>";
-        html += "</tr>";
+      var allContainers = snapshot.docker.containers;
+      var runningCsMerged = allContainers.filter(function(c) { return c.state === "running"; });
+      var stoppedCs = allContainers.filter(function(c) { return c.state !== "running"; });
+      html += "<div class=\"section\" style=\"margin-top:0\">";
+      if (mergedContainers && runningCsMerged.length > 0) {
+        html += "<div class=\"section-title\" style=\"display:flex;align-items:center;justify-content:space-between\">Docker (" + allContainers.length + ")<div class=\"cmetrics-range-btns\" style=\"display:flex;gap:4px\">";
+        html += _rangeBtn(1, "cmetrics-range-btn", "loadContainerChart");
+        html += _rangeBtn(24, "cmetrics-range-btn", "loadContainerChart");
+        html += _rangeBtn(168, "cmetrics-range-btn", "loadContainerChart");
+        html += "</div></div>";
+        for (var cmi = 0; cmi < runningCsMerged.length; cmi++) { html += _renderContainerCard(runningCsMerged[cmi], cmi); }
+        if (stoppedCs.length > 0) {
+          html += "<div style=\"font-size:11px;color:var(--text-dim);margin-top:8px\">" + stoppedCs.length + " stopped: ";
+          html += stoppedCs.map(function(c) { return esc(c.name); }).join(", ") + "</div>";
+        }
+      } else {
+        html += "<div class=\"section-title\">Docker</div>";
+        if (allContainers.length > 0) {
+          html += "<div class=\"table-wrap\"><table><thead><tr><th>Name</th><th>State</th><th>CPU</th><th>Mem</th></tr></thead><tbody>";
+          for (var c = 0; c < allContainers.length; c++) {
+            var ct = allContainers[c];
+            html += "<tr title=\"" + esc(ct.image || "") + "\">";
+            html += "<td style=\"font-weight:500;font-size:12px\">" + esc(ct.name) + "</td>";
+            html += "<td style=\"" + containerColor(ct.state) + ";font-size:12px\"><span class=\"status-dot " + containerDot(ct.state) + "\"></span>" + esc(ct.state) + "</td>";
+            html += "<td class=\"mono\">" + fmtPct(ct.cpu_percent) + "</td>";
+            html += "<td class=\"mono\">" + (ct.mem_mb != null ? ct.mem_mb.toFixed(0) + "M" : "-") + "</td>";
+            html += "</tr>";
+          }
+          html += "</tbody></table></div>";
+        }
       }
-      html += "</tbody>";
-      html += "</table>";
       html += "</div>";
     } else {
-      html += "<div class=\"card-static\"><div class=\"empty-state\">No Docker containers found.</div></div>";
+      html += "<div class=\"section\" style=\"margin-top:0\"><div class=\"section-title\">Docker</div>";
+      html += "<div class=\"card-static\"><div class=\"empty-state\">No Docker containers found.</div></div></div>";
     }
-    html += "</div>"; /* section */
     html += "</div>"; /* section-block docker */
+
+    /* ==== Section: Container Metrics (standalone, when not merged) ==== */
+    html += "<div class=\"section-block\" data-section=\"container_metrics\">";
+    if (!mergedContainers && snapshot && snapshot.docker && snapshot.docker.available && snapshot.docker.containers) {
+      var runningCs = snapshot.docker.containers.filter(function(c) { return c.state === "running"; });
+      if (runningCs.length > 0) {
+        html += "<div class=\"section\" style=\"margin-top:0\">";
+        html += "<div class=\"section-title\" style=\"display:flex;align-items:center;justify-content:space-between\">Container Metrics (" + runningCs.length + ")<div class=\"cmetrics-range-btns\" style=\"display:flex;gap:4px\">";
+        html += _rangeBtn(1, "cmetrics-range-btn", "loadContainerChart");
+        html += _rangeBtn(24, "cmetrics-range-btn", "loadContainerChart");
+        html += _rangeBtn(168, "cmetrics-range-btn", "loadContainerChart");
+        html += "</div></div>";
+        for (var cmi2 = 0; cmi2 < runningCs.length; cmi2++) { html += _renderContainerCard(runningCs[cmi2], cmi2); }
+        html += "</div>";
+      }
+    }
+    html += "</div>"; /* section-block container_metrics */
 
     /* ==== Section: ZFS Pools ==== */
     html += "<div class=\"section-block\" data-section=\"zfs\">";
@@ -1894,7 +1980,7 @@ td.mono {
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
     var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
-    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "gpu": sec.gpu !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "parity": sec.parity !== false };
+    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "container_metrics": sec.container_metrics !== false, "zfs": sec.zfs !== false, "gpu": sec.gpu !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "parity": sec.parity !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var blockMap={};var visibleItems=[];
@@ -1907,7 +1993,64 @@ td.mono {
     if(window.NasDrag)NasDrag.init();
     if(window.NasSwipe)NasSwipe.init();
     initSortBars();
+    NasScrollFade.init();
   }
+
+  window.NasScrollFade = {
+    _done: [], _heights: {}, _saveTimer: null,
+    init: function() {
+      for (var i = 0; i < this._done.length; i++) { try { this._done[i](); } catch(e) {} }
+      this._done = [];
+      this._heights = (_cachedStatus && _cachedStatus.section_heights) ? JSON.parse(JSON.stringify(_cachedStatus.section_heights)) : {};
+      var candidates = document.querySelectorAll('.table-wrap, .table-container, [style*="overflow-x:auto"], [style*="overflow-x: auto"]');
+      for (var j = 0; j < candidates.length; j++) this._setupH(candidates[j]);
+      var blocks = document.querySelectorAll('.section-block');
+      for (var k = 0; k < blocks.length; k++) { if (blocks[k].offsetHeight > 60) this._setupV(blocks[k]); }
+    },
+    _bg: function(el) {
+      for (var n = el; n && n !== document.body; n = n.parentElement) { var bg = getComputedStyle(n).backgroundColor; if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg; }
+      return getComputedStyle(document.body).backgroundColor || '#1c1917';
+    },
+    _saveHeights: function() {
+      var self = this; if (self._saveTimer) clearTimeout(self._saveTimer);
+      self._saveTimer = setTimeout(function() { fetch("/api/v1/settings/section-heights", { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify(self._heights) }).catch(function() {}); }, 500);
+    },
+    _setupH: function(scrollEl) {
+      if (scrollEl._sfH) return; scrollEl._sfH = true;
+      var hasBg = getComputedStyle(scrollEl).backgroundColor;
+      var container = (hasBg && hasBg !== 'rgba(0, 0, 0, 0)' && hasBg !== 'transparent') ? scrollEl : scrollEl.parentElement;
+      var bg = this._bg(container); container.style.position = 'relative';
+      var fL = document.createElement('div'); fL.className = 'sf sf-h sf-l';
+      var fR = document.createElement('div'); fR.className = 'sf sf-h sf-r';
+      fL.style.background = 'linear-gradient(to right, ' + bg + ', transparent)';
+      fR.style.background = 'linear-gradient(to left, ' + bg + ', transparent)';
+      container.appendChild(fL); container.appendChild(fR);
+      var update = function() { fL.classList.toggle('show', scrollEl.scrollLeft > 2); fR.classList.toggle('show', scrollEl.scrollWidth - scrollEl.clientWidth - scrollEl.scrollLeft > 2); };
+      scrollEl.addEventListener('scroll', update, { passive: true }); update();
+      if (window.ResizeObserver) new ResizeObserver(update).observe(scrollEl);
+      this._done.push(function() { fL.remove(); fR.remove(); });
+    },
+    _setupV: function(block) {
+      if (block._sfV) return; block._sfV = true; var self = this;
+      var key = block.getAttribute('data-section') || ('blk-' + Math.random().toString(36).slice(2,8));
+      var bg = this._bg(block);
+      var fB = document.createElement('div'); fB.className = 'sf sf-v sf-b';
+      fB.style.background = 'linear-gradient(to top, ' + bg + ', transparent)';
+      block.appendChild(fB);
+      var handle = document.createElement('div'); handle.className = 'sb-handle'; block.appendChild(handle);
+      if (self._heights[key]) { block.classList.add('sb-resized'); block.style.height = self._heights[key] + 'px'; block.style.overflow = 'hidden'; }
+      var startY, startH;
+      function onMove(e) { var dy = (e.touches ? e.touches[0].clientY : e.clientY) - startY; block.style.height = Math.max(60, startH + dy) + 'px'; }
+      function onUp() { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); document.body.style.userSelect = ''; document.body.style.cursor = ''; var h = parseInt(block.style.height); if (h > 0) { self._heights[key] = h; } else { delete self._heights[key]; } self._saveHeights(); updateFade(); }
+      function onDown(e) { e.preventDefault(); startY = e.touches ? e.touches[0].clientY : e.clientY; startH = block.offsetHeight; if (!block.classList.contains('sb-resized')) { block.classList.add('sb-resized'); block.style.height = startH + 'px'; block.style.overflow = 'hidden'; } document.body.style.userSelect = 'none'; document.body.style.cursor = 'ns-resize'; document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); document.addEventListener('touchmove', onMove, { passive: false }); document.addEventListener('touchend', onUp); }
+      handle.addEventListener('mousedown', onDown); handle.addEventListener('touchstart', onDown, { passive: false });
+      handle.addEventListener('dblclick', function() { block.classList.remove('sb-resized'); block.style.height = ''; block.style.overflow = ''; delete self._heights[key]; self._saveHeights(); updateFade(); });
+      function updateFade() { var overflows = block.classList.contains('sb-resized') && block.scrollHeight > block.clientHeight + 4; fB.classList.toggle('show', overflows); if (overflows) block.style.overflow = 'auto'; }
+      block.addEventListener('scroll', function() { updateFade(); }, { passive: true });
+      if (window.ResizeObserver) new ResizeObserver(updateFade).observe(block); updateFade();
+      this._done.push(function() { fB.remove(); handle.remove(); block.classList.remove('sb-resized'); block.style.height = ''; block.style.overflow = ''; });
+    }
+  };
 
   function _renderSparklines(snapshot) {
     fetch("/api/v1/sparklines")
@@ -1935,7 +2078,75 @@ td.mono {
           }
         }
       }).catch(function() {});
-    loadGPUChart(1);
+    _chartRange = (_cachedStatus && _cachedStatus.chart_range_hours) || 1;
+    loadGPUChart(_chartRange);
+    loadContainerChart(_chartRange);
+  }
+
+  function _saveChartRange(hours) {
+    _chartRange = hours;
+    fetch("/api/v1/settings/chart-range", { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({hours: hours}) }).catch(function() {});
+  }
+
+  window.loadContainerChart = function loadContainerChart(hours, save) {
+    if (save) { _saveChartRange(hours); loadGPUChart(hours); }
+    var btns = document.querySelectorAll(".cmetrics-range-btn");
+    for (var b = 0; b < btns.length; b++) {
+      var btn = btns[b];
+      if (parseInt(btn.getAttribute("data-hours")) === hours) {
+        btn.style.background = "var(--surface-200)"; btn.style.color = "var(--text-primary)";
+      } else {
+        btn.style.background = "transparent"; btn.style.color = "var(--text-tertiary)";
+      }
+    }
+    fetch("/api/v1/history/containers?hours=" + hours)
+      .then(function(r) { return r.json(); })
+      .then(function(points) {
+        if (!points || !points.length || !window.NasChart) return;
+        var byName = {};
+        for (var i = 0; i < points.length; i++) { var p = points[i]; if (!byName[p.name]) byName[p.name] = []; byName[p.name].push(p); }
+        var canvases = document.querySelectorAll("[id^='cmetrics-chart-']");
+        for (var ci = 0; ci < canvases.length; ci++) {
+          var el = canvases[ci];
+          var cname = el.getAttribute("data-container");
+          if (!cname || !byName[cname]) continue;
+          var data = byName[cname];
+          var cpuData = data.map(function(p) { return p.cpu_percent; });
+          var memData = data.map(function(p) { return p.mem_mb; });
+          var labels = data.map(function(p) { var d = new Date(p.timestamp); if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (hours <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
+          try { NasChart.area(el.id, { datasets: [{ data: cpuData, color: "#3b82f6", label: "CPU %" }, { data: memData, color: "#f97316", label: "Mem MB" }], labels: labels, width: el.offsetWidth || 400, height: 60, showDots: false, margins: { top: 4, bottom: 16, left: 30, right: 8 } }); } catch(e) {}
+        }
+      }).catch(function() {});
+  }
+
+  window.loadContainerChart = function loadContainerChart(hours) {
+    var btns = document.querySelectorAll(".cmetrics-range-btn");
+    for (var b = 0; b < btns.length; b++) {
+      var btn = btns[b];
+      if (parseInt(btn.getAttribute("data-hours")) === hours) {
+        btn.style.background = "var(--surface-200)"; btn.style.color = "var(--text-primary)";
+      } else {
+        btn.style.background = "transparent"; btn.style.color = "var(--text-tertiary)";
+      }
+    }
+    fetch("/api/v1/history/containers?hours=" + hours)
+      .then(function(r) { return r.json(); })
+      .then(function(points) {
+        if (!points || !points.length || !window.NasChart) return;
+        var byName = {};
+        for (var i = 0; i < points.length; i++) { var p = points[i]; if (!byName[p.name]) byName[p.name] = []; byName[p.name].push(p); }
+        var canvases = document.querySelectorAll("[id^='cmetrics-chart-']");
+        for (var ci = 0; ci < canvases.length; ci++) {
+          var el = canvases[ci];
+          var cname = el.getAttribute("data-container");
+          if (!cname || !byName[cname]) continue;
+          var data = byName[cname];
+          var cpuData = data.map(function(p) { return p.cpu_percent; });
+          var memData = data.map(function(p) { return p.mem_mb; });
+          var labels = data.map(function(p) { var d = new Date(p.timestamp); if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (hours <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
+          try { NasChart.area(el.id, { datasets: [{ data: cpuData, color: "#3b82f6", label: "CPU %" }, { data: memData, color: "#f97316", label: "Mem MB" }], labels: labels, width: el.offsetWidth || 400, height: 60, showDots: false, margins: { top: 4, bottom: 16, left: 30, right: 8 } }); } catch(e) {}
+        }
+      }).catch(function() {});
   }
 
   window.loadGPUChart = function loadGPUChart(hours) {

@@ -45,7 +45,8 @@ func collectDocker() (internal.DockerInfo, error) {
 	}
 
 	// Get resource usage for running containers
-	statsOut, err := execCmd("docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}")
+	statsOut, err := execCmd("docker", "stats", "--no-stream", "--format",
+		"{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}")
 	if err == nil {
 		for _, line := range strings.Split(statsOut, "\n") {
 			line = strings.TrimSpace(line)
@@ -53,7 +54,7 @@ func collectDocker() (internal.DockerInfo, error) {
 				continue
 			}
 			fields := strings.Split(line, "\t")
-			if len(fields) < 4 {
+			if len(fields) < 6 {
 				continue
 			}
 			name := fields[0]
@@ -71,6 +72,20 @@ func collectDocker() (internal.DockerInfo, error) {
 
 					memPctStr := strings.TrimSuffix(fields[3], "%")
 					info.Containers[i].MemPct, _ = strconv.ParseFloat(memPctStr, 64)
+
+					// Parse net I/O: "1.5MB / 2.3MB"
+					netParts := strings.Split(fields[4], "/")
+					if len(netParts) == 2 {
+						info.Containers[i].NetIn = parseDockerBytes(strings.TrimSpace(netParts[0]))
+						info.Containers[i].NetOut = parseDockerBytes(strings.TrimSpace(netParts[1]))
+					}
+
+					// Parse block I/O: "100MB / 50MB"
+					blkParts := strings.Split(fields[5], "/")
+					if len(blkParts) == 2 {
+						info.Containers[i].BlockRead = parseDockerBytes(strings.TrimSpace(blkParts[0]))
+						info.Containers[i].BlockWrite = parseDockerBytes(strings.TrimSpace(blkParts[1]))
+					}
 					break
 				}
 			}
@@ -93,6 +108,32 @@ func parseMemDocker(s string) float64 {
 	if strings.HasSuffix(s, "KiB") {
 		v, _ := strconv.ParseFloat(strings.TrimSuffix(s, "KiB"), 64)
 		return v / 1024
+	}
+	return 0
+}
+
+// parseDockerBytes parses docker stats byte strings (e.g. "1.5GB", "100MB", "50kB", "0B") into bytes.
+// Docker uses SI units (kB=1000, MB=1e6, GB=1e9, TB=1e12).
+func parseDockerBytes(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "0B" || s == "" || s == "--" {
+		return 0
+	}
+	suffixes := []struct {
+		suffix string
+		mult   float64
+	}{
+		{"TB", 1e12},
+		{"GB", 1e9},
+		{"MB", 1e6},
+		{"kB", 1e3},
+		{"B", 1},
+	}
+	for _, sf := range suffixes {
+		if strings.HasSuffix(s, sf.suffix) {
+			v, _ := strconv.ParseFloat(strings.TrimSuffix(s, sf.suffix), 64)
+			return v * sf.mult
+		}
 	}
 	return 0
 }

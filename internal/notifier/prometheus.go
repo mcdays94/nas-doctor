@@ -44,10 +44,15 @@ type Metrics struct {
 	smartSizeBytes    *prometheus.GaugeVec
 
 	// ── Docker ──
-	containerCPU   *prometheus.GaugeVec
-	containerMem   *prometheus.GaugeVec
-	containerState *prometheus.GaugeVec
-	containerTotal prometheus.Gauge
+	containerCPU        *prometheus.GaugeVec
+	containerMem        *prometheus.GaugeVec
+	containerMemPct     *prometheus.GaugeVec
+	containerNetIn      *prometheus.GaugeVec
+	containerNetOut     *prometheus.GaugeVec
+	containerBlockRead  *prometheus.GaugeVec
+	containerBlockWrite *prometheus.GaugeVec
+	containerState      *prometheus.GaugeVec
+	containerTotal      prometheus.Gauge
 
 	// ── Network ──
 	netInterfaceUp  *prometheus.GaugeVec
@@ -204,6 +209,11 @@ func NewMetrics() *Metrics {
 	containerLabels := []string{"name", "image"}
 	m.containerCPU = gaugeVec(ns, "docker", "container_cpu_percent", "Container CPU usage", containerLabels)
 	m.containerMem = gaugeVec(ns, "docker", "container_memory_bytes", "Container memory usage in bytes", containerLabels)
+	m.containerMemPct = gaugeVec(ns, "docker", "container_memory_percent", "Container memory usage percent", containerLabels)
+	m.containerNetIn = gaugeVec(ns, "docker", "container_net_in_bytes", "Container cumulative network bytes received", containerLabels)
+	m.containerNetOut = gaugeVec(ns, "docker", "container_net_out_bytes", "Container cumulative network bytes sent", containerLabels)
+	m.containerBlockRead = gaugeVec(ns, "docker", "container_block_read_bytes", "Container cumulative block bytes read", containerLabels)
+	m.containerBlockWrite = gaugeVec(ns, "docker", "container_block_write_bytes", "Container cumulative block bytes written", containerLabels)
 	m.containerState = gaugeVec(ns, "docker", "container_running", "Container running state (1=running, 0=stopped)", containerLabels)
 	m.containerTotal = gauge(ns, "docker", "container_count", "Total container count")
 
@@ -326,7 +336,9 @@ func NewMetrics() *Metrics {
 		m.smartHealthy, m.smartTemp, m.smartTempMax, m.smartReallocated, m.smartPending,
 		m.smartOffline, m.smartUDMACRC, m.smartCmdTimeout, m.smartSpinRetry,
 		m.smartPowerOnHours, m.smartSizeBytes,
-		m.containerCPU, m.containerMem, m.containerState, m.containerTotal,
+		m.containerCPU, m.containerMem, m.containerMemPct,
+		m.containerNetIn, m.containerNetOut, m.containerBlockRead, m.containerBlockWrite,
+		m.containerState, m.containerTotal,
 		m.netInterfaceUp, m.netInterfaceMTU,
 		m.upsBatteryPct, m.upsBatteryV, m.upsInputV, m.upsOutputV,
 		m.upsLoadPct, m.upsRuntimeMins, m.upsWattage, m.upsTemperature,
@@ -396,6 +408,11 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 	m.smartSizeBytes.Reset()
 	m.containerCPU.Reset()
 	m.containerMem.Reset()
+	m.containerMemPct.Reset()
+	m.containerNetIn.Reset()
+	m.containerNetOut.Reset()
+	m.containerBlockRead.Reset()
+	m.containerBlockWrite.Reset()
 	m.containerState.Reset()
 	m.netInterfaceUp.Reset()
 	m.netInterfaceMTU.Reset()
@@ -454,6 +471,11 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 		if running {
 			m.containerCPU.With(l).Set(c.CPU)
 			m.containerMem.With(l).Set(c.MemMB * 1024 * 1024)
+			m.containerMemPct.With(l).Set(c.MemPct)
+			m.containerNetIn.With(l).Set(c.NetIn)
+			m.containerNetOut.With(l).Set(c.NetOut)
+			m.containerBlockRead.With(l).Set(c.BlockRead)
+			m.containerBlockWrite.With(l).Set(c.BlockWrite)
 		}
 	}
 

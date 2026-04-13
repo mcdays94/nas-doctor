@@ -173,7 +173,7 @@ func main() {
 			}
 		}
 
-		// Generate hourly GPU snapshots for the past 48h (for 1h/1d chart granularity)
+		// Generate hourly GPU + container snapshots for the past 48h (for 1h/1d chart granularity)
 		for h := 47; h >= 1; h-- {
 			gpuSnap := demo.GenerateSnapshot()
 			gpuSnap.Timestamp = time.Now().Add(-time.Duration(h) * time.Hour)
@@ -203,9 +203,32 @@ func main() {
 					}
 				}
 			}
+			// Vary per-container metrics with time-of-day pattern
+			for j := range gpuSnap.Docker.Containers {
+				c := &gpuSnap.Docker.Containers[j]
+				if c.State != "running" {
+					continue
+				}
+				c.CPU = demo.Jitter(c.CPU*dayFactor, 40)
+				if c.CPU < 0 {
+					c.CPU = 0.1
+				}
+				c.MemMB = demo.Jitter(c.MemMB, 20)
+				if c.MemMB < 1 {
+					c.MemMB = 1
+				}
+				c.MemPct = demo.Jitter(c.MemPct, 20)
+				if c.MemPct < 0.1 {
+					c.MemPct = 0.1
+				}
+				c.NetIn = demo.Jitter(c.NetIn, 15)
+				c.NetOut = demo.Jitter(c.NetOut, 15)
+				c.BlockRead = demo.Jitter(c.BlockRead, 10)
+				c.BlockWrite = demo.Jitter(c.BlockWrite, 10)
+			}
 			gpuSnap.Findings = analyzer.Analyze(gpuSnap)
 			if err := store.SaveSnapshot(gpuSnap); err != nil {
-				logger.Warn("failed to save hourly GPU demo snapshot", "hour", h, "error", err)
+				logger.Warn("failed to save hourly demo snapshot", "hour", h, "error", err)
 			}
 		}
 
