@@ -369,37 +369,17 @@ go build -o nas-doctor ./cmd/nas-doctor
 
 ---
 
-## Themes
-
-NAS Doctor ships with 3 dashboard themes. Switch between them from Settings.
-
-| Theme | Description |
-|---|---|
-| **Midnight** (default) | Ultra-dark precision dashboard |
-| **Clean** | White, minimal gallery space |
-| **Ember** | macOS-native depth, serif typography, micro-animations |
-
 <p>
-  <img src="screenshots/midnight-top.jpg" alt="Midnight" width="380">
-  <img src="screenshots/clean-top.jpg" alt="Clean" width="380">
+  <img src="screenshots/service-checks-page.jpg" alt="Service Checks" width="380">
+  <img src="screenshots/alerts-page.jpg" alt="Alerts" width="380">
 </p>
 <p>
-  <img src="screenshots/ember-top.jpg" alt="Ember" width="380">
-</p>
-
-### More Pages
-
-<p>
-  <img src="screenshots/service-checks-page.jpg" alt="Service Checks Page" width="380">
-  <img src="screenshots/alerts-page.jpg" alt="Alerts Page" width="380">
+  <img src="screenshots/fleet-page.jpg" alt="Fleet" width="380">
+  <img src="screenshots/stats-page.jpg" alt="Stats" width="380">
 </p>
 <p>
-  <img src="screenshots/fleet-page.jpg" alt="Fleet Topology" width="380">
-  <img src="screenshots/parity-page.jpg" alt="Parity History" width="380">
-</p>
-<p>
-  <img src="screenshots/stats-page.jpg" alt="Stats Page" width="380">
-  <img src="screenshots/settings-page.jpg" alt="Settings Page" width="380">
+  <img src="screenshots/settings-page.jpg" alt="Settings" width="380">
+  <img src="screenshots/parity-page.jpg" alt="Parity" width="380">
 </p>
 
 ---
