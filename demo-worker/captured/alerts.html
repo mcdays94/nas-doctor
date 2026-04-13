@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NAS Doctor</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="/css/shared.css">
+</head>
+<body>
+<div class="toast-container" id="toasts"></div>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a><span class="logo-slogan">Sleep tight knowing your server never does.</span>
+      <span class="page-title">Alerts</span>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link">Dashboard</a>
+      <a href="/alerts" class="nav-link active">Alerts</a>
+      <a href="/service-checks" class="nav-link">Services</a>
+      <a href="/stats" class="nav-link">Stats</a>
+      <a href="/fleet" class="nav-link">Fleet</a>
+      <a href="/replacement-planner" class="nav-link">Planner</a>
+      <a href="/settings" class="nav-link" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
+      <a href="https://github.com/mcdays94/nas-doctor" class="nav-link" target="_blank" title="GitHub"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.02 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.82.58C20.56 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg></a>
+    </div>
+  </div>
+
+  <!-- Alert summary bar -->
+  <div class="summary-bar" id="alert-summary">
+    <div class="summary-stat critical"><span class="stat-count" id="sum-critical">-</span><span>Critical</span></div>
+    <div class="summary-stat warning"><span class="stat-count" id="sum-warning">-</span><span>Warning</span></div>
+    <div class="summary-stat info"><span class="stat-count" id="sum-info">-</span><span>Info</span></div>
+    <div class="summary-stat healthy"><span class="stat-count" id="sum-resolved">-</span><span>Resolved</span></div>
+  </div>
+
+  <!-- Action buttons -->
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:16px">
+    <button class="btn btn-secondary btn-sm" onclick="sendTestNotification()" id="test-notif-btn">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      Test Notification
+    </button>
+    <button class="customize-btn" onclick="openCustomizePanel()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7m-4 8h8m-8 4h6"/></svg>
+      Customize Layout
+    </button>
+  </div>
+
+  <!-- Card container (drag target) -->
+  <div id="card-container">
+
+    <!-- 1. Active Alerts -->
+    <div class="card" id="card-alerts" data-card-id="alerts" draggable="true">
+      <div class="card-header">
+        <div class="card-title">Active Alerts</div>
+        <div class="card-controls">
+          <div class="drag-handle" title="Drag to reorder"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></div>
+          <button class="collapse-btn" onclick="toggleCollapse(this)" title="Collapse"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
+        </div>
+      </div>
+      <div class="card-desc">Manage active alerts with acknowledge, snooze, and inspect lifecycle timelines.</div>
+      <div class="card-body">
+        <div class="form-row" style="margin-bottom:10px">
+          <div>
+            <label for="alerts-filter-status">Status filter</label>
+            <select id="alerts-filter-status" onchange="loadAlerts()">
+              <option value="open">Open</option>
+              <option value="acknowledged">Acknowledged</option>
+              <option value="snoozed">Snoozed</option>
+              <option value="resolved">Resolved</option>
+              <option value="">All</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-secondary" onclick="loadAlerts()">Refresh</button>
+          </div>
+        </div>
+        <div class="overflow-x">
+          <table class="log-table">
+            <thead>
+              <tr><th>ID</th><th>Severity</th><th>Title</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="alerts-body">
+              <tr><td colspan="6" class="log-empty">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="alert-events-panel" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>
+      </div>
+    </div>
+
+    <!-- 2. Incident Timeline -->
+    <div class="card" id="card-incidents" data-card-id="incidents" draggable="true">
+      <div class="card-header">
+        <div class="card-title">Incident Timeline & Correlation</div>
+        <div class="card-controls">
+          <div class="drag-handle" title="Drag to reorder"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></div>
+          <button class="collapse-btn" onclick="toggleCollapse(this)" title="Collapse"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
+        </div>
+      </div>
+      <div class="card-desc">Correlate alerts and notifications against CPU, memory, I/O wait, and disk temperature over selectable windows.</div>
+      <div class="card-body">
+        <div class="form-row" style="margin-bottom:10px">
+          <div>
+            <label for="timeline-range">Time range</label>
+            <select id="timeline-range" onchange="loadIncidentTimeline()">
+              <option value="24h">Last 24 hours</option>
+              <option value="7d" selected>Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+          </div>
+          <div>
+            <label for="timeline-severity">Severity filter</label>
+            <select id="timeline-severity" onchange="loadIncidentTimeline()">
+              <option value="">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="warning">Warning</option>
+              <option value="info">Info</option>
+            </select>
+          </div>
+        </div>
+        <div class="chart-card" style="margin-bottom:10px">
+          <div class="chart-label">Metrics (downsampled)</div>
+          <canvas id="timeline-metrics-chart" width="900" height="180" style="width:100%;height:180px"></canvas>
+        </div>
+        <div class="overflow-x">
+          <table class="log-table">
+            <thead>
+              <tr><th>Time</th><th>Type</th><th>Severity</th><th>Title/Source</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="timeline-body">
+              <tr><td colspan="6" class="log-empty">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="timeline-correlation" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>
+      </div>
+    </div>
+
+    <!-- 3. Predictive Trends -->
+    <div class="card" id="card-trends" data-card-id="trends" draggable="true">
+      <div class="card-header">
+        <div class="card-title">Predictive Trend Intelligence</div>
+        <div class="card-controls">
+          <div class="drag-handle" title="Drag to reorder"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></div>
+          <button class="collapse-btn" onclick="toggleCollapse(this)" title="Collapse"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
+        </div>
+      </div>
+      <div class="card-desc">Worsening-pattern detection for SMART counters with urgency and confidence guidance, plus parity risk markers.</div>
+      <div class="card-body">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-secondary" onclick="loadSmartTrends()">Refresh Trends</button>
+        </div>
+        <div id="parity-trend-summary" style="margin-bottom:10px;font-size:12px;color:var(--text2)"></div>
+        <div class="overflow-x">
+          <table class="log-table">
+            <thead>
+              <tr><th>Drive</th><th>Risk</th><th>Urgency</th><th>Confidence</th><th>Deltas</th><th>Recommendation</th></tr>
+            </thead>
+            <tbody id="smart-trends-body">
+              <tr><td colspan="6" class="log-empty">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Notification History -->
+    <div class="card" id="card-history" data-card-id="history" draggable="true">
+      <div class="card-header">
+        <div class="card-title">Notification History</div>
+        <div class="card-controls">
+          <div class="drag-handle" title="Drag to reorder"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></div>
+          <button class="collapse-btn" onclick="toggleCollapse(this)" title="Collapse"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
+        </div>
+      </div>
+      <div class="card-desc">Recent webhook delivery attempts. <span class="log-refresh">Auto-refreshes every 60s.</span></div>
+      <div class="card-body">
+        <div class="overflow-x">
+          <table class="log-table">
+            <thead>
+              <tr><th>Time</th><th>Webhook</th><th>Type</th><th>Status</th><th>Findings</th><th>Error</th></tr>
+            </thead>
+            <tbody id="log-body">
+              <tr><td colspan="6" class="log-empty">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /card-container -->
+</div>
+
+<!-- Customize panel overlay -->
+<div class="customize-overlay" id="customize-overlay" onclick="closeCustomizePanel()"></div>
+<div class="customize-panel" id="customize-panel">
+  <div class="customize-panel-title">Customize Layout</div>
+  <div class="customize-panel-desc">Drag cards to reorder. Toggle visibility with the switch.</div>
+  <div id="customize-list"></div>
+  <div style="margin-top:16px;display:flex;gap:8px">
+    <button class="btn btn-primary" onclick="closeCustomizePanel()">Done</button>
+    <button class="btn btn-secondary" onclick="resetLayout()">Reset to Default</button>
+  </div>
+</div>
+
+<script src="/js/charts.js"></script>
+<script>
+/* ========== Layout persistence ========== */
+var LAYOUT_KEY = "nas-doctor-alerts-layout";
+var DEFAULT_ORDER = ["alerts", "incidents", "trends", "history"];
+var CARD_NAMES = { alerts: "Active Alerts", incidents: "Incident Timeline", trends: "Predictive Trends", history: "Notification History" };
+
+function getLayout() {
+  try {
+    var raw = localStorage.getItem(LAYOUT_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch(e) {}
+  return { order: DEFAULT_ORDER.slice(), collapsed: {}, hidden: {} };
+}
+
+function saveLayout(layout) {
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch(e) {}
+}
+
+function applyLayout() {
+  var layout = getLayout();
+  var container = document.getElementById("card-container");
+  var cards = {};
+  var children = container.querySelectorAll(".card[data-card-id]");
+  for (var i = 0; i < children.length; i++) {
+    cards[children[i].getAttribute("data-card-id")] = children[i];
+  }
+  // Reorder
+  for (var j = 0; j < layout.order.length; j++) {
+    var id = layout.order[j];
+    if (cards[id]) {
+      container.appendChild(cards[id]);
+      // Visibility
+      cards[id].style.display = layout.hidden[id] ? "none" : "";
+      // Collapsed
+      if (layout.collapsed[id]) cards[id].classList.add("collapsed");
+      else cards[id].classList.remove("collapsed");
+    }
+  }
+  // Any cards not in layout order (shouldn't happen, but safety)
+  for (var k in cards) {
+    if (layout.order.indexOf(k) === -1) {
+      container.appendChild(cards[k]);
+    }
+  }
+}
+
+function getCurrentOrder() {
+  var container = document.getElementById("card-container");
+  var children = container.querySelectorAll(".card[data-card-id]");
+  var order = [];
+  for (var i = 0; i < children.length; i++) {
+    order.push(children[i].getAttribute("data-card-id"));
+  }
+  return order;
+}
+
+/* ========== Collapse ========== */
+function toggleCollapse(btn) {
+  var card = btn.closest(".card");
+  card.classList.toggle("collapsed");
+  var layout = getLayout();
+  var id = card.getAttribute("data-card-id");
+  if (card.classList.contains("collapsed")) layout.collapsed[id] = true;
+  else delete layout.collapsed[id];
+  saveLayout(layout);
+}
+
+/* ========== Drag and drop ========== */
+var dragSrcEl = null;
+
+function initDragDrop() {
+  var container = document.getElementById("card-container");
+
+  container.addEventListener("dragstart", function(e) {
+    var card = e.target.closest(".card[data-card-id]");
+    if (!card) return;
+    // Only allow drag from handle
+    if (!e.target.closest(".drag-handle")) { e.preventDefault(); return; }
+    dragSrcEl = card;
+    card.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", card.getAttribute("data-card-id"));
+  });
+
+  container.addEventListener("dragover", function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    var afterElement = getDragAfterElement(container, e.clientY);
+    var placeholder = document.querySelector(".drag-placeholder");
+    if (!placeholder) {
+      placeholder = document.createElement("div");
+      placeholder.className = "drag-placeholder";
+      placeholder.style.height = (dragSrcEl ? dragSrcEl.offsetHeight : 60) + "px";
+    }
+    if (afterElement == null) {
+      container.appendChild(placeholder);
+    } else {
+      container.insertBefore(placeholder, afterElement);
+    }
+  });
+
+  container.addEventListener("dragleave", function(e) {
+    if (!e.relatedTarget || !container.contains(e.relatedTarget)) {
+      removePlaceholder();
+    }
+  });
+
+  container.addEventListener("drop", function(e) {
+    e.preventDefault();
+    removePlaceholder();
+    if (!dragSrcEl) return;
+    var afterElement = getDragAfterElement(container, e.clientY);
+    if (afterElement == null) {
+      container.appendChild(dragSrcEl);
+    } else {
+      container.insertBefore(dragSrcEl, afterElement);
+    }
+    dragSrcEl.classList.remove("dragging");
+    dragSrcEl = null;
+    // Persist new order
+    var layout = getLayout();
+    layout.order = getCurrentOrder();
+    saveLayout(layout);
+  });
+
+  container.addEventListener("dragend", function(e) {
+    removePlaceholder();
+    if (dragSrcEl) {
+      dragSrcEl.classList.remove("dragging");
+      dragSrcEl = null;
+    }
+  });
+}
+
+function getDragAfterElement(container, y) {
+  var draggableElements = Array.from(container.querySelectorAll(".card[data-card-id]:not(.dragging)"));
+  var closest = null;
+  var closestOffset = Number.NEGATIVE_INFINITY;
+  for (var i = 0; i < draggableElements.length; i++) {
+    var el = draggableElements[i];
+    var box = el.getBoundingClientRect();
+    var offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > closestOffset) {
+      closestOffset = offset;
+      closest = el;
+    }
+  }
+  return closest;
+}
+
+function removePlaceholder() {
+  var ph = document.querySelector(".drag-placeholder");
+  if (ph) ph.remove();
+}
+
+/* ========== Customize panel ========== */
+function openCustomizePanel() {
+  var layout = getLayout();
+  var list = document.getElementById("customize-list");
+  var html = "";
+  var order = layout.order.length ? layout.order : DEFAULT_ORDER;
+  for (var i = 0; i < order.length; i++) {
+    var id = order[i];
+    var name = CARD_NAMES[id] || id;
+    var visible = !layout.hidden[id];
+    html += '<div class="customize-item" data-customize-id="' + id + '" draggable="true">';
+    html += '<span class="grip"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="7" r="1.5"/><circle cx="15" cy="7" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="17" r="1.5"/><circle cx="15" cy="17" r="1.5"/></svg></span>';
+    html += '<span class="item-name">' + name + '</span>';
+    html += '<div class="toggle-wrap" onclick="toggleCardVisibility(\'' + id + '\', this)">';
+    html += '<div class="toggle' + (visible ? ' on' : '') + '"><div class="toggle-knob"></div></div>';
+    html += '</div>';
+    html += '</div>';
+  }
+  list.innerHTML = html;
+  document.getElementById("customize-panel").classList.add("visible");
+  document.getElementById("customize-overlay").classList.add("visible");
+  initCustomizeDrag();
+}
+
+function closeCustomizePanel() {
+  document.getElementById("customize-panel").classList.remove("visible");
+  document.getElementById("customize-overlay").classList.remove("visible");
+}
+
+function toggleCardVisibility(id, el) {
+  var toggle = el.querySelector(".toggle");
+  toggle.classList.toggle("on");
+  var layout = getLayout();
+  if (toggle.classList.contains("on")) {
+    delete layout.hidden[id];
+  } else {
+    layout.hidden[id] = true;
+  }
+  saveLayout(layout);
+  applyLayout();
+}
+
+function resetLayout() {
+  localStorage.removeItem(LAYOUT_KEY);
+  applyLayout();
+  closeCustomizePanel();
+  showToast("Layout reset to default", "success");
+}
+
+var customizeDragSrc = null;
+function initCustomizeDrag() {
+  var list = document.getElementById("customize-list");
+  list.addEventListener("dragstart", function(e) {
+    customizeDragSrc = e.target.closest(".customize-item");
+    if (customizeDragSrc) {
+      customizeDragSrc.style.opacity = "0.4";
+      e.dataTransfer.effectAllowed = "move";
+    }
+  });
+  list.addEventListener("dragover", function(e) {
+    e.preventDefault();
+    var item = e.target.closest(".customize-item");
+    if (item && item !== customizeDragSrc) {
+      var rect = item.getBoundingClientRect();
+      var mid = rect.top + rect.height / 2;
+      if (e.clientY < mid) {
+        list.insertBefore(customizeDragSrc, item);
+      } else {
+        list.insertBefore(customizeDragSrc, item.nextSibling);
+      }
+    }
+  });
+  list.addEventListener("dragend", function(e) {
+    if (customizeDragSrc) customizeDragSrc.style.opacity = "1";
+    customizeDragSrc = null;
+    // Persist new order from customize panel
+    var items = list.querySelectorAll(".customize-item");
+    var newOrder = [];
+    for (var i = 0; i < items.length; i++) {
+      newOrder.push(items[i].getAttribute("data-customize-id"));
+    }
+    var layout = getLayout();
+    layout.order = newOrder;
+    saveLayout(layout);
+    applyLayout();
+  });
+}
+
+/* ========== Toast ========== */
+function showToast(msg, type) {
+  var c = document.getElementById("toasts");
+  var t = document.createElement("div");
+  t.className = "toast toast-" + (type || "info");
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(function() {
+    t.style.animation = "toast-out 0.25s ease forwards";
+    setTimeout(function() { t.remove(); }, 260);
+  }, 3000);
+}
+
+/* ========== Helpers ========== */
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+/* ========== Theme ========== */
+function applyTheme(theme) {
+  document.body.classList.remove("theme-midnight", "theme-clean", "theme-ember");
+  if (theme === "clean" || theme === "ember") {
+    document.body.classList.add("theme-" + theme);
+  } else {
+    document.body.classList.add("theme-midnight");
+  }
+}
+(function() {
+  try { var stored = localStorage.getItem("nas-doctor-theme"); if (stored) applyTheme(stored); } catch(e) {}
+})();
+
+/* Load theme from API too */
+fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){
+  if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}
+}).catch(function(){});
+fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
+
+/* ========== Alert summary ========== */
+function loadAlertSummary() {
+  fetch("/api/v1/alerts?status=")
+    .then(function(r) { return r.json(); })
+    .then(function(alerts) {
+      if (!alerts) alerts = [];
+      var counts = { critical: 0, warning: 0, info: 0, resolved: 0 };
+      for (var i = 0; i < alerts.length; i++) {
+        var sev = (alerts[i].severity || "info").toLowerCase();
+        var status = (alerts[i].status || "open").toLowerCase();
+        if (status === "resolved") counts.resolved++;
+        else if (sev === "critical") counts.critical++;
+        else if (sev === "warning") counts.warning++;
+        else counts.info++;
+      }
+      document.getElementById("sum-critical").textContent = counts.critical;
+      document.getElementById("sum-warning").textContent = counts.warning;
+      document.getElementById("sum-info").textContent = counts.info;
+      document.getElementById("sum-resolved").textContent = counts.resolved;
+    })
+    .catch(function() {});
+}
+
+/* ========== Alerts ========== */
+function statusClassForAlert(status) {
+  var s = (status || "").toLowerCase();
+  if (s === "open") return "status-open";
+  if (s === "acknowledged") return "status-acknowledged";
+  if (s === "snoozed") return "status-snoozed";
+  if (s === "resolved") return "status-resolved";
+  return "status-open";
+}
+
+function loadAlerts() {
+  var status = document.getElementById("alerts-filter-status") ? document.getElementById("alerts-filter-status").value : "open";
+  var qs = status ? ("?status=" + encodeURIComponent(status)) : "";
+  fetch("/api/v1/alerts" + qs)
+    .then(function(r) { return r.json(); })
+    .then(function(alerts) {
+      var tbody = document.getElementById("alerts-body");
+      if (!tbody) return;
+      if (!alerts || alerts.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No alerts for this filter.</td></tr>';
+        return;
+      }
+      var html = "";
+      for (var i = 0; i < alerts.length; i++) {
+        var a = alerts[i];
+        var sev = escapeHtml(a.severity || "\u2014");
+        var created = a.created_at ? new Date(a.created_at).toLocaleString() : "\u2014";
+        var statusLabel = a.status || "open";
+        if (a.suppression_reason) statusLabel += " (" + a.suppression_reason + ")";
+
+        html += '<tr>';
+        html += '<td>#' + a.id + '</td>';
+        html += '<td>' + sev + '</td>';
+        html += '<td>' + escapeHtml(a.title || "") + '</td>';
+        html += '<td><span class="status-badge ' + statusClassForAlert(a.status) + '">' + escapeHtml(statusLabel) + '</span></td>';
+        html += '<td>' + escapeHtml(created) + '</td>';
+        html += '<td style="display:flex;gap:6px;flex-wrap:wrap">';
+        if (a.status === "open") {
+          html += '<button class="btn btn-secondary btn-sm" onclick="ackAlert(' + a.id + ')">Ack</button>';
+          html += '<button class="btn btn-secondary btn-sm" onclick="snoozeAlert(' + a.id + ')">Snooze</button>';
+        } else if (a.status === "acknowledged") {
+          html += '<button class="btn btn-secondary btn-sm" onclick="unackAlert(' + a.id + ')">Unack</button>';
+          html += '<button class="btn btn-secondary btn-sm" onclick="snoozeAlert(' + a.id + ')">Snooze</button>';
+        } else if (a.status === "snoozed") {
+          html += '<button class="btn btn-secondary btn-sm" onclick="unsnoozeAlert(' + a.id + ')">Unsnooze</button>';
+          html += '<button class="btn btn-secondary btn-sm" onclick="ackAlert(' + a.id + ')">Ack</button>';
+        }
+        html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertEvents(' + a.id + ', \'' + escapeHtml(a.title || "").replace(/'/g, "\\'") + '\')">Timeline</button>';
+        html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertCorrelation(' + a.id + ')">Correlation</button>';
+        html += '</td>';
+        html += '</tr>';
+      }
+      tbody.innerHTML = html;
+    })
+    .catch(function() {
+      var tbody = document.getElementById("alerts-body");
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="log-empty">Failed to load alerts.</td></tr>';
+    });
+}
+
+function postAlertAction(id, action, payload, successMsg) {
+  fetch("/api/v1/alerts/" + id + "/" + action, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: payload ? JSON.stringify(payload) : ""
+  })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Action failed"); });
+      return r.json();
+    })
+    .then(function() {
+      if (successMsg) showToast(successMsg, "success");
+      loadAlerts();
+      loadAlertSummary();
+    })
+    .catch(function(e) {
+      showToast("Alert action failed: " + e.message, "error");
+    });
+}
+
+function ackAlert(id) { postAlertAction(id, "ack", { actor: "alerts-ui" }, "Alert acknowledged"); }
+function unackAlert(id) { postAlertAction(id, "unack", { actor: "alerts-ui" }, "Alert unacknowledged"); }
+function unsnoozeAlert(id) { postAlertAction(id, "unsnooze", { actor: "alerts-ui" }, "Alert unsnoozed"); }
+
+function snoozeAlert(id) {
+  var hoursRaw = prompt("Snooze for how many hours?", "2");
+  if (hoursRaw === null) return;
+  var hours = parseFloat(hoursRaw);
+  if (!isFinite(hours) || hours <= 0) {
+    showToast("Invalid snooze duration", "error");
+    return;
+  }
+  var until = new Date(Date.now() + (hours * 3600 * 1000)).toISOString();
+  postAlertAction(id, "snooze", { actor: "alerts-ui", until: until }, "Alert snoozed");
+}
+
+function loadAlertEvents(id, title) {
+  var panel = document.getElementById("alert-events-panel");
+  if (!panel) return;
+  panel.innerHTML = "Loading timeline...";
+  fetch("/api/v1/alerts/" + id + "/events?limit=50")
+    .then(function(r) { return r.json(); })
+    .then(function(events) {
+      if (!events || events.length === 0) {
+        panel.innerHTML = "No timeline events for alert #" + id + ".";
+        return;
+      }
+      events.sort(function(a, b) {
+        var ta = a && a.created_at ? Date.parse(a.created_at) : 0;
+        var tb = b && b.created_at ? Date.parse(b.created_at) : 0;
+        return ta - tb;
+      });
+      var html = '<div style="font-weight:600;color:var(--text);margin-bottom:6px">Timeline for #' + id + ' - ' + escapeHtml(title || "") + '</div>';
+      html += '<div class="overflow-x"><table class="log-table"><thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Data</th></tr></thead><tbody>';
+      for (var i = 0; i < events.length; i++) {
+        var e = events[i];
+        var ts = e.created_at ? new Date(e.created_at).toLocaleString() : "\u2014";
+        var data = e.data ? JSON.stringify(e.data) : "\u2014";
+        html += '<tr>';
+        html += '<td>' + escapeHtml(ts) + '</td>';
+        html += '<td>' + escapeHtml(e.event_type || "") + '</td>';
+        html += '<td>' + escapeHtml(e.actor || "system") + '</td>';
+        html += '<td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(data) + '</td>';
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+      panel.innerHTML = html;
+    })
+    .catch(function() {
+      panel.innerHTML = "Failed to load timeline.";
+    });
+}
+
+/* ========== Incident Timeline ========== */
+function parseTimelineRange(rangeKey) {
+  var now = new Date();
+  var from = new Date(now.getTime());
+  if (rangeKey === "24h") from = new Date(now.getTime() - 24 * 3600 * 1000);
+  else if (rangeKey === "30d") from = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
+  else from = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+  return { from: from.toISOString(), to: now.toISOString() };
+}
+
+function loadIncidentTimeline() {
+  var rangeKey = document.getElementById("timeline-range") ? document.getElementById("timeline-range").value : "7d";
+  var sev = document.getElementById("timeline-severity") ? document.getElementById("timeline-severity").value : "";
+  var range = parseTimelineRange(rangeKey);
+  var qs = "?from=" + encodeURIComponent(range.from) + "&to=" + encodeURIComponent(range.to) + "&points=400";
+  if (sev) qs += "&severity=" + encodeURIComponent(sev);
+
+  fetch("/api/v1/incidents/timeline" + qs)
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Failed to load timeline"); });
+      return r.json();
+    })
+    .then(function(data) {
+      renderIncidentTimelineTable(data.events || []);
+      renderIncidentTimelineChart(data.system_metrics || [], data.avg_disk_temp || []);
+    })
+    .catch(function(e) {
+      var tbody = document.getElementById("timeline-body");
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="log-empty">' + escapeHtml(e.message || "Failed to load timeline") + '</td></tr>';
+    });
+}
+
+function renderIncidentTimelineTable(events) {
+  var tbody = document.getElementById("timeline-body");
+  if (!tbody) return;
+  if (!events || events.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No timeline events in this range.</td></tr>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < events.length; i++) {
+    var e = events[i];
+    var ts = e.time ? new Date(e.time).toLocaleString() : "\u2014";
+    html += "<tr>";
+    html += "<td>" + escapeHtml(ts) + "</td>";
+    html += "<td>" + escapeHtml(e.type || "") + "</td>";
+    html += "<td>" + escapeHtml(e.severity || "\u2014") + "</td>";
+    html += "<td>" + escapeHtml(e.title || e.source || "\u2014") + "</td>";
+    html += "<td>" + escapeHtml(e.status || "\u2014") + "</td>";
+    html += "<td>";
+    if (e.alert_id) {
+      html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertCorrelation(' + e.alert_id + ')">Correlation</button>';
+    } else {
+      html += "\u2014";
+    }
+    html += "</td>";
+    html += "</tr>";
+  }
+  tbody.innerHTML = html;
+}
+
+function renderIncidentTimelineChart(systemMetrics, tempMetrics) {
+  var chartId = "timeline-metrics-chart";
+  var chartEl = document.getElementById(chartId);
+  if (!chartEl || !window.NasChart) return;
+  if (!systemMetrics || systemMetrics.length < 2) {
+    try { chartEl.getContext("2d").clearRect(0, 0, chartEl.width, chartEl.height); } catch (e) {}
+    return;
+  }
+  var labels = systemMetrics.map(function(_, idx) { return idx; });
+  var cpu = systemMetrics.map(function(p) { return p.cpu_usage || 0; });
+  var mem = systemMetrics.map(function(p) { return p.mem_percent || 0; });
+  var io = systemMetrics.map(function(p) { return p.io_wait || 0; });
+  var temp = [];
+  if (tempMetrics && tempMetrics.length > 0) {
+    for (var i = 0; i < systemMetrics.length; i++) {
+      var idx = Math.round((i / Math.max(1, systemMetrics.length - 1)) * Math.max(0, tempMetrics.length - 1));
+      temp.push((tempMetrics[idx] && tempMetrics[idx].value) ? tempMetrics[idx].value : 0);
+    }
+  } else {
+    temp = cpu.map(function() { return 0; });
+  }
+  try {
+    NasChart.line(chartId, {
+      labels: labels,
+      datasets: [
+        { label: "CPU %", data: cpu, color: "#5e6ad2" },
+        { label: "Mem %", data: mem, color: "#7170ff" },
+        { label: "I/O Wait %", data: io, color: "#f59e0b" },
+        { label: "Avg Disk Temp C", data: temp, color: "#22c55e" }
+      ]
+    });
+  } catch (e) {}
+}
+
+function loadAlertCorrelation(alertId) {
+  var panel = document.getElementById("timeline-correlation");
+  if (!panel) return;
+  panel.innerHTML = "Loading correlation...";
+  fetch("/api/v1/incidents/correlation?alert_id=" + encodeURIComponent(alertId) + "&window_hours=24")
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Failed to load correlation"); });
+      return r.json();
+    })
+    .then(function(data) {
+      var alert = data.alert || {};
+      var before = data.before || {};
+      var during = data.during || {};
+      var after = data.after || {};
+      var html = '<div style="font-weight:600;color:var(--text);margin-bottom:6px">Correlation for alert #' + alertId + ': ' + escapeHtml(alert.title || "") + '</div>';
+      html += '<div class="overflow-x"><table class="log-table"><thead><tr><th>Window</th><th>Samples</th><th>CPU %</th><th>Mem %</th><th>I/O %</th><th>Avg Temp C</th></tr></thead><tbody>';
+      html += '<tr><td>Before</td><td>' + (before.samples || 0) + '</td><td>' + (before.avg_cpu || 0).toFixed(1) + '</td><td>' + (before.avg_memory || 0).toFixed(1) + '</td><td>' + (before.avg_io_wait || 0).toFixed(1) + '</td><td>' + (before.avg_disk_temp || 0).toFixed(1) + '</td></tr>';
+      html += '<tr><td>During</td><td>' + (during.samples || 0) + '</td><td>' + (during.avg_cpu || 0).toFixed(1) + '</td><td>' + (during.avg_memory || 0).toFixed(1) + '</td><td>' + (during.avg_io_wait || 0).toFixed(1) + '</td><td>' + (during.avg_disk_temp || 0).toFixed(1) + '</td></tr>';
+      html += '<tr><td>After</td><td>' + (after.samples || 0) + '</td><td>' + (after.avg_cpu || 0).toFixed(1) + '</td><td>' + (after.avg_memory || 0).toFixed(1) + '</td><td>' + (after.avg_io_wait || 0).toFixed(1) + '</td><td>' + (after.avg_disk_temp || 0).toFixed(1) + '</td></tr>';
+      html += '</tbody></table></div>';
+      panel.innerHTML = html;
+    })
+    .catch(function(e) {
+      panel.innerHTML = escapeHtml(e.message || "Failed to load correlation");
+    });
+}
+
+/* ========== SMART Trends ========== */
+function urgencyClass(u) {
+  if (u === "immediate") return "status-resolved";
+  if (u === "short-term") return "status-acknowledged";
+  return "status-open";
+}
+
+function loadSmartTrends() {
+  fetch("/api/v1/smart/trends")
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Failed to load trends"); });
+      return r.json();
+    })
+    .then(function(data) {
+      renderSmartTrendTable(data.drives || []);
+      renderParityTrend(data.parity || null);
+    })
+    .catch(function(e) {
+      var tbody = document.getElementById("smart-trends-body");
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="log-empty">' + escapeHtml(e.message || "Failed to load trends") + '</td></tr>';
+    });
+}
+
+function renderSmartTrendTable(drives) {
+  var tbody = document.getElementById("smart-trends-body");
+  if (!tbody) return;
+  if (!drives || drives.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No trend data yet. Collect more scans to build velocity confidence.</td></tr>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < drives.length; i++) {
+    var d = drives[i];
+    var deltas = 'temp ' + ((d.temp_delta >= 0 ? '+' : '') + d.temp_delta) + 'C, realloc ' + ((d.reallocated_delta >= 0 ? '+' : '') + d.reallocated_delta) + ', pending ' + ((d.pending_delta >= 0 ? '+' : '') + d.pending_delta) + ', crc ' + ((d.crc_delta >= 0 ? '+' : '') + d.crc_delta);
+    html += '<tr>';
+    html += '<td><strong>' + escapeHtml(d.device || "") + '</strong><div style="font-size:11px;color:var(--text2)">' + escapeHtml(d.model || "") + '</div></td>';
+    html += '<td>' + (d.risk_score || 0) + (d.replacement_candidate ? ' <span class="status-badge status-snoozed">candidate</span>' : '') + '</td>';
+    html += '<td><span class="status-badge ' + urgencyClass(d.urgency || "monitor") + '">' + escapeHtml(d.urgency || "monitor") + '</span></td>';
+    html += '<td>' + escapeHtml(d.confidence || "low") + '</td>';
+    html += '<td>' + escapeHtml(deltas) + '</td>';
+    html += '<td>' + escapeHtml(d.recommendation || "") + '</td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+function renderParityTrend(parity) {
+  var el = document.getElementById("parity-trend-summary");
+  if (!el) return;
+  if (!parity) {
+    el.innerHTML = "Parity trend data unavailable for this platform.";
+    return;
+  }
+  var risk = parity.risk || "stable";
+  var cls = risk === "critical" ? "status-resolved" : (risk === "warning" ? "status-acknowledged" : "status-open");
+  var html = '';
+  html += '<span class="status-badge ' + cls + '">Parity risk: ' + escapeHtml(risk) + '</span>';
+  html += '<span style="margin-left:10px">Checks: ' + (parity.checks || 0) + '</span>';
+  html += '<span style="margin-left:10px">Recent errors: ' + (parity.recent_errors || 0) + '</span>';
+  html += '<span style="margin-left:10px">Speed degradation: ' + ((parity.speed_degradation_pct || 0).toFixed ? parity.speed_degradation_pct.toFixed(1) : parity.speed_degradation_pct) + '%</span>';
+  html += '<span style="margin-left:10px">Latest speed: ' + ((parity.latest_speed_mb_s || 0).toFixed ? parity.latest_speed_mb_s.toFixed(1) : parity.latest_speed_mb_s) + ' MB/s</span>';
+  el.innerHTML = html;
+}
+
+/* ========== Notification History ========== */
+function loadNotificationLog() {
+  fetch("/api/v1/notifications/log")
+    .then(function(r) { return r.json(); })
+    .then(function(entries) {
+      var tbody = document.getElementById("log-body");
+      if (!entries || entries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="log-empty">No notifications sent yet.</td></tr>';
+        return;
+      }
+      var html = "";
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        var ts = e.created_at ? new Date(e.created_at).toLocaleString() : "\u2014";
+        var st = String(e.status || "").toLowerCase();
+        var statusCls = (st === "sent" || st === "success") ? "status-success" : (st.indexOf("suppressed") === 0 ? "status-open" : "status-failed");
+        var badgeClass = "badge-" + (e.webhook_type || "generic");
+        var typeName = (e.webhook_type || "generic").charAt(0).toUpperCase() + (e.webhook_type || "generic").slice(1);
+        html += "<tr>";
+        html += "<td>" + escapeHtml(ts) + "</td>";
+        html += "<td>" + escapeHtml(e.webhook_name || "\u2014") + "</td>";
+        html += '<td><span class="badge ' + badgeClass + '">' + typeName + "</span></td>";
+        html += '<td><span class="status-badge ' + statusCls + '">' + escapeHtml(e.status || "unknown") + "</span></td>";
+        html += "<td>" + (e.findings_count != null ? e.findings_count : "\u2014") + "</td>";
+        html += "<td>" + escapeHtml(e.error_message || "\u2014") + "</td>";
+        html += "</tr>";
+      }
+      tbody.innerHTML = html;
+    })
+    .catch(function() {
+      document.getElementById("log-body").innerHTML = '<tr><td colspan="6" class="log-empty">Failed to load log.</td></tr>';
+    });
+}
+
+/* ========== Test Notification ========== */
+function sendTestNotification() {
+  var btn = document.getElementById("test-notif-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Sending..."; }
+  fetch("/api/v1/settings")
+    .then(function(r) { return r.json(); })
+    .then(function(settings) {
+      var webhooks = (settings.notifications && settings.notifications.webhooks) ? settings.notifications.webhooks : [];
+      var enabled = webhooks.filter(function(w) { return w.enabled !== false; });
+      if (enabled.length === 0) {
+        showToast("No enabled webhooks configured. Add one in Settings.", "error");
+        if (btn) { btn.disabled = false; btn.textContent = "Test Notification"; }
+        return;
+      }
+      // Send test to first enabled webhook
+      var wh = enabled[0];
+      return fetch("/api/v1/settings/test-webhook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: wh.name, type: wh.type, url: wh.url })
+      });
+    })
+    .then(function(r) {
+      if (!r) return;
+      if (r.ok) {
+        showToast("Test notification sent", "success");
+        setTimeout(loadNotificationLog, 1500);
+      } else {
+        return r.json().then(function(e) { showToast("Failed: " + (e.error || "unknown error"), "error"); });
+      }
+    })
+    .catch(function(e) { showToast("Failed to send: " + e.message, "error"); })
+    .finally(function() {
+      if (btn) { btn.disabled = false; btn.textContent = "Test Notification"; }
+    });
+}
+
+/* ========== Init ========== */
+applyLayout();
+initDragDrop();
+loadAlertSummary();
+loadAlerts();
+loadIncidentTimeline();
+loadSmartTrends();
+loadNotificationLog();
+setInterval(loadAlerts, 60000);
+setInterval(loadAlertSummary, 60000);
+setInterval(loadIncidentTimeline, 60000);
+setInterval(loadSmartTrends, 180000);
+setInterval(loadNotificationLog, 60000);
+</script>
+</body>
+</html>

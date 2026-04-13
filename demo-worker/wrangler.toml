@@ -1,0 +1,17 @@
+name = "nas-doctor-demo"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+account_id = "REDACTED_CF_ACCOUNT_ID"
+workers_dev = false
+
+[vars]
+DEMO_MODE = "true"
+
+[assets]
+directory = "./captured"
+binding = "ASSETS"
+
+# Custom domain — creates DNS record + SSL cert automatically
+[[routes]]
+pattern = "nasdoctordemo.mdias.info"
+custom_domain = true

@@ -1,0 +1,2371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NAS Doctor</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="/css/shared.css">
+<style>
+/* Settings-specific styles only */
+
+/* Theme swatches */
+.theme-options{display:flex;gap:12px;margin-bottom:16px}
+.theme-option{display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;transition:all 0.15s;background:transparent}
+.theme-option:hover{border-color:var(--border-hover)}
+.theme-option.active{border-color:var(--accent);background:rgba(94,106,210,0.06)}
+.theme-option input{display:none}
+.swatch{width:24px;height:24px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);flex-shrink:0}
+.swatch-midnight{background:linear-gradient(135deg,#0f1011 50%,#5e6ad2 50%)}
+.swatch-clean{background:linear-gradient(135deg,#ffffff 50%,#000000 50%)}
+.swatch-ember{background:linear-gradient(135deg,#1a1a1a 50%,#f97316 50%)}
+.theme-name{font-size:13px;font-weight:500;color:var(--text)}
+/* cron preview mono */
+#scan-cron-preview{font-family:var(--font-mono);font-size:11px}
+body.theme-clean .theme-option{border-color:rgba(0,0,0,0.12)}
+body.theme-clean .theme-option:hover{border-color:rgba(0,0,0,0.2)}
+body.theme-clean .theme-option.active{border-color:var(--accent);background:rgba(0,0,0,0.03)}
+body.theme-clean .swatch{border-color:rgba(0,0,0,0.1)}
+body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,0.02)}
+</style>
+</head>
+<body>
+<div class="toast-container" id="toasts"></div>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <a href="/" class="logo" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="">NAS Doctor</a><span class="logo-slogan">Sleep tight knowing your server never does.</span>
+      <span class="page-title">Settings</span>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link">Dashboard</a>
+      <a href="/alerts" class="nav-link">Alerts</a>
+      <a href="/service-checks" class="nav-link">Services</a>
+      <a href="/stats" class="nav-link">Stats</a>
+      <a href="/fleet" class="nav-link">Fleet</a>
+      <a href="/replacement-planner" class="nav-link">Planner</a>
+      <a href="/settings" class="nav-link active" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
+    </div>
+  </div>
+
+  <!-- Section navigation -->
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px;padding:8px 0;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50;background:var(--bg)">
+    <a href="#card-general" class="btn btn-secondary btn-sm" style="text-decoration:none">General</a>
+    <a href="#card-webhooks" class="btn btn-secondary btn-sm" style="text-decoration:none">Webhooks</a>
+    <a href="#card-notification-behavior" class="btn btn-secondary btn-sm" style="text-decoration:none">Behavior</a>
+    <a href="#card-service-checks" class="btn btn-secondary btn-sm" style="text-decoration:none">Services</a>
+    <a href="#card-fleet" class="btn btn-secondary btn-sm" style="text-decoration:none">Fleet</a>
+    <a href="#card-sections" class="btn btn-secondary btn-sm" style="text-decoration:none">Dashboard</a>
+    <a href="#card-retention" class="btn btn-secondary btn-sm" style="text-decoration:none">Data</a>
+    <a href="#card-backup" class="btn btn-secondary btn-sm" style="text-decoration:none">Backup</a>
+  </div>
+
+  <!-- 1. General -->
+  <div class="card" id="card-general">
+    <div class="card-title">General</div>
+    <div class="card-desc">Configure scan interval and appearance.</div>
+    <div class="form-row">
+      <div>
+        <label for="scan-preset">Scan Interval</label>
+        <select id="scan-preset" onchange="onPresetChange()">
+          <option value="30m">Every 30 minutes</option>
+          <option value="1h">Every 1 hour</option>
+          <option value="2h">Every 2 hours</option>
+          <option value="6h" selected>Every 6 hours</option>
+          <option value="12h">Every 12 hours</option>
+          <option value="24h">Every 24 hours</option>
+          <option value="custom">Custom...</option>
+        </select>
+      </div>
+      <div></div>
+    </div>
+    <div id="custom-interval-panel" style="display:none;margin-bottom:16px;padding:16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+        <div style="flex:1;min-width:70px">
+          <label for="scan-days" style="font-size:11px;margin-bottom:4px">Days</label>
+          <input type="number" id="scan-days" min="0" max="365" value="0" style="text-align:center">
+        </div>
+        <div style="flex:1;min-width:70px">
+          <label for="scan-hours" style="font-size:11px;margin-bottom:4px">Hours</label>
+          <input type="number" id="scan-hours" min="0" max="23" value="0" style="text-align:center">
+        </div>
+        <div style="flex:1;min-width:70px">
+          <label for="scan-minutes" style="font-size:11px;margin-bottom:4px">Minutes</label>
+          <input type="number" id="scan-minutes" min="0" max="59" value="30" style="text-align:center">
+        </div>
+        <div style="flex:1;min-width:70px">
+          <label for="scan-seconds" style="font-size:11px;margin-bottom:4px">Seconds</label>
+          <input type="number" id="scan-seconds" min="0" max="59" value="0" style="text-align:center">
+        </div>
+      </div>
+      <div id="scan-interval-preview" style="font-size:12px;color:var(--text2);margin-bottom:4px">Scans every 30 minutes</div>
+      <div id="scan-cron-preview" style="font-size:11px;font-family:monospace;color:var(--accent);background:rgba(94,106,210,0.06);padding:4px 10px;border-radius:4px;display:inline-block"></div>
+    </div>
+    <label>Theme</label>
+    <div class="theme-options" id="theme-options">
+      <div class="theme-option active" data-theme="midnight" onclick="selectTheme(this)">
+        <input type="radio" name="theme" value="midnight" checked>
+        <div class="swatch swatch-midnight"></div>
+        <span class="theme-name">Midnight</span>
+      </div>
+      <div class="theme-option" data-theme="clean" onclick="selectTheme(this)">
+        <input type="radio" name="theme" value="clean">
+        <div class="swatch swatch-clean"></div>
+        <span class="theme-name">Clean</span>
+      </div>
+      <div class="theme-option" data-theme="ember" onclick="selectTheme(this)">
+        <input type="radio" name="theme" value="ember">
+        <div class="swatch swatch-ember"></div>
+        <span class="theme-name">Ember</span>
+      </div>
+    </div>
+    <div style="margin-top:20px">
+      <label>App Icon</label>
+      <div id="icon-options" style="display:flex;gap:12px;margin-top:8px">
+        <div class="theme-option" data-icon="icon1" onclick="selectIcon(this)" style="padding:8px 12px">
+          <input type="radio" name="icon" value="icon1">
+          <img src="/icons/icon1.png" alt="Icon 1" style="width:36px;height:36px;border-radius:6px">
+        </div>
+        <div class="theme-option" data-icon="icon2" onclick="selectIcon(this)" style="padding:8px 12px">
+          <input type="radio" name="icon" value="icon2">
+          <img src="/icons/icon2.png" alt="Icon 2" style="width:36px;height:36px;border-radius:6px">
+        </div>
+        <div class="theme-option active" data-icon="icon3" onclick="selectIcon(this)" style="padding:8px 12px">
+          <input type="radio" name="icon" value="icon3">
+          <img src="/icons/icon3.png" alt="Icon 3" style="width:36px;height:36px;border-radius:6px">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1b. API Key -->
+  <div class="card" id="card-apikey">
+    <div class="card-title">API Key</div>
+    <div class="card-desc">Protect this instance's API. When set, all API requests (fleet polling, service checks, etc.) require this key in the Authorization header. The dashboard UI is not affected.</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+      <input type="password" id="api-key-display" readonly style="flex:1;font-family:var(--font-mono);font-size:12px;letter-spacing:0.5px" placeholder="No API key set — instance is open">
+      <button class="btn btn-secondary btn-sm" onclick="toggleAPIKeyVisibility()" title="Show/Hide">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="generateAPIKey()">Generate</button>
+      <button class="btn btn-secondary btn-sm" onclick="copyAPIKey()">Copy</button>
+      <button class="btn btn-danger btn-sm" onclick="revokeAPIKey()">Revoke</button>
+    </div>
+    <p style="font-size:11px;color:var(--text2);margin-top:8px">Share this key with other NAS Doctor instances that need to connect to this one via fleet monitoring.</p>
+  </div>
+
+  <!-- 2. Notifications — Webhooks -->
+  <div class="card" id="card-webhooks">
+    <div class="card-title">Notifications &mdash; Webhooks</div>
+    <div class="card-desc">Configure webhook endpoints for scan result notifications.</div>
+    <div id="webhook-list"></div>
+    <button class="btn btn-secondary" id="btn-add-webhook" onclick="toggleWebhookForm()" style="margin-top:8px">+ Add Webhook</button>
+    <div class="webhook-form" id="webhook-form">
+      <input type="hidden" id="wh-edit-index" value="-1">
+      <div class="form-row">
+        <div>
+          <label for="wh-name">Name</label>
+          <input type="text" id="wh-name" placeholder="e.g. My Discord">
+        </div>
+        <div>
+          <label for="wh-type">Type</label>
+          <select id="wh-type">
+            <option value="discord">Discord</option>
+            <option value="slack">Slack</option>
+            <option value="gotify">Gotify</option>
+            <option value="ntfy">Ntfy</option>
+            <option value="generic">Generic</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="wh-url">URL</label>
+        <input type="url" id="wh-url" placeholder="https://...">
+      </div>
+      <div class="form-group">
+        <label for="wh-secret">Secret (optional, HMAC signing)</label>
+        <input type="password" id="wh-secret" placeholder="Leave blank if not needed">
+      </div>
+      <!-- Custom Headers -->
+      <div class="form-group" style="margin-top:12px">
+        <label style="cursor:pointer;user-select:none" onclick="document.getElementById('wh-headers-panel').style.display=document.getElementById('wh-headers-panel').style.display==='none'?'block':'none'">Custom Headers (optional) &#9662;</label>
+        <div id="wh-headers-panel" style="display:none;margin-top:8px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
+          <div id="wh-headers-list"></div>
+          <button class="btn btn-secondary btn-sm" onclick="addWebhookHeader()" style="margin-top:8px">+ Add Header</button>
+        </div>
+      </div>
+      <div class="webhook-form-actions">
+        <button class="btn btn-primary" onclick="saveWebhook()">Save Webhook</button>
+        <button class="btn btn-success btn-sm" onclick="testWebhook()">Test</button>
+        <button class="btn btn-secondary" onclick="cancelWebhookForm()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2b. Notification Behavior — Policies, Quiet Hours, Maintenance Windows -->
+  <div class="card" id="card-notification-behavior">
+    <div class="card-title">Notification Behavior</div>
+    <div class="card-desc">Configure alert routing policies, quiet hours, maintenance windows, and deduplication cooldown.</div>
+
+    <!-- Default cooldown -->
+    <div class="form-group">
+      <label for="notif-cooldown">Default notification cooldown (minutes)</label>
+      <div style="display:flex;gap:8px;align-items:center;max-width:200px">
+        <input type="number" id="notif-cooldown" min="0" max="1440" value="15" style="text-align:center">
+      </div>
+      <p style="font-size:11px;color:var(--text2);margin-top:4px">Minimum time between repeated notifications for the same alert. Set 0 to disable.</p>
+    </div>
+
+    <!-- Quiet Hours -->
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:14px;font-weight:600">Quiet Hours</div>
+        <div class="toggle-wrap" onclick="document.getElementById('qh-enabled').checked=!document.getElementById('qh-enabled').checked;this.querySelector('.toggle').classList.toggle('on',document.getElementById('qh-enabled').checked)">
+          <div class="toggle" id="qh-toggle"><div class="toggle-knob"></div></div>
+          <input type="checkbox" id="qh-enabled" style="display:none">
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Suppress notifications during a daily time window. Alerts are still recorded.</p>
+      <div class="form-row">
+        <div>
+          <label for="qh-timezone">Timezone</label>
+          <select id="qh-timezone">
+            <option value="UTC">UTC</option>
+            <option value="America/New_York">America/New_York</option>
+            <option value="America/Chicago">America/Chicago</option>
+            <option value="America/Denver">America/Denver</option>
+            <option value="America/Los_Angeles">America/Los_Angeles</option>
+            <option value="Europe/London">Europe/London</option>
+            <option value="Europe/Paris">Europe/Paris</option>
+            <option value="Europe/Berlin">Europe/Berlin</option>
+            <option value="Europe/Lisbon">Europe/Lisbon</option>
+            <option value="Asia/Tokyo">Asia/Tokyo</option>
+            <option value="Asia/Shanghai">Asia/Shanghai</option>
+            <option value="Australia/Sydney">Australia/Sydney</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px">
+          <div style="flex:1">
+            <label for="qh-start">Start</label>
+            <input type="text" id="qh-start" placeholder="22:00" value="22:00" style="text-align:center">
+          </div>
+          <div style="flex:1">
+            <label for="qh-end">End</label>
+            <input type="text" id="qh-end" placeholder="07:00" value="07:00" style="text-align:center">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Maintenance Windows -->
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:14px;font-weight:600">Maintenance Windows</div>
+        <button class="btn btn-secondary btn-sm" onclick="toggleMaintenanceForm()">+ Add Window</button>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Explicitly suppress notifications during scheduled maintenance periods.</p>
+      <div id="maintenance-list"></div>
+      <div class="webhook-form" id="maintenance-form">
+        <input type="hidden" id="mw-edit-index" value="-1">
+        <div class="form-row">
+          <div>
+            <label for="mw-name">Name</label>
+            <input type="text" id="mw-name" placeholder="e.g. Monthly parity check">
+          </div>
+          <div>
+            <div class="toggle-wrap" style="margin-top:20px" onclick="document.getElementById('mw-enabled').checked=!document.getElementById('mw-enabled').checked;this.querySelector('.toggle').classList.toggle('on',document.getElementById('mw-enabled').checked)">
+              <div class="toggle on"><div class="toggle-knob"></div></div>
+              <span class="toggle-label">Enabled</span>
+              <input type="checkbox" id="mw-enabled" checked style="display:none">
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="mw-start">Start (ISO 8601)</label>
+            <input type="text" id="mw-start" placeholder="2026-04-10T02:00:00Z">
+          </div>
+          <div>
+            <label for="mw-end">End (ISO 8601)</label>
+            <input type="text" id="mw-end" placeholder="2026-04-10T06:00:00Z">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="mw-hostnames">Hostnames (comma-separated, leave blank for all)</label>
+          <input type="text" id="mw-hostnames" placeholder="e.g. nas1,nas2">
+        </div>
+        <div class="webhook-form-actions">
+          <button class="btn btn-primary" onclick="saveMaintenanceWindow()">Save Window</button>
+          <button class="btn btn-secondary" onclick="cancelMaintenanceForm()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notification Rules -->
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:600">Notification Rules</div>
+        <button class="btn btn-secondary btn-sm" onclick="toggleRuleForm()">+ Add Notification</button>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:8px">Define exactly which events trigger each webhook.</p>
+      <!-- Quick Presets -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn btn-secondary btn-sm" onclick="addPreset('critical')">Critical alerts</button>
+        <button class="btn btn-secondary btn-sm" onclick="addPreset('disk_health')">Disk health</button>
+        <button class="btn btn-secondary btn-sm" onclick="addPreset('services')">Service uptime</button>
+        <button class="btn btn-secondary btn-sm" onclick="addPreset('power')">Power protection</button>
+        <button class="btn btn-secondary btn-sm" onclick="addPreset('storage')">Storage warnings</button>
+      </div>
+      <div id="rule-list"></div>
+      <!-- Rule form — all fields visible -->
+      <div class="webhook-form" id="rule-form">
+        <input type="hidden" id="nr-edit-index" value="-1">
+        <div class="form-row">
+          <div>
+            <label for="nr-name">Name</label>
+            <input type="text" id="nr-name" placeholder="e.g. Disk 1 temperature alert">
+          </div>
+          <div>
+            <label for="nr-webhook">Notify via</label>
+            <select id="nr-webhook"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="nr-category">Category</label>
+            <select id="nr-category" onchange="onRuleCategoryChange()">
+              <option value="findings">Findings (severity)</option>
+              <option value="disk_space">Disk Space</option>
+              <option value="disk_temp">Disk Temperature</option>
+              <option value="smart">SMART Health</option>
+              <option value="service">Service Check</option>
+              <option value="parity">Parity (Unraid)</option>
+              <option value="ups">UPS / Power</option>
+              <option value="docker">Docker</option>
+              <option value="system">System</option>
+              <option value="zfs">ZFS</option>
+              <option value="tunnels">Tunnels</option>
+              <option value="update">Platform Update</option>
+            </select>
+          </div>
+          <div>
+            <label for="nr-condition">Condition</label>
+            <select id="nr-condition"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="nr-target">Target <span style="font-size:10px;color:var(--text3)">(optional — specific drive, service, container)</span></label>
+            <select id="nr-target"><option value="">Any / All</option></select>
+          </div>
+          <div>
+            <label for="nr-value">Threshold value</label>
+            <input type="number" id="nr-value" placeholder="e.g. 55" step="any">
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="nr-cooldown">Cooldown</label>
+            <select id="nr-cooldown">
+              <option value="300">5 minutes</option>
+              <option value="900" selected>15 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="14400">4 hours</option>
+              <option value="43200">12 hours</option>
+              <option value="86400">24 hours</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:flex-end;padding-bottom:4px">
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="nr-enabled" checked> Enabled</label>
+          </div>
+        </div>
+        <div class="webhook-form-actions">
+          <button class="btn btn-primary" onclick="saveRule()">Save Rule</button>
+          <button class="btn btn-secondary" onclick="cancelRuleForm()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Service Checks -->
+  <div class="card" id="card-service-checks">
+    <div class="card-title">Service Checks</div>
+    <div class="card-desc">Monitor service endpoints (HTTP, TCP, DNS, Ping/ICMP, SMB, NFS) and trigger findings when they fail repeatedly.</div>
+    <div id="service-check-list"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn btn-secondary" id="btn-add-service-check" onclick="toggleServiceCheckForm()">+ Add Service Check</button>
+      <button class="btn btn-success" onclick="runServiceChecksNow()">Run Checks Now</button>
+    </div>
+
+    <div class="webhook-form" id="service-check-form" style="margin-top:12px">
+      <input type="hidden" id="sc-edit-index" value="-1">
+      <div class="form-row">
+        <div>
+          <label for="sc-name">Name</label>
+          <input type="text" id="sc-name" placeholder="e.g. Home Assistant UI">
+        </div>
+        <div>
+          <label for="sc-type">Type</label>
+          <select id="sc-type" onchange="onServiceTypeChange()">
+            <option value="http">HTTP</option>
+            <option value="tcp">TCP</option>
+            <option value="dns">DNS</option>
+            <option value="ping">Ping (ICMP)</option>
+            <option value="smb">SMB</option>
+            <option value="nfs">NFS</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row" id="sc-instance-wrap" style="display:none">
+        <div>
+          <label for="sc-instance">Instance</label>
+          <select id="sc-instance"><option value="">This server (local)</option></select>
+          <p style="font-size:11px;color:var(--text2);margin-top:4px">Run this check from a fleet member instead of locally.</p>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="sc-target">Target</label>
+          <input type="text" id="sc-target" placeholder="https://nas.local/health, 192.168.1.10, or host:port">
+        </div>
+        <div id="sc-port-wrap">
+          <label for="sc-port">Port (optional)</label>
+          <input type="number" id="sc-port" min="0" max="65535" placeholder="443">
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="sc-interval">Check interval</label>
+          <select id="sc-interval">
+            <option value="30">30 seconds</option>
+            <option value="60">1 minute</option>
+            <option value="120">2 minutes</option>
+            <option value="300" selected>5 minutes</option>
+            <option value="600">10 minutes</option>
+            <option value="900">15 minutes</option>
+            <option value="1800">30 minutes</option>
+            <option value="3600">1 hour</option>
+          </select>
+        </div>
+        <div>
+          <label for="sc-timeout">Timeout (seconds)</label>
+          <input type="number" id="sc-timeout" min="1" max="30" value="5">
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="sc-threshold">Failure threshold</label>
+          <input type="number" id="sc-threshold" min="1" max="20" value="1">
+        </div>
+        <div>
+          <label for="sc-severity">Failure severity</label>
+          <select id="sc-severity">
+            <option value="critical">Critical</option>
+            <option value="warning" selected>Warning</option>
+            <option value="info">Info</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row" id="sc-http-expected-wrap">
+        <div>
+          <label for="sc-http-min">HTTP success range (status)</label>
+          <div style="display:flex;gap:8px">
+            <input type="number" id="sc-http-min" min="100" max="599" value="200" placeholder="Min">
+            <input type="number" id="sc-http-max" min="100" max="599" value="399" placeholder="Max">
+          </div>
+        </div>
+      </div>
+      <div class="form-group" id="sc-headers-wrap">
+        <label for="sc-headers">Custom HTTP Headers (optional — for auth, CF Access, etc.)</label>
+        <textarea id="sc-headers" rows="2" placeholder="Authorization: Bearer token123&#10;CF-Access-Client-Id: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
+      </div>
+      <div class="form-row">
+        <div>
+          <div class="toggle-wrap" onclick="document.getElementById('sc-enabled').checked = !document.getElementById('sc-enabled').checked; this.querySelector('.toggle').classList.toggle('on', document.getElementById('sc-enabled').checked)">
+            <div class="toggle on"><div class="toggle-knob"></div></div>
+            <span class="toggle-label">Enabled</span>
+            <input type="checkbox" id="sc-enabled" checked style="display:none">
+          </div>
+        </div>
+        <div></div>
+      </div>
+      <div class="webhook-form-actions">
+        <button class="btn btn-primary" onclick="saveServiceCheck()">Save Check</button>
+        <button class="btn btn-secondary" onclick="cancelServiceCheckForm()">Cancel</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 4. Proxmox VE Integration -->
+  <div class="card" id="card-proxmox">
+    <div class="card-title">Proxmox VE</div>
+    <div class="card-desc">Connect to a Proxmox VE API to monitor VMs, LXC containers, storage pools, and cluster health. Create an API token in PVE: Datacenter → Permissions → API Tokens.</div>
+    <div class="toggle-wrap" style="margin-bottom:16px">
+      <div class="toggle" id="pve-toggle" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
+      <span class="toggle-label">Enable Proxmox Integration</span>
+    </div>
+    <div class="form-row">
+      <div><label for="pve-url">PVE API URL</label>
+        <input type="text" id="pve-url" placeholder="https://192.168.1.10:8006">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">The Proxmox web UI URL (default port 8006). Self-signed certs are accepted.</p></div>
+      <div><label for="pve-alias">Display Name (optional)</label>
+        <input type="text" id="pve-alias" placeholder="e.g. Proxmox LDN">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Friendly name shown on the dashboard instead of the node hostname.</p></div>
+    </div>
+    <div class="form-row">
+      <div><label for="pve-token">API Token ID</label>
+        <input type="text" id="pve-token" placeholder="root@pam!nas-doctor">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Format: <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">user@realm!tokenname</code></p></div>
+      <div><label for="pve-secret">Token Secret</label>
+        <input type="password" id="pve-secret" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+    </div>
+    <div class="form-row">
+      <div><label for="pve-node">Node filter (optional)</label>
+        <select id="pve-node"><option value="">All nodes (poll entire cluster)</option></select>
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Auto-detected from PVE. Click Test Connection to populate.</p></div>
+    </div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
+      <button class="btn btn-secondary btn-sm" onclick="testProxmoxConnection()">Test Connection</button>
+      <span id="pve-test-result" style="font-size:12px"></span>
+    </div>
+  </div>
+
+  <!-- 5. Kubernetes Cluster -->
+  <div class="card" id="card-kubernetes">
+    <div class="card-title">Kubernetes</div>
+    <div class="card-desc">Connect to a Kubernetes cluster (k8s, k3s, EKS, GKE, AKS) to monitor nodes, pods, deployments, services, and PVCs.</div>
+    <div class="toggle-wrap" style="margin-bottom:16px">
+      <div class="toggle" id="k8s-toggle" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
+      <span class="toggle-label">Enable Kubernetes Integration</span>
+    </div>
+    <div class="form-row">
+      <div><label for="k8s-url">K8s API URL</label>
+        <input type="text" id="k8s-url" placeholder="https://192.168.1.10:6443">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Leave empty for in-cluster auto-detection (when deployed inside K8s).</p></div>
+      <div><label for="k8s-alias">Display Name (optional)</label>
+        <input type="text" id="k8s-alias" placeholder="e.g. Production Cluster"></div>
+    </div>
+    <div class="form-row">
+      <div><label for="k8s-token">Bearer Token</label>
+        <input type="password" id="k8s-token" placeholder="eyJhbGciOi...">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Service account token. For k3s: <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">cat /var/lib/rancher/k3s/server/token</code></p></div>
+      <div style="display:flex;align-items:flex-end;padding-bottom:4px">
+        <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="k8s-incluster"> In-cluster auto-detect</label>
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
+      <button class="btn btn-secondary btn-sm" onclick="testKubernetesConnection()">Test Connection</button>
+      <span id="k8s-test-result" style="font-size:12px"></span>
+    </div>
+  </div>
+
+  <!-- 6. Log Forwarding -->
+  <div class="card" id="card-logfwd">
+    <div class="card-title">Log Forwarding</div>
+    <div class="card-desc">Forward scan results to Loki, syslog, or any HTTP JSON endpoint after each diagnostic scan.</div>
+    <div class="toggle-wrap" style="margin-bottom:16px">
+      <div class="toggle" id="logfwd-toggle" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
+      <span class="toggle-label">Enable Log Forwarding</span>
+    </div>
+    <div id="logfwd-dest-list" style="margin-bottom:12px"></div>
+    <button class="btn btn-secondary btn-sm" onclick="toggleLogFwdForm()">+ Add Destination</button>
+    <div class="webhook-form" id="logfwd-form">
+      <input type="hidden" id="lf-edit-index" value="-1">
+      <div class="form-row">
+        <div><label for="lf-name">Name</label>
+          <input type="text" id="lf-name" placeholder="e.g. Grafana Loki"></div>
+        <div><label for="lf-type">Type</label>
+          <select id="lf-type" onchange="onLogFwdTypeChange()">
+            <option value="loki">Loki</option>
+            <option value="http_json">HTTP JSON</option>
+            <option value="syslog">Syslog</option>
+          </select></div>
+      </div>
+      <div class="form-group">
+        <label for="lf-url">URL</label>
+        <input type="text" id="lf-url" placeholder="http://loki:3100">
+        <p id="lf-url-hint" style="font-size:11px;color:var(--text2);margin-top:4px">Loki: base URL (e.g. http://loki:3100). /loki/api/v1/push is appended automatically.</p>
+      </div>
+      <div class="form-row">
+        <div><label for="lf-format">Payload format</label>
+          <select id="lf-format">
+            <option value="full">Full (findings + summary)</option>
+            <option value="findings_only">Findings only</option>
+            <option value="summary">Summary line only</option>
+          </select></div>
+        <div><label for="lf-labels">Labels / Tags (key=val, comma-sep)</label>
+          <input type="text" id="lf-labels" placeholder="e.g. env=prod,dc=home"></div>
+      </div>
+      <div class="form-group" id="lf-headers-wrap">
+        <label for="lf-headers">Auth header (optional, e.g. X-Scope-OrgID=tenant1)</label>
+        <input type="text" id="lf-headers" placeholder="Header-Name=value">
+      </div>
+      <div class="webhook-form-actions">
+        <button class="btn btn-primary" onclick="saveLogFwdDest()">Save Destination</button>
+        <button class="btn btn-secondary" onclick="cancelLogFwdForm()">Cancel</button>
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <p style="font-size:12px;color:var(--text2);line-height:1.6">Prometheus metrics (80+ gauges) are available at <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:11px">/metrics</code> for Grafana scraping.</p>
+    </div>
+  </div>
+
+  <!-- 5. Data Lifecycle -->
+  <div class="card" id="card-retention">
+    <div class="card-title">Data Lifecycle</div>
+    <div class="card-desc">Control how long diagnostic data is stored. Older data is automatically pruned after each scan.</div>
+    <div class="form-row">
+      <div>
+        <label for="ret-snapshot-days">Snapshot retention (days)</label>
+        <input type="number" id="ret-snapshot-days" min="7" max="365" value="90" style="text-align:center">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Snapshots, SMART history, and system metrics older than this are deleted.</p>
+      </div>
+      <div>
+        <label for="ret-notify-days">Notification log (days)</label>
+        <input type="number" id="ret-notify-days" min="1" max="365" value="30" style="text-align:center">
+      </div>
+    </div>
+    <div class="form-row" style="margin-top:12px">
+      <div>
+        <label for="ret-max-db">Max database size (MB)</label>
+        <input type="number" id="ret-max-db" min="50" max="10000" value="500" style="text-align:center">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Hard cap. Oldest data is aggressively deleted if exceeded.</p>
+      </div>
+      <div>
+        <div id="db-stats" style="font-size:12px;color:var(--text2);line-height:1.8;padding-top:20px">Loading database stats...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Fleet / Multi-Server -->
+  <div class="card" id="card-fleet">
+    <div class="card-title">Fleet Monitoring</div>
+    <div class="card-desc">Monitor multiple NAS Doctor instances from this dashboard. Supports private IPs and public hostnames (with custom auth headers for Cloudflare Access, etc.).</div>
+    <div id="fleet-list" style="margin-bottom:12px"></div>
+    <!-- Add/Edit form -->
+    <div class="webhook-form" id="fleet-form">
+      <input type="hidden" id="fleet-edit-index" value="-1">
+      <div class="form-row">
+        <div><label for="fleet-name">Server Name</label>
+          <input type="text" id="fleet-name" placeholder="e.g. Backup NAS"></div>
+        <div><label for="fleet-url">URL</label>
+          <input type="url" id="fleet-url" placeholder="http://192.168.1.50:8060 or https://nas.example.com"></div>
+      </div>
+      <div class="form-row">
+        <div><label for="fleet-apikey">API Key (optional)</label>
+          <input type="password" id="fleet-apikey" placeholder="Leave blank if not needed"></div>
+      </div>
+      <div class="form-group">
+        <label for="fleet-headers">Custom Headers (optional — for CF Access, auth proxies)</label>
+        <textarea id="fleet-headers" rows="2" placeholder="CF-Access-Client-Id: xxxxx&#10;CF-Access-Client-Secret: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="btn btn-primary" onclick="saveFleetServerForm()">Save</button>
+        <button class="btn btn-secondary" onclick="cancelFleetForm()">Cancel</button>
+        <button class="btn btn-secondary btn-sm" onclick="testFleetFromForm()">Test</button>
+        <span id="fleet-test-result" style="font-size:12px"></span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+      <button class="btn btn-secondary btn-sm" onclick="toggleFleetForm()" style="display:inline-flex;align-items:center;gap:4px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Server
+      </button>
+      <a href="/fleet" style="color:var(--accent);font-size:13px;margin-left:auto">Open Fleet Dashboard &rarr;</a>
+    </div>
+  </div>
+
+  <!-- 7. Dashboard Sections -->
+  <div class="card" id="card-sections">
+    <div class="card-title">Dashboard Sections</div>
+    <div class="card-desc">Toggle which sections appear on the dashboard. Disabled sections are hidden but data is still collected.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;margin-top:12px">
+      <div class="toggle-wrap"><div class="toggle on" id="sec-findings" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Findings</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-disk" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Disk Space</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-smart" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">SMART Health</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-docker" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Docker</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-container-metrics" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Container Metrics</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-zfs" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">ZFS Pools</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-gpu" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">GPU</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-ups" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">UPS / Power</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-parity" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Parity (Unraid)</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-network" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Network</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-tunnels" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Tunnels (Cloudflared / Tailscale)</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-proxmox" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Proxmox VE</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-kubernetes" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Kubernetes</span></div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div class="toggle-wrap"><div class="toggle on" id="sec-merged-containers" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Container View <span style="font-size:11px;color:var(--text2)">(combine Docker list + resource metrics into one section)</span></span></div>
+        <div class="toggle-wrap" style="margin-top:8px"><div class="toggle on" id="sec-merged-drives" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Drive View <span style="font-size:11px;color:var(--text2)">(combine SMART + storage into one card per drive)</span></span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. Backup -->
+  <div class="card" id="card-backup">
+    <div class="card-title">Automatic Backup</div>
+    <div class="card-desc">Periodically back up settings and historical data so you can restore after a Docker reinstall.</div>
+    <div class="form-group">
+      <div class="toggle-wrap" style="margin-bottom:16px">
+        <div class="toggle on" id="backup-toggle" onclick="toggleBackup()"><div class="toggle-knob"></div></div>
+        <span class="toggle-label">Enable automatic backups</span>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="backup-path">Backup directory</label>
+        <input type="text" id="backup-path" placeholder="Leave empty for default (data/backups/)">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Supports local paths and mounted remote shares (NFS, SMB/CIFS). Examples: <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">/mnt/backup-nas/nas-doctor</code>, <code style="font-size:10px;background:var(--input-bg);padding:1px 4px;border-radius:3px">/volume1/backups</code></p>
+      </div>
+      <div>
+        <label for="backup-keep">Keep last N backups</label>
+        <input type="number" id="backup-keep" min="1" max="52" value="4" style="text-align:center">
+      </div>
+    </div>
+    <div class="form-row" style="margin-top:12px">
+      <div>
+        <label for="backup-preset">Backup frequency</label>
+        <select id="backup-preset" onchange="onBackupPresetChange()">
+          <option value="12">Every 12 hours</option>
+          <option value="24">Daily</option>
+          <option value="72">Every 3 days</option>
+          <option value="168" selected>Weekly</option>
+          <option value="336">Every 2 weeks</option>
+          <option value="720">Monthly</option>
+          <option value="custom">Custom...</option>
+        </select>
+      </div>
+      <div>
+        <div id="backup-info" style="font-size:12px;color:var(--text2);line-height:1.8;padding-top:20px">Loading backup info...</div>
+      </div>
+    </div>
+    <div id="backup-custom-panel" style="display:none;margin-top:12px;padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:80px">
+          <label for="backup-days" style="font-size:11px;margin-bottom:4px">Days</label>
+          <input type="number" id="backup-days" min="0" max="365" value="7" style="text-align:center">
+        </div>
+        <div style="flex:1;min-width:80px">
+          <label for="backup-hours" style="font-size:11px;margin-bottom:4px">Hours</label>
+          <input type="number" id="backup-hours" min="0" max="23" value="0" style="text-align:center">
+        </div>
+      </div>
+      <div id="backup-custom-preview" style="font-size:12px;color:var(--text2);margin-top:8px">Backup every 7 days</div>
+    </div>
+    <div style="margin-top:12px">
+      <button class="btn-secondary" onclick="triggerBackup()">Backup Now</button>
+    </div>
+  </div>
+
+  <!-- Alerts, Incidents, Trends, and Notification History have moved to /alerts -->
+  <div class="card" style="background:transparent;border-style:dashed;text-align:center;padding:20px">
+    <div style="font-size:13px;color:var(--text2)">Alerts, Incidents, Trends, and Notification History have moved to their own dedicated page.</div>
+    <a href="/alerts" style="display:inline-block;margin-top:10px;padding:8px 20px;border-radius:var(--radius);background:var(--accent);color:#fff;font-size:13px;font-weight:600;text-decoration:none">Open Alerts &rarr;</a>
+  </div>
+
+</div>
+
+<!-- Sticky save bar -->
+<div class="save-bar" id="save-bar">
+  <div class="save-bar-inner">
+    <span class="save-bar-text" id="save-bar-text">Unsaved changes</span>
+    <button class="btn btn-primary" onclick="saveSettings()">Save All Settings</button>
+  </div>
+</div>
+
+<script src="/js/charts.js"></script>
+<script>
+/* ---------- State ---------- */
+var settings = null;
+var webhooks = [];
+var serviceChecks = [];
+
+/* ---------- Toast ---------- */
+function showToast(msg, type) {
+  var c = document.getElementById("toasts");
+  var t = document.createElement("div");
+  t.className = "toast toast-" + (type || "info");
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(function() {
+    t.style.animation = "toast-out 0.25s ease forwards";
+    setTimeout(function() { t.remove(); }, 260);
+  }, 3000);
+}
+
+/* ---------- Theme selection ---------- */
+function selectTheme(el) {
+  var opts = document.getElementById("theme-options").querySelectorAll(".theme-option");
+  for (var i = 0; i < opts.length; i++) {
+    opts[i].classList.remove("active");
+    opts[i].querySelector("input").checked = false;
+  }
+  el.classList.add("active");
+  el.querySelector("input").checked = true;
+}
+
+function selectIcon(el) {
+  var opts = document.getElementById("icon-options").querySelectorAll(".theme-option");
+  for (var i = 0; i < opts.length; i++) {
+    opts[i].classList.remove("active");
+    opts[i].querySelector("input").checked = false;
+  }
+  el.classList.add("active");
+  el.querySelector("input").checked = true;
+}
+
+function getSelectedIcon() {
+  var checked = document.querySelector('input[name="icon"]:checked');
+  return checked ? checked.value : "icon3";
+}
+
+function getSelectedTheme() {
+  var checked = document.querySelector('input[name="theme"]:checked');
+  return checked ? checked.value : "midnight";
+}
+
+/* ---------- Interval helpers ---------- */
+var presetValues = ["30m", "1h", "2h", "6h", "12h", "24h"];
+
+function parseDurationToFields(dur) {
+  var days = 0, hours = 0, minutes = 0, seconds = 0;
+  if (!dur) return { days: 0, hours: 6, minutes: 0, seconds: 0 };
+  var m;
+  m = dur.match(/(\d+)h/);
+  if (m) { var h = parseInt(m[1], 10); days = Math.floor(h / 24); hours = h % 24; }
+  m = dur.match(/(\d+)m(?!s)/);
+  if (m) { minutes = parseInt(m[1], 10); }
+  m = dur.match(/(\d+)s/);
+  if (m) { seconds = parseInt(m[1], 10); }
+  return { days: days, hours: hours, minutes: minutes, seconds: seconds };
+}
+
+function fieldsToDuration() {
+  var d = parseInt(document.getElementById("scan-days").value, 10) || 0;
+  var h = parseInt(document.getElementById("scan-hours").value, 10) || 0;
+  var m = parseInt(document.getElementById("scan-minutes").value, 10) || 0;
+  var s = parseInt(document.getElementById("scan-seconds").value, 10) || 0;
+  var totalH = d * 24 + h;
+  var parts = [];
+  if (totalH > 0) parts.push(totalH + "h");
+  if (m > 0) parts.push(m + "m");
+  if (s > 0) parts.push(s + "s");
+  if (parts.length === 0) return "6h";
+  return parts.join("");
+}
+
+function getScanInterval() {
+  var preset = document.getElementById("scan-preset").value;
+  if (preset !== "custom") return preset;
+  return fieldsToDuration();
+}
+
+function isPresetValue(dur) {
+  for (var i = 0; i < presetValues.length; i++) {
+    if (presetValues[i] === dur) return true;
+  }
+  return false;
+}
+
+function durationToCron(dur) {
+  var f = parseDurationToFields(dur);
+  var totalSecs = f.days * 86400 + f.hours * 3600 + f.minutes * 60 + f.seconds;
+  if (totalSecs <= 0) return "";
+  if (totalSecs < 60) return "*/" + totalSecs + "s (every " + totalSecs + " seconds)";
+  var totalMin = Math.round(totalSecs / 60);
+  if (totalMin <= 0) totalMin = 1;
+  if (totalMin < 60) return "*/" + totalMin + " * * * *";
+  var totalHrs = f.days * 24 + f.hours;
+  var extraMin = f.minutes;
+  if (totalHrs > 0 && extraMin === 0 && f.seconds === 0) {
+    if (totalHrs < 24) return "0 */" + totalHrs + " * * *";
+    if (totalHrs % 24 === 0) {
+      var d = totalHrs / 24;
+      return "0 0 */" + d + " * *";
+    }
+    return "0 */" + totalHrs + " * * *";
+  }
+  if (totalSecs < 3600) return "*/" + totalMin + " * * * *";
+  return "0 */" + totalHrs + " * * *";
+}
+
+function onPresetChange() {
+  var preset = document.getElementById("scan-preset").value;
+  var panel = document.getElementById("custom-interval-panel");
+  if (preset === "custom") {
+    panel.style.display = "block";
+    updateIntervalPreview();
+  } else {
+    panel.style.display = "none";
+  }
+}
+
+function updateIntervalPreview() {
+  var d = parseInt(document.getElementById("scan-days").value, 10) || 0;
+  var h = parseInt(document.getElementById("scan-hours").value, 10) || 0;
+  var m = parseInt(document.getElementById("scan-minutes").value, 10) || 0;
+  var s = parseInt(document.getElementById("scan-seconds").value, 10) || 0;
+  var parts = [];
+  if (d > 0) parts.push(d + (d === 1 ? " day" : " days"));
+  if (h > 0) parts.push(h + (h === 1 ? " hour" : " hours"));
+  if (m > 0) parts.push(m + (m === 1 ? " minute" : " minutes"));
+  if (s > 0) parts.push(s + (s === 1 ? " second" : " seconds"));
+  var el = document.getElementById("scan-interval-preview");
+  var cronEl = document.getElementById("scan-cron-preview");
+  if (parts.length === 0) {
+    el.textContent = "Invalid: set at least 1 second";
+    el.style.color = "var(--error)";
+    cronEl.textContent = "";
+  } else {
+    el.textContent = "Scans every " + parts.join(", ");
+    el.style.color = "var(--text2)";
+    var dur = fieldsToDuration();
+    var cron = durationToCron(dur);
+    cronEl.textContent = cron ? "cron: " + cron : "";
+  }
+}
+
+document.getElementById("scan-days").addEventListener("input", updateIntervalPreview);
+document.getElementById("scan-hours").addEventListener("input", updateIntervalPreview);
+document.getElementById("scan-minutes").addEventListener("input", updateIntervalPreview);
+document.getElementById("scan-seconds").addEventListener("input", updateIntervalPreview);
+
+/* ---------- Load settings ---------- */
+function loadSettings() {
+  fetch("/api/v1/settings")
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      settings = data;
+      /* Scan interval — check if it matches a preset */
+      var sel = document.getElementById("scan-preset");
+      if (isPresetValue(data.scan_interval)) {
+        sel.value = data.scan_interval;
+        document.getElementById("custom-interval-panel").style.display = "none";
+      } else {
+        sel.value = "custom";
+        document.getElementById("custom-interval-panel").style.display = "block";
+        var f = parseDurationToFields(data.scan_interval);
+        document.getElementById("scan-days").value = f.days;
+        document.getElementById("scan-hours").value = f.hours;
+        document.getElementById("scan-minutes").value = f.minutes;
+        document.getElementById("scan-seconds").value = f.seconds;
+        updateIntervalPreview();
+      }
+      /* Theme */
+      var themeOpts = document.getElementById("theme-options").querySelectorAll(".theme-option");
+      for (var j = 0; j < themeOpts.length; j++) {
+        var isActive = themeOpts[j].getAttribute("data-theme") === data.theme;
+        themeOpts[j].classList.toggle("active", isActive);
+        themeOpts[j].querySelector("input").checked = isActive;
+      }
+      /* Icon */
+      var iconVal = data.icon || "icon3";
+      var iconOpts = document.getElementById("icon-options").querySelectorAll(".theme-option");
+      for (var k = 0; k < iconOpts.length; k++) {
+        var isIconActive = iconOpts[k].getAttribute("data-icon") === iconVal;
+        iconOpts[k].classList.toggle("active", isIconActive);
+        iconOpts[k].querySelector("input").checked = isIconActive;
+      }
+      /* Apply theme to settings page */
+      applyTheme(data.theme);
+      try { localStorage.setItem("nas-doctor-theme", data.theme); } catch(e) {}
+      /* Webhooks */
+      webhooks = (data.notifications && data.notifications.webhooks) ? data.notifications.webhooks : [];
+      renderWebhooks();
+      /* Service checks */
+      serviceChecks = (data.service_checks && data.service_checks.checks) ? data.service_checks.checks : [];
+      renderServiceChecks();
+      /* Dashboard section toggles */
+      var sec = data.sections || {};
+      var secMap = {findings:1,disk_space:1,smart:1,docker:1,container_metrics:1,zfs:1,ups:1,parity:1,network:1,tunnels:1,proxmox:1,kubernetes:1,merged_containers:1,merged_drives:1};
+      var secIds = {"findings":"sec-findings","disk_space":"sec-disk","smart":"sec-smart","docker":"sec-docker","container_metrics":"sec-container-metrics","zfs":"sec-zfs","gpu":"sec-gpu","ups":"sec-ups","parity":"sec-parity","network":"sec-network","tunnels":"sec-tunnels","proxmox":"sec-proxmox","kubernetes":"sec-kubernetes","merged_containers":"sec-merged-containers","merged_drives":"sec-merged-drives"};
+      for (var sk in secIds) { var el = document.getElementById(secIds[sk]); if (el) { if (sec[sk] === false) el.classList.remove("on"); else el.classList.add("on"); } }
+      /* API Key */
+      document.getElementById("api-key-display").value = data.api_key || "";
+      /* Proxmox VE */
+      var pve = data.proxmox || {};
+      if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
+      document.getElementById("pve-url").value = pve.url || "";
+      document.getElementById("pve-alias").value = pve.alias || "";
+      document.getElementById("pve-token").value = pve.token_id || "";
+      document.getElementById("pve-secret").value = pve.secret || "";
+      // Restore node filter — add as option if not already in dropdown
+      var nodeSel = document.getElementById("pve-node");
+      if (pve.node_name) {
+        var found = false;
+        for (var ni = 0; ni < nodeSel.options.length; ni++) { if (nodeSel.options[ni].value === pve.node_name) { found = true; break; } }
+        if (!found) nodeSel.innerHTML += '<option value="' + pve.node_name + '">' + pve.node_name + '</option>';
+        nodeSel.value = pve.node_name;
+      }
+      /* Kubernetes */
+      var k8s = data.kubernetes || {};
+      if (k8s.enabled) document.getElementById("k8s-toggle").classList.add("on"); else document.getElementById("k8s-toggle").classList.remove("on");
+      document.getElementById("k8s-url").value = k8s.url || "";
+      document.getElementById("k8s-token").value = k8s.token || "";
+      document.getElementById("k8s-alias").value = k8s.alias || "";
+      document.getElementById("k8s-incluster").checked = !!k8s.in_cluster;
+      /* Log forwarding */
+      var lp = data.log_push || {};
+      if (lp.enabled) document.getElementById("logfwd-toggle").classList.add("on"); else document.getElementById("logfwd-toggle").classList.remove("on");
+      logFwdDests = lp.destinations || [];
+      renderLogFwdDests();
+      /* Notification Rules */
+      notifRules = (data.notifications && data.notifications.rules) ? data.notifications.rules : [];
+      renderRules();
+    })
+    .catch(function(e) { showToast("Failed to load settings: " + e, "error"); });
+}
+
+/* ---------- Save settings ---------- */
+function buildSettingsPayload() {
+  var base = settings || {};
+  var cooldownMin = parseInt(document.getElementById("notif-cooldown").value, 10) || 0;
+  var notifications = {
+    webhooks: webhooks,
+    rules: notifRules,
+    quiet_hours: {
+      enabled: document.getElementById("qh-enabled").checked,
+      timezone: document.getElementById("qh-timezone").value,
+      start: document.getElementById("qh-start").value.trim() || "22:00",
+      end: document.getElementById("qh-end").value.trim() || "07:00"
+    },
+    maintenance_windows: maintenanceWindows,
+    default_cooldown_sec: cooldownMin * 60
+  };
+
+  return {
+    scan_interval: getScanInterval(),
+    theme: getSelectedTheme(),
+    icon: getSelectedIcon(),
+    notifications: notifications,
+    service_checks: { checks: serviceChecks },
+    log_push: { enabled: document.getElementById("logfwd-toggle").classList.contains("on"), destinations: logFwdDests },
+    retention: {
+      snapshot_days: parseInt(document.getElementById("ret-snapshot-days").value, 10) || 90,
+      max_db_size_mb: parseInt(document.getElementById("ret-max-db").value, 10) || 500,
+      notify_log_days: parseInt(document.getElementById("ret-notify-days").value, 10) || 30
+    },
+    sections: {
+      findings: document.getElementById("sec-findings").classList.contains("on"),
+      disk_space: document.getElementById("sec-disk").classList.contains("on"),
+      smart: document.getElementById("sec-smart").classList.contains("on"),
+      docker: document.getElementById("sec-docker").classList.contains("on"),
+      container_metrics: document.getElementById("sec-container-metrics").classList.contains("on"),
+      merged_containers: document.getElementById("sec-merged-containers").classList.contains("on"),
+      zfs: document.getElementById("sec-zfs").classList.contains("on"),
+      gpu: document.getElementById("sec-gpu").classList.contains("on"),
+      ups: document.getElementById("sec-ups").classList.contains("on"),
+      parity: document.getElementById("sec-parity").classList.contains("on"),
+      network: document.getElementById("sec-network").classList.contains("on"),
+      tunnels: document.getElementById("sec-tunnels").classList.contains("on"),
+      proxmox: document.getElementById("sec-proxmox").classList.contains("on"),
+      kubernetes: document.getElementById("sec-kubernetes").classList.contains("on"),
+      merged_drives: document.getElementById("sec-merged-drives").classList.contains("on")
+    },
+    proxmox: {
+      enabled: document.getElementById("pve-toggle").classList.contains("on"),
+      url: document.getElementById("pve-url").value.trim(),
+      alias: document.getElementById("pve-alias").value.trim(),
+      node_name: document.getElementById("pve-node").value,
+      token_id: document.getElementById("pve-token").value.trim(),
+      secret: document.getElementById("pve-secret").value.trim()
+    },
+    kubernetes: {
+      enabled: document.getElementById("k8s-toggle").classList.contains("on"),
+      url: document.getElementById("k8s-url").value.trim(),
+      token: document.getElementById("k8s-token").value.trim(),
+      alias: document.getElementById("k8s-alias").value.trim(),
+      in_cluster: document.getElementById("k8s-incluster").checked
+    },
+    backup: {
+      enabled: document.getElementById("backup-toggle").classList.contains("on"),
+      path: document.getElementById("backup-path").value.trim(),
+      keep_count: parseInt(document.getElementById("backup-keep").value, 10) || 4,
+      interval_hours: getBackupIntervalH()
+    },
+    api_key: document.getElementById("api-key-display").value.trim(),
+    fleet: fleetServers || base.fleet || [],
+    dismissed_findings: base.dismissed_findings || []
+  };
+}
+
+function saveSettings() {
+  var payload = buildSettingsPayload();
+  fetch("/api/v1/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })
+  .then(function(r) {
+    if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Save failed"); });
+    return r.json();
+  })
+  .then(function(saved) {
+    settings = saved;
+    webhooks = (saved.notifications && saved.notifications.webhooks) ? saved.notifications.webhooks : webhooks;
+    notifRules = (saved.notifications && saved.notifications.rules) ? saved.notifications.rules : notifRules;
+    maintenanceWindows = (saved.notifications && saved.notifications.maintenance_windows) ? saved.notifications.maintenance_windows : maintenanceWindows;
+    serviceChecks = (saved.service_checks && saved.service_checks.checks) ? saved.service_checks.checks : serviceChecks;
+    showToast("Settings saved", "success");
+    markSaved();
+    /* Apply theme live */
+    applyTheme(payload.theme);
+    try { localStorage.setItem("nas-doctor-theme", payload.theme); } catch(e) {}
+    renderWebhooks();
+    renderRules();
+    renderMaintenanceWindows();
+    renderServiceChecks();
+  })
+  .catch(function(e) { showToast("Error: " + e.message, "error"); });
+}
+
+/* ---------- Webhooks ---------- */
+function maskUrl(url) {
+  if (!url) return "";
+  try {
+    var u = new URL(url);
+    var host = u.hostname;
+    var path = u.pathname;
+    if (path.length > 12) path = path.substring(0, 12) + "...";
+    return u.protocol + "//" + host + path;
+  } catch(e) {
+    if (url.length > 40) return url.substring(0, 40) + "...";
+    return url;
+  }
+}
+
+function renderWebhooks() {
+  var container = document.getElementById("webhook-list");
+  if (!webhooks || webhooks.length === 0) {
+    container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text2);font-size:13px">No webhooks configured yet.</div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < webhooks.length; i++) {
+    var wh = webhooks[i];
+    var badgeClass = "badge-" + (wh.type || "generic");
+    var typeName = (wh.type || "generic").charAt(0).toUpperCase() + (wh.type || "generic").slice(1);
+    html += '<div class="webhook-item">';
+    html += '  <div class="webhook-info">';
+    html += '    <div class="webhook-name">' + escapeHtml(wh.name || "Unnamed") + '<span class="badge ' + badgeClass + '">' + typeName + '</span></div>';
+    html += '    <div class="webhook-url">' + escapeHtml(maskUrl(wh.url)) + '</div>';
+    html += '  </div>';
+    html += '  <div class="webhook-actions">';
+    html += '    <div class="toggle-wrap" onclick="toggleWebhookEnabled(' + i + ')">';
+    html += '      <div class="toggle' + (wh.enabled ? " on" : "") + '"><div class="toggle-knob"></div></div>';
+    html += '    </div>';
+    html += '    <button class="btn btn-secondary btn-sm" onclick="editWebhook(' + i + ')">Edit</button>';
+    html += '    <button class="btn btn-danger btn-sm" onclick="removeWebhook(' + i + ')">Remove</button>';
+    html += '  </div>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function toggleWebhookEnabled(idx) {
+  webhooks[idx].enabled = !webhooks[idx].enabled;
+  renderWebhooks();
+  saveSettings();
+}
+
+function toggleWebhookForm() {
+  var form = document.getElementById("webhook-form");
+  if (form.classList.contains("visible")) {
+    cancelWebhookForm();
+    return;
+  }
+  document.getElementById("wh-edit-index").value = "-1";
+  document.getElementById("wh-name").value = "";
+  document.getElementById("wh-url").value = "";
+  document.getElementById("wh-type").value = "discord";
+  document.getElementById("wh-secret").value = "";
+  form.classList.add("visible");
+}
+
+function editWebhook(idx) {
+  var wh = webhooks[idx];
+  document.getElementById("wh-edit-index").value = String(idx);
+  document.getElementById("wh-name").value = wh.name || "";
+  document.getElementById("wh-url").value = wh.url || "";
+  document.getElementById("wh-type").value = wh.type || "generic";
+  document.getElementById("wh-secret").value = wh.secret || "";
+  document.getElementById("webhook-form").classList.add("visible");
+}
+
+function cancelWebhookForm() {
+  document.getElementById("webhook-form").classList.remove("visible");
+}
+
+function saveWebhook() {
+  var name = document.getElementById("wh-name").value.trim();
+  var url = document.getElementById("wh-url").value.trim();
+  if (!name || !url) {
+    showToast("Name and URL are required", "error");
+    return;
+  }
+  var wh = {
+    name: name,
+    url: url,
+    type: document.getElementById("wh-type").value,
+    enabled: true,
+    secret: document.getElementById("wh-secret").value.trim() || ""
+  };
+  var editIdx = parseInt(document.getElementById("wh-edit-index").value, 10);
+  if (editIdx >= 0 && editIdx < webhooks.length) {
+    wh.enabled = webhooks[editIdx].enabled;
+    webhooks[editIdx] = wh;
+  } else {
+    webhooks.push(wh);
+  }
+  renderWebhooks();
+  cancelWebhookForm();
+  saveSettings();
+}
+
+function removeWebhook(idx) {
+  if (!confirm("Remove webhook \"" + (webhooks[idx].name || "Unnamed") + "\"?")) return;
+  webhooks.splice(idx, 1);
+  renderWebhooks();
+  saveSettings();
+}
+
+function testWebhook() {
+  var url = document.getElementById("wh-url").value.trim();
+  if (!url) {
+    showToast("Enter a URL first", "error");
+    return;
+  }
+  var wh = {
+    name: document.getElementById("wh-name").value.trim() || "Test",
+    url: url,
+    type: document.getElementById("wh-type").value,
+    enabled: true,
+    min_level: document.getElementById("wh-level").value,
+    secret: document.getElementById("wh-secret").value.trim() || ""
+  };
+  showToast("Sending test...", "info");
+  fetch("/api/v1/settings/test-webhook", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(wh)
+  })
+  .then(function(r) {
+    if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Test failed"); });
+    return r.json();
+  })
+  .then(function(data) { showToast("Test sent! Check your destination.", "success"); })
+  .catch(function(e) { showToast("Error: " + e.message, "error"); });
+}
+
+/* ---------- Service checks ---------- */
+function normalizeServiceCheck(sc) {
+  var out = {
+    name: (sc && sc.name) ? sc.name : "",
+    type: (sc && sc.type) ? String(sc.type).toLowerCase() : "http",
+    target: (sc && sc.target) ? sc.target : "",
+    enabled: !(sc && sc.enabled === false),
+    interval_sec: (sc && sc.interval_sec > 0) ? sc.interval_sec : 300,
+    timeout_sec: (sc && sc.timeout_sec) ? sc.timeout_sec : 5,
+    port: (sc && sc.port) ? sc.port : 0,
+    failure_threshold: (sc && sc.failure_threshold) ? sc.failure_threshold : 1,
+    failure_severity: (sc && sc.failure_severity) ? sc.failure_severity : "warning",
+    expected_status_min: (sc && sc.expected_status_min) ? sc.expected_status_min : 200,
+    expected_status_max: (sc && sc.expected_status_max) ? sc.expected_status_max : 399
+  };
+  if (out.timeout_sec < 1) out.timeout_sec = 5;
+  if (out.failure_threshold < 1) out.failure_threshold = 1;
+  return out;
+}
+function formatInterval(sec) {
+  if (sec < 60) return sec + "s";
+  if (sec < 3600) return Math.floor(sec/60) + "m";
+  return Math.floor(sec/3600) + "h";
+}
+
+function serviceTypePillClass(t) {
+  var type = (t || "").toLowerCase();
+  if (type === "http") return "pill-http";
+  if (type === "tcp") return "pill-tcp";
+  if (type === "dns") return "pill-dns";
+  if (type === "ping") return "pill-ping";
+  if (type === "smb") return "pill-smb";
+  if (type === "nfs") return "pill-nfs";
+  return "pill-http";
+}
+
+function populateInstanceSelector() {
+  var sel = document.getElementById("sc-instance");
+  var wrap = document.getElementById("sc-instance-wrap");
+  if (!sel || !wrap) return;
+  sel.innerHTML = '<option value="">This server (local)</option>';
+  for (var i = 0; i < fleetServers.length; i++) {
+    var s = fleetServers[i];
+    sel.innerHTML += '<option value="' + escapeHtml(s.id || s.name) + '">' + escapeHtml(s.name) + ' (' + escapeHtml(s.url) + ')</option>';
+  }
+  wrap.style.display = fleetServers.length > 0 ? '' : 'none';
+}
+function renderServiceChecks() {
+  var container = document.getElementById("service-check-list");
+  if (!container) return;
+  if (!serviceChecks || serviceChecks.length === 0) {
+    container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text2);font-size:13px">No service checks configured yet.</div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < serviceChecks.length; i++) {
+    var sc = normalizeServiceCheck(serviceChecks[i]);
+    var t = (sc.type || "http").toUpperCase();
+    html += '<div class="mini-list-item">';
+    html += '  <div class="mini-list-main">';
+    html += '    <div class="mini-list-title">' + escapeHtml(sc.name) + ' <span class="pill ' + serviceTypePillClass(sc.type) + '">' + escapeHtml(t) + '</span></div>';
+    html += '    <div class="mini-list-sub">' + escapeHtml(sc.target) + (sc.port ? (':' + sc.port) : '') + '</div>';
+    html += '    <div class="inline-muted">Every ' + formatInterval(sc.interval_sec) + ' &middot; Threshold: ' + sc.failure_threshold + ' &middot; Severity: ' + escapeHtml(sc.failure_severity) + ' &middot; Timeout: ' + sc.timeout_sec + 's</div>';
+    html += '  </div>';
+    html += '  <div class="webhook-actions">';
+    html += '    <div class="toggle-wrap" onclick="toggleServiceCheckEnabled(' + i + ')"><div class="toggle' + (sc.enabled ? ' on' : '') + '"><div class="toggle-knob"></div></div></div>';
+    html += '    <button class="btn btn-secondary btn-sm" onclick="editServiceCheck(' + i + ')">Edit</button>';
+    html += '    <button class="btn btn-danger btn-sm" onclick="removeServiceCheck(' + i + ')">Remove</button>';
+    html += '  </div>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function toggleServiceCheckEnabled(idx) {
+  if (idx < 0 || idx >= serviceChecks.length) return;
+  var sc = normalizeServiceCheck(serviceChecks[idx]);
+  sc.enabled = !sc.enabled;
+  serviceChecks[idx] = sc;
+  renderServiceChecks();
+  saveSettings();
+}
+
+function toggleServiceCheckForm() {
+  var form = document.getElementById("service-check-form");
+  if (form.classList.contains("visible")) {
+    cancelServiceCheckForm();
+    return;
+  }
+  document.getElementById("sc-edit-index").value = "-1";
+  document.getElementById("sc-name").value = "";
+  document.getElementById("sc-type").value = "http";
+  document.getElementById("sc-target").value = "";
+  document.getElementById("sc-port").value = "";
+  document.getElementById("sc-instance").value = "";
+  document.getElementById("sc-interval").value = "300";
+  document.getElementById("sc-timeout").value = "5";
+  document.getElementById("sc-threshold").value = "1";
+  document.getElementById("sc-severity").value = "warning";
+  document.getElementById("sc-http-min").value = "200";
+  document.getElementById("sc-http-max").value = "399";
+  document.getElementById("sc-headers").value = "";
+  setServiceCheckEnabledUI(true);
+  populateInstanceSelector();
+  onServiceTypeChange();
+  form.classList.add("visible");
+}
+
+function setServiceCheckEnabledUI(enabled) {
+  var checkbox = document.getElementById("sc-enabled");
+  if (checkbox) checkbox.checked = !!enabled;
+  var toggleWrap = checkbox ? checkbox.parentElement : null;
+  var toggle = toggleWrap ? toggleWrap.querySelector(".toggle") : null;
+  if (toggle) toggle.classList.toggle("on", !!enabled);
+}
+
+function onServiceTypeChange() {
+  var type = document.getElementById("sc-type").value;
+  var httpWrap = document.getElementById("sc-http-expected-wrap");
+  var portWrap = document.getElementById("sc-port-wrap");
+  var headersWrap = document.getElementById("sc-headers-wrap");
+  if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
+  if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
+  if (headersWrap) headersWrap.style.display = (type === "http") ? "block" : "none";
+  var targetInput = document.getElementById("sc-target");
+  if (targetInput) {
+    if (type === "ping") targetInput.placeholder = "e.g. 8.8.8.8 or gateway.local";
+    else if (type === "dns") targetInput.placeholder = "e.g. google.com";
+    else targetInput.placeholder = "https://nas.local/health, 192.168.1.10, or host:port";
+  }
+}
+function parseScHeaders() {
+  var raw = (document.getElementById("sc-headers") || {}).value || "";
+  if (!raw.trim()) return null;
+  var h = {};
+  raw.trim().split("\n").forEach(function(l) { var i = l.indexOf(":"); if (i > 0) h[l.substring(0,i).trim()] = l.substring(i+1).trim(); });
+  return Object.keys(h).length > 0 ? h : null;
+}
+function scHeadersToText(hdrs) {
+  if (!hdrs) return "";
+  var lines = []; for (var k in hdrs) lines.push(k + ": " + hdrs[k]); return lines.join("\n");
+}
+
+function editServiceCheck(idx) {
+  if (idx < 0 || idx >= serviceChecks.length) return;
+  var sc = normalizeServiceCheck(serviceChecks[idx]);
+  document.getElementById("sc-edit-index").value = String(idx);
+  document.getElementById("sc-name").value = sc.name;
+  document.getElementById("sc-type").value = sc.type;
+  document.getElementById("sc-target").value = sc.target;
+  document.getElementById("sc-port").value = sc.port > 0 ? String(sc.port) : "";
+  populateInstanceSelector();
+  document.getElementById("sc-instance").value = sc.instance || "";
+  document.getElementById("sc-interval").value = String(sc.interval_sec || 300);
+  document.getElementById("sc-timeout").value = String(sc.timeout_sec || 5);
+  document.getElementById("sc-threshold").value = String(sc.failure_threshold || 1);
+  document.getElementById("sc-severity").value = sc.failure_severity || "warning";
+  document.getElementById("sc-http-min").value = String(sc.expected_status_min || 200);
+  document.getElementById("sc-http-max").value = String(sc.expected_status_max || 399);
+  document.getElementById("sc-headers").value = scHeadersToText(sc.headers);
+  setServiceCheckEnabledUI(sc.enabled !== false);
+  onServiceTypeChange();
+  document.getElementById("service-check-form").classList.add("visible");
+}
+
+function cancelServiceCheckForm() {
+  document.getElementById("service-check-form").classList.remove("visible");
+}
+
+function saveServiceCheck() {
+  var name = document.getElementById("sc-name").value.trim();
+  var target = document.getElementById("sc-target").value.trim();
+  if (!name || !target) {
+    showToast("Name and target are required", "error");
+    return;
+  }
+  var type = document.getElementById("sc-type").value;
+  var sc = {
+    name: name,
+    type: type,
+    target: target,
+    enabled: document.getElementById("sc-enabled").checked,
+    instance: document.getElementById("sc-instance").value || "",
+    interval_sec: parseInt(document.getElementById("sc-interval").value, 10) || 300,
+    timeout_sec: parseInt(document.getElementById("sc-timeout").value, 10) || 5,
+    port: parseInt(document.getElementById("sc-port").value, 10) || 0,
+    failure_threshold: parseInt(document.getElementById("sc-threshold").value, 10) || 1,
+    failure_severity: document.getElementById("sc-severity").value,
+    expected_status_min: parseInt(document.getElementById("sc-http-min").value, 10) || 200,
+    expected_status_max: parseInt(document.getElementById("sc-http-max").value, 10) || 399
+  };
+  var scHdrs = parseScHeaders();
+  if (scHdrs) sc.headers = scHdrs;
+  if (sc.timeout_sec < 1) sc.timeout_sec = 5;
+  if (sc.timeout_sec > 30) sc.timeout_sec = 30;
+  if (sc.failure_threshold < 1) sc.failure_threshold = 1;
+  if (type !== "http") {
+    sc.expected_status_min = 0;
+    sc.expected_status_max = 0;
+  }
+
+  for (var i = 0; i < serviceChecks.length; i++) {
+    if (i === parseInt(document.getElementById("sc-edit-index").value, 10)) continue;
+    if ((serviceChecks[i].name || "").toLowerCase() === name.toLowerCase()) {
+      showToast("Service check name must be unique", "error");
+      return;
+    }
+  }
+
+  var editIdx = parseInt(document.getElementById("sc-edit-index").value, 10);
+  if (editIdx >= 0 && editIdx < serviceChecks.length) {
+    serviceChecks[editIdx] = sc;
+  } else {
+    serviceChecks.push(sc);
+  }
+  renderServiceChecks();
+  cancelServiceCheckForm();
+  saveSettings();
+}
+
+function removeServiceCheck(idx) {
+  if (idx < 0 || idx >= serviceChecks.length) return;
+  if (!confirm('Remove service check "' + (serviceChecks[idx].name || "Unnamed") + '"?')) return;
+  serviceChecks.splice(idx, 1);
+  renderServiceChecks();
+  saveSettings();
+}
+
+function runServiceChecksNow() {
+  showToast("Running service checks...", "info");
+  fetch("/api/v1/service-checks/run", { method: "POST" })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Run failed"); });
+      return r.json();
+    })
+    .then(function() {
+      showToast("Service checks completed", "success");
+    })
+    .catch(function(e) {
+      showToast("Run failed: " + e.message, "error");
+    });
+}
+
+
+
+/* ---------- Alerts, Incidents, Trends, Notification History have moved to /alerts ---------- */
+
+/* (Alerts, incidents, trends, notification history functions moved to /alerts page) */
+
+/* ---------- Helpers ---------- */
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+/* ---------- Apply saved theme ---------- */
+function applyTheme(theme) {
+  document.body.classList.remove("theme-midnight", "theme-clean", "theme-ember");
+  if (theme === "clean" || theme === "ember") {
+    document.body.classList.add("theme-" + theme);
+  } else {
+    document.body.classList.add("theme-midnight");
+  }
+}
+
+/* Load theme before anything else to avoid flash */
+/* ---------- Log Forwarding ---------- */
+var logFwdDests = [];
+function renderLogFwdDests() {
+  var c = document.getElementById("logfwd-dest-list");
+  if (!logFwdDests || logFwdDests.length === 0) {
+    c.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:8px 0">No destinations configured.</div>';
+    return;
+  }
+  var h = "";
+  for (var i = 0; i < logFwdDests.length; i++) {
+    var d = logFwdDests[i];
+    var t = (d.type || "http_json").toUpperCase().replace("_", " ");
+    h += '<div class="webhook-item">';
+    h += '<div class="webhook-info">';
+    h += '<div class="webhook-name">' + escapeHtml(d.name || "Unnamed") + ' <span class="badge" style="font-size:10px">' + t + '</span></div>';
+    h += '<div class="webhook-url">' + escapeHtml(d.url || "") + '</div>';
+    if (d.format && d.format !== "full") h += '<div class="inline-muted">Format: ' + escapeHtml(d.format) + '</div>';
+    h += '</div><div class="webhook-actions">';
+    h += '<div class="toggle-wrap" onclick="toggleLogFwdEnabled(' + i + ')">';
+    h += '<div class="toggle' + (d.enabled ? " on" : "") + '"><div class="toggle-knob"></div></div></div>';
+    h += '<button class="btn btn-secondary btn-sm" onclick="editLogFwdDest(' + i + ')">Edit</button>';
+    h += '<button class="btn btn-danger btn-sm" onclick="removeLogFwdDest(' + i + ')">Remove</button>';
+    h += '</div></div>';
+  }
+  c.innerHTML = h;
+}
+function toggleLogFwdEnabled(idx) { logFwdDests[idx].enabled = !logFwdDests[idx].enabled; renderLogFwdDests(); saveSettings(); }
+function removeLogFwdDest(idx) { logFwdDests.splice(idx, 1); renderLogFwdDests(); saveSettings(); }
+function toggleLogFwdForm() {
+  var f = document.getElementById("logfwd-form");
+  if (f.classList.contains("visible")) { cancelLogFwdForm(); return; }
+  document.getElementById("lf-edit-index").value = "-1";
+  document.getElementById("lf-name").value = "";
+  document.getElementById("lf-type").value = "loki";
+  document.getElementById("lf-url").value = "";
+  document.getElementById("lf-format").value = "full";
+  document.getElementById("lf-labels").value = "";
+  document.getElementById("lf-headers").value = "";
+  onLogFwdTypeChange();
+  f.classList.add("visible");
+}
+function editLogFwdDest(idx) {
+  var d = logFwdDests[idx];
+  document.getElementById("lf-edit-index").value = String(idx);
+  document.getElementById("lf-name").value = d.name || "";
+  document.getElementById("lf-type").value = d.type || "loki";
+  document.getElementById("lf-url").value = d.url || "";
+  document.getElementById("lf-format").value = d.format || "full";
+  var lbls = []; for (var k in (d.labels||{})) lbls.push(k + "=" + d.labels[k]);
+  document.getElementById("lf-labels").value = lbls.join(",");
+  var hdrs = []; for (var k in (d.headers||{})) hdrs.push(k + "=" + d.headers[k]);
+  document.getElementById("lf-headers").value = hdrs.join(",");
+  onLogFwdTypeChange();
+  document.getElementById("logfwd-form").classList.add("visible");
+}
+function cancelLogFwdForm() { document.getElementById("logfwd-form").classList.remove("visible"); }
+function onLogFwdTypeChange() {
+  var t = document.getElementById("lf-type").value;
+  var hint = document.getElementById("lf-url-hint");
+  if (hint) {
+    if (t === "loki") hint.textContent = "Loki: base URL (e.g. http://loki:3100). /loki/api/v1/push is appended automatically.";
+    else if (t === "syslog") hint.textContent = "Syslog: host:port (e.g. 192.168.1.5:514). Prefix with tcp:// for TCP, default is UDP.";
+    else hint.textContent = "HTTP endpoint that accepts POST with JSON body.";
+  }
+}
+function saveLogFwdDest() {
+  var name = document.getElementById("lf-name").value.trim();
+  var url = document.getElementById("lf-url").value.trim();
+  if (!name || !url) { showToast("Name and URL are required", "error"); return; }
+  var d = { name: name, type: document.getElementById("lf-type").value, url: url, enabled: true,
+    format: document.getElementById("lf-format").value };
+  var labelsRaw = document.getElementById("lf-labels").value.trim();
+  if (labelsRaw) { d.labels = {}; labelsRaw.split(",").forEach(function(p) { var kv = p.split("="); if (kv.length === 2) d.labels[kv[0].trim()] = kv[1].trim(); }); }
+  var headersRaw = document.getElementById("lf-headers").value.trim();
+  if (headersRaw) { d.headers = {}; headersRaw.split(",").forEach(function(p) { var kv = p.split("="); if (kv.length === 2) d.headers[kv[0].trim()] = kv[1].trim(); }); }
+  var idx = parseInt(document.getElementById("lf-edit-index").value, 10);
+  if (idx >= 0 && idx < logFwdDests.length) { d.enabled = logFwdDests[idx].enabled; logFwdDests[idx] = d; }
+  else logFwdDests.push(d);
+  renderLogFwdDests(); cancelLogFwdForm(); saveSettings();
+}
+
+(function() {
+  try {
+    var stored = localStorage.getItem("nas-doctor-theme");
+    if (stored) applyTheme(stored);
+  } catch(e) {}
+})();
+
+/* ---------- DB Stats ---------- */
+function loadDBStats() {
+  fetch("/api/v1/db/stats")
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var el = document.getElementById("db-stats");
+      var lines = [];
+      lines.push("<strong>" + d.file_size_mb.toFixed(1) + " MB</strong> database size");
+      lines.push(d.snapshot_count + " snapshots stored");
+      lines.push(d.smart_history_rows + " SMART history rows");
+      lines.push(d.system_history_rows + " system history rows");
+      lines.push((d.service_check_rows || 0) + " service check rows");
+      if (d.oldest_snapshot) {
+        var oldest = d.oldest_snapshot.substring(0, 10);
+        var newest = d.newest_snapshot.substring(0, 10);
+        lines.push("Range: " + oldest + " → " + newest);
+      }
+      el.innerHTML = lines.join("<br>");
+    })
+    .catch(function() {
+      document.getElementById("db-stats").textContent = "Failed to load stats";
+    });
+}
+
+/* ---------- Fleet ---------- */
+var fleetServers = [];
+
+function loadFleetServers() {
+  fetch("/api/v1/fleet/servers")
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      fleetServers = data || [];
+      renderFleetList();
+    }).catch(function() {});
+}
+
+function renderFleetList() {
+  var el = document.getElementById("fleet-list");
+  if (!fleetServers || fleetServers.length === 0) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:8px 0">No remote servers configured.</div>';
+    return;
+  }
+  var h = '';
+  for (var i = 0; i < fleetServers.length; i++) {
+    var s = fleetServers[i];
+    var hdrs = s.headers ? Object.keys(s.headers).length : 0;
+    h += '<div class="webhook-item">';
+    h += '<div class="webhook-info">';
+    h += '<div class="webhook-name">' + escapeHtml(s.name || 'Server ' + (i+1)) + '</div>';
+    h += '<div class="webhook-url">' + escapeHtml(s.url || '') + '</div>';
+    var tags = [];
+    if (hdrs > 0) tags.push(hdrs + ' header' + (hdrs>1?'s':''));
+    if (s.api_key) tags.push('API key');
+    if (tags.length) h += '<div class="inline-muted">' + escapeHtml(tags.join(' · ')) + '</div>';
+    h += '</div>';
+    h += '<div class="webhook-actions">';
+    h += '<button class="btn btn-secondary btn-sm" onclick="testFleetServer(' + i + ')">Test</button>';
+    h += '<button class="btn btn-secondary btn-sm" onclick="editFleetServer(' + i + ')">Edit</button>';
+    h += '<button class="btn btn-danger btn-sm" onclick="removeFleetServer(' + i + ')">Remove</button>';
+    h += '</div>';
+    h += '</div>';
+  }
+  el.innerHTML = h;
+}
+
+function parseHeadersTextarea() {
+  var raw = document.getElementById("fleet-headers").value.trim();
+  if (!raw) return null;
+  var headers = {};
+  raw.split("\n").forEach(function(line) {
+    var idx = line.indexOf(":");
+    if (idx > 0) headers[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+  });
+  return Object.keys(headers).length > 0 ? headers : null;
+}
+function headersToText(hdrs) {
+  if (!hdrs) return "";
+  var lines = [];
+  for (var k in hdrs) lines.push(k + ": " + hdrs[k]);
+  return lines.join("\n");
+}
+function toggleFleetForm() {
+  var form = document.getElementById("fleet-form");
+  if (form.classList.contains("visible")) { cancelFleetForm(); return; }
+  document.getElementById("fleet-edit-index").value = "-1";
+  document.getElementById("fleet-name").value = "";
+  document.getElementById("fleet-url").value = "";
+  document.getElementById("fleet-apikey").value = "";
+  document.getElementById("fleet-headers").value = "";
+  document.getElementById("fleet-test-result").textContent = "";
+  form.classList.add("visible");
+}
+function editFleetServer(idx) {
+  var s = fleetServers[idx];
+  document.getElementById("fleet-edit-index").value = String(idx);
+  document.getElementById("fleet-name").value = s.name || "";
+  document.getElementById("fleet-url").value = s.url || "";
+  document.getElementById("fleet-apikey").value = s.api_key || "";
+  document.getElementById("fleet-headers").value = headersToText(s.headers);
+  document.getElementById("fleet-test-result").textContent = "";
+  document.getElementById("fleet-form").classList.add("visible");
+}
+function cancelFleetForm() {
+  document.getElementById("fleet-form").classList.remove("visible");
+}
+function saveFleetServerForm() {
+  var name = document.getElementById("fleet-name").value.trim();
+  var url = document.getElementById("fleet-url").value.trim();
+  if (!name || !url) { showToast("Name and URL required", "error"); return; }
+  var server = { id: "", name: name, url: url, enabled: true };
+  var apikey = document.getElementById("fleet-apikey").value.trim();
+  if (apikey) server.api_key = apikey;
+  var headers = parseHeadersTextarea();
+  if (headers) server.headers = headers;
+  var editIdx = parseInt(document.getElementById("fleet-edit-index").value, 10);
+  var isNew = !(editIdx >= 0 && editIdx < fleetServers.length);
+  if (!isNew) {
+    server.id = fleetServers[editIdx].id;
+    server.enabled = fleetServers[editIdx].enabled;
+    fleetServers[editIdx] = server;
+  } else {
+    fleetServers.push(server);
+    // Auto-create an HTTP service check for the new fleet instance
+    var healthURL = url.replace(/\/+$/, "") + "/api/v1/health";
+    var newCheck = {
+      name: name + " (fleet)",
+      type: "http",
+      target: healthURL,
+      enabled: true,
+      interval_sec: 300,
+      timeout_sec: 10,
+      failure_threshold: 3,
+      failure_severity: "warning",
+      expected_status_min: 200,
+      expected_status_max: 200
+    };
+    if (headers) newCheck.headers = headers;
+    if (apikey) newCheck.headers = Object.assign(newCheck.headers || {}, {"Authorization": "Bearer " + apikey});
+    serviceChecks.push(newCheck);
+    renderServiceChecks();
+    showToast("Service check auto-created for " + name, "success");
+  }
+  saveFleetServers();
+  saveSettings();
+  cancelFleetForm();
+}
+function testFleetFromForm() {
+  var url = document.getElementById("fleet-url").value.trim();
+  var apikey = document.getElementById("fleet-apikey").value.trim();
+  var headers = parseHeadersTextarea();
+  _doFleetTest(url, apikey, headers, document.getElementById("fleet-test-result"));
+}
+function testFleetServer(idx) {
+  var s = fleetServers[idx];
+  var resultEl = document.createElement("span");
+  resultEl.style.fontSize = "12px";
+  resultEl.textContent = "Testing...";
+  resultEl.style.color = "var(--text2)";
+  var row = document.getElementById("fleet-list").children[idx];
+  if (row) { var existing = row.querySelector(".fleet-test-inline"); if(existing) existing.remove(); resultEl.className = "fleet-test-inline"; row.querySelector(".webhook-info").appendChild(resultEl); }
+  _doFleetTest(s.url, s.api_key, s.headers, resultEl);
+}
+function _doFleetTest(url, apikey, headers, resultEl) {
+  if (!url) { resultEl.textContent = "URL required"; resultEl.style.color = "var(--red)"; return; }
+  resultEl.textContent = "Testing...";
+  resultEl.style.color = "var(--text2)";
+  fetch("/api/v1/fleet/test", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ url: url, api_key: apikey || "", headers: headers || {} })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.success) {
+      resultEl.style.color = "var(--green)";
+      var info = (d.version || "NAS Doctor");
+      if (d.hostname) info += " · " + d.hostname;
+      if (d.uptime) info += " · " + d.uptime;
+      resultEl.textContent = "Connected — " + info;
+      if (d.api_key_required) {
+        resultEl.style.color = "var(--amber)";
+        resultEl.textContent += " ⚠ API key required for full monitoring";
+      }
+      // Auto-populate name if empty
+      var nameField = document.getElementById("fleet-name");
+      if (nameField && !nameField.value.trim() && d.hostname) {
+        nameField.value = d.hostname;
+      }
+      // Store hostname for auto-service-check creation
+      if (formResultEl) formResultEl._testData = d;
+    } else {
+      resultEl.style.color = "var(--red)";
+      resultEl.textContent = "Failed: " + (d.error || "unknown");
+    }
+  })
+  .catch(function(e) { resultEl.style.color = "var(--red)"; resultEl.textContent = "Error: " + e.message; });
+  var formResultEl = resultEl;
+}
+
+function removeFleetServer(idx) {
+  if (!confirm("Remove this server from the fleet?")) return;
+  fleetServers.splice(idx, 1);
+  saveFleetServers();
+}
+
+function saveFleetServers() {
+  fetch("/api/v1/fleet/servers", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fleetServers)
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    fleetServers = data;
+    renderFleetList();
+    showToast("Fleet updated", "success");
+  })
+  .catch(function(e) { showToast("Error: " + e.message, "error"); });
+}
+
+/* ---------- Backup ---------- */
+var backupPresets = ["12", "24", "72", "168", "336", "720"];
+
+function toggleBackup() {
+  var el = document.getElementById("backup-toggle");
+  el.classList.toggle("on");
+}
+
+function onBackupPresetChange() {
+  var v = document.getElementById("backup-preset").value;
+  var panel = document.getElementById("backup-custom-panel");
+  if (v === "custom") {
+    panel.style.display = "block";
+    updateBackupCustomPreview();
+  } else {
+    panel.style.display = "none";
+  }
+}
+
+function getBackupIntervalH() {
+  var v = document.getElementById("backup-preset").value;
+  if (v !== "custom") return parseInt(v, 10);
+  var d = parseInt(document.getElementById("backup-days").value, 10) || 0;
+  var h = parseInt(document.getElementById("backup-hours").value, 10) || 0;
+  var total = d * 24 + h;
+  return total > 0 ? total : 168;
+}
+
+function updateBackupCustomPreview() {
+  var d = parseInt(document.getElementById("backup-days").value, 10) || 0;
+  var h = parseInt(document.getElementById("backup-hours").value, 10) || 0;
+  var parts = [];
+  if (d > 0) parts.push(d + (d === 1 ? " day" : " days"));
+  if (h > 0) parts.push(h + (h === 1 ? " hour" : " hours"));
+  var el = document.getElementById("backup-custom-preview");
+  el.textContent = parts.length > 0 ? "Backup every " + parts.join(", ") : "Set at least 1 hour";
+}
+
+function setBackupIntervalUI(hours) {
+  var sel = document.getElementById("backup-preset");
+  var h = String(hours);
+  if (backupPresets.indexOf(h) >= 0) {
+    sel.value = h;
+    document.getElementById("backup-custom-panel").style.display = "none";
+  } else {
+    sel.value = "custom";
+    document.getElementById("backup-custom-panel").style.display = "block";
+    document.getElementById("backup-days").value = Math.floor(hours / 24);
+    document.getElementById("backup-hours").value = hours % 24;
+    updateBackupCustomPreview();
+  }
+}
+
+/* Attach listeners for custom backup fields */
+(function() {
+  var bd = document.getElementById("backup-days");
+  var bh = document.getElementById("backup-hours");
+  if (bd) bd.addEventListener("input", updateBackupCustomPreview);
+  if (bh) bh.addEventListener("input", updateBackupCustomPreview);
+})();
+
+function loadBackupInfo() {
+  fetch("/api/v1/backup")
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var el = document.getElementById("backup-info");
+      var backups = d.backups || [];
+      if (backups.length === 0) {
+        el.textContent = "No backups yet";
+      } else {
+        var lines = [];
+        lines.push("<strong>" + backups.length + "</strong> backup(s) stored");
+        lines.push("Latest: " + backups[0].timestamp.substring(0, 10));
+        lines.push("Size: " + backups[0].size_mb.toFixed(1) + " MB");
+        el.innerHTML = lines.join("<br>");
+      }
+    })
+    .catch(function() {
+      document.getElementById("backup-info").textContent = "Failed to load";
+    });
+}
+
+function triggerBackup() {
+  showToast("Creating backup...", "success");
+  fetch("/api/v1/backup", { method: "POST" })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { showToast("Backup failed: " + d.error, "error"); return; }
+      showToast("Backup created: " + d.size_mb.toFixed(1) + " MB", "success");
+      loadBackupInfo();
+    })
+    .catch(function(e) { showToast("Backup error: " + e.message, "error"); });
+}
+
+/* ---------- Webhook Custom Headers ---------- */
+var webhookHeaders = {};
+
+function renderWebhookHeaders() {
+  var container = document.getElementById("wh-headers-list");
+  if (!container) return;
+  var keys = Object.keys(webhookHeaders);
+  if (keys.length === 0) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:4px 0">No custom headers.</div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    html += '<div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">';
+    html += '<input type="text" value="' + escapeHtml(k) + '" style="flex:1;font-size:12px;padding:4px 8px" onchange="renameWebhookHeader(this, \'' + escapeHtml(k).replace(/'/g, "\\'") + '\')">';
+    html += '<input type="text" value="' + escapeHtml(webhookHeaders[k]) + '" style="flex:2;font-size:12px;padding:4px 8px" onchange="updateWebhookHeaderValue(\'' + escapeHtml(k).replace(/'/g, "\\'") + '\', this.value)">';
+    html += '<button class="btn btn-danger btn-sm" onclick="removeWebhookHeader(\'' + escapeHtml(k).replace(/'/g, "\\'") + '\')" style="padding:3px 8px;font-size:11px">X</button>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function addWebhookHeader() {
+  var key = "X-Custom-" + (Object.keys(webhookHeaders).length + 1);
+  webhookHeaders[key] = "";
+  renderWebhookHeaders();
+}
+
+function removeWebhookHeader(key) {
+  delete webhookHeaders[key];
+  renderWebhookHeaders();
+}
+
+function renameWebhookHeader(input, oldKey) {
+  var newKey = input.value.trim();
+  if (!newKey || newKey === oldKey) return;
+  var val = webhookHeaders[oldKey] || "";
+  delete webhookHeaders[oldKey];
+  webhookHeaders[newKey] = val;
+  renderWebhookHeaders();
+}
+
+function updateWebhookHeaderValue(key, val) {
+  webhookHeaders[key] = val;
+}
+
+/* ---------- Maintenance Windows ---------- */
+var maintenanceWindows = [];
+
+function renderMaintenanceWindows() {
+  var container = document.getElementById("maintenance-list");
+  if (!container) return;
+  if (!maintenanceWindows || maintenanceWindows.length === 0) {
+    container.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:8px 0">No maintenance windows configured.</div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < maintenanceWindows.length; i++) {
+    var mw = maintenanceWindows[i];
+    var start = mw.start ? mw.start.substring(0, 16).replace("T", " ") : "—";
+    var end = mw.end ? mw.end.substring(0, 16).replace("T", " ") : "—";
+    var hosts = mw.hostnames && mw.hostnames.length ? mw.hostnames.join(", ") : "all";
+    html += '<div class="webhook-item">';
+    html += '  <div class="webhook-info">';
+    html += '    <div class="webhook-name">' + escapeHtml(mw.name || "Unnamed") + '</div>';
+    html += '    <div class="webhook-url">' + escapeHtml(start) + ' — ' + escapeHtml(end) + ' &middot; Hosts: ' + escapeHtml(hosts) + '</div>';
+    html += '  </div>';
+    html += '  <div class="webhook-actions">';
+    html += '    <div class="toggle-wrap" onclick="toggleMaintenanceEnabled(' + i + ')"><div class="toggle' + (mw.enabled ? ' on' : '') + '"><div class="toggle-knob"></div></div></div>';
+    html += '    <button class="btn btn-secondary btn-sm" onclick="editMaintenanceWindow(' + i + ')">Edit</button>';
+    html += '    <button class="btn btn-danger btn-sm" onclick="removeMaintenanceWindow(' + i + ')">Remove</button>';
+    html += '  </div>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function toggleMaintenanceForm() {
+  var form = document.getElementById("maintenance-form");
+  if (form.classList.contains("visible")) { cancelMaintenanceForm(); return; }
+  document.getElementById("mw-edit-index").value = "-1";
+  document.getElementById("mw-name").value = "";
+  document.getElementById("mw-start").value = "";
+  document.getElementById("mw-end").value = "";
+  document.getElementById("mw-hostnames").value = "";
+  document.getElementById("mw-enabled").checked = true;
+  form.querySelector(".toggle").classList.add("on");
+  form.classList.add("visible");
+}
+
+function cancelMaintenanceForm() { document.getElementById("maintenance-form").classList.remove("visible"); }
+
+function editMaintenanceWindow(idx) {
+  var mw = maintenanceWindows[idx];
+  document.getElementById("mw-edit-index").value = String(idx);
+  document.getElementById("mw-name").value = mw.name || "";
+  document.getElementById("mw-start").value = mw.start || "";
+  document.getElementById("mw-end").value = mw.end || "";
+  document.getElementById("mw-hostnames").value = (mw.hostnames || []).join(", ");
+  document.getElementById("mw-enabled").checked = mw.enabled !== false;
+  var toggle = document.getElementById("maintenance-form").querySelector(".toggle");
+  toggle.classList.toggle("on", mw.enabled !== false);
+  document.getElementById("maintenance-form").classList.add("visible");
+}
+
+function saveMaintenanceWindow() {
+  var name = document.getElementById("mw-name").value.trim();
+  var start = document.getElementById("mw-start").value.trim();
+  var end = document.getElementById("mw-end").value.trim();
+  if (!name || !start || !end) { showToast("Name, start, and end are required", "error"); return; }
+  var hostnames = document.getElementById("mw-hostnames").value.trim();
+  var hostnameArr = hostnames ? hostnames.split(",").map(function(h) { return h.trim(); }).filter(Boolean) : [];
+  var mw = {
+    name: name,
+    enabled: document.getElementById("mw-enabled").checked,
+    start: start,
+    end: end,
+    hostnames: hostnameArr
+  };
+  var editIdx = parseInt(document.getElementById("mw-edit-index").value, 10);
+  if (editIdx >= 0 && editIdx < maintenanceWindows.length) {
+    maintenanceWindows[editIdx] = mw;
+  } else {
+    maintenanceWindows.push(mw);
+  }
+  renderMaintenanceWindows();
+  cancelMaintenanceForm();
+  markChanged();
+}
+
+function removeMaintenanceWindow(idx) {
+  if (!confirm("Remove maintenance window?")) return;
+  maintenanceWindows.splice(idx, 1);
+  renderMaintenanceWindows();
+  markChanged();
+}
+
+function toggleMaintenanceEnabled(idx) {
+  maintenanceWindows[idx].enabled = !maintenanceWindows[idx].enabled;
+  renderMaintenanceWindows();
+  markChanged();
+}
+
+/* ---------- Notification Rules ---------- */
+var notifRules = [];
+var _snapshotCache = null; // cached snapshot for target dropdowns
+
+var CONDITION_MAP = {
+  findings:   [{v:"critical",l:"Any critical finding"},{v:"warning",l:"Any warning+ finding"},{v:"category",l:"Findings in category"},{v:"any",l:"Any finding"}],
+  disk_space: [{v:"free_below",l:"Free space below %"}],
+  disk_temp:  [{v:"above",l:"Single disk temp above \u00b0C"},{v:"avg_above",l:"Average disk temp above \u00b0C"}],
+  smart:      [{v:"health_fails",l:"SMART health fails"},{v:"reallocated_above",l:"Reallocated sectors above"},{v:"pending_above",l:"Pending sectors above"},{v:"crc_above",l:"CRC errors above"},{v:"power_hours_above",l:"Power-on hours above"}],
+  service:    [{v:"down",l:"Service goes down"},{v:"latency_above",l:"Latency above (ms)"}],
+  parity:     [{v:"errors",l:"Parity check has errors"},{v:"speed_below",l:"Parity speed below MB/s"}],
+  ups:        [{v:"on_battery",l:"UPS switches to battery"},{v:"battery_below",l:"Battery below %"},{v:"load_above",l:"Load above %"}],
+  docker:     [{v:"stopped",l:"Container stops"}],
+  system:     [{v:"cpu_above",l:"CPU above %"},{v:"mem_above",l:"Memory above %"},{v:"load_above",l:"Load average above"},{v:"iowait_above",l:"I/O wait above %"}],
+  zfs:        [{v:"degraded",l:"Pool degraded"},{v:"scrub_errors",l:"Scrub errors detected"},{v:"usage_above",l:"Pool usage above %"}],
+  tunnels:    [{v:"cloudflared_down",l:"Cloudflared tunnel down"},{v:"tailscale_offline",l:"Tailscale node offline"}],
+  update:     [{v:"available",l:"Platform update available"}]
+};
+var NEEDS_VALUE = {free_below:1,above:1,avg_above:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,latency_above:1,speed_below:1,battery_below:1,load_above:1,cpu_above:1,mem_above:1,iowait_above:1,usage_above:1};
+var NEEDS_TARGET = {above:1,health_fails:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,down:1,latency_above:1,stopped:1,degraded:1,scrub_errors:1,usage_above:1,cloudflared_down:1,tailscale_offline:1,free_below:1,category:1};
+
+function onRuleCategoryChange() {
+  var cat = document.getElementById("nr-category").value;
+  var condSel = document.getElementById("nr-condition");
+  condSel.innerHTML = "";
+  var opts = CONDITION_MAP[cat] || [];
+  for (var i = 0; i < opts.length; i++) {
+    var o = document.createElement("option"); o.value = opts[i].v; o.textContent = opts[i].l;
+    condSel.appendChild(o);
+  }
+  populateTargetDropdown(cat);
+}
+
+function populateTargetDropdown(cat) {
+  var sel = document.getElementById("nr-target");
+  sel.innerHTML = '<option value="">Any / All</option>';
+  if (!_snapshotCache) return;
+  var sn = _snapshotCache;
+  if ((cat === "disk_temp" || cat === "smart") && sn.smart) {
+    for (var i = 0; i < sn.smart.length; i++) {
+      var d = sn.smart[i]; var lbl = d.device + " — " + d.model + " (" + d.serial + ")";
+      sel.innerHTML += '<option value="' + escapeHtml(d.serial) + '">' + escapeHtml(lbl) + '</option>';
+    }
+  } else if (cat === "disk_space" && sn.disks) {
+    for (var i = 0; i < sn.disks.length; i++) {
+      var d = sn.disks[i]; sel.innerHTML += '<option value="' + escapeHtml(d.mount_point) + '">' + escapeHtml(d.mount_point + " (" + d.label + ")") + '</option>';
+    }
+  } else if (cat === "service" && sn.service_checks) {
+    for (var i = 0; i < sn.service_checks.length; i++) {
+      var sc = sn.service_checks[i]; sel.innerHTML += '<option value="' + escapeHtml(sc.name) + '">' + escapeHtml(sc.name) + '</option>';
+    }
+  } else if (cat === "docker" && sn.docker && sn.docker.containers) {
+    for (var i = 0; i < sn.docker.containers.length; i++) {
+      var c = sn.docker.containers[i]; sel.innerHTML += '<option value="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</option>';
+    }
+  } else if (cat === "zfs" && sn.zfs && sn.zfs.pools) {
+    for (var i = 0; i < sn.zfs.pools.length; i++) {
+      sel.innerHTML += '<option value="' + escapeHtml(sn.zfs.pools[i].name) + '">' + escapeHtml(sn.zfs.pools[i].name) + '</option>';
+    }
+  } else if (cat === "tunnels" && sn.tunnels) {
+    if (sn.tunnels.cloudflared) { for (var i = 0; i < sn.tunnels.cloudflared.tunnels.length; i++) { var t = sn.tunnels.cloudflared.tunnels[i]; sel.innerHTML += '<option value="' + escapeHtml(t.name) + '">' + escapeHtml("CF: " + t.name) + '</option>'; } }
+    if (sn.tunnels.tailscale && sn.tunnels.tailscale.peers) { for (var i = 0; i < sn.tunnels.tailscale.peers.length; i++) { var nd = sn.tunnels.tailscale.peers[i]; sel.innerHTML += '<option value="' + escapeHtml(nd.name) + '">' + escapeHtml("TS: " + nd.name) + '</option>'; } }
+  } else if (cat === "findings") {
+    // For "category" condition, target = finding category
+    var cats = ["system","disk","smart","docker","network","service","memory","thermal","logs","parity","zfs","ups"];
+    for (var i = 0; i < cats.length; i++) sel.innerHTML += '<option value="' + cats[i] + '">' + cats[i] + '</option>';
+  }
+}
+
+function renderRules() {
+  var container = document.getElementById("rule-list");
+  // Update webhook dropdown
+  var whSel = document.getElementById("nr-webhook");
+  if (whSel) { var cv = whSel.value; whSel.innerHTML = ""; for (var w = 0; w < webhooks.length; w++) { var o = document.createElement("option"); o.value = webhooks[w].name; o.textContent = webhooks[w].name; whSel.appendChild(o); } if (cv) whSel.value = cv; }
+  if (!notifRules || notifRules.length === 0) {
+    container.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:8px 0">No notification rules. All findings will be sent to all enabled webhooks.</div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < notifRules.length; i++) {
+    var r = notifRules[i];
+    var desc = r.category + " / " + r.condition;
+    if (r.target) desc += " on " + r.target;
+    if (r.value) desc += " (threshold: " + r.value + ")";
+    html += '<div class="webhook-item">';
+    html += '<div class="webhook-info">';
+    html += '<div class="webhook-name">' + escapeHtml(r.name || "Unnamed") + '</div>';
+    html += '<div class="webhook-url">' + escapeHtml(desc) + ' &rarr; ' + escapeHtml(r.webhook || "—") + ' &middot; cooldown ' + (r.cooldown_sec || 900) + 's</div>';
+    html += '</div><div class="webhook-actions">';
+    html += '<div class="toggle-wrap" onclick="toggleRuleEnabled(' + i + ')"><div class="toggle' + (r.enabled ? " on" : "") + '"><div class="toggle-knob"></div></div></div>';
+    html += '<button class="btn btn-secondary btn-sm" onclick="editRule(' + i + ')">Edit</button>';
+    html += '<button class="btn btn-danger btn-sm" onclick="removeRule(' + i + ')">Remove</button>';
+    html += '</div></div>';
+  }
+  container.innerHTML = html;
+}
+
+function toggleRuleForm() {
+  var form = document.getElementById("rule-form");
+  if (form.classList.contains("visible")) { cancelRuleForm(); return; }
+  document.getElementById("nr-edit-index").value = "-1";
+  document.getElementById("nr-name").value = "";
+  document.getElementById("nr-category").value = "findings";
+  document.getElementById("nr-value").value = "";
+  document.getElementById("nr-cooldown").value = "900";
+  document.getElementById("nr-enabled").checked = true;
+  onRuleCategoryChange();
+  renderRules();
+  form.classList.add("visible");
+}
+function cancelRuleForm() { document.getElementById("rule-form").classList.remove("visible"); }
+function editRule(idx) {
+  var r = notifRules[idx];
+  document.getElementById("nr-edit-index").value = String(idx);
+  document.getElementById("nr-name").value = r.name || "";
+  document.getElementById("nr-webhook").value = r.webhook || "";
+  document.getElementById("nr-category").value = r.category || "findings";
+  onRuleCategoryChange();
+  document.getElementById("nr-condition").value = r.condition || "";
+  document.getElementById("nr-target").value = r.target || "";
+  document.getElementById("nr-value").value = r.value || "";
+  document.getElementById("nr-cooldown").value = String(r.cooldown_sec || 900);
+  document.getElementById("nr-enabled").checked = r.enabled !== false;
+  renderRules();
+  document.getElementById("rule-form").classList.add("visible");
+}
+function saveRule() {
+  var name = document.getElementById("nr-name").value.trim();
+  var wh = document.getElementById("nr-webhook").value;
+  if (!name) { showToast("Rule name is required", "error"); return; }
+  if (!wh) { showToast("Select a webhook", "error"); return; }
+  var rule = {
+    id: "rule-" + Date.now() + "-" + Math.random().toString(36).substr(2,6),
+    name: name, enabled: document.getElementById("nr-enabled").checked,
+    webhook: wh, category: document.getElementById("nr-category").value,
+    condition: document.getElementById("nr-condition").value,
+    target: document.getElementById("nr-target").value,
+    value: document.getElementById("nr-value").value,
+    cooldown_sec: parseInt(document.getElementById("nr-cooldown").value, 10) || 900
+  };
+  var editIdx = parseInt(document.getElementById("nr-edit-index").value, 10);
+  if (editIdx >= 0 && editIdx < notifRules.length) { rule.id = notifRules[editIdx].id; notifRules[editIdx] = rule; }
+  else notifRules.push(rule);
+  renderRules(); cancelRuleForm(); saveSettings();
+}
+function removeRule(idx) { if (!confirm("Remove rule?")) return; notifRules.splice(idx, 1); renderRules(); saveSettings(); }
+function toggleRuleEnabled(idx) { notifRules[idx].enabled = !notifRules[idx].enabled; renderRules(); saveSettings(); }
+
+function addPreset(preset) {
+  var wh = webhooks.length > 0 ? webhooks[0].name : "";
+  if (!wh) { showToast("Add a webhook first", "error"); return; }
+  var rules = [];
+  switch(preset) {
+    case "critical": rules = [{name:"Critical alerts",category:"findings",condition:"critical",cooldown_sec:900}]; break;
+    case "disk_health": rules = [
+      {name:"SMART failure",category:"smart",condition:"health_fails",cooldown_sec:900},
+      {name:"Reallocated sectors",category:"smart",condition:"reallocated_above",value:"0",cooldown_sec:3600},
+      {name:"Disk temp >55\u00b0C",category:"disk_temp",condition:"above",value:"55",cooldown_sec:1800}
+    ]; break;
+    case "services": rules = [{name:"Service down",category:"service",condition:"down",cooldown_sec:300}]; break;
+    case "power": rules = [
+      {name:"UPS on battery",category:"ups",condition:"on_battery",cooldown_sec:300},
+      {name:"UPS battery <20%",category:"ups",condition:"battery_below",value:"20",cooldown_sec:300}
+    ]; break;
+    case "storage": rules = [{name:"Disk space <10%",category:"disk_space",condition:"free_below",value:"10",cooldown_sec:3600}]; break;
+  }
+  for (var i = 0; i < rules.length; i++) {
+    rules[i].id = "rule-" + Date.now() + "-" + Math.random().toString(36).substr(2,6);
+    rules[i].enabled = true;
+    rules[i].webhook = wh;
+    if (!rules[i].cooldown_sec) rules[i].cooldown_sec = 900;
+    notifRules.push(rules[i]);
+  }
+  renderRules(); saveSettings();
+  showToast("Added " + rules.length + " preset rule(s)", "success");
+}
+
+// Load snapshot for target dropdowns
+function toggleAPIKeyVisibility() {
+  var el = document.getElementById("api-key-display");
+  el.type = el.type === "password" ? "text" : "password";
+}
+function generateAPIKey() {
+  var key = 'nd-' + crypto.randomUUID().replace(/-/g, '');
+  document.getElementById("api-key-display").value = key;
+  saveSettings();
+  showToast("API key generated — save it somewhere safe", "success");
+}
+function copyAPIKey() {
+  var el = document.getElementById("api-key-display");
+  if (!el.value) { showToast("No API key to copy", "error"); return; }
+  navigator.clipboard.writeText(el.value).then(function() { showToast("Copied to clipboard", "success"); });
+}
+function revokeAPIKey() {
+  if (!confirm("Revoke the API key? All fleet instances using this key will lose access.")) return;
+  document.getElementById("api-key-display").value = "";
+  saveSettings();
+  showToast("API key revoked — instance is now open", "success");
+}
+
+function testKubernetesConnection() {
+  var result = document.getElementById("k8s-test-result");
+  result.textContent = "Testing..."; result.style.color = "var(--text2)";
+  fetch("/api/v1/kubernetes/test", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ url: document.getElementById("k8s-url").value.trim(), token: document.getElementById("k8s-token").value.trim(), in_cluster: document.getElementById("k8s-incluster").checked })
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d.success){result.style.color="var(--green)";result.textContent="Connected — "+d.platform+" "+d.version+" · "+d.nodes+" nodes, "+d.pods+" pods, "+d.namespaces+" ns, "+d.deployments+" deployments";}
+    else{result.style.color="var(--red)";result.textContent="Failed: "+(d.error||"unknown");}
+  }).catch(function(e){result.style.color="var(--red)";result.textContent="Error: "+e.message;});
+}
+
+function testProxmoxConnection() {
+  var result = document.getElementById("pve-test-result");
+  result.textContent = "Testing...";
+  result.style.color = "var(--text2)";
+  fetch("/api/v1/proxmox/test", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      url: document.getElementById("pve-url").value.trim(),
+      token_id: document.getElementById("pve-token").value.trim(),
+      secret: document.getElementById("pve-secret").value.trim()
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.success) {
+      result.style.color = "var(--green)";
+      result.textContent = "Connected — PVE " + (d.version || "?") + (d.cluster ? " · cluster: " + d.cluster : "") + " · " + d.nodes + " node(s), " + d.guests + " guest(s), " + d.storage + " storage pool(s)";
+      // Populate node dropdown from detected nodes
+      var sel = document.getElementById("pve-node");
+      var current = sel.value;
+      sel.innerHTML = '<option value="">All nodes (poll entire cluster)</option>';
+      if (d.node_names) {
+        for (var i = 0; i < d.node_names.length; i++) {
+          sel.innerHTML += '<option value="' + d.node_names[i] + '">' + d.node_names[i] + '</option>';
+        }
+      }
+      if (current) sel.value = current;
+    } else {
+      result.style.color = "var(--red)";
+      result.textContent = "Failed: " + (d.error || "unknown error");
+    }
+  })
+  .catch(function(e) {
+    result.style.color = "var(--red)";
+    result.textContent = "Error: " + e.message;
+  });
+}
+
+function loadSnapshotForTargets() {
+  fetch("/api/v1/snapshot/latest").then(function(r){return r.json()}).then(function(d){_snapshotCache=d;}).catch(function(){});
+}
+loadSnapshotForTargets();
+
+/* ---------- Change Detection ---------- */
+var settingsChanged = false;
+
+function markChanged() {
+  if (!settingsChanged) {
+    settingsChanged = true;
+    var bar = document.getElementById("save-bar");
+    if (bar) bar.classList.add("visible");
+  }
+}
+
+function markSaved() {
+  settingsChanged = false;
+  var bar = document.getElementById("save-bar");
+  if (bar) bar.classList.remove("visible");
+}
+
+// Attach change listeners to all inputs, selects, and toggles
+document.addEventListener("input", function(e) {
+  if (e.target.closest(".card")) markChanged();
+});
+document.addEventListener("change", function(e) {
+  if (e.target.closest(".card")) markChanged();
+});
+document.addEventListener("click", function(e) {
+  if (e.target.closest(".toggle")) markChanged();
+  if (e.target.closest(".theme-option")) markChanged();
+});
+
+/* ---------- Init ---------- */
+loadSettings();
+loadDBStats();
+loadBackupInfo();
+loadFleetServers();
+onServiceTypeChange();
+fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
+</script>
+</body>
+</html>
