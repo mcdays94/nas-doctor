@@ -327,16 +327,22 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         <div class="form-row">
           <div>
             <label for="nr-name">Name</label>
-            <input type="text" id="nr-name" placeholder="e.g. Disk 1 temperature alert">
+            <input type="text" id="nr-name" placeholder="e.g. Disk 1 temperature alert" oninput="updateRulePreview()">
+            <div style="font-size:10px;color:var(--text3);margin-top:2px">A short name to identify this rule in the list</div>
           </div>
           <div>
             <label for="nr-webhook">Notify via</label>
-            <select id="nr-webhook"></select>
+            <select id="nr-webhook" onchange="updateRulePreview()"></select>
+            <div id="nr-webhook-hint" style="font-size:10px;color:var(--text3);margin-top:2px">Select which webhook receives this notification</div>
           </div>
+        </div>
+        <!-- Live preview of what the rule will do -->
+        <div id="nr-preview" style="background:var(--elevated,rgba(255,255,255,0.04));border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--text2);display:none">
+          <strong style="color:var(--text1)">Rule preview:</strong> <span id="nr-preview-text"></span>
         </div>
         <div class="form-row">
           <div>
-            <label for="nr-category">Category</label>
+            <label for="nr-category">What to monitor</label>
             <select id="nr-category" onchange="onRuleCategoryChange()">
               <option value="findings">Findings (severity)</option>
               <option value="disk_space">Disk Space</option>
@@ -353,24 +359,24 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             </select>
           </div>
           <div>
-            <label for="nr-condition">Condition</label>
+            <label for="nr-condition">When this happens</label>
             <select id="nr-condition" onchange="updateValueHint()"></select>
           </div>
         </div>
         <div class="form-row">
           <div>
-            <label for="nr-target">Target <span style="font-size:10px;color:var(--text3)">(optional — specific drive, service, container)</span></label>
-            <select id="nr-target"><option value="">Any / All</option></select>
+            <label for="nr-target">On which target <span style="font-size:10px;color:var(--text3)">(leave blank for all)</span></label>
+            <select id="nr-target" onchange="updateRulePreview()"><option value="">Any / All</option></select>
           </div>
-          <div>
+          <div id="nr-value-wrap">
             <label for="nr-value" id="nr-value-label">Threshold value</label>
-            <input type="number" id="nr-value" placeholder="e.g. 55" step="any">
+            <input type="number" id="nr-value" placeholder="" step="any" oninput="updateRulePreview()">
             <div id="nr-value-hint" style="font-size:10px;color:var(--text3);margin-top:2px"></div>
           </div>
         </div>
         <div class="form-row">
           <div>
-            <label for="nr-cooldown">Cooldown</label>
+            <label for="nr-cooldown">Don't repeat for</label>
             <select id="nr-cooldown">
               <option value="300">5 minutes</option>
               <option value="900" selected>15 minutes</option>
@@ -380,6 +386,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
               <option value="43200">12 hours</option>
               <option value="86400">24 hours</option>
             </select>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px">After notifying, wait this long before sending another for the same issue</div>
           </div>
           <div style="display:flex;align-items:flex-end;padding-bottom:4px">
             <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="nr-enabled" checked> Enabled</label>
@@ -1259,20 +1266,20 @@ function removeWebhook(idx) {
 }
 
 function testWebhook() {
-  var url = document.getElementById("wh-url").value.trim();
+  var url = (document.getElementById("wh-url") || {}).value || "";
+  url = url.trim();
   if (!url) {
-    showToast("Enter a URL first", "error");
+    showToast("Enter a webhook URL first", "error");
     return;
   }
   var wh = {
-    name: document.getElementById("wh-name").value.trim() || "Test",
+    name: (document.getElementById("wh-name") || {}).value || "Test",
     url: url,
-    type: document.getElementById("wh-type").value,
+    type: (document.getElementById("wh-type") || {}).value || "generic",
     enabled: true,
-    min_level: document.getElementById("wh-level").value,
-    secret: document.getElementById("wh-secret").value.trim() || ""
+    secret: ((document.getElementById("wh-secret") || {}).value || "").trim()
   };
-  showToast("Sending test...", "info");
+  showToast("Sending test notification...", "info");
   fetch("/api/v1/settings/test-webhook", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1282,7 +1289,7 @@ function testWebhook() {
     if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Test failed"); });
     return r.json();
   })
-  .then(function(data) { showToast("Test sent! Check your destination.", "success"); })
+  .then(function(data) { showToast(data.message || "Test sent! Check your destination.", "success"); })
   .catch(function(e) { showToast("Error: " + e.message, "error"); });
 }
 
@@ -2157,10 +2164,11 @@ function onRuleCategoryChange() {
 }
 function updateValueHint() {
   var cond = document.getElementById("nr-condition").value;
+  var wrap = document.getElementById("nr-value-wrap");
   var label = document.getElementById("nr-value-label");
   var input = document.getElementById("nr-value");
   var hint = document.getElementById("nr-value-hint");
-  if (!label || !input || !hint) return;
+  if (!wrap || !label || !input || !hint) return;
   var hints = {
     free_below:       {label:"Threshold (%)",       placeholder:"e.g. 10",  hint:"Alert when free space drops below this percentage"},
     above:            {label:"Temperature (\u00b0C)",placeholder:"e.g. 55",  hint:"Alert when drive temperature exceeds this value"},
@@ -2185,18 +2193,42 @@ function updateValueHint() {
     label.textContent = h.label;
     input.placeholder = h.placeholder;
     hint.textContent = h.hint;
-    input.parentElement.style.display = "";
+    wrap.style.display = "";
   } else if (NEEDS_VALUE[cond]) {
     label.textContent = "Threshold value";
     input.placeholder = "";
     hint.textContent = "";
-    input.parentElement.style.display = "";
+    wrap.style.display = "";
   } else {
-    label.textContent = "Threshold value";
-    input.placeholder = "";
-    hint.textContent = "";
-    input.parentElement.style.display = "none";
+    // No threshold needed for this condition — hide the field entirely
+    wrap.style.display = "none";
   }
+  updateRulePreview();
+}
+function updateRulePreview() {
+  var prev = document.getElementById("nr-preview");
+  var text = document.getElementById("nr-preview-text");
+  if (!prev || !text) return;
+  var cat = document.getElementById("nr-category");
+  var cond = document.getElementById("nr-condition");
+  var target = document.getElementById("nr-target");
+  var val = document.getElementById("nr-value");
+  var webhook = document.getElementById("nr-webhook");
+  var cooldown = document.getElementById("nr-cooldown");
+  if (!cat || !cond) return;
+  var catLabel = cat.options[cat.selectedIndex] ? cat.options[cat.selectedIndex].text : cat.value;
+  var condLabel = cond.options[cond.selectedIndex] ? cond.options[cond.selectedIndex].text : cond.value;
+  var targetLabel = target && target.value ? target.options[target.selectedIndex].text : "any";
+  var valText = val && val.value && NEEDS_VALUE[cond.value] ? " " + val.value : "";
+  var webhookName = webhook && webhook.value ? webhook.value : "(no webhook selected)";
+  var cooldownText = cooldown ? cooldown.options[cooldown.selectedIndex].text : "15 minutes";
+  var sentence = 'When <strong>' + condLabel.toLowerCase() + '</strong>';
+  if (valText) sentence += ' <strong>' + valText.trim() + '</strong>';
+  sentence += ' on <strong>' + targetLabel + '</strong>';
+  sentence += ', send a notification to <strong>' + escapeHtml(webhookName) + '</strong>';
+  sentence += '. Don\u2019t repeat for <strong>' + cooldownText + '</strong>.';
+  text.innerHTML = sentence;
+  prev.style.display = "block";
 }
 
 function populateTargetDropdown(cat) {
@@ -2273,10 +2305,20 @@ function toggleRuleForm() {
   document.getElementById("nr-cooldown").value = "900";
   document.getElementById("nr-enabled").checked = true;
   onRuleCategoryChange();
+  updateValueHint();
+  // Show webhook warning if none configured
+  var whHint = document.getElementById("nr-webhook-hint");
+  var whSel = document.getElementById("nr-webhook");
+  if (whHint && whSel && whSel.options.length === 0) {
+    whHint.innerHTML = '<span style="color:var(--amber,#f59e0b)">No webhooks configured yet. Add one above first.</span>';
+  }
   renderRules();
   form.classList.add("visible");
 }
-function cancelRuleForm() { document.getElementById("rule-form").classList.remove("visible"); }
+function cancelRuleForm() {
+  document.getElementById("rule-form").classList.remove("visible");
+  document.getElementById("nr-preview").style.display = "none";
+}
 function editRule(idx) {
   var r = notifRules[idx];
   document.getElementById("nr-edit-index").value = String(idx);
@@ -2289,6 +2331,7 @@ function editRule(idx) {
   document.getElementById("nr-value").value = r.value || "";
   document.getElementById("nr-cooldown").value = String(r.cooldown_sec || 900);
   document.getElementById("nr-enabled").checked = r.enabled !== false;
+  updateValueHint();
   renderRules();
   document.getElementById("rule-form").classList.add("visible");
 }
