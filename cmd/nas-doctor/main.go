@@ -153,9 +153,59 @@ func main() {
 					}
 				}
 			}
+			// Jitter GPU metrics
+			if histSnap.GPU != nil && histSnap.GPU.Available {
+				for j := range histSnap.GPU.GPUs {
+					histSnap.GPU.GPUs[j].UsagePct = demo.Jitter(34, 60)
+					histSnap.GPU.GPUs[j].Temperature = int(demo.Jitter(62, 20))
+					histSnap.GPU.GPUs[j].MemUsedMB = demo.Jitter(2048, 40)
+					histSnap.GPU.GPUs[j].PowerW = demo.Jitter(85, 30)
+					histSnap.GPU.GPUs[j].EncoderPct = demo.Jitter(40, 80)
+					histSnap.GPU.GPUs[j].DecoderPct = demo.Jitter(30, 70)
+					if histSnap.GPU.GPUs[j].MemTotalMB > 0 {
+						histSnap.GPU.GPUs[j].MemPct = (histSnap.GPU.GPUs[j].MemUsedMB / histSnap.GPU.GPUs[j].MemTotalMB) * 100
+					}
+				}
+			}
 			histSnap.Findings = analyzer.Analyze(histSnap)
 			if err := store.SaveSnapshot(histSnap); err != nil {
 				logger.Warn("failed to save historical demo snapshot", "day", i, "error", err)
+			}
+		}
+
+		// Generate hourly GPU snapshots for the past 48h (for 1h/1d chart granularity)
+		for h := 47; h >= 1; h-- {
+			gpuSnap := demo.GenerateSnapshot()
+			gpuSnap.Timestamp = time.Now().Add(-time.Duration(h) * time.Hour)
+			gpuSnap.ID = fmt.Sprintf("demo-gpu-h%03d", h)
+			// Vary GPU metrics with a time-of-day pattern (higher during "day" hours)
+			hourOfDay := gpuSnap.Timestamp.Hour()
+			dayFactor := 1.0
+			if hourOfDay >= 9 && hourOfDay <= 23 {
+				dayFactor = 1.5 // busier during day
+			}
+			gpuSnap.System.CPUUsage = demo.Jitter(23.4*dayFactor, 30)
+			gpuSnap.System.MemPercent = demo.Jitter(75.0, 10)
+			gpuSnap.System.IOWait = demo.Jitter(18.3, 25)
+			if gpuSnap.GPU != nil {
+				for j := range gpuSnap.GPU.GPUs {
+					gpuSnap.GPU.GPUs[j].UsagePct = demo.Jitter(30*dayFactor, 50)
+					if gpuSnap.GPU.GPUs[j].UsagePct > 100 {
+						gpuSnap.GPU.GPUs[j].UsagePct = 100
+					}
+					gpuSnap.GPU.GPUs[j].Temperature = int(demo.Jitter(55+7*dayFactor, 15))
+					gpuSnap.GPU.GPUs[j].MemUsedMB = demo.Jitter(1800*dayFactor, 35)
+					gpuSnap.GPU.GPUs[j].PowerW = demo.Jitter(70*dayFactor, 30)
+					gpuSnap.GPU.GPUs[j].EncoderPct = demo.Jitter(35*dayFactor, 60)
+					gpuSnap.GPU.GPUs[j].DecoderPct = demo.Jitter(25*dayFactor, 50)
+					if gpuSnap.GPU.GPUs[j].MemTotalMB > 0 {
+						gpuSnap.GPU.GPUs[j].MemPct = (gpuSnap.GPU.GPUs[j].MemUsedMB / gpuSnap.GPU.GPUs[j].MemTotalMB) * 100
+					}
+				}
+			}
+			gpuSnap.Findings = analyzer.Analyze(gpuSnap)
+			if err := store.SaveSnapshot(gpuSnap); err != nil {
+				logger.Warn("failed to save hourly GPU demo snapshot", "hour", h, "error", err)
 			}
 		}
 

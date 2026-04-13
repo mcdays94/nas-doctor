@@ -49,6 +49,10 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 		findings = append(findings, analyzeKubernetes(snap.Kubernetes)...)
 	}
 
+	if snap.GPU != nil && snap.GPU.Available {
+		findings = append(findings, analyzeGPU(snap.GPU)...)
+	}
+
 	// Cross-correlation: combine related findings
 	findings = correlate(findings, snap)
 
@@ -1220,4 +1224,72 @@ func parseVersionParts(v string) []int {
 		nums = append(nums, n)
 	}
 	return nums
+}
+
+// ── GPU rules ───────────────────────────────────────────────────────
+
+func analyzeGPU(gpu *internal.GPUInfo) []internal.Finding {
+	var findings []internal.Finding
+
+	for _, g := range gpu.GPUs {
+		name := g.Name
+		if name == "" {
+			name = fmt.Sprintf("%s GPU %d", g.Vendor, g.Index)
+		}
+
+		// High temperature
+		if g.Temperature >= 95 {
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategoryGPU,
+				Title:       fmt.Sprintf("GPU Overheating: %s at %d°C", name, g.Temperature),
+				Description: fmt.Sprintf("GPU '%s' temperature is critically high at %d°C. Thermal throttling is active and sustained operation at this temperature reduces GPU lifespan.", name, g.Temperature),
+				Evidence:    []string{fmt.Sprintf("Temperature: %d°C", g.Temperature), fmt.Sprintf("Fan: %.0f%%", g.FanPct)},
+				Impact:      "Performance degradation from thermal throttling. Risk of hardware damage.",
+				Action:      "Improve case airflow. Clean heatsink/fans. Check thermal paste. Reduce workload.",
+				Priority:    "immediate",
+			})
+		} else if g.Temperature >= 85 {
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategoryGPU,
+				Title:       fmt.Sprintf("GPU Temperature High: %s at %d°C", name, g.Temperature),
+				Description: fmt.Sprintf("GPU '%s' is running warm at %d°C. Most GPUs throttle between 83-95°C.", name, g.Temperature),
+				Evidence:    []string{fmt.Sprintf("Temperature: %d°C", g.Temperature), fmt.Sprintf("Fan: %.0f%%", g.FanPct)},
+				Impact:      "May begin thermal throttling under sustained load.",
+				Action:      "Monitor trends. Improve airflow if temperature continues rising.",
+				Priority:    "short-term",
+			})
+		}
+
+		// VRAM exhaustion
+		if g.MemTotalMB > 0 && g.MemPct >= 95 {
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategoryGPU,
+				Title:       fmt.Sprintf("GPU VRAM Nearly Full: %s (%.0f%%)", name, g.MemPct),
+				Description: fmt.Sprintf("GPU '%s' VRAM utilization is at %.0f%% (%.0f/%.0f MB). Applications may crash or fall back to system RAM.", name, g.MemPct, g.MemUsedMB, g.MemTotalMB),
+				Evidence:    []string{fmt.Sprintf("VRAM: %.0f / %.0f MB (%.0f%%)", g.MemUsedMB, g.MemTotalMB, g.MemPct)},
+				Impact:      "Transcoding failures, OOM kills for GPU workloads, degraded performance.",
+				Action:      "Reduce concurrent GPU workloads or upgrade to a GPU with more VRAM.",
+				Priority:    "short-term",
+			})
+		}
+
+		// Power limit exceeded (drawing more than TDP — unusual, may indicate issue)
+		if g.PowerMaxW > 0 && g.PowerW > g.PowerMaxW*1.1 {
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategoryGPU,
+				Title:       fmt.Sprintf("GPU Power Draw Exceeds Limit: %s", name),
+				Description: fmt.Sprintf("GPU '%s' is drawing %.0fW against a %.0fW power limit. This may indicate a misconfigured power limit or faulty power delivery.", name, g.PowerW, g.PowerMaxW),
+				Evidence:    []string{fmt.Sprintf("Power: %.0fW / %.0fW limit", g.PowerW, g.PowerMaxW)},
+				Impact:      "Potential instability or PSU stress.",
+				Action:      "Check GPU BIOS settings and PSU capacity.",
+				Priority:    "short-term",
+			})
+		}
+	}
+
+	return findings
 }

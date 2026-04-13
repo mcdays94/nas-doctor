@@ -32,6 +32,7 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.Tunnels = demoTunnels()
 	snap.Proxmox = demoProxmox()
 	snap.Kubernetes = demoKubernetes()
+	snap.GPU = demoGPU()
 
 	return snap
 }
@@ -484,6 +485,28 @@ func demoZFS() *internal.ZFSInfo {
 			Misses:    51482304,
 			L2SizeMB:  245760,
 			L2HitRate: 78.5,
+		},
+	}
+}
+
+func demoGPU() *internal.GPUInfo {
+	return &internal.GPUInfo{
+		Available: true,
+		GPUs: []internal.GPUDevice{
+			{
+				Index: 0, Name: "NVIDIA GeForce RTX 4060", Vendor: "nvidia",
+				Driver: "560.35.03", UsagePct: 34, MemUsedMB: 2048, MemTotalMB: 8192,
+				MemPct: 25, Temperature: 62, FanPct: 45, PowerW: 85, PowerMaxW: 150,
+				ClockMHz: 2460, MemClockMHz: 8501, PCIeBus: "01:00.0",
+				EncoderPct: 78, DecoderPct: 42,
+			},
+			{
+				Index: 1, Name: "Intel UHD Graphics 730", Vendor: "intel",
+				Driver: "i915", UsagePct: 12, MemUsedMB: 128, MemTotalMB: 512,
+				MemPct: 25, Temperature: 48, FanPct: 0, PowerW: 8, PowerMaxW: 15,
+				ClockMHz: 1450, MemClockMHz: 0, PCIeBus: "00:02.0",
+				EncoderPct: 5, DecoderPct: 15,
+			},
 		},
 	}
 }

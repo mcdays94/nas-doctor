@@ -134,6 +134,28 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_system_history_ts ON system_history(timestamp DESC)`,
 
+		// --- GPU history ---
+		`CREATE TABLE IF NOT EXISTS gpu_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+			gpu_index INTEGER NOT NULL,
+			name TEXT,
+			vendor TEXT,
+			usage_pct REAL,
+			mem_used_mb REAL,
+			mem_total_mb REAL,
+			mem_pct REAL,
+			temperature INTEGER,
+			power_watts REAL,
+			fan_pct REAL,
+			encoder_pct REAL,
+			decoder_pct REAL,
+			timestamp DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gpu_history_ts ON gpu_history(timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_gpu_history_gpu ON gpu_history(gpu_index, timestamp DESC)`,
+
 		// --- Notification log ---
 		`CREATE TABLE IF NOT EXISTS notification_log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -308,6 +330,11 @@ func (d *DB) SaveSnapshot(snap *internal.Snapshot) error {
 		return fmt.Errorf("save disk usage history: %w", err)
 	}
 
+	// Store GPU history
+	if err := d.saveGPUHistory(tx, snap); err != nil {
+		return fmt.Errorf("save gpu history: %w", err)
+	}
+
 	return tx.Commit()
 }
 
@@ -353,6 +380,66 @@ func (d *DB) saveDiskUsageHistory(tx *sql.Tx, snap *internal.Snapshot) error {
 		}
 	}
 	return nil
+}
+
+func (d *DB) saveGPUHistory(tx *sql.Tx, snap *internal.Snapshot) error {
+	if snap.GPU == nil || !snap.GPU.Available {
+		return nil
+	}
+	for _, g := range snap.GPU.GPUs {
+		_, err := tx.Exec(
+			`INSERT INTO gpu_history (snapshot_id, gpu_index, name, vendor, usage_pct, mem_used_mb, mem_total_mb, mem_pct, temperature, power_watts, fan_pct, encoder_pct, decoder_pct, timestamp)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snap.ID, g.Index, g.Name, g.Vendor,
+			g.UsagePct, g.MemUsedMB, g.MemTotalMB, g.MemPct,
+			g.Temperature, g.PowerW, g.FanPct,
+			g.EncoderPct, g.DecoderPct, snap.Timestamp,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GPUHistoryPoint represents a single time-series data point for a GPU.
+type GPUHistoryPoint struct {
+	Timestamp   time.Time `json:"timestamp"`
+	GPUIndex    int       `json:"gpu_index"`
+	Name        string    `json:"name"`
+	Vendor      string    `json:"vendor"`
+	UsagePct    float64   `json:"usage_percent"`
+	MemPct      float64   `json:"mem_percent"`
+	Temperature int       `json:"temperature_c"`
+	PowerW      float64   `json:"power_watts"`
+	EncoderPct  float64   `json:"encoder_percent"`
+	DecoderPct  float64   `json:"decoder_percent"`
+}
+
+// GetGPUHistory returns GPU history for the given time range.
+func (d *DB) GetGPUHistory(hours int) ([]GPUHistoryPoint, error) {
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	rows, err := d.db.Query(
+		`SELECT timestamp, gpu_index, name, vendor, usage_pct, mem_pct, temperature, power_watts, encoder_pct, decoder_pct
+		 FROM gpu_history
+		 WHERE timestamp >= ?
+		 ORDER BY gpu_index ASC, timestamp ASC`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []GPUHistoryPoint
+	for rows.Next() {
+		var p GPUHistoryPoint
+		if err := rows.Scan(&p.Timestamp, &p.GPUIndex, &p.Name, &p.Vendor, &p.UsagePct, &p.MemPct, &p.Temperature, &p.PowerW, &p.EncoderPct, &p.DecoderPct); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
 }
 
 // DiskUsagePoint is a single historical data point for capacity forecasting.
@@ -1343,7 +1430,7 @@ func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 
 	// Explicitly delete from history tables for the snapshots being pruned,
 	// in case foreign_keys or CASCADE is not fully honoured at runtime.
-	for _, table := range []string{"smart_history", "system_history", "disk_usage_history"} {
+	for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history"} {
 		_, err := tx.Exec(fmt.Sprintf(
 			`DELETE FROM %s WHERE snapshot_id IN (%s)`, table, pruneQuery,
 		), keepMin, cutoff)
@@ -1723,7 +1810,7 @@ func (d *DB) PruneToSizeMB(targetMB float64) (int, error) {
 		if err != nil {
 			return totalPruned, err
 		}
-		for _, table := range []string{"smart_history", "system_history", "disk_usage_history"} {
+		for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history"} {
 			d.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE snapshot_id IN (
 				SELECT id FROM snapshots ORDER BY timestamp ASC LIMIT ?
 			)`, table), batchSize)
