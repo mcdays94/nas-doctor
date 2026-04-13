@@ -1454,40 +1454,57 @@ body {
     html += '</div>'; // end section-block proxmox
 
     // ==== Section: Kubernetes ====
-    html += '<div class="section-block" data-section="kubernetes">';
+    // K8s shared data
     var k8s = snapshot ? snapshot.kubernetes : null;
-    if (k8s) {
-      var k8sT = k8s.alias ? escapeHTML(k8s.alias) : 'Kubernetes';
-      html += '<div class="section"><div class="section-title">' + k8sT + (k8s.platform ? ' <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.12);color:var(--accent)">' + escapeHTML(k8s.platform) + '</span>' : '') + '</div>';
-      if (k8s.error) {
-        html += '<div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:12px;color:#dc2626;font-size:12px">' + escapeHTML(k8s.error) + '</div>';
-      } else if (k8s.connected) {
-        if (k8s.nodes && k8s.nodes.length > 0) {
-          html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
-          for (var ki = 0; ki < k8s.nodes.length; ki++) { var kn = k8s.nodes[ki]; var knR = kn.status==='Ready';
-            html += '<div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:10px 14px;flex:1;min-width:200px">';
-            html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span class="status-dot '+(knR?'green':'red')+'"></span><span style="font-weight:600">' + escapeHTML(kn.name) + '</span>';
-            if(kn.roles)html+='<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">'+escapeHTML(kn.roles)+'</span>';
-            html+='</div><div style="font-size:11px;color:#808080">'+kn.cpu_cores+' cores &middot; '+kn.pod_count+'/'+kn.pod_capacity+' pods</div></div>';
-          }
-          html += '</div>';
-        }
-        if (k8s.pods && k8s.pods.length > 0) {
-          var runP = k8s.pods.filter(function(p){return p.status==='Running';});
-          var compP = k8s.pods.filter(function(p){return p.status==='Succeeded';});
-          var probPods = k8s.pods.filter(function(p){return p.status!=='Running'&&p.status!=='Succeeded';});
-          var showP = probPods.length > 0 ? probPods.concat(runP.slice(0,10)) : runP.slice(0,15);
-          html += '<div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;overflow:hidden;max-height:250px;overflow-y:auto">';
-          html += '<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="color:#808080;font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Pod</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">NS</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Status</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Ready</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Restarts</th></tr>';
-          for(var pi=0;pi<showP.length;pi++){var kp=showP[pi];var pOk=kp.status==='Running'||kp.status==='Succeeded';
-            html+='<tr><td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04);font-weight:500">'+escapeHTML(kp.name)+'</td><td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04);font-size:11px;color:#808080">'+escapeHTML(kp.namespace)+'</td><td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04);color:'+(pOk?'#16a34a':'#dc2626')+';font-weight:600">'+escapeHTML(kp.status)+'</td><td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04)">'+escapeHTML(kp.ready)+'</td><td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04)">'+kp.restarts+'</td></tr>';
-          }
-          html += '</table></div>';
-        }
+    var k8sOk = k8s && k8s.connected && !k8s.error;
+    var k8sT = k8s ? (k8s.alias || 'K8s') : 'K8s';
+    var k8sBdg = k8s && k8s.platform ? ' <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.12);color:var(--accent)">' + escapeHTML(k8s.platform) + '</span>' : '';
+    // K8s Nodes
+    html += '<div class="section-block" data-section="k8s_nodes">';
+    if (k8sOk && k8s.nodes && k8s.nodes.length > 0) {
+      html += '<div class="section"><div class="section-title">' + escapeHTML(k8sT) + ' Nodes' + k8sBdg + '</div>';
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+      for (var ki=0;ki<k8s.nodes.length;ki++){var kn=k8s.nodes[ki];var knR=kn.status==='Ready';
+        html+='<div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:10px 14px;flex:1;min-width:200px"><div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span class="status-dot '+(knR?'green':'red')+'"></span><span style="font-weight:600">'+escapeHTML(kn.name)+'</span>';
+        if(kn.roles)html+='<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">'+escapeHTML(kn.roles)+'</span>';
+        html+='</div><div style="font-size:11px;color:#808080">'+kn.cpu_cores+' cores &middot; '+kn.pod_count+'/'+kn.pod_capacity+' pods</div>';
+        if(kn.disk_total>0){var du=kn.disk_total-kn.disk_allocatable,dp=du/kn.disk_total*100,dc=dp>=90?'#dc2626':dp>=75?'#d97706':'#16a34a';html+='<div style="margin-top:4px;display:flex;justify-content:space-between;font-size:10px;color:#808080"><span>Disk '+dp.toFixed(0)+'%</span><span>'+(kn.disk_total>=1073741824?(kn.disk_total/1073741824).toFixed(0)+' GB':(kn.disk_total/1048576).toFixed(0)+' MB')+'</span></div><div style="height:3px;background:rgba(0,0,0,0.08);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+dp.toFixed(1)+'%;background:'+dc+'"></div></div>';}
+        html+='</div>';
       }
-      html += '</div>';
+      html+='</div></div>';
+    } else if(k8s&&k8s.error){html+='<div class="section"><div class="section-title">'+escapeHTML(k8sT)+' Nodes</div><div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:12px;color:#dc2626;font-size:12px">'+escapeHTML(k8s.error)+'</div></div>';}
+    html+='</div>';
+    // K8s Problem Pods
+    var _cRunP=[],_cProbP=[],_cByNode={};
+    if(k8sOk&&k8s.pods){_cRunP=k8s.pods.filter(function(p){return p.status==='Running';});_cProbP=k8s.pods.filter(function(p){return p.status!=='Running'&&p.status!=='Succeeded';});for(var pi=0;pi<_cRunP.length;pi++){var nd=_cRunP[pi].node||'unassigned';if(!_cByNode[nd])_cByNode[nd]=[];_cByNode[nd].push(_cRunP[pi]);}}
+    html+='<div class="section-block" data-section="k8s_problems">';
+    if(_cProbP.length>0){html+='<div class="section"><div class="section-title">'+escapeHTML(k8sT)+' Problem Pods ('+_cProbP.length+')</div><div style="background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.15);border-radius:8px;padding:8px 12px">';for(var pp=0;pp<_cProbP.length;pp++){var prb=_cProbP[pp];html+='<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px"><span style="color:#dc2626;font-weight:600">'+escapeHTML(prb.status)+'</span><span style="font-weight:500">'+escapeHTML(prb.name)+'</span><span style="color:#808080;font-size:11px">'+escapeHTML(prb.namespace)+'</span></div>';}html+='</div></div>';}
+    html+='</div>';
+    // Per-node workloads
+    var _cNodeKeys=Object.keys(_cByNode).sort();
+    for(var nni=0;nni<_cNodeKeys.length;nni++){var nName=_cNodeKeys[nni];var nPods=_cByNode[nName];var nInfo=null;for(var fi=0;fi<(k8s?k8s.nodes||[]:[]).length;fi++){if(k8s.nodes[fi].name===nName){nInfo=k8s.nodes[fi];break;}}
+      html+='<div class="section-block" data-section="k8s_node_'+nni+'">';
+      html+='<div class="section"><div class="section-title">'+escapeHTML(nName)+' <span style="font-size:11px;color:#808080;font-weight:400">'+nPods.length+' pods</span>';
+      if(nInfo&&nInfo.roles)html+=' <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">'+escapeHTML(nInfo.roles)+'</span>';
+      html+='</div><div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:10px 12px">';
+      if(nInfo&&nInfo.disk_total>0){var ndu=nInfo.disk_total-nInfo.disk_allocatable,ndp=ndu/nInfo.disk_total*100,ndc=ndp>=90?'#dc2626':ndp>=75?'#d97706':'#16a34a';html+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:10px;color:#808080"><span>Disk '+ndp.toFixed(0)+'%</span><div style="flex:1;height:3px;background:rgba(0,0,0,0.08);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+ndp.toFixed(1)+'%;background:'+ndc+'"></div></div><span>'+(nInfo.disk_total>=1073741824?(nInfo.disk_total/1073741824).toFixed(0)+'G':(nInfo.disk_total/1048576).toFixed(0)+'M')+'</span></div>';}
+      var nsP={};for(var npi=0;npi<nPods.length;npi++){var ns=nPods[npi].namespace;if(!nsP[ns])nsP[ns]=[];nsP[ns].push(nPods[npi]);}
+      var nsK=Object.keys(nsP).sort();
+      for(var nsk=0;nsk<nsK.length;nsk++){html+='<div style="margin-bottom:6px"><div style="font-size:10px;color:#808080;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px">'+escapeHTML(nsK[nsk])+'</div>';for(var npj=0;npj<nsP[nsK[nsk]].length;npj++){var pod=nsP[nsK[nsk]][npj];html+='<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px"><span style="width:6px;height:6px;border-radius:50%;background:#16a34a;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+escapeHTML(pod.name)+'</span><span style="color:#808080;font-size:10px">'+escapeHTML(pod.ready)+'</span>'+(pod.restarts>0?'<span style="color:#d97706;font-size:10px">'+pod.restarts+'r</span>':'')+'</div>';}html+='</div>';}
+      html+='</div></div></div>';
     }
-    html += '</div>'; // end section-block kubernetes
+    // K8s Deployments
+    html+='<div class="section-block" data-section="k8s_deployments">';
+    if(k8sOk&&k8s.deployments&&k8s.deployments.length>0){var uDeps=k8s.deployments.filter(function(d){return d.unavailable>0;});
+      html+='<div class="section"><div class="section-title">'+escapeHTML(k8sT)+' Deployments ('+k8s.deployments.length+')'+(uDeps.length>0?' <span style="color:#dc2626">'+uDeps.length+' unhealthy</span>':'')+'</div>';
+      html+='<div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;overflow:hidden;max-height:250px;overflow-y:auto"><table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="color:#808080;font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Name</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">NS</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Ready</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,0.08)">Strategy</th></tr>';
+      for(var di=0;di<k8s.deployments.length;di++){var dep=k8s.deployments[di];var dOk=dep.unavailable===0&&dep.ready_replicas>=dep.replicas;html+='<tr><td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04);font-weight:500;color:'+(dOk?'inherit':'#dc2626')+'">'+escapeHTML(dep.name)+'</td><td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04);font-size:11px;color:#808080">'+escapeHTML(dep.namespace)+'</td><td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04);color:'+(dOk?'#16a34a':'#dc2626')+'">'+dep.ready_replicas+'/'+dep.replicas+'</td><td style="padding:5px 8px;border-bottom:1px solid rgba(0,0,0,0.04);font-size:11px;color:#808080">'+escapeHTML(dep.strategy||'')+'</td></tr>';}
+      html+='</table></div></div>';}
+    html+='</div>';
+    // K8s Events
+    html+='<div class="section-block" data-section="k8s_events">';
+    if(k8sOk&&k8s.events&&k8s.events.length>0){html+='<div class="section"><div class="section-title">'+escapeHTML(k8sT)+' Events ('+k8s.events.length+' warnings)</div><div style="background:var(--card-bg,#fff);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:8px;max-height:200px;overflow-y:auto">';for(var ei=0;ei<Math.min(k8s.events.length,15);ei++){var ev=k8s.events[ei];html+='<div style="font-size:11px;padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.04)"><span style="color:#d97706;font-weight:600">'+escapeHTML(ev.reason)+'</span> <span style="color:#808080">'+escapeHTML(ev.object)+'</span> <span style="color:#4d4d4d">'+escapeHTML(ev.message).substring(0,100)+'</span></div>';}html+='</div></div>';}
+    html+='</div>';
 
     // ==== Section: Parity ====
     html += '<div class="section-block" data-section="parity">';
@@ -1566,11 +1583,15 @@ body {
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
     var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
+<<<<<<< HEAD
     var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "container_metrics": sec.container_metrics !== false, "zfs": sec.zfs !== false, "gpu": sec.gpu !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "parity": sec.parity !== false };
+=======
+    var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "zfs": sec.zfs !== false, "ups": sec.ups !== false, "services": true, "network": sec.network !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "k8s_nodes": sec.kubernetes !== false, "k8s_problems": sec.kubernetes !== false, "k8s_deployments": sec.kubernetes !== false, "k8s_events": sec.kubernetes !== false, "parity": sec.parity !== false };
+>>>>>>> 293df38 (feat: K8s per-node sections in clean + ember themes, README cleanup)
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var blockMap={};var visibleItems=[];
-    for(var i=0;i<blocks.length;i++){var name=blocks[i].getAttribute("data-section");if(sectionMap[name]===false)continue;if(blocks[i].offsetHeight<10)continue;blockMap[name]=blocks[i];visibleItems.push({el:blocks[i],name:name,h:blocks[i].offsetHeight});}
+    for(var i=0;i<blocks.length;i++){var name=blocks[i].getAttribute("data-section");var resolved=sectionMap[name];if(resolved===undefined&&name&&name.indexOf("k8s_node_")===0)resolved=sec.kubernetes!==false;if(resolved===false)continue;if(blocks[i].offsetHeight<10)continue;blockMap[name]=blocks[i];visibleItems.push({el:blocks[i],name:name,h:blocks[i].offsetHeight});}
     if (!window.NasDrag || !NasDrag.applySavedOrder(blockMap, visibleItems, colL, colR)) {
       var leftH=0,rightH=0;
       for(var j=0;j<visibleItems.length;j++){if(leftH<=rightH){colL.appendChild(visibleItems[j].el);leftH+=visibleItems[j].h;}else{colR.appendChild(visibleItems[j].el);rightH+=visibleItems[j].h;}}

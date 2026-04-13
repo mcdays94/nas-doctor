@@ -14,7 +14,7 @@ interface Env {
   DEMO_DATA: KVNamespace;
 }
 
-const PLATFORMS = ["unraid", "synology", "proxmox", "kubernetes"] as const;
+const PLATFORMS = ["unraid", "synology", "truenas", "proxmox", "kubernetes"] as const;
 type Platform = (typeof PLATFORMS)[number];
 
 const ENDPOINTS = [
@@ -84,6 +84,29 @@ const PROFILES: Record<Platform, PlatformProfile> = {
       { name: "plex", image: "linuxserver/plex:latest", state: "running", cpu: 8.5, mem: 768 },
       { name: "homebridge", image: "homebridge/homebridge:latest", state: "running", cpu: 0.8, mem: 128 },
       { name: "watchtower", image: "containrrr/watchtower:latest", state: "running", cpu: 0.1, mem: 32 },
+    ],
+  },
+  truenas: {
+    hostname: "truenas-scale", platformName: "TrueNAS SCALE 24.10", cpuModel: "Intel Xeon E-2278G", cpuCores: 8, ramGB: 64, uptimeDays: 120,
+    hasZFS: true, hasUPS: true, hasParity: false, hasProxmox: false, hasKubernetes: false, hasTunnels: false, hasGPU: false,
+    drives: [
+      { device: "sda", model: "WDC WD120EMFZ", serial: "WD-WMC540123456", sizeGB: 12000, type: "hdd", mount: "/mnt/tank", label: "tank (raidz2)", usedPct: 68, temp: 34, poh: 38000 },
+      { device: "sdb", model: "WDC WD120EMFZ", serial: "WD-WMC540234567", sizeGB: 12000, type: "hdd", mount: "/mnt/tank", label: "tank (raidz2)", usedPct: 68, temp: 35, poh: 38000 },
+      { device: "sdc", model: "WDC WD120EMFZ", serial: "WD-WMC540345678", sizeGB: 12000, type: "hdd", mount: "/mnt/tank", label: "tank (raidz2)", usedPct: 68, temp: 33, poh: 38000 },
+      { device: "sdd", model: "WDC WD120EMFZ", serial: "WD-WMC540456789", sizeGB: 12000, type: "hdd", mount: "/mnt/tank", label: "tank (raidz2)", usedPct: 68, temp: 36, poh: 38000 },
+      { device: "sde", model: "WDC WD120EMFZ", serial: "WD-WMC540567890", sizeGB: 12000, type: "hdd", mount: "/mnt/tank", label: "tank (raidz2)", usedPct: 68, temp: 34, poh: 25000 },
+      { device: "sdf", model: "WDC WD120EMFZ", serial: "WD-WMC540678901", sizeGB: 12000, type: "hdd", mount: "/mnt/tank", label: "tank (raidz2)", usedPct: 68, temp: 35, poh: 25000 },
+      { device: "nvme0n1", model: "Intel Optane 900P 480GB", serial: "INTEL-OPTANE-001", sizeGB: 480, type: "nvme", mount: "/mnt/tank", label: "SLOG", usedPct: 5, temp: 42, poh: 22000 },
+      { device: "nvme1n1", model: "Samsung 980 Pro 1TB", serial: "S6XNNS0T555555", sizeGB: 1000, type: "nvme", mount: "/mnt/tank", label: "L2ARC", usedPct: 82, temp: 46, poh: 14000 },
+    ],
+    containers: [
+      { name: "plex", image: "plexinc/pms-docker:latest", state: "running", cpu: 15.2, mem: 2048 },
+      { name: "nextcloud", image: "nextcloud:latest", state: "running", cpu: 2.1, mem: 512 },
+      { name: "minio", image: "minio/minio:latest", state: "running", cpu: 0.8, mem: 256 },
+      { name: "syncthing", image: "syncthing/syncthing:latest", state: "running", cpu: 0.4, mem: 128 },
+      { name: "prometheus", image: "prom/prometheus:latest", state: "running", cpu: 0.6, mem: 384 },
+      { name: "grafana", image: "grafana/grafana:latest", state: "running", cpu: 0.3, mem: 192 },
+      { name: "nas-doctor", image: "ghcr.io/mcdays94/nas-doctor:latest", state: "running", cpu: 0.2, mem: 48 },
     ],
   },
   proxmox: {
@@ -308,7 +331,7 @@ function transformSnapshot(d: Record<string, unknown>, p: PlatformProfile, platf
 
   // Sections that differ per platform
   const ups = p.hasUPS ? d.ups : { available: false };
-  const zfs = p.hasZFS ? d.zfs : { available: false, pools: [] };
+  const zfs = p.hasZFS ? buildZFS(p) : { available: false, pools: [] };
   const gpu = p.hasGPU ? d.gpu : { available: false, devices: [] };
   const parity = p.hasParity ? d.parity : { available: false, history: [] };
   const tunnels = p.hasTunnels ? d.tunnels : { available: false, cloudflared: [] };
@@ -411,29 +434,41 @@ function buildReplacementPlan(p: PlatformProfile): unknown {
   };
 }
 
-// /api/v1/capacity-forecast — matches real Go app format
+// /api/v1/capacity-forecast — matches real Go app format exactly
 function buildCapacityForecast(p: PlatformProfile): unknown {
-  const now = Date.now();
-  const volumes = p.drives.filter(d => d.usedPct > 0).map((dr, i) => {
+  const volumes = p.drives.filter(d => d.usedPct > 0).map((dr) => {
     const growthGBPerDay = round2(dr.sizeGB * (0.001 + hash(hashStr(dr.serial) + 42) * 0.003));
     const currentUsedGB = round2(dr.usedPct / 100 * dr.sizeGB);
     const remainingGB = dr.sizeGB - currentUsedGB;
-    const daysTo90 = dr.usedPct < 90 ? Math.round((0.9 * dr.sizeGB - currentUsedGB) / growthGBPerDay) : 0;
+    const daysTo = (threshold: number) => {
+      if (dr.usedPct >= threshold) return 0;
+      const targetGB = (threshold / 100) * dr.sizeGB;
+      return growthGBPerDay > 0.001 ? Math.round((targetGB - currentUsedGB) / growthGBPerDay) : -1;
+    };
+    const d90 = daysTo(90), d95 = daysTo(95), d100 = daysTo(100);
+    const urgency = d100 >= 0 && d100 < 30 ? "critical" : d100 >= 0 && d100 < 90 ? "warning" : "ok";
+    const trend = growthGBPerDay > 0.5 ? "growing" : growthGBPerDay < -0.5 ? "shrinking" : "stable";
     return {
       mount_point: dr.mount, label: dr.label, device: `/dev/${dr.device}`,
       total_gb: round2(dr.sizeGB),
       current_pct: round2(dr.usedPct),
       current_used_gb: currentUsedGB,
       growth_gb_per_day: growthGBPerDay,
-      days_to_90: daysTo90,
+      days_to_90: d90,
+      days_to_95: d95,
+      days_to_100: d100,
+      confidence: 78,
+      data_points: 78,
+      trend,
+      urgency,
     };
   });
   return {
     volumes,
     total_volumes: volumes.length,
-    critical: volumes.filter(v => v.days_to_90 > 0 && v.days_to_90 < 30).length,
-    warning: volumes.filter(v => v.days_to_90 >= 30 && v.days_to_90 < 90).length,
-    ok: volumes.filter(v => v.days_to_90 === 0 || v.days_to_90 >= 90).length,
+    critical: volumes.filter(v => v.urgency === "critical").length,
+    warning: volumes.filter(v => v.urgency === "warning").length,
+    ok: volumes.filter(v => v.urgency === "ok").length,
   };
 }
 
@@ -567,6 +602,84 @@ function buildServiceChecks(): unknown[] {
   sc("fleet-http-192.168.50.10:8060", "Fleet: Remote Backup", "http", "http://192.168.50.10:8060/api/v1/health", false, 0, "critical", 576);
 
   return checks;
+}
+
+function buildZFS(p: PlatformProfile): unknown {
+  const isTrueNAS = p.platformName.includes("TrueNAS");
+  const isProxmox = p.platformName.includes("Proxmox");
+
+  if (isTrueNAS) {
+    const hddDrives = p.drives.filter(d => d.type === "hdd");
+    const totalBytes = hddDrives.reduce((s, d) => s + d.sizeGB * 1e9, 0);
+    const usedBytes = Math.round(totalBytes * (p.drives[0]?.usedPct || 60) / 100);
+    return {
+      available: true,
+      pools: [{
+        name: "tank",
+        state: "ONLINE",
+        size_bytes: totalBytes,
+        allocated_bytes: usedBytes,
+        free_bytes: totalBytes - usedBytes,
+        fragmentation: Math.round(clamp(jitter(12, 30, hashStr("truenas-zfs")), 1, 35)),
+        capacity_percent: Math.round(usedBytes / totalBytes * 100),
+        dedup_ratio: 1.0,
+        vdevs: [{
+          name: "raidz2-0",
+          type: "raidz2",
+          state: "ONLINE",
+          devices: hddDrives.map(d => ({ name: d.device, state: "ONLINE", read_errors: 0, write_errors: 0, checksum_errors: 0 })),
+        }],
+        scan: {
+          type: "scrub",
+          state: "completed",
+          start_time: hoursAgo(168),
+          end_time: hoursAgo(154),
+          errors: 0,
+          bytes_scanned: usedBytes,
+          bytes_total: usedBytes,
+          percent: 100,
+        },
+      }],
+    };
+  }
+
+  // Proxmox ZFS
+  const ssdDrives = p.drives.filter(d => d.type === "ssd");
+  const nvmeDrives = p.drives.filter(d => d.type === "nvme");
+  return {
+    available: true,
+    pools: [{
+      name: "rpool",
+      state: "ONLINE",
+      size_bytes: ssdDrives.reduce((s, d) => s + d.sizeGB * 1e9, 0),
+      allocated_bytes: Math.round(ssdDrives.reduce((s, d) => s + d.sizeGB * 1e9 * d.usedPct / 100, 0)),
+      free_bytes: Math.round(ssdDrives.reduce((s, d) => s + d.sizeGB * 1e9 * (1 - d.usedPct / 100), 0)),
+      fragmentation: 8,
+      capacity_percent: ssdDrives[0]?.usedPct || 18,
+      dedup_ratio: 1.0,
+      vdevs: [{
+        name: "mirror-0",
+        type: "mirror",
+        state: "ONLINE",
+        devices: ssdDrives.map(d => ({ name: d.device, state: "ONLINE", read_errors: 0, write_errors: 0, checksum_errors: 0 })),
+      }, ...(nvmeDrives.length >= 2 ? [{
+        name: "mirror-1",
+        type: "mirror",
+        state: "ONLINE",
+        devices: nvmeDrives.map(d => ({ name: d.device, state: "ONLINE", read_errors: 0, write_errors: 0, checksum_errors: 0 })),
+      }] : [])],
+      scan: {
+        type: "scrub",
+        state: "completed",
+        start_time: hoursAgo(72),
+        end_time: hoursAgo(68),
+        errors: 0,
+        bytes_scanned: Math.round(ssdDrives.reduce((s, d) => s + d.sizeGB * 1e9 * d.usedPct / 100, 0)),
+        bytes_total: Math.round(ssdDrives.reduce((s, d) => s + d.sizeGB * 1e9 * d.usedPct / 100, 0)),
+        percent: 100,
+      },
+    }],
+  };
 }
 
 function buildFindings(p: PlatformProfile, disks: any[], smart: any[], containers: any[]): unknown[] {
