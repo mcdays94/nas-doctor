@@ -175,17 +175,9 @@ function transformForPlatform(endpoint: string, data: unknown, platform: Platfor
   if (endpoint === "replacement_plan") return buildReplacementPlan(PROFILES[platform]);
   if (endpoint === "capacity_forecast") return buildCapacityForecast(PROFILES[platform]);
   if (endpoint === "sparklines") return transformSparklines(data as Record<string, unknown>, PROFILES[platform]);
+  if (endpoint === "snapshot") return transformSnapshot(data as Record<string, unknown>, PROFILES[platform], platform);
 
-  if (platform === "unraid") return data; // unraid IS the seed for other endpoints
-
-  const p = PROFILES[platform];
-
-  switch (endpoint) {
-    case "snapshot":
-      return transformSnapshot(data as Record<string, unknown>, p, platform);
-    default:
-      return data; // everything else either handled above or passed through
-  }
+  return data; // everything else passed through from seed
 }
 
 function transformStatus(d: Record<string, unknown>, p: PlatformProfile): Record<string, unknown> {
@@ -272,14 +264,29 @@ function transformSnapshot(d: Record<string, unknown>, p: PlatformProfile, platf
   }));
   for (const dk of disks) { dk.free_gb = round2(dk.total_gb - dk.used_gb); dk.used_percent = round2((dk.used_gb / dk.total_gb) * 100); }
 
-  // SMART
+  // SMART — must include ALL fields the stats page reads
+  const temp = (dr: typeof p.drives[0], i: number) => Math.round(clamp(jitter(dr.temp, 8, hashStr(platform) + 200 + i), 22, 60));
   const smart = p.drives.map((dr, i) => ({
     device: `/dev/${dr.device}`, model: dr.model, serial: dr.serial,
-    firmware: "FW01", type: dr.type, health_passed: true,
-    temperature_c: Math.round(clamp(jitter(dr.temp, 8, hashStr(platform) + 200 + i), 22, 60)),
+    firmware: "FW01",
+    size_gb: round2(dr.sizeGB),
+    health_passed: true,
+    data_available: true,
     power_on_hours: dr.poh + Math.floor(Date.now() / 3600000) % 100,
+    temperature_c: temp(dr, i),
+    temperature_max_c: temp(dr, i) + 8,
+    reallocated_sectors: 0,
+    pending_sectors: 0,
+    offline_uncorrectable: 0,
+    udma_crc_errors: 0,
+    command_timeout: 0,
+    spin_retry_count: 0,
+    raw_read_error_rate: 0,
+    seek_error_rate: 0,
+    disk_type: dr.type,
+    ata_port: dr.type === "nvme" ? "" : `ata${i + 1}`,
+    array_slot: dr.label,
     power_cycle_count: Math.floor(dr.poh / 2000) + 12,
-    reallocated_sectors: 0, pending_sectors: 0, offline_uncorrectable: 0, udma_crc_errors: 0,
     wear_leveling: dr.type !== "hdd" ? Math.round(clamp(100 - dr.poh / 500, 70, 100)) : undefined,
     reads_gb: round2(jitter(dr.poh * 0.8, 10, hashStr(platform) + 300 + i)),
     writes_gb: round2(jitter(dr.poh * 0.3, 10, hashStr(platform) + 400 + i)),
