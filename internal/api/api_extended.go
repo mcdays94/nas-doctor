@@ -472,7 +472,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		serviceNames[strings.ToLower(check.Name)] = struct{}{}
 		switch check.Type {
-		case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing:
+		case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing, internal.ServiceCheckSpeed:
 			// valid
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid service check type: " + check.Type})
