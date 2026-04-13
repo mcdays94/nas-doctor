@@ -327,16 +327,22 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         <div class="form-row">
           <div>
             <label for="nr-name">Name</label>
-            <input type="text" id="nr-name" placeholder="e.g. Disk 1 temperature alert">
+            <input type="text" id="nr-name" placeholder="e.g. Disk 1 temperature alert" oninput="updateRulePreview()">
+            <div style="font-size:10px;color:var(--text3);margin-top:2px">A short name to identify this rule in the list</div>
           </div>
           <div>
             <label for="nr-webhook">Notify via</label>
-            <select id="nr-webhook"></select>
+            <select id="nr-webhook" onchange="updateRulePreview()"></select>
+            <div id="nr-webhook-hint" style="font-size:10px;color:var(--text3);margin-top:2px">Select which webhook receives this notification</div>
           </div>
+        </div>
+        <!-- Live preview of what the rule will do -->
+        <div id="nr-preview" style="background:var(--elevated,rgba(255,255,255,0.04));border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--text2);display:none">
+          <strong style="color:var(--text1)">Rule preview:</strong> <span id="nr-preview-text"></span>
         </div>
         <div class="form-row">
           <div>
-            <label for="nr-category">Category</label>
+            <label for="nr-category">What to monitor</label>
             <select id="nr-category" onchange="onRuleCategoryChange()">
               <option value="findings">Findings (severity)</option>
               <option value="disk_space">Disk Space</option>
@@ -353,23 +359,24 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             </select>
           </div>
           <div>
-            <label for="nr-condition">Condition</label>
-            <select id="nr-condition"></select>
+            <label for="nr-condition">When this happens</label>
+            <select id="nr-condition" onchange="updateValueHint()"></select>
           </div>
         </div>
         <div class="form-row">
           <div>
-            <label for="nr-target">Target <span style="font-size:10px;color:var(--text3)">(optional — specific drive, service, container)</span></label>
-            <select id="nr-target"><option value="">Any / All</option></select>
+            <label for="nr-target">On which target <span style="font-size:10px;color:var(--text3)">(leave blank for all)</span></label>
+            <select id="nr-target" onchange="filterConditionsForTarget();updateRulePreview()"><option value="">Any / All</option></select>
           </div>
-          <div>
-            <label for="nr-value">Threshold value</label>
-            <input type="number" id="nr-value" placeholder="e.g. 55" step="any">
+          <div id="nr-value-wrap">
+            <label for="nr-value" id="nr-value-label">Threshold value</label>
+            <input type="number" id="nr-value" placeholder="" step="any" oninput="updateRulePreview()">
+            <div id="nr-value-hint" style="font-size:10px;color:var(--text3);margin-top:2px"></div>
           </div>
         </div>
         <div class="form-row">
           <div>
-            <label for="nr-cooldown">Cooldown</label>
+            <label for="nr-cooldown">Don't repeat for</label>
             <select id="nr-cooldown">
               <option value="300">5 minutes</option>
               <option value="900" selected>15 minutes</option>
@@ -379,6 +386,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
               <option value="43200">12 hours</option>
               <option value="86400">24 hours</option>
             </select>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px">After notifying, wait this long before sending another for the same issue</div>
           </div>
           <div style="display:flex;align-items:flex-end;padding-bottom:4px">
             <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="nr-enabled" checked> Enabled</label>
@@ -386,6 +394,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         </div>
         <div class="webhook-form-actions">
           <button class="btn btn-primary" onclick="saveRule()">Save Rule</button>
+          <button class="btn btn-success btn-sm" onclick="testRule()">Test</button>
           <button class="btn btn-secondary" onclick="cancelRuleForm()">Cancel</button>
         </div>
       </div>
@@ -395,7 +404,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
   <!-- 3. Service Checks -->
   <div class="card" id="card-service-checks">
     <div class="card-title">Service Checks</div>
-    <div class="card-desc">Monitor service endpoints (HTTP, TCP, DNS, Ping/ICMP, SMB, NFS) and trigger findings when they fail repeatedly.</div>
+    <div class="card-desc">Monitor service endpoints (HTTP, TCP, DNS, Ping/ICMP, SMB, NFS, Speed Test) and trigger findings when they fail repeatedly.</div>
     <div id="service-check-list"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
       <button class="btn btn-secondary" id="btn-add-service-check" onclick="toggleServiceCheckForm()">+ Add Service Check</button>
@@ -418,6 +427,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             <option value="ping">Ping (ICMP)</option>
             <option value="smb">SMB</option>
             <option value="nfs">NFS</option>
+            <option value="speed">Speed Test</option>
           </select>
         </div>
       </div>
@@ -429,7 +439,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         </div>
       </div>
       <div class="form-row">
-        <div>
+        <div id="sc-target-wrap">
           <label for="sc-target">Target</label>
           <input type="text" id="sc-target" placeholder="https://nas.local/health, 192.168.1.10, or host:port">
         </div>
@@ -461,6 +471,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         <div>
           <label for="sc-threshold">Failure threshold</label>
           <input type="number" id="sc-threshold" min="1" max="20" value="1">
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">Number of consecutive failures before alerting</div>
         </div>
         <div>
           <label for="sc-severity">Failure severity</label>
@@ -483,6 +494,23 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div class="form-group" id="sc-headers-wrap">
         <label for="sc-headers">Custom HTTP Headers (optional — for auth, CF Access, etc.)</label>
         <textarea id="sc-headers" rows="2" placeholder="Authorization: Bearer token123&#10;CF-Access-Client-Id: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
+      </div>
+      <div id="sc-speed-wrap" style="display:none">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <div style="flex:1">
+            <label class="form-label">Contracted Download (Mbps)</label>
+            <input type="number" id="sc-contracted-down" class="form-input" placeholder="e.g. 1000" step="1" min="0">
+          </div>
+          <div style="flex:1">
+            <label class="form-label">Contracted Upload (Mbps)</label>
+            <input type="number" id="sc-contracted-up" class="form-input" placeholder="e.g. 500" step="1" min="0">
+          </div>
+        </div>
+        <div>
+          <label class="form-label">Margin of Error (%)</label>
+          <input type="number" id="sc-margin" class="form-input" placeholder="10" step="1" min="0" max="50" value="10">
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">Speeds within this % of contracted speed are considered acceptable</div>
+        </div>
       </div>
       <div class="form-row">
         <div>
@@ -699,6 +727,8 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div class="toggle-wrap"><div class="toggle on" id="sec-tunnels" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Tunnels (Cloudflared / Tailscale)</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-proxmox" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Proxmox VE</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-kubernetes" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Kubernetes</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-backup" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Backup Monitoring</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-speedtest" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Speed Test</span></div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div class="toggle-wrap"><div class="toggle on" id="sec-merged-containers" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Container View <span style="font-size:11px;color:var(--text2)">(combine Docker list + resource metrics into one section)</span></span></div>
         <div class="toggle-wrap" style="margin-top:8px"><div class="toggle on" id="sec-merged-drives" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Drive View <span style="font-size:11px;color:var(--text2)">(combine SMART + storage into one card per drive)</span></span></div>
@@ -982,8 +1012,8 @@ function loadSettings() {
       renderServiceChecks();
       /* Dashboard section toggles */
       var sec = data.sections || {};
-      var secMap = {findings:1,disk_space:1,smart:1,docker:1,container_metrics:1,zfs:1,ups:1,parity:1,network:1,tunnels:1,proxmox:1,kubernetes:1,merged_containers:1,merged_drives:1};
-      var secIds = {"findings":"sec-findings","disk_space":"sec-disk","smart":"sec-smart","docker":"sec-docker","container_metrics":"sec-container-metrics","zfs":"sec-zfs","gpu":"sec-gpu","ups":"sec-ups","parity":"sec-parity","network":"sec-network","tunnels":"sec-tunnels","proxmox":"sec-proxmox","kubernetes":"sec-kubernetes","merged_containers":"sec-merged-containers","merged_drives":"sec-merged-drives"};
+      var secMap = {findings:1,disk_space:1,smart:1,docker:1,container_metrics:1,zfs:1,ups:1,parity:1,network:1,tunnels:1,proxmox:1,kubernetes:1,backup:1,speedtest:1,merged_containers:1,merged_drives:1};
+      var secIds = {"findings":"sec-findings","disk_space":"sec-disk","smart":"sec-smart","docker":"sec-docker","container_metrics":"sec-container-metrics","zfs":"sec-zfs","gpu":"sec-gpu","ups":"sec-ups","parity":"sec-parity","network":"sec-network","tunnels":"sec-tunnels","proxmox":"sec-proxmox","kubernetes":"sec-kubernetes","backup":"sec-backup","speedtest":"sec-speedtest","merged_containers":"sec-merged-containers","merged_drives":"sec-merged-drives"};
       for (var sk in secIds) { var el = document.getElementById(secIds[sk]); if (el) { if (sec[sk] === false) el.classList.remove("on"); else el.classList.add("on"); } }
       /* API Key */
       document.getElementById("api-key-display").value = data.api_key || "";
@@ -1065,6 +1095,8 @@ function buildSettingsPayload() {
       tunnels: document.getElementById("sec-tunnels").classList.contains("on"),
       proxmox: document.getElementById("sec-proxmox").classList.contains("on"),
       kubernetes: document.getElementById("sec-kubernetes").classList.contains("on"),
+      backup: document.getElementById("sec-backup").classList.contains("on"),
+      speedtest: document.getElementById("sec-speedtest").classList.contains("on"),
       merged_drives: document.getElementById("sec-merged-drives").classList.contains("on")
     },
     proxmox: {
@@ -1235,20 +1267,20 @@ function removeWebhook(idx) {
 }
 
 function testWebhook() {
-  var url = document.getElementById("wh-url").value.trim();
+  var url = (document.getElementById("wh-url") || {}).value || "";
+  url = url.trim();
   if (!url) {
-    showToast("Enter a URL first", "error");
+    showToast("Enter a webhook URL first", "error");
     return;
   }
   var wh = {
-    name: document.getElementById("wh-name").value.trim() || "Test",
+    name: (document.getElementById("wh-name") || {}).value || "Test",
     url: url,
-    type: document.getElementById("wh-type").value,
+    type: (document.getElementById("wh-type") || {}).value || "generic",
     enabled: true,
-    min_level: document.getElementById("wh-level").value,
-    secret: document.getElementById("wh-secret").value.trim() || ""
+    secret: ((document.getElementById("wh-secret") || {}).value || "").trim()
   };
-  showToast("Sending test...", "info");
+  showToast("Sending test notification...", "info");
   fetch("/api/v1/settings/test-webhook", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1258,7 +1290,100 @@ function testWebhook() {
     if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Test failed"); });
     return r.json();
   })
-  .then(function(data) { showToast("Test sent! Check your destination.", "success"); })
+  .then(function(data) { showToast(data.message || "Test sent! Check your destination.", "success"); })
+  .catch(function(e) { showToast("Error: " + e.message, "error"); });
+}
+
+function testRule() {
+  var webhookName = (document.getElementById("nr-webhook") || {}).value;
+  if (!webhookName) { showToast("Select a webhook first", "error"); return; }
+  var wh = null;
+  for (var i = 0; i < webhooks.length; i++) {
+    if (webhooks[i].name === webhookName) { wh = webhooks[i]; break; }
+  }
+  if (!wh || !wh.url) { showToast("Webhook not found or has no URL", "error"); return; }
+
+  var cat = (document.getElementById("nr-category") || {}).value || "system";
+  var cond = (document.getElementById("nr-condition") || {}).value || "any";
+  var condSel = document.getElementById("nr-condition");
+  var condLabel = condSel && condSel.options[condSel.selectedIndex] ? condSel.options[condSel.selectedIndex].text : cond;
+  var targetSel = document.getElementById("nr-target");
+  var targetLabel = targetSel && targetSel.value ? targetSel.options[targetSel.selectedIndex].text : "all targets";
+  var val = (document.getElementById("nr-value") || {}).value || "";
+  var ruleName = (document.getElementById("nr-name") || {}).value || "Unnamed rule";
+
+  // Map category to a Finding category constant
+  var catMap = {findings:"system",disk_space:"disk",disk_temp:"smart",smart:"smart",service:"service",parity:"parity",ups:"ups",docker:"docker",system:"system",zfs:"zfs",tunnels:"network",update:"system"};
+  var findingCat = catMap[cat] || "system";
+
+  // Build a severity based on the condition
+  var severity = "warning";
+  if (cond === "critical" || cond === "down" || cond === "health_fails" || cond === "on_battery") severity = "critical";
+  if (cond === "any" || cond === "available" || cond === "category") severity = "info";
+
+  // Build a realistic title and description that simulate what the rule would fire
+  var titles = {
+    critical: "Critical finding detected",
+    warning: "Warning threshold reached",
+    any: "New finding detected",
+    category: "Finding in category: " + (targetSel && targetSel.value ? targetSel.value : cat),
+    free_below: "Disk space low on " + targetLabel + " — " + (val || "10") + "% free",
+    above: "Disk temperature high on " + targetLabel + " — " + (val || "55") + "\u00b0C",
+    avg_above: "Average disk temperature high — " + (val || "50") + "\u00b0C",
+    health_fails: "SMART health check failed on " + targetLabel,
+    reallocated_above: "Reallocated sectors detected on " + targetLabel + " — " + (val || "1") + " sectors",
+    pending_above: "Pending sectors detected on " + targetLabel + " — " + (val || "1") + " sectors",
+    crc_above: "CRC errors on " + targetLabel + " — " + (val || "1") + " errors",
+    power_hours_above: "Drive age warning on " + targetLabel + " — " + (val || "40000") + " hours",
+    down: "Service down: " + targetLabel,
+    degraded: "Service degraded: " + targetLabel + " — partial speed failure",
+    latency_above: "High latency on " + targetLabel + " — over " + (val || "500") + "ms",
+    download_below: "Download speed low: " + targetLabel + " — below " + (val || "800") + " Mbps",
+    upload_below: "Upload speed low: " + targetLabel + " — below " + (val || "400") + " Mbps",
+    errors: "Parity check errors detected",
+    speed_below: "Parity speed below " + (val || "50") + " MB/s",
+    on_battery: "UPS switched to battery power",
+    battery_below: "UPS battery low — " + (val || "20") + "%",
+    load_above: "Load above threshold — " + (val || "80") + "%",
+    stopped: "Container stopped: " + targetLabel,
+    cpu_above: "CPU usage high — " + (val || "90") + "%",
+    mem_above: "Memory usage high — " + (val || "90") + "%",
+    iowait_above: "I/O wait high — " + (val || "20") + "%",
+    degraded_pool: "ZFS pool degraded: " + targetLabel,
+    scrub_errors: "ZFS scrub errors on " + targetLabel,
+    usage_above: "Usage above " + (val || "80") + "% on " + targetLabel,
+    cloudflared_down: "Cloudflared tunnel down: " + targetLabel,
+    tailscale_offline: "Tailscale node offline: " + targetLabel,
+    available: "Platform update available"
+  };
+
+  var title = titles[cond] || condLabel + " on " + targetLabel;
+  var description = "TEST — This simulates what the notification rule \"" + ruleName + "\" would send when triggered. Condition: " + condLabel + " on " + targetLabel + (val ? " (threshold: " + val + ")" : "") + ".";
+
+  showToast("Sending test via " + webhookName + "...", "info");
+  fetch("/api/v1/settings/test-webhook", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: wh.name, url: wh.url, type: wh.type || "generic",
+      enabled: true, secret: wh.secret || "",
+      finding: {
+        severity: severity,
+        category: findingCat,
+        title: title,
+        description: description,
+        evidence: ["Rule: " + ruleName, "Condition: " + condLabel, "Target: " + targetLabel, val ? "Threshold: " + val : null].filter(Boolean),
+        impact: "This is a test notification. No action required.",
+        action: "Verify this notification arrived correctly in " + webhookName + ".",
+        priority: severity === "critical" ? "immediate" : "short-term"
+      }
+    })
+  })
+  .then(function(r) {
+    if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Test failed"); });
+    return r.json();
+  })
+  .then(function(data) { showToast(data.message || "Test sent! Check " + webhookName + ".", "success"); })
   .catch(function(e) { showToast("Error: " + e.message, "error"); });
 }
 
@@ -1275,7 +1400,10 @@ function normalizeServiceCheck(sc) {
     failure_threshold: (sc && sc.failure_threshold) ? sc.failure_threshold : 1,
     failure_severity: (sc && sc.failure_severity) ? sc.failure_severity : "warning",
     expected_status_min: (sc && sc.expected_status_min) ? sc.expected_status_min : 200,
-    expected_status_max: (sc && sc.expected_status_max) ? sc.expected_status_max : 399
+    expected_status_max: (sc && sc.expected_status_max) ? sc.expected_status_max : 399,
+    contracted_down_mbps: (sc && sc.contracted_down_mbps) ? sc.contracted_down_mbps : 0,
+    contracted_up_mbps: (sc && sc.contracted_up_mbps) ? sc.contracted_up_mbps : 0,
+    margin_pct: (sc && sc.margin_pct) ? sc.margin_pct : 0
   };
   if (out.timeout_sec < 1) out.timeout_sec = 5;
   if (out.failure_threshold < 1) out.failure_threshold = 1;
@@ -1295,6 +1423,7 @@ function serviceTypePillClass(t) {
   if (type === "ping") return "pill-ping";
   if (type === "smb") return "pill-smb";
   if (type === "nfs") return "pill-nfs";
+  if (type === "speed") return "pill-speed";
   return "pill-http";
 }
 
@@ -1364,6 +1493,9 @@ function toggleServiceCheckForm() {
   document.getElementById("sc-http-min").value = "200";
   document.getElementById("sc-http-max").value = "399";
   document.getElementById("sc-headers").value = "";
+  document.getElementById("sc-contracted-down").value = "";
+  document.getElementById("sc-contracted-up").value = "";
+  document.getElementById("sc-margin").value = "10";
   setServiceCheckEnabledUI(true);
   populateInstanceSelector();
   onServiceTypeChange();
@@ -1383,12 +1515,18 @@ function onServiceTypeChange() {
   var httpWrap = document.getElementById("sc-http-expected-wrap");
   var portWrap = document.getElementById("sc-port-wrap");
   var headersWrap = document.getElementById("sc-headers-wrap");
+  var speedWrap = document.getElementById("sc-speed-wrap");
+  var targetWrap = document.getElementById("sc-target-wrap");
   if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
   if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
   if (headersWrap) headersWrap.style.display = (type === "http") ? "block" : "none";
+  if (speedWrap) speedWrap.style.display = (type === "speed") ? "block" : "none";
+  // Hide target field for speed checks — speedtest auto-selects the best server
+  if (targetWrap) targetWrap.style.display = (type === "speed") ? "none" : "";
   var targetInput = document.getElementById("sc-target");
   if (targetInput) {
-    if (type === "ping") targetInput.placeholder = "e.g. 8.8.8.8 or gateway.local";
+    if (type === "speed") { targetInput.value = "speedtest"; }
+    else if (type === "ping") targetInput.placeholder = "e.g. 8.8.8.8 or gateway.local";
     else if (type === "dns") targetInput.placeholder = "e.g. google.com";
     else targetInput.placeholder = "https://nas.local/health, 192.168.1.10, or host:port";
   }
@@ -1422,6 +1560,9 @@ function editServiceCheck(idx) {
   document.getElementById("sc-http-min").value = String(sc.expected_status_min || 200);
   document.getElementById("sc-http-max").value = String(sc.expected_status_max || 399);
   document.getElementById("sc-headers").value = scHeadersToText(sc.headers);
+  document.getElementById("sc-contracted-down").value = sc.contracted_down_mbps || "";
+  document.getElementById("sc-contracted-up").value = sc.contracted_up_mbps || "";
+  document.getElementById("sc-margin").value = sc.margin_pct || 10;
   setServiceCheckEnabledUI(sc.enabled !== false);
   onServiceTypeChange();
   document.getElementById("service-check-form").classList.add("visible");
@@ -1433,12 +1574,14 @@ function cancelServiceCheckForm() {
 
 function saveServiceCheck() {
   var name = document.getElementById("sc-name").value.trim();
+  var type = document.getElementById("sc-type").value;
   var target = document.getElementById("sc-target").value.trim();
-  if (!name || !target) {
+  // Speed checks don't need a target — auto-set it
+  if (type === "speed") { target = "speedtest"; }
+  if (!name || (!target && type !== "speed")) {
     showToast("Name and target are required", "error");
     return;
   }
-  var type = document.getElementById("sc-type").value;
   var sc = {
     name: name,
     type: type,
@@ -1461,6 +1604,12 @@ function saveServiceCheck() {
   if (type !== "http") {
     sc.expected_status_min = 0;
     sc.expected_status_max = 0;
+  }
+  if (type === "speed") {
+    sc.contracted_down_mbps = parseFloat(document.getElementById("sc-contracted-down").value) || 0;
+    sc.contracted_up_mbps = parseFloat(document.getElementById("sc-contracted-up").value) || 0;
+    sc.margin_pct = parseFloat(document.getElementById("sc-margin").value) || 10;
+    sc.target = "speedtest";
   }
 
   for (var i = 0; i < serviceChecks.length; i++) {
@@ -2083,7 +2232,7 @@ var CONDITION_MAP = {
   disk_space: [{v:"free_below",l:"Free space below %"}],
   disk_temp:  [{v:"above",l:"Single disk temp above \u00b0C"},{v:"avg_above",l:"Average disk temp above \u00b0C"}],
   smart:      [{v:"health_fails",l:"SMART health fails"},{v:"reallocated_above",l:"Reallocated sectors above"},{v:"pending_above",l:"Pending sectors above"},{v:"crc_above",l:"CRC errors above"},{v:"power_hours_above",l:"Power-on hours above"}],
-  service:    [{v:"down",l:"Service goes down"},{v:"latency_above",l:"Latency above (ms)"}],
+  service:    [{v:"down",l:"Goes down"},{v:"degraded",l:"Degraded (partial failure)"},{v:"latency_above",l:"Latency above (ms)"},{v:"download_below",l:"Download below (Mbps)"},{v:"upload_below",l:"Upload below (Mbps)"}],
   parity:     [{v:"errors",l:"Parity check has errors"},{v:"speed_below",l:"Parity speed below MB/s"}],
   ups:        [{v:"on_battery",l:"UPS switches to battery"},{v:"battery_below",l:"Battery below %"},{v:"load_above",l:"Load above %"}],
   docker:     [{v:"stopped",l:"Container stops"}],
@@ -2092,7 +2241,7 @@ var CONDITION_MAP = {
   tunnels:    [{v:"cloudflared_down",l:"Cloudflared tunnel down"},{v:"tailscale_offline",l:"Tailscale node offline"}],
   update:     [{v:"available",l:"Platform update available"}]
 };
-var NEEDS_VALUE = {free_below:1,above:1,avg_above:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,latency_above:1,speed_below:1,battery_below:1,load_above:1,cpu_above:1,mem_above:1,iowait_above:1,usage_above:1};
+var NEEDS_VALUE = {free_below:1,above:1,avg_above:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,latency_above:1,speed_below:1,battery_below:1,load_above:1,cpu_above:1,mem_above:1,iowait_above:1,usage_above:1,download_below:1,upload_below:1};
 var NEEDS_TARGET = {above:1,health_fails:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,down:1,latency_above:1,stopped:1,degraded:1,scrub_errors:1,usage_above:1,cloudflared_down:1,tailscale_offline:1,free_below:1,category:1};
 
 function onRuleCategoryChange() {
@@ -2105,6 +2254,116 @@ function onRuleCategoryChange() {
     condSel.appendChild(o);
   }
   populateTargetDropdown(cat);
+  filterConditionsForTarget();
+  updateValueHint();
+}
+// When a service check target is selected, filter conditions to match the check type.
+// Speed checks only show: down, degraded, download_below, upload_below
+// Other checks only show: down, latency_above
+// "Any/All" shows everything.
+function filterConditionsForTarget() {
+  var cat = document.getElementById("nr-category").value;
+  if (cat !== "service") return;
+  var targetSel = document.getElementById("nr-target");
+  var condSel = document.getElementById("nr-condition");
+  if (!targetSel || !condSel) return;
+
+  var selectedOpt = targetSel.options[targetSel.selectedIndex];
+  var targetName = targetSel.value; // "" for Any/All
+  var checkType = selectedOpt ? (selectedOpt.getAttribute("data-check-type") || "") : "";
+
+  var prevVal = condSel.value;
+  condSel.innerHTML = "";
+  var allOpts = CONDITION_MAP.service || [];
+
+  for (var j = 0; j < allOpts.length; j++) {
+    var opt = allOpts[j];
+    if (targetName) {
+      // Specific target selected — filter by check type
+      if (checkType === "speed") {
+        // Speed: only down, degraded, download_below, upload_below
+        if (opt.v !== "down" && opt.v !== "degraded" && opt.v !== "download_below" && opt.v !== "upload_below") continue;
+      } else {
+        // Non-speed: only down, latency_above
+        if (opt.v !== "down" && opt.v !== "latency_above") continue;
+      }
+    }
+    // "Any/All" (no target): show all conditions
+    var o = document.createElement("option"); o.value = opt.v; o.textContent = opt.l;
+    condSel.appendChild(o);
+  }
+
+  condSel.value = prevVal;
+  if (condSel.selectedIndex < 0 && condSel.options.length > 0) condSel.selectedIndex = 0;
+  updateValueHint();
+}
+function updateValueHint() {
+  var cond = document.getElementById("nr-condition").value;
+  var wrap = document.getElementById("nr-value-wrap");
+  var label = document.getElementById("nr-value-label");
+  var input = document.getElementById("nr-value");
+  var hint = document.getElementById("nr-value-hint");
+  if (!wrap || !label || !input || !hint) return;
+  var hints = {
+    free_below:       {label:"Threshold (%)",       placeholder:"e.g. 10",  hint:"Alert when free space drops below this percentage"},
+    above:            {label:"Temperature (\u00b0C)",placeholder:"e.g. 55",  hint:"Alert when drive temperature exceeds this value"},
+    avg_above:        {label:"Temperature (\u00b0C)",placeholder:"e.g. 50",  hint:"Alert when average temperature across all drives exceeds this"},
+    reallocated_above:{label:"Sector count",         placeholder:"e.g. 0",   hint:"Alert when reallocated sector count exceeds this (0 = any)"},
+    pending_above:    {label:"Sector count",         placeholder:"e.g. 0",   hint:"Alert when pending sector count exceeds this"},
+    crc_above:        {label:"Error count",          placeholder:"e.g. 0",   hint:"Alert when CRC error count exceeds this"},
+    power_hours_above:{label:"Hours",                placeholder:"e.g. 40000",hint:"Alert when drive power-on hours exceed this"},
+    latency_above:    {label:"Latency (ms)",         placeholder:"e.g. 500", hint:"Alert when service response time exceeds this many milliseconds"},
+    download_below:   {label:"Download (Mbps)",      placeholder:"e.g. 800", hint:"Alert when speed test download falls below this (in Mbps)"},
+    upload_below:     {label:"Upload (Mbps)",        placeholder:"e.g. 400", hint:"Alert when speed test upload falls below this (in Mbps)"},
+    speed_below:      {label:"Speed (MB/s)",         placeholder:"e.g. 50",  hint:"Alert when parity check speed falls below this"},
+    battery_below:    {label:"Battery (%)",          placeholder:"e.g. 20",  hint:"Alert when UPS battery level drops below this percentage"},
+    load_above:       {label:"Load / %",             placeholder:"e.g. 80",  hint:"Alert when value exceeds this threshold"},
+    cpu_above:        {label:"CPU (%)",              placeholder:"e.g. 90",  hint:"Alert when CPU usage exceeds this percentage"},
+    mem_above:        {label:"Memory (%)",           placeholder:"e.g. 90",  hint:"Alert when memory usage exceeds this percentage"},
+    iowait_above:     {label:"I/O Wait (%)",         placeholder:"e.g. 20",  hint:"Alert when I/O wait exceeds this percentage"},
+    usage_above:      {label:"Usage (%)",            placeholder:"e.g. 80",  hint:"Alert when usage exceeds this percentage"},
+  };
+  var h = hints[cond];
+  if (h) {
+    label.textContent = h.label;
+    input.placeholder = h.placeholder;
+    hint.textContent = h.hint;
+    wrap.style.display = "";
+  } else if (NEEDS_VALUE[cond]) {
+    label.textContent = "Threshold value";
+    input.placeholder = "";
+    hint.textContent = "";
+    wrap.style.display = "";
+  } else {
+    // No threshold needed for this condition — hide the field entirely
+    wrap.style.display = "none";
+  }
+  updateRulePreview();
+}
+function updateRulePreview() {
+  var prev = document.getElementById("nr-preview");
+  var text = document.getElementById("nr-preview-text");
+  if (!prev || !text) return;
+  var cat = document.getElementById("nr-category");
+  var cond = document.getElementById("nr-condition");
+  var target = document.getElementById("nr-target");
+  var val = document.getElementById("nr-value");
+  var webhook = document.getElementById("nr-webhook");
+  var cooldown = document.getElementById("nr-cooldown");
+  if (!cat || !cond) return;
+  var catLabel = cat.options[cat.selectedIndex] ? cat.options[cat.selectedIndex].text : cat.value;
+  var condLabel = cond.options[cond.selectedIndex] ? cond.options[cond.selectedIndex].text : cond.value;
+  var targetLabel = target && target.value ? target.options[target.selectedIndex].text : "any";
+  var valText = val && val.value && NEEDS_VALUE[cond.value] ? " " + val.value : "";
+  var webhookName = webhook && webhook.value ? webhook.value : "(no webhook selected)";
+  var cooldownText = cooldown ? cooldown.options[cooldown.selectedIndex].text : "15 minutes";
+  var sentence = 'When <strong>' + condLabel.toLowerCase() + '</strong>';
+  if (valText) sentence += ' <strong>' + valText.trim() + '</strong>';
+  sentence += ' on <strong>' + targetLabel + '</strong>';
+  sentence += ', send a notification to <strong>' + escapeHtml(webhookName) + '</strong>';
+  sentence += '. Don\u2019t repeat for <strong>' + cooldownText + '</strong>.';
+  text.innerHTML = sentence;
+  prev.style.display = "block";
 }
 
 function populateTargetDropdown(cat) {
@@ -2123,7 +2382,9 @@ function populateTargetDropdown(cat) {
     }
   } else if (cat === "service" && sn.service_checks) {
     for (var i = 0; i < sn.service_checks.length; i++) {
-      var sc = sn.service_checks[i]; sel.innerHTML += '<option value="' + escapeHtml(sc.name) + '">' + escapeHtml(sc.name) + '</option>';
+      var sc = sn.service_checks[i];
+      var typeLabel = sc.type ? ' [' + sc.type.toUpperCase() + ']' : '';
+      sel.innerHTML += '<option value="' + escapeHtml(sc.name) + '" data-check-type="' + escapeHtml(sc.type || '') + '">' + escapeHtml(sc.name + typeLabel) + '</option>';
     }
   } else if (cat === "docker" && sn.docker && sn.docker.containers) {
     for (var i = 0; i < sn.docker.containers.length; i++) {
@@ -2181,10 +2442,20 @@ function toggleRuleForm() {
   document.getElementById("nr-cooldown").value = "900";
   document.getElementById("nr-enabled").checked = true;
   onRuleCategoryChange();
+  updateValueHint();
+  // Show webhook warning if none configured
+  var whHint = document.getElementById("nr-webhook-hint");
+  var whSel = document.getElementById("nr-webhook");
+  if (whHint && whSel && whSel.options.length === 0) {
+    whHint.innerHTML = '<span style="color:var(--amber,#f59e0b)">No webhooks configured yet. Add one above first.</span>';
+  }
   renderRules();
   form.classList.add("visible");
 }
-function cancelRuleForm() { document.getElementById("rule-form").classList.remove("visible"); }
+function cancelRuleForm() {
+  document.getElementById("rule-form").classList.remove("visible");
+  document.getElementById("nr-preview").style.display = "none";
+}
 function editRule(idx) {
   var r = notifRules[idx];
   document.getElementById("nr-edit-index").value = String(idx);
@@ -2197,6 +2468,7 @@ function editRule(idx) {
   document.getElementById("nr-value").value = r.value || "";
   document.getElementById("nr-cooldown").value = String(r.cooldown_sec || 900);
   document.getElementById("nr-enabled").checked = r.enabled !== false;
+  updateValueHint();
   renderRules();
   document.getElementById("rule-form").classList.add("visible");
 }
