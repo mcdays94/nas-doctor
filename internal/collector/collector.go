@@ -169,6 +169,13 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 		}
 	}
 
+	// GPU (Nvidia / AMD / Intel)
+	c.logger.Info("collecting GPU info")
+	gpuInfo := collectGPU()
+	if gpuInfo != nil && gpuInfo.Available {
+		snap.GPU = gpuInfo
+	}
+
 	// ZFS (if available)
 	c.logger.Info("collecting ZFS info")
 	zfsInfo, err := collectZFS()
@@ -178,6 +185,16 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 	if zfsInfo != nil && zfsInfo.Available {
 		snap.ZFS = zfsInfo
 	}
+
+	// Backup monitoring (Borg, Restic, PBS, Duplicati)
+	c.logger.Info("collecting backup info")
+	backupInfo := collectBackups()
+	if backupInfo != nil && backupInfo.Available {
+		snap.Backup = backupInfo
+	}
+
+	// Speed test: not collected here (runs on its own schedule via scheduler)
+	// snap.SpeedTest is populated by the scheduler's speed test loop
 
 	snap.Duration = time.Since(start).Seconds()
 	c.logger.Info("collection complete", "duration", fmt.Sprintf("%.1fs", snap.Duration))

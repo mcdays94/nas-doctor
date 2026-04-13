@@ -134,6 +134,63 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_system_history_ts ON system_history(timestamp DESC)`,
 
+		// --- GPU history ---
+		`CREATE TABLE IF NOT EXISTS gpu_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+			gpu_index INTEGER NOT NULL,
+			name TEXT,
+			vendor TEXT,
+			usage_pct REAL,
+			mem_used_mb REAL,
+			mem_total_mb REAL,
+			mem_pct REAL,
+			temperature INTEGER,
+			power_watts REAL,
+			fan_pct REAL,
+			encoder_pct REAL,
+			decoder_pct REAL,
+			timestamp DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gpu_history_ts ON gpu_history(timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_gpu_history_gpu ON gpu_history(gpu_index, timestamp DESC)`,
+
+		// --- Container stats history ---
+		`CREATE TABLE IF NOT EXISTS container_stats_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+			container_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			image TEXT,
+			cpu_pct REAL,
+			mem_mb REAL,
+			mem_pct REAL,
+			net_in_bytes REAL,
+			net_out_bytes REAL,
+			block_read_bytes REAL,
+			block_write_bytes REAL,
+			timestamp DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_container_stats_ts ON container_stats_history(timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_container_stats_name ON container_stats_history(name, timestamp DESC)`,
+
+		// --- Speed test history ---
+		`CREATE TABLE IF NOT EXISTS speedtest_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+			download_mbps REAL,
+			upload_mbps REAL,
+			latency_ms REAL,
+			jitter_ms REAL,
+			server_name TEXT,
+			isp TEXT,
+			timestamp DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_speedtest_ts ON speedtest_history(timestamp DESC)`,
+
 		// --- Notification log ---
 		`CREATE TABLE IF NOT EXISTS notification_log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,6 +242,20 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_service_checks_key_ts ON service_checks_history(check_key, checked_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_service_checks_ts ON service_checks_history(checked_at DESC)`,
+		// Disk usage history for capacity forecasting
+		`CREATE TABLE IF NOT EXISTS disk_usage_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			mount_point TEXT NOT NULL,
+			label TEXT NOT NULL DEFAULT '',
+			device TEXT NOT NULL DEFAULT '',
+			total_gb REAL NOT NULL,
+			used_gb REAL NOT NULL,
+			free_gb REAL NOT NULL,
+			used_pct REAL NOT NULL,
+			timestamp DATETIME NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_disk_usage_mount_ts ON disk_usage_history(mount_point, timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_disk_usage_ts ON disk_usage_history(timestamp DESC)`,
 	}
 
 	for _, m := range migrations {
@@ -289,6 +360,26 @@ func (d *DB) SaveSnapshot(snap *internal.Snapshot) error {
 		return fmt.Errorf("save system history: %w", err)
 	}
 
+	// Store disk usage history for capacity forecasting
+	if err := d.saveDiskUsageHistory(tx, snap); err != nil {
+		return fmt.Errorf("save disk usage history: %w", err)
+	}
+
+	// Store GPU history
+	if err := d.saveGPUHistory(tx, snap); err != nil {
+		return fmt.Errorf("save gpu history: %w", err)
+	}
+
+	// Store container stats history
+	if err := d.saveContainerHistory(tx, snap); err != nil {
+		return fmt.Errorf("save container history: %w", err)
+	}
+
+	// Store speed test history
+	if err := d.saveSpeedTestHistory(tx, snap); err != nil {
+		return fmt.Errorf("save speedtest history: %w", err)
+	}
+
 	return tx.Commit()
 }
 
@@ -316,6 +407,281 @@ func (d *DB) saveSystemHistory(tx *sql.Tx, snap *internal.Snapshot) error {
 		snap.System.LoadAvg1, snap.System.LoadAvg5, snap.System.LoadAvg15, snap.System.UptimeSecs, snap.Timestamp,
 	)
 	return err
+}
+
+func (d *DB) saveDiskUsageHistory(tx *sql.Tx, snap *internal.Snapshot) error {
+	for _, disk := range snap.Disks {
+		if disk.MountPoint == "" || disk.TotalGB <= 1 || disk.MountPoint[0] != '/' {
+			continue // skip virtual/empty/non-absolute mounts
+		}
+		_, err := tx.Exec(
+			`INSERT INTO disk_usage_history (mount_point, label, device, total_gb, used_gb, free_gb, used_pct, timestamp)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			disk.MountPoint, disk.Label, disk.Device,
+			disk.TotalGB, disk.UsedGB, disk.FreeGB, disk.UsedPct, snap.Timestamp,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *DB) saveGPUHistory(tx *sql.Tx, snap *internal.Snapshot) error {
+	if snap.GPU == nil || !snap.GPU.Available {
+		return nil
+	}
+	for _, g := range snap.GPU.GPUs {
+		_, err := tx.Exec(
+			`INSERT INTO gpu_history (snapshot_id, gpu_index, name, vendor, usage_pct, mem_used_mb, mem_total_mb, mem_pct, temperature, power_watts, fan_pct, encoder_pct, decoder_pct, timestamp)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snap.ID, g.Index, g.Name, g.Vendor,
+			g.UsagePct, g.MemUsedMB, g.MemTotalMB, g.MemPct,
+			g.Temperature, g.PowerW, g.FanPct,
+			g.EncoderPct, g.DecoderPct, snap.Timestamp,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *DB) saveContainerHistory(tx *sql.Tx, snap *internal.Snapshot) error {
+	if !snap.Docker.Available {
+		return nil
+	}
+	for _, c := range snap.Docker.Containers {
+		if c.State != "running" {
+			continue // only track running containers
+		}
+		_, err := tx.Exec(
+			`INSERT INTO container_stats_history (snapshot_id, container_id, name, image, cpu_pct, mem_mb, mem_pct, net_in_bytes, net_out_bytes, block_read_bytes, block_write_bytes, timestamp)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snap.ID, c.ID, c.Name, c.Image,
+			c.CPU, c.MemMB, c.MemPct,
+			c.NetIn, c.NetOut, c.BlockRead, c.BlockWrite,
+			snap.Timestamp,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ContainerHistoryPoint represents a single time-series data point for a container.
+type ContainerHistoryPoint struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Name       string    `json:"name"`
+	Image      string    `json:"image"`
+	CPUPct     float64   `json:"cpu_percent"`
+	MemMB      float64   `json:"mem_mb"`
+	MemPct     float64   `json:"mem_percent"`
+	NetIn      float64   `json:"net_in_bytes"`
+	NetOut     float64   `json:"net_out_bytes"`
+	BlockRead  float64   `json:"block_read_bytes"`
+	BlockWrite float64   `json:"block_write_bytes"`
+}
+
+// GetContainerHistory returns container stats history for the given time range.
+func (d *DB) GetContainerHistory(hours int) ([]ContainerHistoryPoint, error) {
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	rows, err := d.db.Query(
+		`SELECT timestamp, name, image, cpu_pct, mem_mb, mem_pct, net_in_bytes, net_out_bytes, block_read_bytes, block_write_bytes
+		 FROM container_stats_history
+		 WHERE timestamp >= ?
+		 ORDER BY name ASC, timestamp ASC`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []ContainerHistoryPoint
+	for rows.Next() {
+		var p ContainerHistoryPoint
+		if err := rows.Scan(&p.Timestamp, &p.Name, &p.Image, &p.CPUPct, &p.MemMB, &p.MemPct, &p.NetIn, &p.NetOut, &p.BlockRead, &p.BlockWrite); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
+}
+
+func (d *DB) saveSpeedTestHistory(tx *sql.Tx, snap *internal.Snapshot) error {
+	if snap.SpeedTest == nil || !snap.SpeedTest.Available || snap.SpeedTest.Latest == nil {
+		return nil
+	}
+	r := snap.SpeedTest.Latest
+	_, err := tx.Exec(
+		`INSERT INTO speedtest_history (snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		snap.ID, r.DownloadMbps, r.UploadMbps, r.LatencyMs, r.JitterMs, r.ServerName, r.ISP, snap.Timestamp,
+	)
+	return err
+}
+
+// SpeedTestHistoryPoint represents a single speed test history data point.
+type SpeedTestHistoryPoint struct {
+	Timestamp    time.Time `json:"timestamp"`
+	DownloadMbps float64   `json:"download_mbps"`
+	UploadMbps   float64   `json:"upload_mbps"`
+	LatencyMs    float64   `json:"latency_ms"`
+	JitterMs     float64   `json:"jitter_ms"`
+	ServerName   string    `json:"server_name"`
+	ISP          string    `json:"isp"`
+}
+
+// SaveSpeedTest inserts a single speed test result row.
+func (d *DB) SaveSpeedTest(snapshotID string, result *internal.SpeedTestResult) error {
+	if result == nil {
+		return nil
+	}
+	_, err := d.db.Exec(
+		`INSERT INTO speedtest_history (snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		snapshotID, result.DownloadMbps, result.UploadMbps, result.LatencyMs, result.JitterMs, result.ServerName, result.ISP, result.Timestamp,
+	)
+	return err
+}
+
+// GetSpeedTestHistory returns speed test history for the given time range.
+func (d *DB) GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error) {
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	rows, err := d.db.Query(
+		`SELECT timestamp, download_mbps, upload_mbps, latency_ms, jitter_ms, COALESCE(server_name, ''), COALESCE(isp, '')
+		 FROM speedtest_history
+		 WHERE timestamp >= ?
+		 ORDER BY timestamp ASC`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []SpeedTestHistoryPoint
+	for rows.Next() {
+		var p SpeedTestHistoryPoint
+		if err := rows.Scan(&p.Timestamp, &p.DownloadMbps, &p.UploadMbps, &p.LatencyMs, &p.JitterMs, &p.ServerName, &p.ISP); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
+}
+
+// GPUHistoryPoint represents a single time-series data point for a GPU.
+type GPUHistoryPoint struct {
+	Timestamp   time.Time `json:"timestamp"`
+	GPUIndex    int       `json:"gpu_index"`
+	Name        string    `json:"name"`
+	Vendor      string    `json:"vendor"`
+	UsagePct    float64   `json:"usage_percent"`
+	MemPct      float64   `json:"mem_percent"`
+	Temperature int       `json:"temperature_c"`
+	PowerW      float64   `json:"power_watts"`
+	EncoderPct  float64   `json:"encoder_percent"`
+	DecoderPct  float64   `json:"decoder_percent"`
+}
+
+// GetGPUHistory returns GPU history for the given time range.
+func (d *DB) GetGPUHistory(hours int) ([]GPUHistoryPoint, error) {
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	rows, err := d.db.Query(
+		`SELECT timestamp, gpu_index, name, vendor, usage_pct, mem_pct, temperature, power_watts, encoder_pct, decoder_pct
+		 FROM gpu_history
+		 WHERE timestamp >= ?
+		 ORDER BY gpu_index ASC, timestamp ASC`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []GPUHistoryPoint
+	for rows.Next() {
+		var p GPUHistoryPoint
+		if err := rows.Scan(&p.Timestamp, &p.GPUIndex, &p.Name, &p.Vendor, &p.UsagePct, &p.MemPct, &p.Temperature, &p.PowerW, &p.EncoderPct, &p.DecoderPct); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
+}
+
+// DiskUsagePoint is a single historical data point for capacity forecasting.
+type DiskUsagePoint struct {
+	Timestamp string  `json:"timestamp"`
+	UsedGB    float64 `json:"used_gb"`
+	TotalGB   float64 `json:"total_gb"`
+	UsedPct   float64 `json:"used_pct"`
+}
+
+// DiskUsageSeries holds usage history for one mount point.
+type DiskUsageSeries struct {
+	MountPoint string           `json:"mount_point"`
+	Label      string           `json:"label"`
+	Device     string           `json:"device"`
+	TotalGB    float64          `json:"total_gb"`
+	CurrentPct float64          `json:"current_pct"`
+	Points     []DiskUsagePoint `json:"points"`
+}
+
+// GetDiskUsageHistory returns usage history grouped by mount point.
+func (d *DB) GetDiskUsageHistory(limit int) ([]DiskUsageSeries, error) {
+	// Get unique mount points
+	mpRows, err := d.db.Query(
+		`SELECT mount_point, label, device, total_gb FROM disk_usage_history
+		 GROUP BY mount_point ORDER BY mount_point`)
+	if err != nil {
+		return nil, err
+	}
+	defer mpRows.Close()
+
+	var series []DiskUsageSeries
+	for mpRows.Next() {
+		var ds DiskUsageSeries
+		if err := mpRows.Scan(&ds.MountPoint, &ds.Label, &ds.Device, &ds.TotalGB); err != nil {
+			continue
+		}
+		series = append(series, ds)
+	}
+
+	// For each mount point, get last N data points
+	for i := range series {
+		rows, err := d.db.Query(
+			`SELECT timestamp, used_gb, total_gb, used_pct FROM disk_usage_history
+			 WHERE mount_point = ? ORDER BY timestamp DESC LIMIT ?`,
+			series[i].MountPoint, limit,
+		)
+		if err != nil {
+			continue
+		}
+		var points []DiskUsagePoint
+		for rows.Next() {
+			var p DiskUsagePoint
+			if err := rows.Scan(&p.Timestamp, &p.UsedGB, &p.TotalGB, &p.UsedPct); err != nil {
+				continue
+			}
+			points = append(points, p)
+		}
+		rows.Close()
+		// Reverse to chronological order
+		for l, r := 0, len(points)-1; l < r; l, r = l+1, r-1 {
+			points[l], points[r] = points[r], points[l]
+		}
+		series[i].Points = points
+		if len(points) > 0 {
+			series[i].CurrentPct = points[len(points)-1].UsedPct
+			series[i].TotalGB = points[len(points)-1].TotalGB
+		}
+	}
+
+	return series, nil
 }
 
 // GetLatestSnapshot returns the most recent snapshot.
@@ -1235,7 +1601,7 @@ func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 
 	// Explicitly delete from history tables for the snapshots being pruned,
 	// in case foreign_keys or CASCADE is not fully honoured at runtime.
-	for _, table := range []string{"smart_history", "system_history"} {
+	for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history", "speedtest_history"} {
 		_, err := tx.Exec(fmt.Sprintf(
 			`DELETE FROM %s WHERE snapshot_id IN (%s)`, table, pruneQuery,
 		), keepMin, cutoff)
@@ -1615,7 +1981,7 @@ func (d *DB) PruneToSizeMB(targetMB float64) (int, error) {
 		if err != nil {
 			return totalPruned, err
 		}
-		for _, table := range []string{"smart_history", "system_history"} {
+		for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history", "speedtest_history"} {
 			d.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE snapshot_id IN (
 				SELECT id FROM snapshots ORDER BY timestamp ASC LIMIT ?
 			)`, table), batchSize)

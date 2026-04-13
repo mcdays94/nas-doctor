@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
 )
@@ -47,6 +48,14 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 
 	if snap.Kubernetes != nil && snap.Kubernetes.Connected {
 		findings = append(findings, analyzeKubernetes(snap.Kubernetes)...)
+	}
+
+	if snap.GPU != nil && snap.GPU.Available {
+		findings = append(findings, analyzeGPU(snap.GPU)...)
+	}
+
+	if snap.Backup != nil && snap.Backup.Available {
+		findings = append(findings, analyzeBackups(snap.Backup)...)
 	}
 
 	// Cross-correlation: combine related findings
@@ -470,21 +479,57 @@ func analyzeDocker(docker internal.DockerInfo) []internal.Finding {
 		if c.State == "exited" || c.State == "dead" {
 			exitedCount++
 		}
-		if c.CPU > 80 {
+		// CPU rules: critical >200% (multi-core pinned), warning >80%
+		if c.CPU > 200 {
+			highCPU++
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategoryDocker,
+				Title:       fmt.Sprintf("Extreme CPU: Container '%s' (%.0f%%)", c.Name, c.CPU),
+				Description: fmt.Sprintf("Container '%s' (%s) is consuming %.1f%% CPU across multiple cores.", c.Name, c.Image, c.CPU),
+				Evidence:    []string{fmt.Sprintf("CPU: %.1f%%, Memory: %.0f MB (%.1f%%)", c.CPU, c.MemMB, c.MemPct)},
+				Impact:      "Severely starving other containers and host processes. May cause system instability.",
+				Action:      "Investigate the container workload immediately. Apply CPU limits (--cpus) or restart if stuck.",
+				Priority:    "immediate",
+			})
+		} else if c.CPU > 80 {
 			highCPU++
 			findings = append(findings, internal.Finding{
 				Severity:    internal.SeverityWarning,
 				Category:    internal.CategoryDocker,
 				Title:       fmt.Sprintf("High CPU: Container '%s' (%.0f%%)", c.Name, c.CPU),
 				Description: fmt.Sprintf("Container '%s' (%s) is using %.1f%% CPU.", c.Name, c.Image, c.CPU),
-				Evidence:    []string{fmt.Sprintf("CPU: %.1f%%, Memory: %.0f MB", c.CPU, c.MemMB)},
+				Evidence:    []string{fmt.Sprintf("CPU: %.1f%%, Memory: %.0f MB (%.1f%%)", c.CPU, c.MemMB, c.MemPct)},
 				Impact:      "May starve other containers and system processes",
 				Action:      "Check if the container is healthy. Set CPU limits if needed.",
 				Priority:    "short-term",
 			})
 		}
-		if c.MemPct > 80 {
+		// Memory rules: critical >95%, warning >80%
+		if c.MemPct > 95 {
 			highMem++
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategoryDocker,
+				Title:       fmt.Sprintf("Memory Exhaustion: Container '%s' (%.0f%%)", c.Name, c.MemPct),
+				Description: fmt.Sprintf("Container '%s' (%s) is using %.1f%% of available memory (%.0f MB).", c.Name, c.Image, c.MemPct, c.MemMB),
+				Evidence:    []string{fmt.Sprintf("Memory: %.0f MB (%.1f%%), CPU: %.1f%%", c.MemMB, c.MemPct, c.CPU)},
+				Impact:      "Imminent OOM kill risk. Container or host may become unresponsive.",
+				Action:      "Set memory limits (--memory). Investigate memory leaks. Restart the container.",
+				Priority:    "immediate",
+			})
+		} else if c.MemPct > 80 {
+			highMem++
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategoryDocker,
+				Title:       fmt.Sprintf("High Memory: Container '%s' (%.0f%%)", c.Name, c.MemPct),
+				Description: fmt.Sprintf("Container '%s' (%s) is using %.1f%% of available memory (%.0f MB).", c.Name, c.Image, c.MemPct, c.MemMB),
+				Evidence:    []string{fmt.Sprintf("Memory: %.0f MB (%.1f%%), CPU: %.1f%%", c.MemMB, c.MemPct, c.CPU)},
+				Impact:      "May trigger OOM killer if usage continues to grow.",
+				Action:      "Monitor memory trends. Set memory limits or investigate the workload.",
+				Priority:    "short-term",
+			})
 		}
 	}
 
@@ -1220,4 +1265,182 @@ func parseVersionParts(v string) []int {
 		nums = append(nums, n)
 	}
 	return nums
+}
+
+// ── GPU rules ───────────────────────────────────────────────────────
+
+func analyzeGPU(gpu *internal.GPUInfo) []internal.Finding {
+	var findings []internal.Finding
+
+	for _, g := range gpu.GPUs {
+		name := g.Name
+		if name == "" {
+			name = fmt.Sprintf("%s GPU %d", g.Vendor, g.Index)
+		}
+
+		// High temperature
+		if g.Temperature >= 95 {
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategoryGPU,
+				Title:       fmt.Sprintf("GPU Overheating: %s at %d°C", name, g.Temperature),
+				Description: fmt.Sprintf("GPU '%s' temperature is critically high at %d°C. Thermal throttling is active and sustained operation at this temperature reduces GPU lifespan.", name, g.Temperature),
+				Evidence:    []string{fmt.Sprintf("Temperature: %d°C", g.Temperature), fmt.Sprintf("Fan: %.0f%%", g.FanPct)},
+				Impact:      "Performance degradation from thermal throttling. Risk of hardware damage.",
+				Action:      "Improve case airflow. Clean heatsink/fans. Check thermal paste. Reduce workload.",
+				Priority:    "immediate",
+			})
+		} else if g.Temperature >= 85 {
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategoryGPU,
+				Title:       fmt.Sprintf("GPU Temperature High: %s at %d°C", name, g.Temperature),
+				Description: fmt.Sprintf("GPU '%s' is running warm at %d°C. Most GPUs throttle between 83-95°C.", name, g.Temperature),
+				Evidence:    []string{fmt.Sprintf("Temperature: %d°C", g.Temperature), fmt.Sprintf("Fan: %.0f%%", g.FanPct)},
+				Impact:      "May begin thermal throttling under sustained load.",
+				Action:      "Monitor trends. Improve airflow if temperature continues rising.",
+				Priority:    "short-term",
+			})
+		}
+
+		// VRAM exhaustion
+		if g.MemTotalMB > 0 && g.MemPct >= 95 {
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategoryGPU,
+				Title:       fmt.Sprintf("GPU VRAM Nearly Full: %s (%.0f%%)", name, g.MemPct),
+				Description: fmt.Sprintf("GPU '%s' VRAM utilization is at %.0f%% (%.0f/%.0f MB). Applications may crash or fall back to system RAM.", name, g.MemPct, g.MemUsedMB, g.MemTotalMB),
+				Evidence:    []string{fmt.Sprintf("VRAM: %.0f / %.0f MB (%.0f%%)", g.MemUsedMB, g.MemTotalMB, g.MemPct)},
+				Impact:      "Transcoding failures, OOM kills for GPU workloads, degraded performance.",
+				Action:      "Reduce concurrent GPU workloads or upgrade to a GPU with more VRAM.",
+				Priority:    "short-term",
+			})
+		}
+
+		// Power limit exceeded (drawing more than TDP — unusual, may indicate issue)
+		if g.PowerMaxW > 0 && g.PowerW > g.PowerMaxW*1.1 {
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategoryGPU,
+				Title:       fmt.Sprintf("GPU Power Draw Exceeds Limit: %s", name),
+				Description: fmt.Sprintf("GPU '%s' is drawing %.0fW against a %.0fW power limit. This may indicate a misconfigured power limit or faulty power delivery.", name, g.PowerW, g.PowerMaxW),
+				Evidence:    []string{fmt.Sprintf("Power: %.0fW / %.0fW limit", g.PowerW, g.PowerMaxW)},
+				Impact:      "Potential instability or PSU stress.",
+				Action:      "Check GPU BIOS settings and PSU capacity.",
+				Priority:    "short-term",
+			})
+		}
+	}
+
+	return findings
+}
+
+// ── Backup rules ────────────────────────────────────────────────────
+
+func analyzeBackups(backup *internal.BackupInfo) []internal.Finding {
+	var findings []internal.Finding
+
+	for _, job := range backup.Jobs {
+		name := job.Name
+		if name == "" {
+			name = job.Provider
+		}
+
+		switch job.Status {
+		case "failed":
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategoryBackup,
+				Title:       fmt.Sprintf("Backup failed: %s (%s)", name, job.Provider),
+				Description: fmt.Sprintf("Backup job '%s' (%s) has failed. %s", name, job.Provider, job.ErrorMessage),
+				Evidence: []string{
+					fmt.Sprintf("Provider: %s", job.Provider),
+					fmt.Sprintf("Repository: %s", job.Repository),
+					fmt.Sprintf("Error: %s", job.ErrorMessage),
+				},
+				Impact:   "No recent backup available. Data loss risk if a failure occurs.",
+				Action:   "Investigate the backup error and re-run the job. Check repository access and disk space.",
+				Priority: "immediate",
+			})
+
+		case "stale":
+			age := formatBackupAge(job.LastSuccess)
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityCritical,
+				Category:    internal.CategoryBackup,
+				Title:       fmt.Sprintf("Backup stale: %s (%s) — last success %s ago", name, job.Provider, age),
+				Description: fmt.Sprintf("Backup job '%s' (%s) has not completed successfully in over 48 hours. Last success was %s ago.", name, job.Provider, age),
+				Evidence: []string{
+					fmt.Sprintf("Provider: %s", job.Provider),
+					fmt.Sprintf("Last success: %s", job.LastSuccess.Format("2006-01-02 15:04")),
+					fmt.Sprintf("Snapshots: %d", job.SnapshotCount),
+				},
+				Impact:   "Backup data is stale. Recovery point objective (RPO) exceeded.",
+				Action:   "Check if the backup schedule is running. Verify repository connectivity and credentials.",
+				Priority: "immediate",
+			})
+
+		case "warning":
+			age := formatBackupAge(job.LastSuccess)
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityWarning,
+				Category:    internal.CategoryBackup,
+				Title:       fmt.Sprintf("Backup aging: %s (%s) — last success %s ago", name, job.Provider, age),
+				Description: fmt.Sprintf("Backup job '%s' (%s) last succeeded %s ago (>24h). The job may be delayed or encountering intermittent issues.", name, job.Provider, age),
+				Evidence: []string{
+					fmt.Sprintf("Provider: %s", job.Provider),
+					fmt.Sprintf("Last success: %s", job.LastSuccess.Format("2006-01-02 15:04")),
+					fmt.Sprintf("Snapshots: %d", job.SnapshotCount),
+				},
+				Impact:   "Backup freshness degraded. Recovery may be missing recent changes.",
+				Action:   "Monitor the next scheduled run. Check logs for intermittent errors.",
+				Priority: "short-term",
+			})
+
+		case "ok":
+			sizeStr := formatBackupSize(job.SizeBytes)
+			findings = append(findings, internal.Finding{
+				Severity:    internal.SeverityInfo,
+				Category:    internal.CategoryBackup,
+				Title:       fmt.Sprintf("Backup healthy: %s (%s) — %d snapshots, %s", name, job.Provider, job.SnapshotCount, sizeStr),
+				Description: fmt.Sprintf("Backup job '%s' (%s) is healthy with %d snapshots totaling %s.", name, job.Provider, job.SnapshotCount, sizeStr),
+				Evidence: []string{
+					fmt.Sprintf("Provider: %s", job.Provider),
+					fmt.Sprintf("Snapshots: %d", job.SnapshotCount),
+					fmt.Sprintf("Total size: %s", sizeStr),
+					fmt.Sprintf("Schedule: %s", job.Schedule),
+				},
+				Impact:   "None — backup is operating normally.",
+				Action:   "No action required.",
+				Priority: "medium-term",
+			})
+		}
+	}
+
+	return findings
+}
+
+func formatBackupAge(t time.Time) string {
+	if t.IsZero() {
+		return "unknown"
+	}
+	d := time.Since(t)
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+func formatBackupSize(bytes int64) string {
+	if bytes <= 0 {
+		return "unknown"
+	}
+	gb := float64(bytes) / (1024 * 1024 * 1024)
+	if gb >= 1024 {
+		return fmt.Sprintf("%.1f TB", gb/1024)
+	}
+	return fmt.Sprintf("%.1f GB", gb)
 }

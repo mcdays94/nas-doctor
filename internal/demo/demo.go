@@ -32,6 +32,9 @@ func GenerateSnapshot() *internal.Snapshot {
 	snap.Tunnels = demoTunnels()
 	snap.Proxmox = demoProxmox()
 	snap.Kubernetes = demoKubernetes()
+	snap.GPU = demoGPU()
+	snap.Backup = demoBackup()
+	snap.SpeedTest = demoSpeedTest()
 
 	return snap
 }
@@ -244,6 +247,7 @@ func DemoServiceCheckConfigs() []internal.ServiceCheckConfig {
 		{Name: "Plex Media Server", Type: "http", Target: "http://192.168.1.51:32400/web", Enabled: true, IntervalSec: 300, TimeoutSec: 10, FailureThreshold: 2, FailureSeverity: "warning"},
 		{Name: "NFS Share", Type: "nfs", Target: "192.168.1.50", Enabled: true, IntervalSec: 300, TimeoutSec: 5, FailureThreshold: 3, FailureSeverity: "warning"},
 		{Name: "SMB Share", Type: "smb", Target: "192.168.1.50", Enabled: true, IntervalSec: 300, TimeoutSec: 5, FailureThreshold: 3, FailureSeverity: "warning"},
+		{Name: "Internet Speed", Type: internal.ServiceCheckSpeed, Target: "speedtest", Enabled: true, IntervalSec: 14400, FailureThreshold: 2, FailureSeverity: internal.SeverityWarning, ContractedDownMbps: 1000, ContractedUpMbps: 500, MarginPct: 10},
 	}
 }
 
@@ -256,6 +260,7 @@ func demoServiceChecks() []internal.ServiceCheckResult {
 		{Key: "demo-plex", Name: "Plex Media Server", Type: "http", Target: "http://192.168.1.51:32400/web", Status: "up", ResponseMS: 185, CheckedAt: now.Add(-120 * time.Second).Format(time.RFC3339), FailureThreshold: 2, FailureSeverity: "warning"},
 		{Key: "demo-nfs", Name: "NFS Share", Type: "nfs", Target: "192.168.1.50", Status: "down", ResponseMS: 5000, Error: "connection refused", CheckedAt: now.Add(-90 * time.Second).Format(time.RFC3339), ConsecutiveFailures: 2, FailureThreshold: 3, FailureSeverity: "warning"},
 		{Key: "demo-smb", Name: "SMB Share", Type: "smb", Target: "192.168.1.50", Status: "up", ResponseMS: 8, CheckedAt: now.Add(-90 * time.Second).Format(time.RFC3339), FailureThreshold: 3, FailureSeverity: "warning"},
+		{Key: "demo-speed", Name: "Internet Speed", Type: "speed", Target: "speedtest", Status: "up", ResponseMS: 8200, CheckedAt: now.Add(-3600 * time.Second).Format(time.RFC3339), FailureThreshold: 2, FailureSeverity: "warning", DownloadMbps: 940, UploadMbps: 450, LatencyMs: 8, DownloadOK: boolPtr(true), UploadOK: boolPtr(true)},
 	}
 }
 
@@ -358,18 +363,18 @@ func demoDocker() internal.DockerInfo {
 	return internal.DockerInfo{
 		Available: true,
 		Containers: []internal.ContainerInfo{
-			{ID: "a1b2c3d4", Name: "plex", Image: "linuxserver/plex:latest", Status: "Up 30 days", State: "running", CPU: 12.3, MemMB: 1340, MemPct: 4.1, Uptime: "30 days"},
-			{ID: "e5f6g7h8", Name: "emby", Image: "emby/embyserver:latest", Status: "Up 30 days", State: "running", CPU: 8.7, MemMB: 2028, MemPct: 6.2, Uptime: "30 days"},
-			{ID: "i9j0k1l2", Name: "tdarr", Image: "haveagitgat/tdarr:latest", Status: "Up 30 days", State: "running", CPU: 5.4, MemMB: 916, MemPct: 2.8, Uptime: "30 days"},
-			{ID: "m3n4o5p6", Name: "nginx-proxy", Image: "nginx:alpine", Status: "Up 30 days", State: "running", CPU: 0.3, MemMB: 42, MemPct: 0.1, Uptime: "30 days"},
-			{ID: "q7r8s9t0", Name: "wireguard", Image: "linuxserver/wireguard:latest", Status: "Up 30 days", State: "running", CPU: 0.1, MemMB: 28, MemPct: 0.1, Uptime: "30 days"},
-			{ID: "u1v2w3x4", Name: "home-assistant", Image: "homeassistant/home-assistant:latest", Status: "Up 15 days", State: "running", CPU: 3.2, MemMB: 512, MemPct: 1.6, Uptime: "15 days"},
-			{ID: "y5z6a7b8", Name: "grafana", Image: "grafana/grafana:latest", Status: "Up 30 days", State: "running", CPU: 1.1, MemMB: 186, MemPct: 0.6, Uptime: "30 days"},
-			{ID: "c9d0e1f2", Name: "prometheus", Image: "prom/prometheus:latest", Status: "Up 30 days", State: "running", CPU: 0.8, MemMB: 256, MemPct: 0.8, Uptime: "30 days"},
-			{ID: "g3h4i5j6", Name: "radarr", Image: "linuxserver/radarr:latest", Status: "Up 30 days", State: "running", CPU: 0.4, MemMB: 312, MemPct: 1.0, Uptime: "30 days"},
-			{ID: "k7l8m9n0", Name: "sonarr", Image: "linuxserver/sonarr:latest", Status: "Up 30 days", State: "running", CPU: 0.3, MemMB: 298, MemPct: 0.9, Uptime: "30 days"},
-			{ID: "o1p2q3r4", Name: "overseerr", Image: "linuxserver/overseerr:latest", Status: "Up 30 days", State: "running", CPU: 0.2, MemMB: 148, MemPct: 0.5, Uptime: "30 days"},
-			{ID: "s5t6u7v8", Name: "sabnzbd", Image: "linuxserver/sabnzbd:latest", Status: "Up 30 days", State: "running", CPU: 0.1, MemMB: 95, MemPct: 0.3, Uptime: "30 days"},
+			{ID: "a1b2c3d4", Name: "plex", Image: "linuxserver/plex:latest", Status: "Up 30 days", State: "running", CPU: 12.3, MemMB: 1340, MemPct: 4.1, NetIn: 154_618_822_656, NetOut: 892_345_678_912, BlockRead: 1_099_511_627_776, BlockWrite: 52_428_800_000, Uptime: "30 days"},
+			{ID: "e5f6g7h8", Name: "emby", Image: "emby/embyserver:latest", Status: "Up 30 days", State: "running", CPU: 8.7, MemMB: 2028, MemPct: 6.2, NetIn: 98_765_432_100, NetOut: 543_210_987_654, BlockRead: 824_633_720_832, BlockWrite: 41_943_040_000, Uptime: "30 days"},
+			{ID: "i9j0k1l2", Name: "tdarr", Image: "haveagitgat/tdarr:latest", Status: "Up 30 days", State: "running", CPU: 5.4, MemMB: 916, MemPct: 2.8, NetIn: 12_345_678_900, NetOut: 9_876_543_210, BlockRead: 2_199_023_255_552, BlockWrite: 1_649_267_441_664, Uptime: "30 days"},
+			{ID: "m3n4o5p6", Name: "nginx-proxy", Image: "nginx:alpine", Status: "Up 30 days", State: "running", CPU: 0.3, MemMB: 42, MemPct: 0.1, NetIn: 456_789_012_345, NetOut: 567_890_123_456, BlockRead: 104_857_600, BlockWrite: 52_428_800, Uptime: "30 days"},
+			{ID: "q7r8s9t0", Name: "wireguard", Image: "linuxserver/wireguard:latest", Status: "Up 30 days", State: "running", CPU: 0.1, MemMB: 28, MemPct: 0.1, NetIn: 234_567_890_123, NetOut: 198_765_432_100, BlockRead: 10_485_760, BlockWrite: 5_242_880, Uptime: "30 days"},
+			{ID: "u1v2w3x4", Name: "home-assistant", Image: "homeassistant/home-assistant:latest", Status: "Up 15 days", State: "running", CPU: 3.2, MemMB: 512, MemPct: 1.6, NetIn: 8_765_432_100, NetOut: 4_321_098_765, BlockRead: 21_474_836_480, BlockWrite: 10_737_418_240, Uptime: "15 days"},
+			{ID: "y5z6a7b8", Name: "grafana", Image: "grafana/grafana:latest", Status: "Up 30 days", State: "running", CPU: 1.1, MemMB: 186, MemPct: 0.6, NetIn: 5_432_109_876, NetOut: 12_345_678_900, BlockRead: 1_073_741_824, BlockWrite: 536_870_912, Uptime: "30 days"},
+			{ID: "c9d0e1f2", Name: "prometheus", Image: "prom/prometheus:latest", Status: "Up 30 days", State: "running", CPU: 0.8, MemMB: 256, MemPct: 0.8, NetIn: 3_210_987_654, NetOut: 6_543_210_987, BlockRead: 5_368_709_120, BlockWrite: 10_737_418_240, Uptime: "30 days"},
+			{ID: "g3h4i5j6", Name: "radarr", Image: "linuxserver/radarr:latest", Status: "Up 30 days", State: "running", CPU: 0.4, MemMB: 312, MemPct: 1.0, NetIn: 2_345_678_901, NetOut: 1_234_567_890, BlockRead: 2_147_483_648, BlockWrite: 1_073_741_824, Uptime: "30 days"},
+			{ID: "k7l8m9n0", Name: "sonarr", Image: "linuxserver/sonarr:latest", Status: "Up 30 days", State: "running", CPU: 0.3, MemMB: 298, MemPct: 0.9, NetIn: 2_109_876_543, NetOut: 1_098_765_432, BlockRead: 2_147_483_648, BlockWrite: 1_073_741_824, Uptime: "30 days"},
+			{ID: "o1p2q3r4", Name: "overseerr", Image: "linuxserver/overseerr:latest", Status: "Up 30 days", State: "running", CPU: 0.2, MemMB: 148, MemPct: 0.5, NetIn: 876_543_210, NetOut: 654_321_098, BlockRead: 536_870_912, BlockWrite: 268_435_456, Uptime: "30 days"},
+			{ID: "s5t6u7v8", Name: "sabnzbd", Image: "linuxserver/sabnzbd:latest", Status: "Up 30 days", State: "running", CPU: 0.1, MemMB: 95, MemPct: 0.3, NetIn: 43_210_987_654, NetOut: 2_109_876_543, BlockRead: 549_755_813_888, BlockWrite: 274_877_906_944, Uptime: "30 days"},
 			{ID: "w9x0y1z2", Name: "pihole", Image: "pihole/pihole:latest", Status: "Exited (1) 3 days ago", State: "exited", CPU: 0, MemMB: 0, MemPct: 0, Uptime: "Exited"},
 			{ID: "a3b4c5d6", Name: "mariadb-old", Image: "mariadb:10.5", Status: "Exited (0) 14 days ago", State: "exited", CPU: 0, MemMB: 0, MemPct: 0, Uptime: "Exited"},
 		},
@@ -528,6 +533,100 @@ func demoZFS() *internal.ZFSInfo {
 		},
 	}
 }
+
+func demoGPU() *internal.GPUInfo {
+	return &internal.GPUInfo{
+		Available: true,
+		GPUs: []internal.GPUDevice{
+			{
+				Index: 0, Name: "NVIDIA GeForce RTX 4060", Vendor: "nvidia",
+				Driver: "560.35.03", UsagePct: 34, MemUsedMB: 2048, MemTotalMB: 8192,
+				MemPct: 25, Temperature: 62, FanPct: 45, PowerW: 85, PowerMaxW: 150,
+				ClockMHz: 2460, MemClockMHz: 8501, PCIeBus: "01:00.0",
+				EncoderPct: 78, DecoderPct: 42,
+			},
+			{
+				Index: 1, Name: "Intel UHD Graphics 730", Vendor: "intel",
+				Driver: "i915", UsagePct: 12, MemUsedMB: 128, MemTotalMB: 512,
+				MemPct: 25, Temperature: 48, FanPct: 0, PowerW: 8, PowerMaxW: 15,
+				ClockMHz: 1450, MemClockMHz: 0, PCIeBus: "00:02.0",
+				EncoderPct: 5, DecoderPct: 15,
+			},
+		},
+	}
+}
+
+func demoBackup() *internal.BackupInfo {
+	now := time.Now()
+	return &internal.BackupInfo{
+		Available: true,
+		Jobs: []internal.BackupJob{
+			{
+				Provider:      "borg",
+				Name:          "daily-borg",
+				Repository:    "/mnt/backup/borg-repo",
+				LastRun:       now.Add(-6 * time.Hour),
+				LastSuccess:   now.Add(-6 * time.Hour),
+				Status:        "ok",
+				SizeBytes:     2_576_980_377_600, // 2.4 TB
+				FilesCount:    284_520,
+				Duration:      1845,
+				SnapshotCount: 14,
+				Schedule:      "daily",
+				Compression:   "lz4",
+				Encrypted:     true,
+			},
+			{
+				Provider:      "restic",
+				Name:          "hourly-restic",
+				Repository:    "s3:s3.amazonaws.com/my-backup-bucket",
+				LastRun:       now.Add(-1 * time.Hour),
+				LastSuccess:   now.Add(-1 * time.Hour),
+				Status:        "ok",
+				SizeBytes:     955_835_801_600, // 890 GB
+				FilesCount:    42_180,
+				Duration:      312,
+				SnapshotCount: 168,
+				Schedule:      "hourly",
+				Compression:   "zstd",
+				Encrypted:     true,
+			},
+			{
+				Provider:      "pbs",
+				Name:          "proxmox-backup",
+				Repository:    "pbs.local:datastore1",
+				LastRun:       now.Add(-72 * time.Hour),
+				LastSuccess:   now.Add(-72 * time.Hour),
+				Status:        "stale",
+				SizeBytes:     5_476_083_302_400, // 5.1 TB
+				FilesCount:    0,
+				Duration:      7200,
+				SnapshotCount: 30,
+				Schedule:      "daily",
+				Compression:   "zstd",
+				Encrypted:     false,
+			},
+		},
+	}
+}
+
+func demoSpeedTest() *internal.SpeedTestInfo {
+	now := time.Now()
+	return &internal.SpeedTestInfo{
+		Available: true,
+		Latest: &internal.SpeedTestResult{
+			Timestamp:    now.Add(-15 * time.Minute),
+			DownloadMbps: 940,
+			UploadMbps:   450,
+			LatencyMs:    8,
+			JitterMs:     1.2,
+			ServerName:   "Lisbon",
+			ISP:          "MEO",
+		},
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
 
 // Jitter adds small random variation to a float to simulate live data.
 func Jitter(base float64, pct float64) float64 {

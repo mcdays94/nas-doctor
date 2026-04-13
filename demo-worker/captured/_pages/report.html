@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diagnostic Report — Tower</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@page { size: A4; margin: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --cf-orange: #FF4801;
+  --cf-orange-hover: #FF7038;
+  --cf-orange-light: rgba(255, 72, 1, 0.08);
+  --cf-text: #521000;
+  --cf-text-muted: rgba(82, 16, 0, 0.7);
+  --cf-text-subtle: rgba(82, 16, 0, 0.4);
+  --cf-bg: #FFFBF5;
+  --cf-bg-card: #FFFDFB;
+  --cf-bg-hover: #FEF7ED;
+  --cf-border: #EBD5C1;
+  --cf-border-light: rgba(235, 213, 193, 0.5);
+  --red: #dc2626; --amber: #d97706; --green: #16a34a; --blue: #0072f5;
+}
+body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 9.5pt; color: var(--cf-text); background: #e8e0d8; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+.page-container { display: flex; flex-direction: column; align-items: center; padding: 40px 0; gap: 40px; }
+.page { background: var(--cf-bg); width: 210mm; min-height: 297mm; padding: 28mm 24mm; box-shadow: 0 2px 20px rgba(82,16,0,0.12), 0 0 0 1px rgba(82,16,0,0.06); border-radius: 2px; position: relative; }
+@page { @bottom-center { font-family: 'Inter', sans-serif; font-size: 7.5pt; color: var(--cf-text-subtle); content: 'Page ' counter(page) ' of ' counter(pages); } }
+.dashed-sep { height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x; }
+.cover { padding: 0; }
+.cover-badge { display: inline-block; font-size: 8pt; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; background: var(--cf-orange); color: #fff; padding: 5px 16px; border-radius: 9999px; margin-bottom: 28px; }
+.cover h1 { font-size: 32pt; font-weight: 500; line-height: 1.15; color: var(--cf-text); margin-bottom: 12px; white-space: pre-line; letter-spacing: -0.02em; }
+.cover-subtitle { font-size: 11pt; font-weight: 400; color: var(--cf-text-muted); margin-bottom: 40px; line-height: 1.6; }
+.cover-meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px 40px; padding-top: 28px; margin-bottom: 48px; position: relative; }
+.cover-meta::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x; }
+.cover-meta-label { font-size: 7pt; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cf-text-subtle); margin-bottom: 4px; }
+.cover-meta-value { font-size: 10.5pt; font-weight: 500; color: var(--cf-text); }
+.cover-summary { padding: 20px 24px; border-radius: 8px; margin-top: 24px; border: 1px solid var(--cf-border); background: var(--cf-bg-card); position: relative; }
+.cover-summary::before, .cover-summary::after { content: ''; position: absolute; width: 8px; height: 8px; border-radius: 1.5px; background: var(--cf-bg); border: 1px solid var(--cf-border); }
+.cover-summary::before { top: -4px; right: -4px; }
+.cover-summary::after { bottom: -4px; right: -4px; }
+.cover-summary-critical { border-left: 3px solid var(--red); }
+.cover-summary-warning { border-left: 3px solid var(--amber); }
+.cover-summary-healthy { border-left: 3px solid var(--green); }
+.cover-summary-critical h3 { color: var(--red); }
+.cover-summary-warning h3 { color: var(--amber); }
+.cover-summary-healthy h3 { color: var(--green); }
+.cover-summary h3 { font-size: 11pt; font-weight: 500; margin-bottom: 10px; }
+.cover-summary ul { list-style: none; padding-left: 0; font-size: 9.5pt; line-height: 1.7; }
+.cover-summary li { margin-bottom: 4px; padding-left: 16px; position: relative; color: var(--cf-text-muted); }
+.cover-summary-critical li::before { content: ''; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+.cover-summary-warning li::before { content: ''; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
+.cover-summary-healthy li::before { content: ''; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+h2.section-heading { font-size: 18pt; font-weight: 500; color: var(--cf-text); padding-bottom: 14px; margin: 0 0 24px; page-break-after: avoid; letter-spacing: -0.02em; position: relative; }
+h2.section-heading::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x; }
+h2.section-heading .section-num { color: var(--cf-text); margin-right: 6px; font-weight: 500; }
+h2.section-heading .sev-badge { font-size: 7.5pt; font-weight: 600; text-transform: uppercase; padding: 3px 12px; border-radius: 9999px; margin-left: 14px; vertical-align: middle; letter-spacing: 0.04em; border: 1px solid; }
+.sev-badge.sev-critical { background: rgba(220,38,38,0.08); color: var(--red); border-color: rgba(220,38,38,0.2); }
+.sev-badge.sev-warning { background: rgba(217,119,6,0.08); color: var(--amber); border-color: rgba(217,119,6,0.2); }
+.sev-badge.sev-info { background: rgba(0,114,245,0.08); color: var(--blue); border-color: rgba(0,114,245,0.2); }
+.sev-badge.sev-ok { background: rgba(22,163,74,0.08); color: var(--green); border-color: rgba(22,163,74,0.2); }
+h3.sub-heading { font-size: 12pt; font-weight: 500; color: var(--cf-text); margin: 24px 0 14px; }
+.table-wrap { margin-bottom: 24px; border-radius: 8px; overflow: hidden; border: 1px solid var(--cf-border); }
+table { width: 100%; border-collapse: collapse; font-size: 8.5pt; table-layout: fixed; word-wrap: break-word; }
+thead th { background: var(--cf-bg-hover); color: var(--cf-text-muted); font-size: 7pt; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--cf-border); overflow: hidden; text-overflow: ellipsis; }
+thead th:not(:last-child) { border-right: 1px solid var(--cf-border-light); }
+tbody td { padding: 8px 10px; border-bottom: 1px solid var(--cf-border-light); font-size: 8.5pt; color: var(--cf-text-muted); overflow: hidden; text-overflow: ellipsis; }
+tbody td:not(:last-child) { border-right: 1px solid var(--cf-border-light); }
+tbody tr:last-child td { border-bottom: none; }
+.td-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.finding-card { border-radius: 8px; padding: 18px 22px; margin-bottom: 16px; page-break-inside: avoid; background: var(--cf-bg-card); border: 1px solid var(--cf-border); position: relative; }
+.finding-card::before, .finding-card::after { content: ''; position: absolute; width: 8px; height: 8px; border-radius: 1.5px; background: var(--cf-bg); border: 1px solid var(--cf-border); }
+.finding-card::before { top: -4px; right: -4px; }
+.finding-card::after { bottom: -4px; right: -4px; }
+.finding-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.finding-title { font-size: 11pt; font-weight: 500; color: var(--cf-text); flex: 1; }
+.finding-desc { font-size: 9.5pt; color: var(--cf-text-muted); margin-bottom: 12px; line-height: 1.6; }
+.finding-evidence { font-size: 8.5pt; color: var(--cf-text-subtle); margin-bottom: 10px; }
+.finding-evidence ul { padding-left: 18px; }
+.finding-evidence li { margin-bottom: 3px; }
+.finding-action { font-size: 9pt; font-weight: 500; color: var(--cf-text-muted); padding-top: 10px; position: relative; }
+.finding-action::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 10px 1px; background-repeat: repeat-x; }
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 28px; }
+.stat-card { background: var(--cf-bg-card); border-radius: 10px; padding: 18px 16px; text-align: center; border: 1px solid var(--cf-border); }
+.stat-value { font-size: 20pt; font-weight: 500; line-height: 1.2; color: var(--cf-text); }
+.stat-label { font-size: 7pt; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cf-text-subtle); margin-top: 6px; }
+.log-block { background: #1a1209; color: #e0d4c8; border-radius: 12px; padding: 14px 16px; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; font-size: 7.5pt; line-height: 1.8; overflow-x: auto; margin-bottom: 18px; border: 1px solid rgba(235,213,193,0.15); }
+.log-block .log-error { color: #fca5a5; }
+.log-block .log-warning { color: #fde68a; }
+.bar-chart { margin-bottom: 24px; }
+.bar-row { display: flex; align-items: center; margin-bottom: 8px; }
+.bar-label { width: 100px; font-size: 8.5pt; font-weight: 500; color: var(--cf-text); flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { flex: 1; height: 8px; background: var(--cf-border-light); border-radius: 9999px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 9999px; }
+.bar-value { width: 50px; font-size: 8.5pt; font-weight: 500; text-align: right; color: var(--cf-text-muted); flex-shrink: 0; margin-left: 10px; }
+.val-bad { color: var(--red); font-weight: 600; }
+.val-warn { color: var(--amber); font-weight: 500; }
+.val-good { color: var(--green); font-weight: 500; }
+.toc { padding: 0; }
+.toc h2 { font-size: 22pt; font-weight: 500; color: var(--cf-text); margin-bottom: 28px; padding-bottom: 14px; position: relative; }
+.toc h2::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x; }
+.toc-list { list-style: none; padding: 0; }
+.toc-item { display: flex; align-items: center; padding: 14px 0; font-size: 10.5pt; position: relative; }
+.toc-item + .toc-item::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x; }
+.toc-num { font-weight: 500; color: var(--cf-text); width: 30px; flex-shrink: 0; }
+.toc-title { flex: 1; font-weight: 500; color: var(--cf-text-muted); }
+.toc-badge { margin-left: 10px; }
+.section { }
+.priority-cell { font-weight: 500; }
+.callout { background: rgba(255,72,1,0.04); border-left: 3px solid var(--cf-orange); border-radius: 0 8px 8px 0; padding: 14px 18px; margin: 16px 0; font-size: 9pt; color: var(--cf-text); line-height: 1.6; }
+.report-toolbar { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: var(--cf-bg); border-bottom: 1px solid var(--cf-border); padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; }
+.report-toolbar-left { display: flex; align-items: center; gap: 12px; }
+.report-toolbar-title { font-size: 14px; font-weight: 500; color: var(--cf-text); }
+.report-toolbar-sub { font-size: 12px; color: var(--cf-text-subtle); }
+.report-toolbar .btn-print { display: inline-flex; align-items: center; gap: 6px; padding: 8px 20px; background: var(--cf-orange); color: #fff; border: none; border-radius: 9999px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.15s; }
+.report-toolbar .btn-print:hover { background: var(--cf-orange-hover); }
+.report-toolbar .btn-back { display: inline-flex; align-items: center; gap: 4px; padding: 8px 16px; background: transparent; color: var(--cf-text-muted); border: 1px solid var(--cf-border); border-radius: 9999px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; text-decoration: none; transition: all 0.15s; }
+.report-toolbar .btn-back:hover { border-style: dashed; color: var(--cf-text); background: var(--cf-bg-hover); }
+.page-container { padding-top: 70px; }
+@media print {
+  html, body { background: var(--cf-bg) !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color: var(--cf-text) !important; margin: 0; padding: 0; }
+  .report-toolbar { display: none !important; }
+  .page-container { padding: 0; gap: 0; display: block; background: transparent !important; }
+  .page { width: auto; min-height: auto; box-shadow: none !important; border-radius: 0; background: var(--cf-bg) !important; padding: 20mm 22mm; page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  .finding-card { break-inside: avoid; background: var(--cf-bg-card) !important; border: 1px solid var(--cf-border) !important; }
+  .table-wrap { break-inside: avoid; border: 1px solid var(--cf-border) !important; }
+  .stats-grid { break-inside: avoid; }
+  .stat-card { background: var(--cf-bg-card) !important; border: 1px solid var(--cf-border) !important; }
+  .cover-summary { background: var(--cf-bg-card) !important; border: 1px solid var(--cf-border) !important; }
+  .cover-badge { background: var(--cf-orange) !important; color: #fff !important; }
+  thead th { background: var(--cf-bg-hover) !important; color: var(--cf-text-muted) !important; }
+  .bar-track { background: var(--cf-border-light) !important; }
+  .sev-badge { border: 1px solid !important; }
+  .sev-badge.sev-critical { background: rgba(220,38,38,0.08) !important; color: var(--red) !important; }
+  .sev-badge.sev-warning { background: rgba(217,119,6,0.08) !important; color: var(--amber) !important; }
+  .sev-badge.sev-info { background: rgba(0,114,245,0.08) !important; color: var(--blue) !important; }
+  .sev-badge.sev-ok { background: rgba(22,163,74,0.08) !important; color: var(--green) !important; }
+  h2.section-heading::after, .cover-meta::before, .toc h2::after, .toc-item + .toc-item::before, .finding-action::before { background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%) !important; }
+  .finding-card::before, .finding-card::after, .cover-summary::before, .cover-summary::after { background: var(--cf-bg) !important; border: 1px solid var(--cf-border) !important; }
+}
+</style>
+</head>
+<body>
+<div class="report-toolbar">
+  <div class="report-toolbar-left">
+    <a href="/" class="btn-back">&larr; Dashboard</a>
+    <span class="report-toolbar-title">Diagnostic Report</span>
+    <span class="report-toolbar-sub">Tower &mdash; 13 Apr 2026 18:47</span>
+  </div>
+  <button class="btn-print" onclick="window.print()">&#x1F5B6; Print / Save PDF</button>
+</div>
+<div class="page-container">
+<div class="page">
+<div class="cover">
+  <div class="cover-badge">Diagnostic Report</div>
+  <h1>Tower
+Health Analysis</h1>
+  <div class="cover-subtitle">Diagnostic scan identified 8 critical and 14 warning findings requiring attention.</div>
+  <div class="cover-meta">
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Server</div>
+      <div class="cover-meta-value">Tower</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Date</div>
+      <div class="cover-meta-value">13 April 2026</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Uptime</div>
+      <div class="cover-meta-value">30 days, 0 hrs</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Hardware</div>
+      <div class="cover-meta-value">Intel Core i7-10700 @ 2.90GHz (16 cores)</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">OS / Platform</div>
+      <div class="cover-meta-value">unraid 7.1.4 (kernel 6.12.10-Unraid) / unraid 7.1.4</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Array Status</div>
+      <div class="cover-meta-value">Attention Required</div>
+    </div>
+  </div>
+  <div class="cover-summary cover-summary-critical">
+    <h3>8 Critical Finding(s) Detected</h3>
+    <ul>
+      <li>Disk Almost Full: /mnt/disk5 (98%)</li>
+      <li>Severe Parity Check Speed Degradation</li>
+      <li>Parity Errors on 2026-01-22</li>
+      <li>Parity Errors on 2026-03-30</li>
+      <li>ZFS Pool &#39;backup&#39; is DEGRADED</li>
+      <li>K8s pod crash loop: default/broken-app-7b9f4c-abc12</li>
+      <li>K8s deployment down: default/broken-app</li>
+      <li>Backup stale: proxmox-backup (pbs) — last success 3d ago</li>
+    </ul>
+  </div>
+</div>
+</div>
+<div class="page">
+<div class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li class="toc-item">
+      <span class="toc-num">1</span>
+      <span class="toc-title">System Overview</span>
+    </li>
+    <li class="toc-item">
+      <span class="toc-num">2</span>
+      <span class="toc-title">Findings</span>
+      <span class="toc-badge"><span class="sev-badge sev-critical">Critical</span></span>
+    </li>
+    <li class="toc-item">
+      <span class="toc-num">3</span>
+      <span class="toc-title">Drive Health &amp; SMART Analysis</span>
+    </li>
+    <li class="toc-item">
+      <span class="toc-num">4</span>
+      <span class="toc-title">Docker &amp; Application Analysis</span>
+    </li>
+    <li class="toc-item">
+      <span class="toc-num">5</span>
+      <span class="toc-title">ZFS Pool Analysis</span>
+    </li>
+    <li class="toc-item">
+      <span class="toc-num">6</span>
+      <span class="toc-title">UPS / Power</span>
+    </li>
+    <li class="toc-item">
+      <span class="toc-num">7</span>
+      <span class="toc-title">Network Interfaces</span>
+    </li>
+    <li class="toc-item">
+      <span class="toc-num">8</span>
+      <span class="toc-title">Service Checks</span>
+    </li>
+    <li class="toc-item">
+      <span class="toc-num">9</span>
+      <span class="toc-title">Parity Analysis</span>
+    </li>
+    <li class="toc-item">
+      <span class="toc-num">10</span>
+      <span class="toc-title">Recommended Actions</span>
+    </li>
+  </ol>
+</div>
+</div>
+<div class="page">
+<div class="section">
+  <h2 class="section-heading"><span class="section-num">1</span>System Overview</h2>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value">16</div>
+      <div class="stat-label">CPU Cores</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" class="val-good">75.0%</div>
+      <div class="stat-label">Memory Usage</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" class="val-warn">18.3%</div>
+      <div class="stat-label">I/O Wait</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">30 days, 0 hrs</div>
+      <div class="stat-label">Uptime</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+    <div style="flex:1;min-width:140px">
+      <div style="font-size:8pt;color:var(--cf-text-muted);margin-bottom:2px">CPU History</div>
+      <svg width="200" height="40" viewBox="0 0 200 40" style="display:inline-block;vertical-align:middle"><path d="M1.0,31.1 L4.4,35.9 L7.7,37.7 L11.1,32.1 L14.4,38.7 L17.8,34.7 L21.1,33.3 L24.5,28.8 L27.8,33.7 L31.2,21.8 L34.6,34.4 L37.9,31.7 L41.3,33.1 L44.6,37.7 L48.0,23.1 L51.3,33.6 L54.7,26.0 L58.1,39.0 L61.4,31.4 L64.8,27.4 L68.1,19.9 L71.5,37.2 L74.8,27.7 L78.2,28.5 L81.5,18.2 L84.9,20.4 L88.3,29.0 L91.6,34.4 L95.0,17.1 L98.3,26.9 L101.7,7.8 L105.0,11.8 L108.4,10.0 L111.7,35.6 L115.1,27.8 L118.5,34.8 L121.8,33.0 L125.2,36.0 L128.5,34.3 L131.9,31.9 L135.2,20.9 L138.6,31.6 L141.9,3.3 L145.3,2.3 L148.7,15.2 L152.0,16.7 L155.4,2.8 L158.7,24.9 L162.1,1.0 L165.4,10.1 L168.8,7.2 L172.2,29.0 L175.5,7.0 L178.9,15.0 L182.2,16.1 L185.6,1.7 L188.9,3.0 L192.3,22.4 L195.6,32.2 L199.0,31.4 L199.0,40 L1.0,40 Z" fill="#0072f5" fill-opacity="0.12" stroke="none"/><polyline points="1.0,31.1 4.4,35.9 7.7,37.7 11.1,32.1 14.4,38.7 17.8,34.7 21.1,33.3 24.5,28.8 27.8,33.7 31.2,21.8 34.6,34.4 37.9,31.7 41.3,33.1 44.6,37.7 48.0,23.1 51.3,33.6 54.7,26.0 58.1,39.0 61.4,31.4 64.8,27.4 68.1,19.9 71.5,37.2 74.8,27.7 78.2,28.5 81.5,18.2 84.9,20.4 88.3,29.0 91.6,34.4 95.0,17.1 98.3,26.9 101.7,7.8 105.0,11.8 108.4,10.0 111.7,35.6 115.1,27.8 118.5,34.8 121.8,33.0 125.2,36.0 128.5,34.3 131.9,31.9 135.2,20.9 138.6,31.6 141.9,3.3 145.3,2.3 148.7,15.2 152.0,16.7 155.4,2.8 158.7,24.9 162.1,1.0 165.4,10.1 168.8,7.2 172.2,29.0 175.5,7.0 178.9,15.0 182.2,16.1 185.6,1.7 188.9,3.0 192.3,22.4 195.6,32.2 199.0,31.4" fill="none" stroke="#0072f5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div style="flex:1;min-width:140px">
+      <div style="font-size:8pt;color:var(--cf-text-muted);margin-bottom:2px">Memory History</div>
+      <svg width="200" height="40" viewBox="0 0 200 40" style="display:inline-block;vertical-align:middle"><path d="M1.0,37.7 L4.4,3.9 L7.7,4.9 L11.1,17.3 L14.4,24.5 L17.8,39.0 L21.1,35.7 L24.5,30.1 L27.8,8.1 L31.2,10.6 L34.6,25.0 L37.9,31.2 L41.3,28.7 L44.6,1.8 L48.0,17.6 L51.3,11.4 L54.7,7.1 L58.1,1.0 L61.4,30.8 L64.8,12.1 L68.1,4.0 L71.5,37.4 L74.8,33.3 L78.2,25.0 L81.5,37.4 L84.9,30.3 L88.3,6.4 L91.6,35.0 L95.0,6.3 L98.3,32.0 L101.7,29.1 L105.0,24.8 L108.4,28.2 L111.7,17.0 L115.1,22.2 L118.5,15.3 L121.8,16.3 L125.2,28.5 L128.5,10.7 L131.9,7.9 L135.2,11.9 L138.6,20.8 L141.9,9.7 L145.3,18.9 L148.7,24.4 L152.0,21.6 L155.4,13.5 L158.7,27.5 L162.1,18.2 L165.4,18.4 L168.8,23.1 L172.2,26.1 L175.5,17.3 L178.9,12.5 L182.2,27.5 L185.6,5.6 L188.9,32.4 L192.3,22.8 L195.6,18.4 L199.0,24.5 L199.0,40 L1.0,40 Z" fill="#7c3aed" fill-opacity="0.12" stroke="none"/><polyline points="1.0,37.7 4.4,3.9 7.7,4.9 11.1,17.3 14.4,24.5 17.8,39.0 21.1,35.7 24.5,30.1 27.8,8.1 31.2,10.6 34.6,25.0 37.9,31.2 41.3,28.7 44.6,1.8 48.0,17.6 51.3,11.4 54.7,7.1 58.1,1.0 61.4,30.8 64.8,12.1 68.1,4.0 71.5,37.4 74.8,33.3 78.2,25.0 81.5,37.4 84.9,30.3 88.3,6.4 91.6,35.0 95.0,6.3 98.3,32.0 101.7,29.1 105.0,24.8 108.4,28.2 111.7,17.0 115.1,22.2 118.5,15.3 121.8,16.3 125.2,28.5 128.5,10.7 131.9,7.9 135.2,11.9 138.6,20.8 141.9,9.7 145.3,18.9 148.7,24.4 152.0,21.6 155.4,13.5 158.7,27.5 162.1,18.2 165.4,18.4 168.8,23.1 172.2,26.1 175.5,17.3 178.9,12.5 182.2,27.5 185.6,5.6 188.9,32.4 192.3,22.8 195.6,18.4 199.0,24.5" fill="none" stroke="#7c3aed" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div style="flex:1;min-width:140px">
+      <div style="font-size:8pt;color:var(--cf-text-muted);margin-bottom:2px">I/O Wait History</div>
+      <svg width="200" height="40" viewBox="0 0 200 40" style="display:inline-block;vertical-align:middle"><path d="M1.0,30.9 L4.4,26.9 L7.7,8.3 L11.1,36.8 L14.4,14.6 L17.8,24.2 L21.1,1.0 L24.5,15.1 L27.8,29.5 L31.2,14.9 L34.6,26.1 L37.9,17.3 L41.3,39.0 L44.6,1.5 L48.0,9.7 L51.3,1.5 L54.7,19.7 L58.1,4.8 L61.4,5.4 L64.8,10.4 L68.1,25.8 L71.5,17.4 L74.8,35.9 L78.2,1.0 L81.5,25.8 L84.9,15.2 L88.3,32.3 L91.6,12.2 L95.0,24.1 L98.3,37.4 L101.7,26.8 L105.0,38.9 L108.4,7.0 L111.7,32.8 L115.1,10.0 L118.5,15.3 L121.8,28.7 L125.2,16.2 L128.5,33.2 L131.9,4.3 L135.2,14.0 L138.6,21.5 L141.9,37.0 L145.3,13.3 L148.7,19.4 L152.0,23.8 L155.4,11.3 L158.7,7.9 L162.1,29.0 L165.4,30.6 L168.8,31.6 L172.2,21.1 L175.5,5.5 L178.9,18.8 L182.2,12.3 L185.6,24.7 L188.9,16.4 L192.3,26.8 L195.6,17.8 L199.0,11.4 L199.0,40 L1.0,40 Z" fill="#d97706" fill-opacity="0.12" stroke="none"/><polyline points="1.0,30.9 4.4,26.9 7.7,8.3 11.1,36.8 14.4,14.6 17.8,24.2 21.1,1.0 24.5,15.1 27.8,29.5 31.2,14.9 34.6,26.1 37.9,17.3 41.3,39.0 44.6,1.5 48.0,9.7 51.3,1.5 54.7,19.7 58.1,4.8 61.4,5.4 64.8,10.4 68.1,25.8 71.5,17.4 74.8,35.9 78.2,1.0 81.5,25.8 84.9,15.2 88.3,32.3 91.6,12.2 95.0,24.1 98.3,37.4 101.7,26.8 105.0,38.9 108.4,7.0 111.7,32.8 115.1,10.0 118.5,15.3 121.8,28.7 125.2,16.2 128.5,33.2 131.9,4.3 135.2,14.0 138.6,21.5 141.9,37.0 145.3,13.3 148.7,19.4 152.0,23.8 155.4,11.3 158.7,7.9 162.1,29.0 165.4,30.6 168.8,31.6 172.2,21.1 175.5,5.5 178.9,18.8 182.2,12.3 185.6,24.7 188.9,16.4 192.3,26.8 195.6,17.8 199.0,11.4" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Component</th><th>Detail</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>CPU</strong></td>
+        <td>Intel Core i7-10700 @ 2.90GHz — 23.4% usage</td>
+        <td class="val-good">Normal</td>
+      </tr>
+      <tr>
+        <td><strong>Memory</strong></td>
+        <td>24576 MB / 32768 MB (75.0%)</td>
+        <td class="val-good">Normal</td>
+      </tr>
+      <tr>
+        <td><strong>Load Average</strong></td>
+        <td>1m: 2.34 / 5m: 1.87 / 15m: 1.52</td>
+        <td class="val-good">Normal</td>
+      </tr>
+      <tr>
+        <td><strong>I/O Wait</strong></td>
+        <td>18.3%</td>
+        <td class="val-warn">Elevated</td>
+      </tr>
+      <tr>
+        <td><strong>Network</strong></td>
+        <td>eth0 (1000Mb/s), bond0 (2000Mb/s), wg0</td>
+        <td class="val-good">Connected</td>
+      </tr>
+      <tr>
+        <td><strong>Uptime</strong></td>
+        <td>30 days, 0 hrs</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>OS</strong></td>
+        <td>unraid 7.1.4 (kernel 6.12.10-Unraid) 6.12.10-Unraid</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Motherboard</strong></td>
+        <td>ASRock Z490M-ITX/ac</td>
+        <td>&mdash;</td>
+      </tr>
+    </tbody>
+  </table></div>
+  <h3 class="sub-heading">Disk Space Utilisation</h3>
+  <div class="bar-chart">
+    <div class="bar-row">
+      <span class="bar-label">Disk 1</span>
+      <div class="bar-track"><div class="bar-fill" style="width: 87.0%; background: #3b82f6;"></div></div>
+      <span class="bar-value">87.0%</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">Disk 2</span>
+      <div class="bar-track"><div class="bar-fill" style="width: 81.0%; background: #3b82f6;"></div></div>
+      <span class="bar-value">81.0%</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">Disk 3</span>
+      <div class="bar-track"><div class="bar-fill" style="width: 96.0%; background: #ef4444;"></div></div>
+      <span class="bar-value">96.0%</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">Disk 4</span>
+      <div class="bar-track"><div class="bar-fill" style="width: 70.0%; background: #3b82f6;"></div></div>
+      <span class="bar-value">70.0%</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">Disk 5</span>
+      <div class="bar-track"><div class="bar-fill" style="width: 98.0%; background: #dc2626;"></div></div>
+      <span class="bar-value">98.0%</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">Cache (NVMe)</span>
+      <div class="bar-track"><div class="bar-fill" style="width: 68.0%; background: #3b82f6;"></div></div>
+      <span class="bar-value">68.0%</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">Flash</span>
+      <div class="bar-track"><div class="bar-fill" style="width: 6.0%; background: #3b82f6;"></div></div>
+      <span class="bar-value">6.0%</span>
+    </div>
+  </div>
+</div>
+</div>
+<div class="page">
+<div class="section">
+  <h2 class="section-heading"><span class="section-num">2</span>Findings <span class="sev-badge sev-critical">Critical</span></h2>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-critical">Critical</span>
+      <span class="finding-title">Disk Almost Full: /mnt/disk5 (98%)</span>
+    </div>
+    <div class="finding-desc">/mnt/disk5 is at 98% capacity (80.0 GB free of 4000.0 GB).</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Usage: 3920.0/4000.0 GB (98%)</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Free space immediately or expand storage.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-critical">Critical</span>
+      <span class="finding-title">Severe Parity Check Speed Degradation</span>
+    </div>
+    <div class="finding-desc">Parity check speed has degraded by 69% (from 142 MB/s to 44 MB/s). This is a strong indicator of a hardware issue.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Earliest: 142 MB/s (2024-01-15)</li>
+      <li>Latest: 44 MB/s (2026-03-30)</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Check SATA cables, drive health, and controller. The slowest drive/cable is the bottleneck.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-critical">Critical</span>
+      <span class="finding-title">Parity Errors on 2026-01-22</span>
+    </div>
+    <div class="finding-desc">Parity check on 2026-01-22 found 5 errors (action: check).</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Errors: 5, Duration: 151200s, Speed: 50 MB/s</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Run a correcting parity check. Investigate which drive has bad data.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-critical">Critical</span>
+      <span class="finding-title">Parity Errors on 2026-03-30</span>
+    </div>
+    <div class="finding-desc">Parity check on 2026-03-30 found 12 errors (action: check).</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Errors: 12, Duration: 172800s, Speed: 44 MB/s</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Run a correcting parity check. Investigate which drive has bad data.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-critical">Critical</span>
+      <span class="finding-title">ZFS Pool &#39;backup&#39; is DEGRADED</span>
+    </div>
+    <div class="finding-desc">Pool &#39;backup&#39; is operating in degraded mode — one or more devices has failed or been removed. The pool has reduced redundancy and cannot survive another device failure.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>State: DEGRADED</li>
+      <li>Status: One or more devices has been removed by the administrator.</li>
+      <li>Scan: scrub repaired 0B in 06:18:44 with 0 errors on Sat Apr 5 04:00:00 2026</li>
+      <li>VDev raidz1-0: DEGRADED</li>
+      <li>  /dev/sdg: REMOVED</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Replace the failed device immediately with &#39;zpool replace&#39;. Online the device using &#39;zpool online&#39; or replace the device with &#39;zpool replace&#39;.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-critical">Critical</span>
+      <span class="finding-title">K8s pod crash loop: default/broken-app-7b9f4c-abc12</span>
+    </div>
+    <div class="finding-desc">Pod broken-app-7b9f4c-abc12 in namespace default is in CrashLoopBackOff with 47 restarts</div>
+    <div class="finding-action">Recommended: Check logs: kubectl logs broken-app-7b9f4c-abc12 -n default --previous</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-critical">Critical</span>
+      <span class="finding-title">K8s deployment down: default/broken-app</span>
+    </div>
+    <div class="finding-desc">Deployment broken-app has 0/1 ready replicas</div>
+    <div class="finding-action">Recommended: Investigate immediately: kubectl describe deployment broken-app -n default</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-critical">Critical</span>
+      <span class="finding-title">Backup stale: proxmox-backup (pbs) — last success 3d ago</span>
+    </div>
+    <div class="finding-desc">Backup job &#39;proxmox-backup&#39; (pbs) has not completed successfully in over 48 hours. Last success was 3d ago.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Provider: pbs</li>
+      <li>Last success: 2026-04-10 18:47</li>
+      <li>Snapshots: 30</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Check if the backup schedule is running. Verify repository connectivity and credentials.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">SMART data unavailable: /dev/sdb</span>
+    </div>
+    <div class="finding-desc">Drive /dev/sdb (WDC WD140EDGZ-11B1PA0) was detected but smartctl could not read SMART attributes. The drive may be behind an HBA, USB bridge, or unsupported controller.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Temperature: 0°C</li>
+      <li>Power-on hours: 0</li>
+      <li>No SMART attributes in smartctl output</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">SMART data unavailable: /dev/sdc</span>
+    </div>
+    <div class="finding-desc">Drive /dev/sdc (WDC WD140EDGZ-11B1PA0) was detected but smartctl could not read SMART attributes. The drive may be behind an HBA, USB bridge, or unsupported controller.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Temperature: 0°C</li>
+      <li>Power-on hours: 0</li>
+      <li>No SMART attributes in smartctl output</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">SMART data unavailable: /dev/sdd</span>
+    </div>
+    <div class="finding-desc">Drive /dev/sdd (Seagate ST14000NM001G-2KJ) was detected but smartctl could not read SMART attributes. The drive may be behind an HBA, USB bridge, or unsupported controller.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Temperature: 0°C</li>
+      <li>Power-on hours: 0</li>
+      <li>No SMART attributes in smartctl output</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">SMART data unavailable: /dev/sde</span>
+    </div>
+    <div class="finding-desc">Drive /dev/sde (Seagate ST8000VN004-2M2101) was detected but smartctl could not read SMART attributes. The drive may be behind an HBA, USB bridge, or unsupported controller.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Temperature: 0°C</li>
+      <li>Power-on hours: 0</li>
+      <li>No SMART attributes in smartctl output</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">SMART data unavailable: /dev/sdf</span>
+    </div>
+    <div class="finding-desc">Drive /dev/sdf (Seagate ST8000VN004-2M2101) was detected but smartctl could not read SMART attributes. The drive may be behind an HBA, USB bridge, or unsupported controller.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Temperature: 0°C</li>
+      <li>Power-on hours: 0</li>
+      <li>No SMART attributes in smartctl output</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">SMART data unavailable: /dev/sdg</span>
+    </div>
+    <div class="finding-desc">Drive /dev/sdg (WDC WD40EFAX-68JH4N1) was detected but smartctl could not read SMART attributes. The drive may be behind an HBA, USB bridge, or unsupported controller.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Temperature: 0°C</li>
+      <li>Power-on hours: 0</li>
+      <li>No SMART attributes in smartctl output</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">SMART data unavailable: /dev/nvme0n1</span>
+    </div>
+    <div class="finding-desc">Drive /dev/nvme0n1 (Samsung 970 EVO Plus 1TB) was detected but smartctl could not read SMART attributes. The drive may be behind an HBA, USB bridge, or unsupported controller.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Temperature: 0°C</li>
+      <li>Power-on hours: 0</li>
+      <li>No SMART attributes in smartctl output</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">Drive Temperature: /dev/sdg at 47°C</span>
+    </div>
+    <div class="finding-desc">Drive /dev/sdg (WDC WD40EFAX-68JH4N1) is at 47°C. Elevated — reduce if possible — Backblaze + Google research shows failure rate at 2.0x baseline at this temperature.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Current temperature: 47°C</li>
+      <li>Failure rate multiplier: 2.0x (Backblaze/Google data)</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Improve case airflow. Add/replace fans. Check that existing fans are working.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">Historical Overheating on /dev/sdg (max 69°C)</span>
+    </div>
+    <div class="finding-desc">Drive /dev/sdg has reached 69°C at some point in its lifetime. At this temperature, failure rate is ~10.0x baseline. Thermal damage may be permanent.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Airflow_Temperature_Max: 69°C</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Monitor SMART attributes closely for degradation.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">Elevated Disk I/O Wait</span>
+    </div>
+    <div class="finding-desc">I/O wait is at 18.3%. This is above the ideal threshold of &lt;10%.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>I/O Wait: 18.3%</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Consider adding an SSD cache for Docker containers and frequently-accessed data.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">Low Disk Space: /mnt/disk3 (96%)</span>
+    </div>
+    <div class="finding-desc">/mnt/disk3 is at 96% capacity (320.0 GB free of 8000.0 GB).</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Usage: 7680.0/8000.0 GB (96%)</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Monitor growth rate. Plan storage expansion or cleanup.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">K8s pod pending (unscheduled): default/pending-job-xyz</span>
+    </div>
+    <div class="finding-desc">Pod pending-job-xyz in namespace default is pending and not assigned to any node</div>
+    <div class="finding-action">Recommended: Check events: kubectl describe pod pending-job-xyz -n default</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">K8s deployment unhealthy: default/broken-app</span>
+    </div>
+    <div class="finding-desc">Deployment broken-app has 1 unavailable replicas (0/1 ready)</div>
+    <div class="finding-action">Recommended: Check pod status: kubectl get pods -l app=broken-app -n default</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-warning">Warning</span>
+      <span class="finding-title">K8s PVC pending: default/pending-pvc</span>
+    </div>
+    <div class="finding-desc">PersistentVolumeClaim pending-pvc (class: nfs, capacity: ) is still pending</div>
+    <div class="finding-action">Recommended: Check storage provisioner and available PVs</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-info">Info</span>
+      <span class="finding-title">Drive Temperature: /dev/sde at 42°C</span>
+    </div>
+    <div class="finding-desc">Drive /dev/sde (Seagate ST8000VN004-2M2101) is at 42°C. Warm — within tolerance — Backblaze + Google research shows failure rate at 1.5x baseline at this temperature.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Current temperature: 42°C</li>
+      <li>Failure rate multiplier: 1.5x (Backblaze/Google data)</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Improve case airflow. Add/replace fans. Check that existing fans are working.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-info">Info</span>
+      <span class="finding-title">Drive Temperature: /dev/nvme0n1 at 41°C</span>
+    </div>
+    <div class="finding-desc">Drive /dev/nvme0n1 (Samsung 970 EVO Plus 1TB) is at 41°C. Warm — within tolerance — Backblaze + Google research shows failure rate at 1.5x baseline at this temperature.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Current temperature: 41°C</li>
+      <li>Failure rate multiplier: 1.5x (Backblaze/Google data)</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Improve case airflow. Add/replace fans. Check that existing fans are working.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-info">Info</span>
+      <span class="finding-title">OS Update Available: unraid 7.0.0 → 7.0.1</span>
+    </div>
+    <div class="finding-desc">You are running unraid 7.0.0. Version 7.0.1 is available. Keeping your NAS OS up to date ensures you have the latest security patches and bug fixes.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Installed: 7.0.0</li>
+      <li>Latest: 7.0.1</li>
+      <li>Checked: 2026-04-13T18:47:59+01:00</li>
+    </ul></div>
+    <div class="finding-action">Recommended: Update your NAS OS when convenient. Review release notes before updating.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-info">Info</span>
+      <span class="finding-title">Backup healthy: daily-borg (borg) — 14 snapshots, 2.3 TB</span>
+    </div>
+    <div class="finding-desc">Backup job &#39;daily-borg&#39; (borg) is healthy with 14 snapshots totaling 2.3 TB.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Provider: borg</li>
+      <li>Snapshots: 14</li>
+      <li>Total size: 2.3 TB</li>
+      <li>Schedule: daily</li>
+    </ul></div>
+    <div class="finding-action">Recommended: No action required.</div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header">
+      <span class="sev-badge sev-info">Info</span>
+      <span class="finding-title">Backup healthy: hourly-restic (restic) — 168 snapshots, 890.2 GB</span>
+    </div>
+    <div class="finding-desc">Backup job &#39;hourly-restic&#39; (restic) is healthy with 168 snapshots totaling 890.2 GB.</div>
+    <div class="finding-evidence"><strong>Evidence:</strong><ul>
+      <li>Provider: restic</li>
+      <li>Snapshots: 168</li>
+      <li>Total size: 890.2 GB</li>
+      <li>Schedule: hourly</li>
+    </ul></div>
+    <div class="finding-action">Recommended: No action required.</div>
+  </div>
+  <div class="info-card" style="margin-top:16px;border-left:3px solid var(--amber)">
+    <strong>OS Update Available:</strong> unraid 7.0.0 &rarr; 7.0.1 &mdash; <a href="https://docs.unraid.net/unraid-os/release-notes/7.0.1/" target="_blank" style="color:var(--blue)">Release notes</a>
+  </div>
+</div>
+</div>
+<div class="page">
+<div class="section">
+  <h2 class="section-heading"><span class="section-num">3</span>Drive Health &amp; SMART Analysis</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Dev</th><th>Disk</th><th>Model</th><th>Size</th><th>Hours</th><th>Age</th><th>Health</th><th>Concerns</th><th>Temp History</th></tr></thead>
+    <tbody>
+      <tr><td>/dev/sdb</td><td>parity</td><td class="td-truncate" title="WDC WD140EDGZ-11B1PA0">WDC WD140EDGZ-11B1PA0</td><td>14T</td><td>38.4K</td><td>4.4 years</td><td class="val-good"><strong>PASSED</strong></td><td class="">—</td><td><svg width="80" height="24" viewBox="0 0 80 24" style="display:inline-block;vertical-align:middle"><path d="M1.0,5.4 L2.3,5.4 L3.6,9.8 L5.0,9.8 L6.3,3.2 L7.6,5.4 L8.9,3.2 L10.3,7.6 L11.6,1.0 L12.9,1.0 L14.2,12.0 L15.5,12.0 L16.9,12.0 L18.2,12.0 L19.5,12.0 L20.8,12.0 L22.2,12.0 L23.5,12.0 L24.8,12.0 L26.1,12.0 L27.4,12.0 L28.8,12.0 L30.1,12.0 L31.4,12.0 L32.7,12.0 L34.1,12.0 L35.4,12.0 L36.7,12.0 L38.0,12.0 L39.3,12.0 L40.7,12.0 L42.0,12.0 L43.3,12.0 L44.6,7.6 L45.9,12.0 L47.3,12.0 L48.6,12.0 L49.9,12.0 L51.2,12.0 L52.6,12.0 L53.9,12.0 L55.2,12.0 L56.5,12.0 L57.8,12.0 L59.2,12.0 L60.5,12.0 L61.8,12.0 L63.1,12.0 L64.5,12.0 L65.8,12.0 L67.1,12.0 L68.4,12.0 L69.7,12.0 L71.1,12.0 L72.4,12.0 L73.7,12.0 L75.0,12.0 L76.4,12.0 L77.7,23.0 L79.0,12.0 L79.0,24 L1.0,24 Z" fill="#16a34a" fill-opacity="0.12" stroke="none"/><polyline points="1.0,5.4 2.3,5.4 3.6,9.8 5.0,9.8 6.3,3.2 7.6,5.4 8.9,3.2 10.3,7.6 11.6,1.0 12.9,1.0 14.2,12.0 15.5,12.0 16.9,12.0 18.2,12.0 19.5,12.0 20.8,12.0 22.2,12.0 23.5,12.0 24.8,12.0 26.1,12.0 27.4,12.0 28.8,12.0 30.1,12.0 31.4,12.0 32.7,12.0 34.1,12.0 35.4,12.0 36.7,12.0 38.0,12.0 39.3,12.0 40.7,12.0 42.0,12.0 43.3,12.0 44.6,7.6 45.9,12.0 47.3,12.0 48.6,12.0 49.9,12.0 51.2,12.0 52.6,12.0 53.9,12.0 55.2,12.0 56.5,12.0 57.8,12.0 59.2,12.0 60.5,12.0 61.8,12.0 63.1,12.0 64.5,12.0 65.8,12.0 67.1,12.0 68.4,12.0 69.7,12.0 71.1,12.0 72.4,12.0 73.7,12.0 75.0,12.0 76.4,12.0 77.7,23.0 79.0,12.0" fill="none" stroke="#16a34a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td></tr>
+      <tr><td>/dev/sdc</td><td>disk1</td><td class="td-truncate" title="WDC WD140EDGZ-11B1PA0">WDC WD140EDGZ-11B1PA0</td><td>14T</td><td>42.1K</td><td>4.8 years</td><td class="val-good"><strong>PASSED*</strong></td><td class="val-bad">47 CRC error(s)</td><td><svg width="80" height="24" viewBox="0 0 80 24" style="display:inline-block;vertical-align:middle"><path d="M1.0,18.1 L2.3,3.4 L3.6,5.9 L5.0,23.0 L6.3,3.4 L7.6,8.3 L8.9,3.4 L10.3,3.4 L11.6,13.2 L12.9,15.7 L14.2,8.3 L15.5,8.3 L16.9,8.3 L18.2,8.3 L19.5,8.3 L20.8,8.3 L22.2,8.3 L23.5,8.3 L24.8,8.3 L26.1,8.3 L27.4,8.3 L28.8,8.3 L30.1,8.3 L31.4,8.3 L32.7,8.3 L34.1,8.3 L35.4,8.3 L36.7,8.3 L38.0,8.3 L39.3,8.3 L40.7,8.3 L42.0,8.3 L43.3,8.3 L44.6,1.0 L45.9,8.3 L47.3,8.3 L48.6,8.3 L49.9,8.3 L51.2,8.3 L52.6,8.3 L53.9,8.3 L55.2,8.3 L56.5,8.3 L57.8,8.3 L59.2,8.3 L60.5,8.3 L61.8,8.3 L63.1,8.3 L64.5,8.3 L65.8,8.3 L67.1,8.3 L68.4,8.3 L69.7,8.3 L71.1,8.3 L72.4,8.3 L73.7,8.3 L75.0,8.3 L76.4,8.3 L77.7,5.9 L79.0,8.3 L79.0,24 L1.0,24 Z" fill="#16a34a" fill-opacity="0.12" stroke="none"/><polyline points="1.0,18.1 2.3,3.4 3.6,5.9 5.0,23.0 6.3,3.4 7.6,8.3 8.9,3.4 10.3,3.4 11.6,13.2 12.9,15.7 14.2,8.3 15.5,8.3 16.9,8.3 18.2,8.3 19.5,8.3 20.8,8.3 22.2,8.3 23.5,8.3 24.8,8.3 26.1,8.3 27.4,8.3 28.8,8.3 30.1,8.3 31.4,8.3 32.7,8.3 34.1,8.3 35.4,8.3 36.7,8.3 38.0,8.3 39.3,8.3 40.7,8.3 42.0,8.3 43.3,8.3 44.6,1.0 45.9,8.3 47.3,8.3 48.6,8.3 49.9,8.3 51.2,8.3 52.6,8.3 53.9,8.3 55.2,8.3 56.5,8.3 57.8,8.3 59.2,8.3 60.5,8.3 61.8,8.3 63.1,8.3 64.5,8.3 65.8,8.3 67.1,8.3 68.4,8.3 69.7,8.3 71.1,8.3 72.4,8.3 73.7,8.3 75.0,8.3 76.4,8.3 77.7,5.9 79.0,8.3" fill="none" stroke="#16a34a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td></tr>
+      <tr><td>/dev/sdd</td><td>disk2</td><td class="td-truncate" title="Seagate ST14000NM001G-2KJ">Seagate ST14000NM001G-2KJ</td><td>14T</td><td>35.8K</td><td>4.1 years</td><td class="val-good"><strong>PASSED</strong></td><td class="">—</td><td><svg width="80" height="24" viewBox="0 0 80 24" style="display:inline-block;vertical-align:middle"><path d="M1.0,21.0 L2.3,3.0 L3.6,21.0 L5.0,21.0 L6.3,3.0 L7.6,23.0 L8.9,13.0 L10.3,1.0 L11.6,11.0 L12.9,15.0 L14.2,11.0 L15.5,11.0 L16.9,11.0 L18.2,11.0 L19.5,11.0 L20.8,11.0 L22.2,11.0 L23.5,11.0 L24.8,11.0 L26.1,11.0 L27.4,11.0 L28.8,11.0 L30.1,11.0 L31.4,11.0 L32.7,11.0 L34.1,11.0 L35.4,11.0 L36.7,11.0 L38.0,11.0 L39.3,11.0 L40.7,11.0 L42.0,11.0 L43.3,11.0 L44.6,1.0 L45.9,11.0 L47.3,11.0 L48.6,11.0 L49.9,11.0 L51.2,11.0 L52.6,11.0 L53.9,11.0 L55.2,11.0 L56.5,11.0 L57.8,11.0 L59.2,11.0 L60.5,11.0 L61.8,11.0 L63.1,11.0 L64.5,11.0 L65.8,11.0 L67.1,11.0 L68.4,11.0 L69.7,11.0 L71.1,11.0 L72.4,11.0 L73.7,11.0 L75.0,11.0 L76.4,11.0 L77.7,15.0 L79.0,11.0 L79.0,24 L1.0,24 Z" fill="#16a34a" fill-opacity="0.12" stroke="none"/><polyline points="1.0,21.0 2.3,3.0 3.6,21.0 5.0,21.0 6.3,3.0 7.6,23.0 8.9,13.0 10.3,1.0 11.6,11.0 12.9,15.0 14.2,11.0 15.5,11.0 16.9,11.0 18.2,11.0 19.5,11.0 20.8,11.0 22.2,11.0 23.5,11.0 24.8,11.0 26.1,11.0 27.4,11.0 28.8,11.0 30.1,11.0 31.4,11.0 32.7,11.0 34.1,11.0 35.4,11.0 36.7,11.0 38.0,11.0 39.3,11.0 40.7,11.0 42.0,11.0 43.3,11.0 44.6,1.0 45.9,11.0 47.3,11.0 48.6,11.0 49.9,11.0 51.2,11.0 52.6,11.0 53.9,11.0 55.2,11.0 56.5,11.0 57.8,11.0 59.2,11.0 60.5,11.0 61.8,11.0 63.1,11.0 64.5,11.0 65.8,11.0 67.1,11.0 68.4,11.0 69.7,11.0 71.1,11.0 72.4,11.0 73.7,11.0 75.0,11.0 76.4,11.0 77.7,15.0 79.0,11.0" fill="none" stroke="#16a34a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td></tr>
+      <tr><td>/dev/sde</td><td>disk3</td><td class="td-truncate" title="Seagate ST8000VN004-2M2101">Seagate ST8000VN004-2M2101</td><td>8T</td><td>51.2K</td><td>5.8 years</td><td class="val-good"><strong>PASSED*</strong></td><td class="val-bad">12 cmd timeouts, 8 realloc, 2 pending</td><td><svg width="80" height="24" viewBox="0 0 80 24" style="display:inline-block;vertical-align:middle"><path d="M1.0,21.2 L2.3,6.5 L3.6,1.0 L5.0,8.3 L6.3,2.8 L7.6,12.0 L8.9,19.3 L10.3,19.3 L11.6,23.0 L12.9,19.3 L14.2,10.2 L15.5,10.2 L16.9,10.2 L18.2,10.2 L19.5,10.2 L20.8,10.2 L22.2,10.2 L23.5,10.2 L24.8,10.2 L26.1,10.2 L27.4,10.2 L28.8,10.2 L30.1,10.2 L31.4,10.2 L32.7,10.2 L34.1,10.2 L35.4,10.2 L36.7,10.2 L38.0,10.2 L39.3,10.2 L40.7,10.2 L42.0,10.2 L43.3,10.2 L44.6,15.7 L45.9,10.2 L47.3,10.2 L48.6,10.2 L49.9,10.2 L51.2,10.2 L52.6,10.2 L53.9,10.2 L55.2,10.2 L56.5,10.2 L57.8,10.2 L59.2,10.2 L60.5,10.2 L61.8,10.2 L63.1,10.2 L64.5,10.2 L65.8,10.2 L67.1,10.2 L68.4,10.2 L69.7,10.2 L71.1,10.2 L72.4,10.2 L73.7,10.2 L75.0,10.2 L76.4,10.2 L77.7,13.8 L79.0,10.2 L79.0,24 L1.0,24 Z" fill="#16a34a" fill-opacity="0.12" stroke="none"/><polyline points="1.0,21.2 2.3,6.5 3.6,1.0 5.0,8.3 6.3,2.8 7.6,12.0 8.9,19.3 10.3,19.3 11.6,23.0 12.9,19.3 14.2,10.2 15.5,10.2 16.9,10.2 18.2,10.2 19.5,10.2 20.8,10.2 22.2,10.2 23.5,10.2 24.8,10.2 26.1,10.2 27.4,10.2 28.8,10.2 30.1,10.2 31.4,10.2 32.7,10.2 34.1,10.2 35.4,10.2 36.7,10.2 38.0,10.2 39.3,10.2 40.7,10.2 42.0,10.2 43.3,10.2 44.6,15.7 45.9,10.2 47.3,10.2 48.6,10.2 49.9,10.2 51.2,10.2 52.6,10.2 53.9,10.2 55.2,10.2 56.5,10.2 57.8,10.2 59.2,10.2 60.5,10.2 61.8,10.2 63.1,10.2 64.5,10.2 65.8,10.2 67.1,10.2 68.4,10.2 69.7,10.2 71.1,10.2 72.4,10.2 73.7,10.2 75.0,10.2 76.4,10.2 77.7,13.8 79.0,10.2" fill="none" stroke="#16a34a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td></tr>
+      <tr><td>/dev/sdf</td><td>disk4</td><td class="td-truncate" title="Seagate ST8000VN004-2M2101">Seagate ST8000VN004-2M2101</td><td>8T</td><td>44.8K</td><td>5.1 years</td><td class="val-good"><strong>PASSED</strong></td><td class="">—</td><td><svg width="80" height="24" viewBox="0 0 80 24" style="display:inline-block;vertical-align:middle"><path d="M1.0,20.6 L2.3,13.2 L3.6,20.6 L5.0,1.0 L6.3,20.6 L7.6,13.2 L8.9,23.0 L10.3,3.4 L11.6,23.0 L12.9,5.9 L14.2,10.8 L15.5,10.8 L16.9,10.8 L18.2,10.8 L19.5,10.8 L20.8,10.8 L22.2,10.8 L23.5,10.8 L24.8,10.8 L26.1,10.8 L27.4,10.8 L28.8,10.8 L30.1,10.8 L31.4,10.8 L32.7,10.8 L34.1,10.8 L35.4,10.8 L36.7,10.8 L38.0,10.8 L39.3,10.8 L40.7,10.8 L42.0,10.8 L43.3,10.8 L44.6,3.4 L45.9,10.8 L47.3,10.8 L48.6,10.8 L49.9,10.8 L51.2,10.8 L52.6,10.8 L53.9,10.8 L55.2,10.8 L56.5,10.8 L57.8,10.8 L59.2,10.8 L60.5,10.8 L61.8,10.8 L63.1,10.8 L64.5,10.8 L65.8,10.8 L67.1,10.8 L68.4,10.8 L69.7,10.8 L71.1,10.8 L72.4,10.8 L73.7,10.8 L75.0,10.8 L76.4,10.8 L77.7,13.2 L79.0,10.8 L79.0,24 L1.0,24 Z" fill="#16a34a" fill-opacity="0.12" stroke="none"/><polyline points="1.0,20.6 2.3,13.2 3.6,20.6 5.0,1.0 6.3,20.6 7.6,13.2 8.9,23.0 10.3,3.4 11.6,23.0 12.9,5.9 14.2,10.8 15.5,10.8 16.9,10.8 18.2,10.8 19.5,10.8 20.8,10.8 22.2,10.8 23.5,10.8 24.8,10.8 26.1,10.8 27.4,10.8 28.8,10.8 30.1,10.8 31.4,10.8 32.7,10.8 34.1,10.8 35.4,10.8 36.7,10.8 38.0,10.8 39.3,10.8 40.7,10.8 42.0,10.8 43.3,10.8 44.6,3.4 45.9,10.8 47.3,10.8 48.6,10.8 49.9,10.8 51.2,10.8 52.6,10.8 53.9,10.8 55.2,10.8 56.5,10.8 57.8,10.8 59.2,10.8 60.5,10.8 61.8,10.8 63.1,10.8 64.5,10.8 65.8,10.8 67.1,10.8 68.4,10.8 69.7,10.8 71.1,10.8 72.4,10.8 73.7,10.8 75.0,10.8 76.4,10.8 77.7,13.2 79.0,10.8" fill="none" stroke="#16a34a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td></tr>
+      <tr><td>/dev/sdg</td><td>disk5</td><td class="td-truncate" title="WDC WD40EFAX-68JH4N1">WDC WD40EFAX-68JH4N1</td><td>4T</td><td>62.4K</td><td>7.1 years</td><td class="val-bad"><strong>FAILED</strong></td><td class="val-bad">87 cmd timeouts, Max 47°C, 184 realloc, 24 pending, Very old</td><td><svg width="80" height="24" viewBox="0 0 80 24" style="display:inline-block;vertical-align:middle"><path d="M1.0,14.5 L2.3,9.5 L3.6,7.8 L5.0,21.3 L6.3,7.8 L7.6,1.0 L8.9,17.9 L10.3,9.5 L11.6,12.8 L12.9,11.2 L14.2,11.2 L15.5,11.2 L16.9,11.2 L18.2,11.2 L19.5,11.2 L20.8,11.2 L22.2,11.2 L23.5,11.2 L24.8,11.2 L26.1,11.2 L27.4,11.2 L28.8,11.2 L30.1,11.2 L31.4,11.2 L32.7,11.2 L34.1,11.2 L35.4,11.2 L36.7,11.2 L38.0,11.2 L39.3,11.2 L40.7,11.2 L42.0,11.2 L43.3,11.2 L44.6,21.3 L45.9,11.2 L47.3,11.2 L48.6,11.2 L49.9,11.2 L51.2,11.2 L52.6,11.2 L53.9,11.2 L55.2,11.2 L56.5,11.2 L57.8,11.2 L59.2,11.2 L60.5,11.2 L61.8,11.2 L63.1,11.2 L64.5,11.2 L65.8,11.2 L67.1,11.2 L68.4,11.2 L69.7,11.2 L71.1,11.2 L72.4,11.2 L73.7,11.2 L75.0,11.2 L76.4,11.2 L77.7,23.0 L79.0,11.2 L79.0,24 L1.0,24 Z" fill="#d97706" fill-opacity="0.12" stroke="none"/><polyline points="1.0,14.5 2.3,9.5 3.6,7.8 5.0,21.3 6.3,7.8 7.6,1.0 8.9,17.9 10.3,9.5 11.6,12.8 12.9,11.2 14.2,11.2 15.5,11.2 16.9,11.2 18.2,11.2 19.5,11.2 20.8,11.2 22.2,11.2 23.5,11.2 24.8,11.2 26.1,11.2 27.4,11.2 28.8,11.2 30.1,11.2 31.4,11.2 32.7,11.2 34.1,11.2 35.4,11.2 36.7,11.2 38.0,11.2 39.3,11.2 40.7,11.2 42.0,11.2 43.3,11.2 44.6,21.3 45.9,11.2 47.3,11.2 48.6,11.2 49.9,11.2 51.2,11.2 52.6,11.2 53.9,11.2 55.2,11.2 56.5,11.2 57.8,11.2 59.2,11.2 60.5,11.2 61.8,11.2 63.1,11.2 64.5,11.2 65.8,11.2 67.1,11.2 68.4,11.2 69.7,11.2 71.1,11.2 72.4,11.2 73.7,11.2 75.0,11.2 76.4,11.2 77.7,23.0 79.0,11.2" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td></tr>
+      <tr><td>nvme0n1</td><td>cache</td><td class="td-truncate" title="Samsung 970 EVO Plus 1TB">Samsung 970 EVO Plus 1TB</td><td>1T</td><td>18.2K</td><td>2.1 years</td><td class="val-good"><strong>PASSED</strong></td><td class="">—</td><td><svg width="80" height="24" viewBox="0 0 80 24" style="display:inline-block;vertical-align:middle"><path d="M1.0,4.7 L2.3,15.7 L3.6,19.3 L5.0,1.0 L6.3,21.2 L7.6,23.0 L8.9,1.0 L10.3,13.8 L11.6,6.5 L12.9,6.5 L14.2,10.2 L15.5,10.2 L16.9,10.2 L18.2,10.2 L19.5,10.2 L20.8,10.2 L22.2,10.2 L23.5,10.2 L24.8,10.2 L26.1,10.2 L27.4,10.2 L28.8,10.2 L30.1,10.2 L31.4,10.2 L32.7,10.2 L34.1,10.2 L35.4,10.2 L36.7,10.2 L38.0,10.2 L39.3,10.2 L40.7,10.2 L42.0,10.2 L43.3,10.2 L44.6,17.5 L45.9,10.2 L47.3,10.2 L48.6,10.2 L49.9,10.2 L51.2,10.2 L52.6,10.2 L53.9,10.2 L55.2,10.2 L56.5,10.2 L57.8,10.2 L59.2,10.2 L60.5,10.2 L61.8,10.2 L63.1,10.2 L64.5,10.2 L65.8,10.2 L67.1,10.2 L68.4,10.2 L69.7,10.2 L71.1,10.2 L72.4,10.2 L73.7,10.2 L75.0,10.2 L76.4,10.2 L77.7,15.7 L79.0,10.2 L79.0,24 L1.0,24 Z" fill="#16a34a" fill-opacity="0.12" stroke="none"/><polyline points="1.0,4.7 2.3,15.7 3.6,19.3 5.0,1.0 6.3,21.2 7.6,23.0 8.9,1.0 10.3,13.8 11.6,6.5 12.9,6.5 14.2,10.2 15.5,10.2 16.9,10.2 18.2,10.2 19.5,10.2 20.8,10.2 22.2,10.2 23.5,10.2 24.8,10.2 26.1,10.2 27.4,10.2 28.8,10.2 30.1,10.2 31.4,10.2 32.7,10.2 34.1,10.2 35.4,10.2 36.7,10.2 38.0,10.2 39.3,10.2 40.7,10.2 42.0,10.2 43.3,10.2 44.6,17.5 45.9,10.2 47.3,10.2 48.6,10.2 49.9,10.2 51.2,10.2 52.6,10.2 53.9,10.2 55.2,10.2 56.5,10.2 57.8,10.2 59.2,10.2 60.5,10.2 61.8,10.2 63.1,10.2 64.5,10.2 65.8,10.2 67.1,10.2 68.4,10.2 69.7,10.2 71.1,10.2 72.4,10.2 73.7,10.2 75.0,10.2 76.4,10.2 77.7,15.7 79.0,10.2" fill="none" stroke="#16a34a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></td></tr>
+    </tbody>
+  </table></div>
+</div>
+</div>
+<div class="page">
+<div class="section">
+  <h2 class="section-heading"><span class="section-num">4</span>Docker &amp; Application Analysis</h2>
+  <h3 class="sub-heading" style="margin-top: 0;">Running Containers</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Container</th><th>Image</th><th>Status</th><th>CPU</th><th>Memory</th><th>Uptime</th></tr></thead>
+    <tbody>
+      <tr><td><strong>plex</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">linuxserver/plex:latest</td><td class="val-good">Up 30 days</td><td class="val-warn">12.3%</td><td>1340 MB (4.1%)</td><td>30 days</td></tr>
+      <tr><td><strong>emby</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">emby/embyserver:latest</td><td class="val-good">Up 30 days</td><td class="">8.7%</td><td>2028 MB (6.2%)</td><td>30 days</td></tr>
+      <tr><td><strong>tdarr</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">haveagitgat/tdarr:latest</td><td class="val-good">Up 30 days</td><td class="">5.4%</td><td>916 MB (2.8%)</td><td>30 days</td></tr>
+      <tr><td><strong>nginx-proxy</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">nginx:alpine</td><td class="val-good">Up 30 days</td><td class="">0.3%</td><td>42 MB (0.1%)</td><td>30 days</td></tr>
+      <tr><td><strong>wireguard</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">linuxserver/wireguard:latest</td><td class="val-good">Up 30 days</td><td class="">0.1%</td><td>28 MB (0.1%)</td><td>30 days</td></tr>
+      <tr><td><strong>home-assistant</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">homeassistant/home-assistant:latest</td><td class="val-good">Up 15 days</td><td class="">3.2%</td><td>512 MB (1.6%)</td><td>15 days</td></tr>
+      <tr><td><strong>grafana</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">grafana/grafana:latest</td><td class="val-good">Up 30 days</td><td class="">1.1%</td><td>186 MB (0.6%)</td><td>30 days</td></tr>
+      <tr><td><strong>prometheus</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">prom/prometheus:latest</td><td class="val-good">Up 30 days</td><td class="">0.8%</td><td>256 MB (0.8%)</td><td>30 days</td></tr>
+      <tr><td><strong>radarr</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">linuxserver/radarr:latest</td><td class="val-good">Up 30 days</td><td class="">0.4%</td><td>312 MB (1.0%)</td><td>30 days</td></tr>
+      <tr><td><strong>sonarr</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">linuxserver/sonarr:latest</td><td class="val-good">Up 30 days</td><td class="">0.3%</td><td>298 MB (0.9%)</td><td>30 days</td></tr>
+      <tr><td><strong>overseerr</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">linuxserver/overseerr:latest</td><td class="val-good">Up 30 days</td><td class="">0.2%</td><td>148 MB (0.5%)</td><td>30 days</td></tr>
+      <tr><td><strong>sabnzbd</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">linuxserver/sabnzbd:latest</td><td class="val-good">Up 30 days</td><td class="">0.1%</td><td>95 MB (0.3%)</td><td>30 days</td></tr>
+      <tr><td><strong>pihole</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">pihole/pihole:latest</td><td class="val-warn">Exited (1) 3 days ago</td><td class="">0.0%</td><td>0 MB (0.0%)</td><td>Exited</td></tr>
+      <tr><td><strong>mariadb-old</strong></td><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">mariadb:10.5</td><td class="val-warn">Exited (0) 14 days ago</td><td class="">0.0%</td><td>0 MB (0.0%)</td><td>Exited</td></tr>
+    </tbody>
+  </table></div>
+  <h3 class="sub-heading">Top Processes by Resource Usage</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Process</th><th>CPU %</th><th>RAM</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><strong>/usr/bin/plex-media-server</strong></td><td class="val-warn"><strong>12.3%</strong></td><td>4.1%</td><td style="color: var(--slate-500);">root</td></tr>
+      <tr><td><strong>emby-server --ffmpeg /usr/bin/ffmpeg</strong></td><td class="val-good"><strong>8.7%</strong></td><td>6.2%</td><td style="color: var(--slate-500);">root</td></tr>
+      <tr><td><strong>python3 /app/tdarr/Tdarr_Node</strong></td><td class="val-good"><strong>5.4%</strong></td><td>2.8%</td><td style="color: var(--slate-500);">nobody</td></tr>
+      <tr><td><strong>/usr/sbin/shfs</strong></td><td class="val-good"><strong>3.2%</strong></td><td>1.5%</td><td style="color: var(--slate-500);">root</td></tr>
+      <tr><td><strong>mongod --config /etc/mongod.conf</strong></td><td class="val-good"><strong>2.1%</strong></td><td>3.4%</td><td style="color: var(--slate-500);">root</td></tr>
+      <tr><td><strong>nginx: master process</strong></td><td class="val-good"><strong>1.8%</strong></td><td>0.9%</td><td style="color: var(--slate-500);">root</td></tr>
+      <tr><td><strong>/usr/bin/wireguard-go wg0</strong></td><td class="val-good"><strong>1.2%</strong></td><td>0.4%</td><td style="color: var(--slate-500);">nobody</td></tr>
+      <tr><td><strong>postgres: writer process</strong></td><td class="val-good"><strong>0.8%</strong></td><td>2.1%</td><td style="color: var(--slate-500);">root</td></tr>
+      <tr><td><strong>/usr/sbin/sshd -D</strong></td><td class="val-good"><strong>0.5%</strong></td><td>0.3%</td><td style="color: var(--slate-500);">root</td></tr>
+      <tr><td><strong>/sbin/agetty --noclear tty1 linux</strong></td><td class="val-good"><strong>0.3%</strong></td><td>0.2%</td><td style="color: var(--slate-500);">root</td></tr>
+    </tbody>
+  </table></div>
+</div>
+</div>
+<div class="page">
+<div class="section">
+  <h2 class="section-heading"><span class="section-num">5</span>ZFS Pool Analysis</h2>
+  <div class="info-card">
+    <h3 class="sub-heading" style="margin-top:0">Pool: tank</h3>
+    <div class="component-grid">
+      <tr>
+        <td><strong>State</strong></td>
+        <td>ONLINE</td>
+        <td class="val-good">val-good</td>
+      </tr>
+      <tr>
+        <td><strong>Size</strong></td>
+        <td>28000.0 GB total, 21280.0 GB used (76%)</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Fragmentation</strong></td>
+        <td>18%</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Last Scrub</strong></td>
+        <td>scrub — Sun Apr 6 02:00:00 2026 (0 errors)</td>
+        <td>&mdash;</td>
+      </tr>
+    </div>
+    <h4 style="margin-top:10px;font-size:9pt;color:var(--cf-text-muted)">VDev Layout</h4>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Device</th><th>Type</th><th>State</th><th>Read Err</th><th>Write Err</th><th>Cksum Err</th></tr></thead>
+      <tbody>
+      <tr><td>mirror-0</td><td>mirror</td><td class="val-good">ONLINE</td><td class="">0</td><td class="">0</td><td class="">0</td></tr>
+      <tr><td>&nbsp;&nbsp;&nbsp;/dev/sdb</td><td>disk</td><td class="val-good">ONLINE</td><td class="">0</td><td class="">0</td><td class="">0</td></tr>
+      <tr><td>&nbsp;&nbsp;&nbsp;/dev/sdc</td><td>disk</td><td class="val-good">ONLINE</td><td class="">0</td><td class="">0</td><td class="">0</td></tr>
+      <tr><td>mirror-1</td><td>mirror</td><td class="val-good">ONLINE</td><td class="">0</td><td class="">0</td><td class="">0</td></tr>
+      <tr><td>&nbsp;&nbsp;&nbsp;/dev/sdd</td><td>disk</td><td class="val-good">ONLINE</td><td class="">0</td><td class="">0</td><td class="">0</td></tr>
+      <tr><td>&nbsp;&nbsp;&nbsp;/dev/sde</td><td>disk</td><td class="val-good">ONLINE</td><td class="">0</td><td class="">0</td><td class="">0</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+  <div class="info-card">
+    <h3 class="sub-heading" style="margin-top:0">Pool: backup</h3>
+    <div class="component-grid">
+      <tr>
+        <td><strong>State</strong></td>
+        <td>DEGRADED</td>
+        <td class="val-warn">val-warn</td>
+      </tr>
+      <tr>
+        <td><strong>Size</strong></td>
+        <td>8000.0 GB total, 5440.0 GB used (68%)</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Fragmentation</strong></td>
+        <td>8%</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Last Scrub</strong></td>
+        <td>scrub — Sat Apr 5 04:00:00 2026 (0 errors)</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Status</strong></td>
+        <td>One or more devices has been removed by the administrator.</td>
+        <td>&mdash;</td>
+      </tr>
+    </div>
+    <h4 style="margin-top:10px;font-size:9pt;color:var(--cf-text-muted)">VDev Layout</h4>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Device</th><th>Type</th><th>State</th><th>Read Err</th><th>Write Err</th><th>Cksum Err</th></tr></thead>
+      <tbody>
+      <tr><td>raidz1-0</td><td>raidz1</td><td class="val-warn">DEGRADED</td><td class="">0</td><td class="">0</td><td class="">0</td></tr>
+      <tr><td>&nbsp;&nbsp;&nbsp;/dev/sdf</td><td>disk</td><td class="val-good">ONLINE</td><td class="">0</td><td class="">0</td><td class="">0</td></tr>
+      <tr><td>&nbsp;&nbsp;&nbsp;/dev/sdg</td><td>disk</td><td class="val-bad">REMOVED</td><td class="">0</td><td class="">0</td><td class="">0</td></tr>
+      <tr><td>&nbsp;&nbsp;&nbsp;/dev/sdh</td><td>disk</td><td class="val-good">ONLINE</td><td class="">0</td><td class="">0</td><td class="">0</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+  <h3 class="sub-heading">ARC Cache Statistics</h3>
+  <div class="component-grid">
+      <tr>
+        <td><strong>ARC Size</strong></td>
+        <td>12288 MB / 16384 MB max</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Hit Rate</strong></td>
+        <td>94.2%</td>
+        <td class="val-good">val-good</td>
+      </tr>
+  </div>
+</div>
+</div>
+<div class="page">
+<div class="section">
+  <h2 class="section-heading"><span class="section-num">6</span>UPS / Power</h2>
+  <div class="info-card">
+    <h3 class="sub-heading" style="margin-top:0">ServerUPS</h3>
+    <p style="color:var(--cf-text-muted);font-size:9pt;margin-bottom:8px">APC Back-UPS XS 1400U</p>
+    <div class="component-grid">
+      <tr>
+        <td><strong>Status</strong></td>
+        <td>Online</td>
+        <td class="val-good">val-good</td>
+      </tr>
+      <tr>
+        <td><strong>Battery</strong></td>
+        <td>100%</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Load</strong></td>
+        <td>34%</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Runtime</strong></td>
+        <td>48 min</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Power Draw</strong></td>
+        <td>294W / 865W nominal</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Input Voltage</strong></td>
+        <td>122V</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Temperature</strong></td>
+        <td>31°C</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><strong>Last Transfer</strong></td>
+        <td>Low line voltage</td>
+        <td>&mdash;</td>
+      </tr>
+    </div>
+  </div>
+</div>
+</div>
+<div class="page">
+<div class="section">
+  <h2 class="section-heading"><span class="section-num">7</span>Network Interfaces</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Interface</th><th>State</th><th>Speed</th><th>MTU</th><th>IPv4 Address</th></tr></thead>
+    <tbody>
+      <tr><td><strong>eth0</strong></td><td class="val-good">UP</td><td>1000Mb/s</td><td>1500</td><td>192.168.1.38/24</td></tr>
+      <tr><td><strong>bond0</strong></td><td class="val-good">UP</td><td>2000Mb/s</td><td>1500</td><td>192.168.1.38/24</td></tr>
+      <tr><td><strong>wg0</strong></td><td class="val-good">UP</td><td>—</td><td>1420</td><td>10.13.13.1/24</td></tr>
+    </tbody>
+  </table></div>
+</div>
+</div>
+<div class="page">
+<div class="section">
+  <h2 class="section-heading"><span class="section-num">8</span>Service Checks</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Service</th><th>Type</th><th>Target</th><th>Status</th><th>Response</th><th>Failures</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Home Assistant</strong></td><td style="text-transform:uppercase;font-size:8pt">http</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">http://192.168.1.10:8123</td><td class="val-good"><strong>UP</strong></td><td>42ms</td><td class="">0</td></tr>
+      <tr><td><strong>Pi-hole DNS</strong></td><td style="text-transform:uppercase;font-size:8pt">dns</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">pi.hole</td><td class="val-good"><strong>UP</strong></td><td>3ms</td><td class="">0</td></tr>
+      <tr><td><strong>Gateway Ping</strong></td><td style="text-transform:uppercase;font-size:8pt">ping</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">192.168.1.1</td><td class="val-good"><strong>UP</strong></td><td>1ms</td><td class="">0</td></tr>
+      <tr><td><strong>Plex Media Server</strong></td><td style="text-transform:uppercase;font-size:8pt">http</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">http://192.168.1.51:32400/web</td><td class="val-good"><strong>UP</strong></td><td>185ms</td><td class="">0</td></tr>
+      <tr><td><strong>NFS Share</strong></td><td style="text-transform:uppercase;font-size:8pt">nfs</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">192.168.1.50</td><td class="val-bad"><strong>DOWN</strong></td><td>—</td><td class="val-bad">2</td></tr>
+      <tr><td><strong>SMB Share</strong></td><td style="text-transform:uppercase;font-size:8pt">smb</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">192.168.1.50</td><td class="val-good"><strong>UP</strong></td><td>8ms</td><td class="">0</td></tr>
+      <tr><td><strong>Internet Speed</strong></td><td style="text-transform:uppercase;font-size:8pt">speed</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-text-muted)">speedtest</td><td class="val-good"><strong>UP</strong></td><td>8200ms</td><td class="">0</td></tr>
+    </tbody>
+  </table></div>
+</div>
+</div>
+<div class="page">
+<div class="section">
+  <h2 class="section-heading"><span class="section-num">9</span>Parity Analysis</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Period</th><th>Duration</th><th>Speed</th><th>Errors</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td>2024-01-15</td><td><strong>15h 0m</strong></td><td class="">142.5 MB/s</td><td class="val-good">0</td><td>check</td></tr>
+      <tr><td>2024-04-12</td><td><strong>16h 0m</strong></td><td class="">134.2 MB/s</td><td class="val-good">0</td><td>check</td></tr>
+      <tr><td>2024-07-20</td><td><strong>17h 30m</strong></td><td class="">121.8 MB/s</td><td class="val-good">0</td><td>check</td></tr>
+      <tr><td>2024-10-05</td><td><strong>20h 0m</strong></td><td class="">106.3 MB/s</td><td class="val-good">0</td><td>check</td></tr>
+      <tr><td>2025-01-11</td><td><strong>24h 0m</strong></td><td class="">88.7 MB/s</td><td class="val-good">0</td><td>check</td></tr>
+      <tr><td>2025-04-19</td><td><strong>27h 0m</strong></td><td class="">78.4 MB/s</td><td class="val-bad">2</td><td>check</td></tr>
+      <tr><td>2025-07-26</td><td><strong>30h 0m</strong></td><td class="">71.1 MB/s</td><td class="val-good">0</td><td>check</td></tr>
+      <tr><td>2025-10-18</td><td><strong>35h 0m</strong></td><td class="">60.2 MB/s</td><td class="val-good">0</td><td>check</td></tr>
+      <tr><td>2026-01-22</td><td><strong>42h 0m</strong></td><td class="val-warn">50.5 MB/s</td><td class="val-bad">5</td><td>check</td></tr>
+      <tr><td>2026-03-30</td><td><strong>48h 0m</strong></td><td class="val-warn">44.1 MB/s</td><td class="val-bad">12</td><td>check</td></tr>
+    </tbody>
+  </table></div>
+</div>
+</div>
+<div class="page">
+<div class="section">
+  <h2 class="section-heading"><span class="section-num">10</span>Recommended Actions</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Action</th><th>Priority</th><th>Estimated Impact</th><th>Cost</th></tr></thead>
+    <tbody>
+      <tr><td>Free space immediately or expand storage.</td><td class="priority-cell" style="color: #dc2626;"><strong>immediate</strong></td><td>Services may fail if disk fills completely. Write operations will fail.</td><td>—</td></tr>
+      <tr><td>Check SATA cables, drive health, and controller. The slowest drive/cable is the bottleneck.</td><td class="priority-cell" style="color: #dc2626;"><strong>immediate</strong></td><td>Parity checks take much longer, array is unprotected for extended periods</td><td>—</td></tr>
+      <tr><td>Run a correcting parity check. Investigate which drive has bad data.</td><td class="priority-cell" style="color: #dc2626;"><strong>immediate</strong></td><td>Parity data is inconsistent. Array protection is compromised.</td><td>—</td></tr>
+      <tr><td>Run a correcting parity check. Investigate which drive has bad data.</td><td class="priority-cell" style="color: #dc2626;"><strong>immediate</strong></td><td>Parity data is inconsistent. Array protection is compromised.</td><td>—</td></tr>
+      <tr><td>Replace the failed device immediately with &#39;zpool replace&#39;. Online the device using &#39;zpool online&#39; or replace the device with &#39;zpool replace&#39;.</td><td class="priority-cell" style="color: #dc2626;"><strong>immediate</strong></td><td>No redundancy. Another device failure will cause data loss.</td><td>—</td></tr>
+      <tr><td>Check logs: kubectl logs broken-app-7b9f4c-abc12 -n default --previous</td><td class="priority-cell" style="color: #dc2626;"><strong>immediate</strong></td><td>Application is repeatedly crashing and restarting</td><td>—</td></tr>
+      <tr><td>Investigate immediately: kubectl describe deployment broken-app -n default</td><td class="priority-cell" style="color: #dc2626;"><strong>immediate</strong></td><td>Service is completely unavailable</td><td>—</td></tr>
+      <tr><td>Check if the backup schedule is running. Verify repository connectivity and credentials.</td><td class="priority-cell" style="color: #dc2626;"><strong>immediate</strong></td><td>Backup data is stale. Recovery point objective (RPO) exceeded.</td><td>—</td></tr>
+      <tr><td>Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Drive health cannot be monitored — failures may go undetected</td><td>Free</td></tr>
+      <tr><td>Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Drive health cannot be monitored — failures may go undetected</td><td>Free</td></tr>
+      <tr><td>Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Drive health cannot be monitored — failures may go undetected</td><td>Free</td></tr>
+      <tr><td>Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Drive health cannot be monitored — failures may go undetected</td><td>Free</td></tr>
+      <tr><td>Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Drive health cannot be monitored — failures may go undetected</td><td>Free</td></tr>
+      <tr><td>Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Drive health cannot be monitored — failures may go undetected</td><td>Free</td></tr>
+      <tr><td>Check if the drive supports SMART passthrough. For USB drives, try enabling SAT passthrough. For HBA controllers, verify smartctl can access the drive directly.</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Drive health cannot be monitored — failures may go undetected</td><td>Free</td></tr>
+      <tr><td>Improve case airflow. Add/replace fans. Check that existing fans are working.</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Reduced drive lifespan, increased error rate</td><td>$20-50 for case fans</td></tr>
+      <tr><td>Monitor SMART attributes closely for degradation.</td><td class="priority-cell" style="color: #2563eb;"><strong>medium-term</strong></td><td>Possible latent damage from thermal stress</td><td>—</td></tr>
+      <tr><td>Consider adding an SSD cache for Docker containers and frequently-accessed data.</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Noticeable performance degradation during heavy disk activity</td><td>$50-150 for SSD cache drive</td></tr>
+      <tr><td>Monitor growth rate. Plan storage expansion or cleanup.</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>May run out of space soon if growth continues</td><td>—</td></tr>
+      <tr><td>Check events: kubectl describe pod pending-job-xyz -n default</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Workload is not running — may be waiting for resources</td><td>—</td></tr>
+      <tr><td>Check pod status: kubectl get pods -l app=broken-app -n default</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Service may be degraded</td><td>—</td></tr>
+      <tr><td>Check storage provisioner and available PVs</td><td class="priority-cell" style="color: #d97706;"><strong>short-term</strong></td><td>Pods depending on this PVC cannot start</td><td>—</td></tr>
+      <tr><td>Improve case airflow. Add/replace fans. Check that existing fans are working.</td><td class="priority-cell" style="color: #2563eb;"><strong>medium-term</strong></td><td>Reduced drive lifespan, increased error rate</td><td>$20-50 for case fans</td></tr>
+      <tr><td>Improve case airflow. Add/replace fans. Check that existing fans are working.</td><td class="priority-cell" style="color: #2563eb;"><strong>medium-term</strong></td><td>Reduced drive lifespan, increased error rate</td><td>$20-50 for case fans</td></tr>
+      <tr><td>Update your NAS OS when convenient. Review release notes before updating.</td><td class="priority-cell" style="color: #2563eb;"><strong>medium-term</strong></td><td>Missing security patches and bug fixes.</td><td>—</td></tr>
+      <tr><td>No action required.</td><td class="priority-cell" style="color: #2563eb;"><strong>medium-term</strong></td><td>None — backup is operating normally.</td><td>—</td></tr>
+      <tr><td>No action required.</td><td class="priority-cell" style="color: #2563eb;"><strong>medium-term</strong></td><td>None — backup is operating normally.</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+</div>
+</div>
+<div class="page">
+<div style="position: relative; padding-top: 24px;">
+  <div style="position: absolute; top: 0; left: 0; right: 0; height: 1px; background-image: linear-gradient(to right, var(--cf-border) 50%, transparent 50%); background-size: 12px 1px; background-repeat: repeat-x;"></div>
+  <p style="font-size: 8.5pt; color: var(--cf-text-subtle); font-style: italic; margin-bottom: 16px; line-height: 1.6;">This report was generated from a read-only diagnostic session on 13 April 2026. No changes were made to the system.</p>
+  <p style="font-size: 8pt; color: var(--cf-text-subtle); text-align: center;">Data sources: SMART, dmesg, syslog, /proc/meminfo, /proc/stat, docker, parity-checks.log.</p>
+</div>
+</div>
+</div>
+</body>
+</html>
