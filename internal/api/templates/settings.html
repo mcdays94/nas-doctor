@@ -395,7 +395,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
   <!-- 3. Service Checks -->
   <div class="card" id="card-service-checks">
     <div class="card-title">Service Checks</div>
-    <div class="card-desc">Monitor service endpoints (HTTP, TCP, DNS, Ping/ICMP, SMB, NFS) and trigger findings when they fail repeatedly.</div>
+    <div class="card-desc">Monitor service endpoints (HTTP, TCP, DNS, Ping/ICMP, SMB, NFS, Speed Test) and trigger findings when they fail repeatedly.</div>
     <div id="service-check-list"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
       <button class="btn btn-secondary" id="btn-add-service-check" onclick="toggleServiceCheckForm()">+ Add Service Check</button>
@@ -418,6 +418,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             <option value="ping">Ping (ICMP)</option>
             <option value="smb">SMB</option>
             <option value="nfs">NFS</option>
+            <option value="speed">Speed Test</option>
           </select>
         </div>
       </div>
@@ -483,6 +484,23 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div class="form-group" id="sc-headers-wrap">
         <label for="sc-headers">Custom HTTP Headers (optional — for auth, CF Access, etc.)</label>
         <textarea id="sc-headers" rows="2" placeholder="Authorization: Bearer token123&#10;CF-Access-Client-Id: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
+      </div>
+      <div id="sc-speed-wrap" style="display:none">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <div style="flex:1">
+            <label class="form-label">Contracted Download (Mbps)</label>
+            <input type="number" id="sc-contracted-down" class="form-input" placeholder="e.g. 1000" step="1" min="0">
+          </div>
+          <div style="flex:1">
+            <label class="form-label">Contracted Upload (Mbps)</label>
+            <input type="number" id="sc-contracted-up" class="form-input" placeholder="e.g. 500" step="1" min="0">
+          </div>
+        </div>
+        <div>
+          <label class="form-label">Margin of Error (%)</label>
+          <input type="number" id="sc-margin" class="form-input" placeholder="10" step="1" min="0" max="50" value="10">
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">Speeds within this % of contracted speed are considered acceptable</div>
+        </div>
       </div>
       <div class="form-row">
         <div>
@@ -1279,7 +1297,10 @@ function normalizeServiceCheck(sc) {
     failure_threshold: (sc && sc.failure_threshold) ? sc.failure_threshold : 1,
     failure_severity: (sc && sc.failure_severity) ? sc.failure_severity : "warning",
     expected_status_min: (sc && sc.expected_status_min) ? sc.expected_status_min : 200,
-    expected_status_max: (sc && sc.expected_status_max) ? sc.expected_status_max : 399
+    expected_status_max: (sc && sc.expected_status_max) ? sc.expected_status_max : 399,
+    contracted_down_mbps: (sc && sc.contracted_down_mbps) ? sc.contracted_down_mbps : 0,
+    contracted_up_mbps: (sc && sc.contracted_up_mbps) ? sc.contracted_up_mbps : 0,
+    margin_pct: (sc && sc.margin_pct) ? sc.margin_pct : 0
   };
   if (out.timeout_sec < 1) out.timeout_sec = 5;
   if (out.failure_threshold < 1) out.failure_threshold = 1;
@@ -1299,6 +1320,7 @@ function serviceTypePillClass(t) {
   if (type === "ping") return "pill-ping";
   if (type === "smb") return "pill-smb";
   if (type === "nfs") return "pill-nfs";
+  if (type === "speed") return "pill-speed";
   return "pill-http";
 }
 
@@ -1368,6 +1390,9 @@ function toggleServiceCheckForm() {
   document.getElementById("sc-http-min").value = "200";
   document.getElementById("sc-http-max").value = "399";
   document.getElementById("sc-headers").value = "";
+  document.getElementById("sc-contracted-down").value = "";
+  document.getElementById("sc-contracted-up").value = "";
+  document.getElementById("sc-margin").value = "10";
   setServiceCheckEnabledUI(true);
   populateInstanceSelector();
   onServiceTypeChange();
@@ -1387,12 +1412,16 @@ function onServiceTypeChange() {
   var httpWrap = document.getElementById("sc-http-expected-wrap");
   var portWrap = document.getElementById("sc-port-wrap");
   var headersWrap = document.getElementById("sc-headers-wrap");
+  var speedWrap = document.getElementById("sc-speed-wrap");
+  var targetRow = document.getElementById("sc-target") ? document.getElementById("sc-target").closest(".form-row") : null;
   if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
   if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
   if (headersWrap) headersWrap.style.display = (type === "http") ? "block" : "none";
+  if (speedWrap) speedWrap.style.display = (type === "speed") ? "block" : "none";
   var targetInput = document.getElementById("sc-target");
   if (targetInput) {
-    if (type === "ping") targetInput.placeholder = "e.g. 8.8.8.8 or gateway.local";
+    if (type === "speed") { targetInput.placeholder = "speedtest (auto-filled)"; targetInput.value = targetInput.value || "speedtest"; }
+    else if (type === "ping") targetInput.placeholder = "e.g. 8.8.8.8 or gateway.local";
     else if (type === "dns") targetInput.placeholder = "e.g. google.com";
     else targetInput.placeholder = "https://nas.local/health, 192.168.1.10, or host:port";
   }
@@ -1426,6 +1455,9 @@ function editServiceCheck(idx) {
   document.getElementById("sc-http-min").value = String(sc.expected_status_min || 200);
   document.getElementById("sc-http-max").value = String(sc.expected_status_max || 399);
   document.getElementById("sc-headers").value = scHeadersToText(sc.headers);
+  document.getElementById("sc-contracted-down").value = sc.contracted_down_mbps || "";
+  document.getElementById("sc-contracted-up").value = sc.contracted_up_mbps || "";
+  document.getElementById("sc-margin").value = sc.margin_pct || 10;
   setServiceCheckEnabledUI(sc.enabled !== false);
   onServiceTypeChange();
   document.getElementById("service-check-form").classList.add("visible");
@@ -1465,6 +1497,12 @@ function saveServiceCheck() {
   if (type !== "http") {
     sc.expected_status_min = 0;
     sc.expected_status_max = 0;
+  }
+  if (type === "speed") {
+    sc.contracted_down_mbps = parseFloat(document.getElementById("sc-contracted-down").value) || 0;
+    sc.contracted_up_mbps = parseFloat(document.getElementById("sc-contracted-up").value) || 0;
+    sc.margin_pct = parseFloat(document.getElementById("sc-margin").value) || 10;
+    sc.target = "speedtest";
   }
 
   for (var i = 0; i < serviceChecks.length; i++) {

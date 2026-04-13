@@ -191,12 +191,13 @@ type TailscaleNode struct {
 // ---------- Service Checks ----------
 
 const (
-	ServiceCheckHTTP = "http"
-	ServiceCheckTCP  = "tcp"
-	ServiceCheckDNS  = "dns"
-	ServiceCheckSMB  = "smb"
-	ServiceCheckNFS  = "nfs"
-	ServiceCheckPing = "ping"
+	ServiceCheckHTTP  = "http"
+	ServiceCheckTCP   = "tcp"
+	ServiceCheckDNS   = "dns"
+	ServiceCheckSMB   = "smb"
+	ServiceCheckNFS   = "nfs"
+	ServiceCheckPing  = "ping"
+	ServiceCheckSpeed = "speed"
 )
 
 type ServiceCheckConfig struct {
@@ -213,6 +214,11 @@ type ServiceCheckConfig struct {
 	ExpectedMin      int               `json:"expected_status_min,omitempty"`
 	ExpectedMax      int               `json:"expected_status_max,omitempty"`
 	Headers          map[string]string `json:"headers,omitempty"` // custom request headers for HTTP checks
+
+	// Speed check specific fields
+	ContractedDownMbps float64 `json:"contracted_down_mbps,omitempty"` // expected minimum download speed
+	ContractedUpMbps   float64 `json:"contracted_up_mbps,omitempty"`   // expected minimum upload speed
+	MarginPct          float64 `json:"margin_pct,omitempty"`           // acceptable margin of error (e.g. 10 = ±10%)
 }
 
 type ServiceCheckResult struct {
@@ -220,13 +226,20 @@ type ServiceCheckResult struct {
 	Name                string   `json:"name"`
 	Type                string   `json:"type"`
 	Target              string   `json:"target"`
-	Status              string   `json:"status"` // up, down
+	Status              string   `json:"status"` // up, degraded, down
 	ResponseMS          int64    `json:"response_ms"`
 	Error               string   `json:"error,omitempty"`
 	CheckedAt           string   `json:"checked_at"`
 	ConsecutiveFailures int      `json:"consecutive_failures"`
 	FailureThreshold    int      `json:"failure_threshold"`
 	FailureSeverity     Severity `json:"failure_severity"`
+
+	// Speed check specific fields (populated when Type == "speed")
+	DownloadMbps float64 `json:"download_mbps,omitempty"`
+	UploadMbps   float64 `json:"upload_mbps,omitempty"`
+	LatencyMs    float64 `json:"latency_ms,omitempty"`
+	DownloadOK   *bool   `json:"download_ok,omitempty"` // nil for non-speed checks
+	UploadOK     *bool   `json:"upload_ok,omitempty"`
 }
 
 // ---------- System ----------

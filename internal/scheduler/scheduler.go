@@ -969,6 +969,52 @@ func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) inter
 		}
 		result.Status = "up"
 
+	case internal.ServiceCheckSpeed:
+		// Run a speed test and compare against contracted speeds
+		stResult := collector.RunSpeedTest()
+		if stResult == nil {
+			result.Error = "no speedtest tool available (install speedtest or speedtest-cli)"
+			break
+		}
+
+		result.DownloadMbps = stResult.DownloadMbps
+		result.UploadMbps = stResult.UploadMbps
+		result.LatencyMs = stResult.LatencyMs
+		result.ResponseMS = int64(stResult.LatencyMs)
+
+		// Apply margin of error (default 10%)
+		margin := check.MarginPct
+		if margin <= 0 {
+			margin = 10
+		}
+		marginFactor := 1 - (margin / 100)
+
+		dlThreshold := check.ContractedDownMbps * marginFactor
+		ulThreshold := check.ContractedUpMbps * marginFactor
+
+		dlOK := check.ContractedDownMbps <= 0 || stResult.DownloadMbps >= dlThreshold
+		ulOK := check.ContractedUpMbps <= 0 || stResult.UploadMbps >= ulThreshold
+		result.DownloadOK = &dlOK
+		result.UploadOK = &ulOK
+
+		switch {
+		case dlOK && ulOK:
+			result.Status = "up"
+		case dlOK || ulOK:
+			result.Status = "degraded"
+			which := "upload"
+			if !dlOK {
+				which = "download"
+			}
+			result.Error = fmt.Sprintf("%s below contracted speed (%.0f/%.0f Mbps, threshold %.0f with %.0f%% margin)",
+				which, stResult.DownloadMbps, stResult.UploadMbps,
+				check.ContractedDownMbps, margin)
+		default:
+			result.Error = fmt.Sprintf("both download and upload below contracted speed (%.0f/%.0f Mbps, contracted %.0f/%.0f with %.0f%% margin)",
+				stResult.DownloadMbps, stResult.UploadMbps,
+				check.ContractedDownMbps, check.ContractedUpMbps, margin)
+		}
+
 	default:
 		result.Error = "unsupported service check type"
 	}
@@ -984,7 +1030,7 @@ func executeServiceCheck(check internal.ServiceCheckConfig, now time.Time) inter
 
 func isSupportedServiceCheckType(checkType string) bool {
 	switch strings.ToLower(strings.TrimSpace(checkType)) {
-	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing:
+	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing, internal.ServiceCheckSpeed:
 		return true
 	default:
 		return false
