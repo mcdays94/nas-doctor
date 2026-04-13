@@ -206,6 +206,7 @@ func DemoServiceCheckConfigs() []internal.ServiceCheckConfig {
 		{Name: "Plex Media Server", Type: "http", Target: "http://192.168.1.51:32400/web", Enabled: true, IntervalSec: 300, TimeoutSec: 10, FailureThreshold: 2, FailureSeverity: "warning"},
 		{Name: "NFS Share", Type: "nfs", Target: "192.168.1.50", Enabled: true, IntervalSec: 300, TimeoutSec: 5, FailureThreshold: 3, FailureSeverity: "warning"},
 		{Name: "SMB Share", Type: "smb", Target: "192.168.1.50", Enabled: true, IntervalSec: 300, TimeoutSec: 5, FailureThreshold: 3, FailureSeverity: "warning"},
+		{Name: "Internet Speed", Type: internal.ServiceCheckSpeed, Target: "speedtest", Enabled: true, IntervalSec: 14400, FailureThreshold: 2, FailureSeverity: internal.SeverityWarning, ContractedDownMbps: 1000, ContractedUpMbps: 500, MarginPct: 10},
 	}
 }
 
@@ -218,6 +219,7 @@ func demoServiceChecks() []internal.ServiceCheckResult {
 		{Key: "demo-plex", Name: "Plex Media Server", Type: "http", Target: "http://192.168.1.51:32400/web", Status: "up", ResponseMS: 185, CheckedAt: now.Add(-120 * time.Second).Format(time.RFC3339), FailureThreshold: 2, FailureSeverity: "warning"},
 		{Key: "demo-nfs", Name: "NFS Share", Type: "nfs", Target: "192.168.1.50", Status: "down", ResponseMS: 5000, Error: "connection refused", CheckedAt: now.Add(-90 * time.Second).Format(time.RFC3339), ConsecutiveFailures: 2, FailureThreshold: 3, FailureSeverity: "warning"},
 		{Key: "demo-smb", Name: "SMB Share", Type: "smb", Target: "192.168.1.50", Status: "up", ResponseMS: 8, CheckedAt: now.Add(-90 * time.Second).Format(time.RFC3339), FailureThreshold: 3, FailureSeverity: "warning"},
+		{Key: "demo-speed", Name: "Internet Speed", Type: "speed", Target: "speedtest", Status: "up", ResponseMS: 8200, CheckedAt: now.Add(-3600 * time.Second).Format(time.RFC3339), FailureThreshold: 2, FailureSeverity: "warning", DownloadMbps: 940, UploadMbps: 450, LatencyMs: 8, DownloadOK: boolPtr(true), UploadOK: boolPtr(true)},
 	}
 }
 
@@ -582,6 +584,8 @@ func demoSpeedTest() *internal.SpeedTestInfo {
 		},
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }
 
 // Jitter adds small random variation to a float to simulate live data.
 func Jitter(base float64, pct float64) float64 {

@@ -282,6 +282,10 @@ body.theme-clean .badge-generic { background:rgba(0,0,0,0.06) }
 .pill-dns  { background:rgba(236,72,153,0.14); color:#f472b6 }
 .pill-smb,.pill-nfs { background:rgba(245,158,11,0.14); color:#fbbf24 }
 .pill-ping { background:rgba(139,92,246,0.14); color:#a78bfa }
+.pill-speed { background:rgba(14,165,233,0.14); color:#38bdf8 }
+
+/* ── Status Dots ────────────────────────────────────────────── */
+.status-dot.degraded { background:#f59e0b }
 
 /* ── Webhook Items ──────────────────────────────────────────── */
 .webhook-item {

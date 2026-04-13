@@ -25,13 +25,14 @@
 .badge-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .badge-dot.up{background:var(--green)}
 .badge-dot.down{background:var(--red)}
+.badge-dot.degraded{background:var(--amber)}
 .badge-name{font-weight:600;font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .badge-pct{font-size:12px;font-weight:600}
 .badge-pct.good{color:var(--green)}.badge-pct.warn{color:var(--amber)}.badge-pct.bad{color:var(--red)}
 .badge-meta{font-size:11px;color:var(--text3);display:flex;gap:8px}
 .heartbeat{display:flex;gap:1px;align-items:center;height:20px;overflow:hidden;margin-top:6px}
 .hb-dot{width:3px;height:14px;border-radius:1px;flex-shrink:0}
-.hb-dot.up{background:var(--green)}.hb-dot.down{background:var(--red)}.hb-dot.empty{background:var(--border);opacity:0.3}
+.hb-dot.up{background:var(--green)}.hb-dot.down{background:var(--red)}.hb-dot.degraded{background:var(--amber)}.hb-dot.empty{background:var(--border);opacity:0.3}
 /* Filter bar */
 .filter-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
 .filter-bar select,.filter-bar input{font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text)}
@@ -44,6 +45,7 @@
 .log-table td{padding:6px 12px;border-bottom:1px solid var(--border)}
 .log-table .status-up{color:var(--green);font-weight:600}
 .log-table .status-down{color:var(--red);font-weight:600}
+.log-table .status-degraded{color:var(--amber);font-weight:600}
 .log-table tr:hover{background:var(--bg-elevated)}
 .log-empty{padding:40px;text-align:center;color:var(--text3)}
 /* Pagination */
@@ -107,7 +109,7 @@
     <div><span class="filter-label">Check</span><br>
       <select id="f-check" onchange="applyFilters()"><option value="">All checks</option></select></div>
     <div><span class="filter-label">Status</span><br>
-      <select id="f-status" onchange="applyFilters()"><option value="">All</option><option value="up">Up</option><option value="down">Down</option></select></div>
+      <select id="f-status" onchange="applyFilters()"><option value="">All</option><option value="up">Up</option><option value="degraded">Degraded</option><option value="down">Down</option></select></div>
     <div><span class="filter-label">Time range</span><br>
       <select id="f-range" onchange="applyFilters()"><option value="1h">Last hour</option><option value="6h">Last 6 hours</option><option value="24h" selected>Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></div>
     <div style="margin-left:auto;align-self:flex-end">
@@ -151,7 +153,7 @@
 
   function esc(s){var d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
   function fetchJSON(url){return fetch(url).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()});}
-  function pillClass(t){t=(t||"").toLowerCase();if(t==="http")return"pill-http";if(t==="tcp")return"pill-tcp";if(t==="dns")return"pill-dns";if(t==="ping")return"pill-ping";if(t==="smb"||t==="nfs")return"pill-smb";return"pill-http";}
+  function pillClass(t){t=(t||"").toLowerCase();if(t==="http")return"pill-http";if(t==="tcp")return"pill-tcp";if(t==="dns")return"pill-dns";if(t==="ping")return"pill-ping";if(t==="smb"||t==="nfs")return"pill-smb";if(t==="speed")return"pill-speed";return"pill-http";}
   function fmtInterval(sec){if(sec<60)return sec+"s";if(sec<3600)return Math.floor(sec/60)+"m";return Math.floor(sec/3600)+"h";}
   function faviconHTML(type,target){
     if((type||"").toLowerCase()!=="http")return"";
@@ -175,8 +177,8 @@
     var count=Math.min(hist.length,N);var pad=N-count;
     for(var d=0;d<pad;d++)h+='<div class="hb-dot empty"></div>';
     for(var d=count-1;d>=0;d--){
-      var e=hist[d];var isUp=e.status==="up";
-      h+='<div class="hb-dot '+(isUp?"up":"down")+'" title="'+(e.response_ms||0)+'ms"></div>';
+      var e=hist[d];var dotCls=e.status==="up"?"up":e.status==="degraded"?"degraded":"down";
+      h+='<div class="hb-dot '+dotCls+'" title="'+(e.response_ms||0)+'ms"></div>';
     }
     h+='</div>';return h;
   }
@@ -191,11 +193,11 @@
       var total=hist.length,up=0;for(var j=0;j<total;j++){if(hist[j].status==="up")up++;}
       var pct=total>0?up/total*100:100;
       var pctCls=pct>=99?"good":pct>=90?"warn":"bad";
-      var isUp=c.status==="up";
+      var isUp=c.status==="up";var isDegraded=c.status==="degraded";
       var isActive=(activeFilter===c.key);
       h+='<div class="badge-card'+(isActive?" active":"")+'" onclick="filterByCheck(\''+esc(c.key)+'\')">';
       h+='<div class="badge-top">';
-      h+='<div class="badge-dot '+(isUp?"up":"down")+'"></div>';
+      h+='<div class="badge-dot '+(isUp?"up":isDegraded?"degraded":"down")+'"></div>';
       h+=faviconHTML(c.type,c.target);
       h+='<div class="badge-name">'+esc(c.name)+'</div>';
       h+='<span class="pill '+pillClass(c.type)+'" style="font-size:9px;padding:1px 5px">'+esc((c.type||"").toUpperCase())+'</span>';
@@ -204,7 +206,7 @@
       var isOrphan = !configuredKeys[c.key] && !configuredKeys[(c.name||"").toLowerCase()];
       h+='<div class="badge-meta" style="margin-top:6px">';
       h+='<span class="badge-pct '+pctCls+'">'+pct.toFixed(1)+'%</span>';
-      h+='<span>'+(isUp?(c.response_ms||0)+'ms':'DOWN')+'</span>';
+      h+='<span>'+(isUp?(c.response_ms||0)+'ms':isDegraded?'<span style="color:var(--amber)">DEGRADED</span>':'DOWN')+'</span>';
       if(c.interval_sec)h+='<span>every '+fmtInterval(c.interval_sec)+'</span>';
       if(isOrphan)h+='<span class="orphan-badge">orphaned</span><button class="btn-delete-check" onclick="event.stopPropagation();deleteCheck(\''+esc(c.key)+'\')">Delete</button>';
       h+='</div>';
@@ -277,7 +279,7 @@
       h+='<div class="log-detail-item"><div class="ld-label">Check Name</div><div class="ld-val">'+esc(e.name||"—")+'</div></div>';
       h+='<div class="log-detail-item"><div class="ld-label">Type</div><div class="ld-val">'+esc((e.type||"").toUpperCase())+'</div></div>';
       h+='<div class="log-detail-item"><div class="ld-label">Target</div><div class="ld-val" style="font-size:11px;font-family:var(--font-mono);word-break:break-all">'+esc(e.target||"—")+'</div></div>';
-      h+='<div class="log-detail-item"><div class="ld-label">Status</div><div class="ld-val" style="color:'+(e.status==="up"?"var(--green)":"var(--red)")+'">'+esc(e.status||"—")+'</div></div>';
+      h+='<div class="log-detail-item"><div class="ld-label">Status</div><div class="ld-val" style="color:'+(e.status==="up"?"var(--green)":e.status==="degraded"?"var(--amber)":"var(--red)")+'">'+esc(e.status||"—")+'</div></div>';
       h+='<div class="log-detail-item"><div class="ld-label">Response Time</div><div class="ld-val">'+(e.response_ms!=null?e.response_ms+' ms':'—')+'</div></div>';
       h+='<div class="log-detail-item"><div class="ld-label">Checked At</div><div class="ld-val" style="font-size:11px">'+esc(ts)+'</div></div>';
       h+='<div class="log-detail-item"><div class="ld-label">Consecutive Failures</div><div class="ld-val">'+(e.consecutive_failures||0)+' / '+(e.failure_threshold||1)+'</div></div>';
@@ -292,6 +294,13 @@
       }
       if((e.type||"").toLowerCase()==="ping"){
         h+='<div class="log-detail-item"><div class="ld-label">RTT</div><div class="ld-val">'+(e.response_ms||0)+' ms</div></div>';
+      }
+      if((e.type||"").toLowerCase()==="speed"){
+        h+='<div class="log-detail-item"><div class="ld-label">Download</div><div class="ld-val">'+(e.download_mbps?e.download_mbps.toFixed(1)+' Mbps':'—')+'</div></div>';
+        h+='<div class="log-detail-item"><div class="ld-label">Upload</div><div class="ld-val">'+(e.upload_mbps?e.upload_mbps.toFixed(1)+' Mbps':'—')+'</div></div>';
+        h+='<div class="log-detail-item"><div class="ld-label">Latency</div><div class="ld-val">'+(e.latency_ms?e.latency_ms.toFixed(1)+' ms':'—')+'</div></div>';
+        if(e.download_ok!=null) h+='<div class="log-detail-item"><div class="ld-label">Download OK</div><div class="ld-val" style="color:'+(e.download_ok?'var(--green)':'var(--red)')+'">'+e.download_ok+'</div></div>';
+        if(e.upload_ok!=null) h+='<div class="log-detail-item"><div class="ld-label">Upload OK</div><div class="ld-val" style="color:'+(e.upload_ok?'var(--green)':'var(--red)')+'">'+e.upload_ok+'</div></div>';
       }
       h+='</div></div></td></tr>';
     }
