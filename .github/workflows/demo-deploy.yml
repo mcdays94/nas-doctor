@@ -118,6 +118,41 @@ jobs:
             wrangler kv key put --namespace-id=$KV_NAMESPACE_ID --remote "seed:unraid:$(basename "$f" .json)" --path "$f"
           done
 
+      # ── Generate wrangler.toml from secrets ──
+      - name: Generate wrangler configs
+        run: |
+          cat > demo-worker/wrangler.toml << TOML
+          name = "nas-doctor-demo"
+          main = "src/index.ts"
+          compatibility_date = "2024-12-30"
+          account_id = "$CF_ACCOUNT_ID"
+          workers_dev = false
+          [vars]
+          DEMO_MODE = "true"
+          [assets]
+          directory = "./captured"
+          binding = "ASSETS"
+          [[routes]]
+          pattern = "nasdoctordemo.mdias.info"
+          custom_domain = true
+          [[kv_namespaces]]
+          binding = "DEMO_DATA"
+          id = "$KV_NAMESPACE_ID"
+          TOML
+
+          cat > demo-worker/feeder/wrangler.toml << TOML
+          name = "nas-doctor-demo-feeder"
+          main = "src/index.ts"
+          compatibility_date = "2024-12-30"
+          account_id = "$CF_ACCOUNT_ID"
+          workers_dev = true
+          [triggers]
+          crons = ["*/5 * * * *"]
+          [[kv_namespaces]]
+          binding = "DEMO_DATA"
+          id = "$KV_NAMESPACE_ID"
+          TOML
+
       # ── Deploy demo Worker ──
       - name: Install demo Worker deps
         working-directory: demo-worker
