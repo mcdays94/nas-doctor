@@ -6,6 +6,7 @@ package collector
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -266,6 +267,36 @@ func collectIntel() []internal.GPUDevice {
 				gpu.PowerW = parseFloat(pwrStr) / 1000000
 			}
 		}
+
+		// Temperature fallback: iGPU shares die with CPU — use thermal_zone or coretemp
+		if gpu.Temperature == 0 {
+			gpu.Temperature = readThermalZoneTemp()
+		}
+
+		// GPU usage: estimate from frequency ratio (actual / max)
+		cardDir := filepath.Dir(base) // e.g., /sys/class/drm/card0
+		actFreq := readSysfs(filepath.Join(cardDir, "gt_act_freq_mhz"))
+		maxFreq := readSysfs(filepath.Join(cardDir, "gt_max_freq_mhz"))
+		if actFreq == "" {
+			actFreq = readSysfs(filepath.Join(cardDir, "gt_cur_freq_mhz"))
+		}
+		if actFreq != "" && maxFreq != "" {
+			act := parseFloat(actFreq)
+			max := parseFloat(maxFreq)
+			if max > 0 {
+				gpu.UsagePct = (act / max) * 100
+				if gpu.UsagePct > 100 {
+					gpu.UsagePct = 100
+				}
+			}
+			gpu.ClockMHz = int(act)
+		}
+
+		// Try intel_gpu_top for more accurate usage (if installed)
+		if out, err := execCmd("intel_gpu_top", "-J", "-s", "100", "-l", "1"); err == nil {
+			gpu.UsagePct = parseIntelGPUTop(out, &gpu)
+		}
+
 		// VRAM / local memory — Intel Arc discrete GPUs
 		vramTotal := readSysfs(filepath.Join(base, "mem_info_vram_total"))
 		vramUsed := readSysfs(filepath.Join(base, "mem_info_vram_used"))
@@ -277,6 +308,11 @@ func collectIntel() []internal.GPUDevice {
 		}
 		if gpu.MemTotalMB > 0 {
 			gpu.MemPct = (gpu.MemUsedMB / gpu.MemTotalMB) * 100
+		}
+
+		// Don't show GPU section with all zeros — skip if no useful data
+		if gpu.UsagePct == 0 && gpu.Temperature == 0 && gpu.MemTotalMB == 0 && gpu.PowerW == 0 {
+			continue
 		}
 		gpus = append(gpus, gpu)
 	}
@@ -327,4 +363,87 @@ func parseInt(s string) int {
 	}
 	v, _ := strconv.Atoi(s)
 	return v
+}
+
+// readThermalZoneTemp reads the CPU/package temperature from thermal zones.
+// Intel iGPUs share the die with the CPU, so the CPU package temp is the
+// closest approximation of GPU temperature.
+func readThermalZoneTemp() int {
+	zones, _ := filepath.Glob("/sys/class/thermal/thermal_zone*/type")
+	for _, typePath := range zones {
+		zoneType := readSysfs(typePath)
+		// Prefer x86_pkg_temp (package), then coretemp, then any zone
+		if strings.Contains(zoneType, "x86_pkg") || strings.Contains(zoneType, "pkg") {
+			tempStr := readSysfs(filepath.Join(filepath.Dir(typePath), "temp"))
+			if tempStr != "" {
+				return parseInt(tempStr) / 1000
+			}
+		}
+	}
+	// Fallback: try first thermal zone with a non-zero temperature
+	zones2, _ := filepath.Glob("/sys/class/thermal/thermal_zone*/temp")
+	for _, tempPath := range zones2 {
+		t := parseInt(readSysfs(tempPath)) / 1000
+		if t > 0 && t < 120 {
+			return t
+		}
+	}
+	return 0
+}
+
+// parseIntelGPUTop parses JSON output from `intel_gpu_top -J -s 100 -l 1`.
+// Returns the render busy percentage, and populates encoder/decoder if available.
+func parseIntelGPUTop(output string, gpu *internal.GPUDevice) float64 {
+	// intel_gpu_top JSON wraps data in {"period": {...}, "engines": {...}, "frequency": {...}, ...}
+	// Look for "Render/3D" or "render" engine busy percentage
+	type engineData struct {
+		Busy float64 `json:"busy"`
+	}
+	type gpuTopEntry struct {
+		Frequency struct {
+			Actual float64 `json:"actual"`
+			Max    float64 `json:"requested"`
+		} `json:"frequency"`
+		Engines map[string]engineData `json:"engines"`
+		Power   struct {
+			GPU float64 `json:"GPU"`
+			Pkg float64 `json:"Package"`
+		} `json:"power"`
+	}
+
+	// The output may have multiple lines or be wrapped — try to find the JSON object
+	var entry gpuTopEntry
+	if err := json.Unmarshal([]byte(output), &entry); err != nil {
+		// intel_gpu_top sometimes wraps in a JSON array
+		var entries []gpuTopEntry
+		if err := json.Unmarshal([]byte(output), &entries); err == nil && len(entries) > 0 {
+			entry = entries[len(entries)-1]
+		} else {
+			return 0
+		}
+	}
+
+	// Sum render + video engine usage
+	var renderBusy, videoBusy float64
+	for name, eng := range entry.Engines {
+		nameLower := strings.ToLower(name)
+		if strings.Contains(nameLower, "render") || strings.Contains(nameLower, "3d") {
+			renderBusy = eng.Busy
+		}
+		if strings.Contains(nameLower, "video") || strings.Contains(nameLower, "vecs") {
+			videoBusy = eng.Busy
+		}
+	}
+
+	if renderBusy > 0 {
+		gpu.EncoderPct = videoBusy
+	}
+	if entry.Frequency.Actual > 0 {
+		gpu.ClockMHz = int(entry.Frequency.Actual)
+	}
+	if entry.Power.GPU > 0 {
+		gpu.PowerW = entry.Power.GPU
+	}
+
+	return renderBusy
 }
