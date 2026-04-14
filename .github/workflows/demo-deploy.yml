@@ -12,8 +12,8 @@ on:
   workflow_dispatch:
 
 env:
-  KV_NAMESPACE_ID: 'REDACTED_KV_NAMESPACE_ID'
-  CF_ACCOUNT_ID: 'REDACTED_CF_ACCOUNT_ID'
+  KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+  CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
 jobs:
   deploy:
