@@ -98,6 +98,13 @@ jobs:
             wrangler kv key put --namespace-id=$KV_NAMESPACE_ID --remote "seed:unraid:$(basename "$f" .json)" --path "$f"
           done
 
+      # ── Capture version from running binary ──
+      - name: Capture version
+        run: |
+          VERSION=$(curl -sf http://localhost:8060/api/v1/health | python3 -c "import sys,json; print(json.load(sys.stdin).get('version','unknown'))" 2>/dev/null || echo "unknown")
+          echo "DEMO_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Captured version: $VERSION"
+
       # ── Deploy demo Worker ──
       - name: Install demo Worker deps
         working-directory: demo-worker
@@ -109,7 +116,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ env.CF_ACCOUNT_ID }}
           workingDirectory: demo-worker
-          command: deploy
+          command: deploy --var VERSION:${{ env.DEMO_VERSION }}
 
       # ── Deploy feeder Worker ──
       - name: Install feeder deps
