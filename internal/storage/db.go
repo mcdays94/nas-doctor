@@ -470,6 +470,33 @@ func (d *DB) saveContainerHistory(tx *sql.Tx, snap *internal.Snapshot) error {
 	return nil
 }
 
+// SaveContainerStats saves a standalone container stats snapshot (not tied to a full scan).
+// Used by the lightweight container stats collection loop.
+func (d *DB) SaveContainerStats(docker *internal.DockerInfo) error {
+	if docker == nil || !docker.Available {
+		return nil
+	}
+	now := time.Now()
+	snapshotID := fmt.Sprintf("cstats-%d", now.UnixMilli())
+	for _, c := range docker.Containers {
+		if c.State != "running" {
+			continue
+		}
+		_, err := d.db.Exec(
+			`INSERT INTO container_stats_history (snapshot_id, container_id, name, image, cpu_pct, mem_mb, mem_pct, net_in_bytes, net_out_bytes, block_read_bytes, block_write_bytes, timestamp)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snapshotID, c.ID, c.Name, c.Image,
+			c.CPU, c.MemMB, c.MemPct,
+			c.NetIn, c.NetOut, c.BlockRead, c.BlockWrite,
+			now,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ContainerHistoryPoint represents a single time-series data point for a container.
 type ContainerHistoryPoint struct {
 	Timestamp  time.Time `json:"timestamp"`
