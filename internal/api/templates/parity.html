@@ -89,13 +89,35 @@
     if(el)el.classList.toggle("open");
   };
 
+  var _sortField="date",_sortAsc=false,_parity=null;
+  function parseParityDate(s){if(!s)return 0;var d=new Date(s);return isNaN(d.getTime())?0:d.getTime();}
+  window.setSortField=function(f){
+    if(_sortField===f){_sortAsc=!_sortAsc;}else{_sortField=f;_sortAsc=(f==="date"?false:true);}
+    if(_parity)render(_parity);
+  };
   function render(parity){
+    _parity=parity;
     if(!parity||!parity.history||parity.history.length===0){
       document.getElementById("parity-list").innerHTML='<div style="padding:60px 20px;text-align:center;color:var(--text2)"><div style="font-size:16px;font-weight:600;margin-bottom:8px">No parity check history</div><p>Parity checks will appear here once they have been detected.</p></div>';
       document.getElementById("summary").innerHTML="";
       return;
     }
-    var hist=parity.history.slice().sort(function(a,b){return(b.date||"").localeCompare(a.date||"");});
+    // Filter bogus epoch-zero entries and parse dates for sorting
+    var raw=parity.history.slice().filter(function(e){var t=parseParityDate(e.date);return t>86400000;});
+    for(var ri=0;ri<raw.length;ri++)raw[ri]._ts=parseParityDate(raw[ri].date);
+    // Sort
+    var sf=_sortField,sa=_sortAsc;
+    raw.sort(function(a,b){
+      var va,vb;
+      if(sf==="date"){va=a._ts;vb=b._ts;}
+      else if(sf==="duration"){va=a.duration_seconds||0;vb=b.duration_seconds||0;}
+      else if(sf==="speed"){va=a.speed_mb_s||0;vb=b.speed_mb_s||0;}
+      else if(sf==="errors"){va=a.errors||0;vb=b.errors||0;}
+      else if(sf==="size"){va=a.size_gb||0;vb=b.size_gb||0;}
+      else{va=a._ts;vb=b._ts;}
+      return sa?(va-vb):(vb-va);
+    });
+    var hist=raw;
     var totalErr=0,cleanCount=0;
     for(var i=0;i<hist.length;i++){
       if(hist[i].errors>0)totalErr+=hist[i].errors;else cleanCount++;
@@ -106,7 +128,17 @@
     sh+='<div class="summary-stat clean"><span class="stat-count">'+cleanCount+'</span><span>Clean</span></div>';
     sh+='<div class="summary-stat errors"><span class="stat-count">'+totalErr+'</span><span>Total Errors</span></div>';
     sh+='<div class="summary-stat"><span class="stat-count" style="color:var(--text)">'+esc(parity.status||"idle")+'</span><span>Current Status</span></div>';
-    document.getElementById("summary").innerHTML=sh;
+
+    // Sort controls
+    var sortBtns=[{f:"date",l:"Date"},{f:"duration",l:"Duration"},{f:"speed",l:"Speed"},{f:"errors",l:"Errors"},{f:"size",l:"Size"}];
+    var sortH='<div style="display:flex;gap:4px;align-items:center;margin-bottom:12px"><span style="font-size:11px;color:var(--text2);margin-right:4px">Sort by:</span>';
+    for(var si=0;si<sortBtns.length;si++){
+      var sb=sortBtns[si],active=_sortField===sb.f;
+      var arrow=active?(_sortAsc?" \u2191":" \u2193"):"";
+      sortH+='<button onclick="setSortField(\''+sb.f+'\')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);cursor:pointer;background:'+(active?"var(--bg-elevated)":"transparent")+';color:'+(active?"var(--text)":"var(--text2)")+';font-weight:'+(active?"600":"400")+'">'+sb.l+arrow+'</button>';
+    }
+    sortH+='</div>';
+    document.getElementById("summary").innerHTML=sh+sortH;
 
     // Speed trend chart (oldest to newest)
     var speedData=[];
