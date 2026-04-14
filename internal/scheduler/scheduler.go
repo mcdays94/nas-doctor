@@ -177,6 +177,22 @@ func (s *Scheduler) Start() {
 		}
 	}()
 
+	// Independent container stats loop — collects Docker metrics every 5 minutes
+	// for chart history (full scans happen every 6h which is too infrequent for charts)
+	go func() {
+		time.Sleep(30 * time.Second) // let first scan finish
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.collectContainerStats()
+			case <-s.stop:
+				return
+			}
+		}
+	}()
+
 	// Independent speed test loop — default 4h interval
 	go func() {
 		// Run first test 2 minutes after startup
@@ -754,6 +770,26 @@ const defaultCheckIntervalSec = 300 // 5 minutes
 // runDueServiceChecks is called every 30s by the independent service check
 // loop. It checks each configured check's per-check interval and only
 // executes those whose interval has elapsed since their last run.
+// collectContainerStats runs a lightweight Docker stats collection and saves to DB.
+// This runs every 5 minutes independently of the main scan (which runs every 6h)
+// to provide enough data points for the container metrics charts.
+func (s *Scheduler) collectContainerStats() {
+	docker, err := s.collector.CollectDockerStats()
+	if err != nil || docker == nil || !docker.Available {
+		return
+	}
+	if err := s.store.SaveContainerStats(docker); err != nil {
+		s.logger.Warn("failed to save container stats", "error", err)
+		return
+	}
+	// Update the cached snapshot's Docker data so the dashboard shows fresh values
+	s.mu.Lock()
+	if s.latest != nil {
+		s.latest.Docker = *docker
+	}
+	s.mu.Unlock()
+}
+
 // runSpeedTest executes a network speed test and stores the result.
 func (s *Scheduler) runSpeedTest() {
 	s.logger.Info("running speed test")

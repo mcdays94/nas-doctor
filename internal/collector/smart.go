@@ -56,6 +56,9 @@ func discoverDrives() []string {
 	// Discover /dev/sd* drives (Linux SCSI/SATA)
 	matches, _ := filepath.Glob("/dev/sd[a-z]")
 	drives = append(drives, matches...)
+	// Multi-letter (sdaa, sdab, etc.)
+	matches2, _ := filepath.Glob("/dev/sd[a-z][a-z]")
+	drives = append(drives, matches2...)
 
 	// Discover /dev/da* drives (FreeBSD SCSI/SAS — TrueNAS CORE)
 	daMatches, _ := filepath.Glob("/dev/da[0-9]")
@@ -69,9 +72,17 @@ func discoverDrives() []string {
 	adaMatches2, _ := filepath.Glob("/dev/ada[0-9][0-9]")
 	drives = append(drives, adaMatches2...)
 
+	// Synology: /dev/sata* devices (maps to internal bays)
+	sataMatches, _ := filepath.Glob("/dev/sata[0-9]")
+	drives = append(drives, sataMatches...)
+	sataMatches2, _ := filepath.Glob("/dev/sata[0-9][0-9]")
+	drives = append(drives, sataMatches2...)
+
 	// Discover NVMe drives
 	nvmeMatches, _ := filepath.Glob("/dev/nvme[0-9]n1")
 	drives = append(drives, nvmeMatches...)
+	nvmeMatches2, _ := filepath.Glob("/dev/nvme[0-9][0-9]n1")
+	drives = append(drives, nvmeMatches2...)
 
 	return drives
 }
@@ -87,6 +98,18 @@ func readSMARTDevice(device string) (internal.SMARTInfo, error) {
 	out, _ := execCmd("smartctl", "--json=c", "-a", device)
 	if strings.Contains(out, "json_format_version") {
 		return parseSMARTJSON(device, out)
+	}
+
+	// Fallback: try with SCSI-to-ATA translation (needed for some Synology/QNAP bays)
+	if strings.Contains(out, "Unknown USB bridge") || strings.Contains(out, "Please specify device type") ||
+		strings.Contains(out, "INQUIRY failed") || strings.Contains(out, "unable to detect device") ||
+		out == "" {
+		for _, devType := range []string{"sat", "auto", "scsi"} {
+			out2, _ := execCmd("smartctl", "--json=c", "-a", "-d", devType, device)
+			if strings.Contains(out2, "json_format_version") {
+				return parseSMARTJSON(device, out2)
+			}
+		}
 	}
 
 	// Check for USB bridge / unsupported device

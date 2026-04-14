@@ -200,3 +200,13 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 	c.logger.Info("collection complete", "duration", fmt.Sprintf("%.1fs", snap.Duration))
 	return snap, nil
 }
+
+// CollectDockerStats runs a lightweight Docker stats collection (no full scan).
+// Used by the scheduler's independent container stats loop for chart history.
+func (c *Collector) CollectDockerStats() (*internal.DockerInfo, error) {
+	info, err := collectDocker()
+	if err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
