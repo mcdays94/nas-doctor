@@ -46,6 +46,7 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 - [API Reference](#api-reference)
 - [Project Structure](#project-structure)
 - [Platform Support](#platform-support)
+- [Diagnostic Report](#diagnostic-report)
 - [Contributing](#contributing)
 
 ---
@@ -641,6 +642,23 @@ go build -o nas-doctor ./cmd/nas-doctor
 ```
 
 Demo includes: 7 SMART drives (with Backblaze-informed findings), 14 Docker containers, 2 ZFS pools (one DEGRADED), UPS monitoring, OS update notification, 30 days of historical sparkline data, 6 service checks with 7 days of history, 4 fleet servers, 2 cloudflared tunnels, and a tailscale network with 5 nodes.
+
+---
+
+## Diagnostic Report
+
+Click **Export Report** on the dashboard to generate a print-ready diagnostic report covering all monitored subsystems. Open in your browser and use Print > Save as PDF.
+
+The report includes 16 sections: System Overview, Findings, Drive Health & SMART, Docker (with net/block I/O), GPU, Backup Monitoring, Speed Test, ZFS, UPS, Network, Service Checks (with speed check details), Proxmox, Kubernetes, Tunnels & VPN, Parity, and Recommended Actions.
+
+<p>
+  <img src="screenshots/report-cover.jpg" alt="Report — Cover Page" width="380">
+  <img src="screenshots/report-findings.jpg" alt="Report — Findings" width="380">
+</p>
+<p>
+  <img src="screenshots/report-drives.jpg" alt="Report — Drive Health" width="380">
+  <img src="screenshots/report-actions.jpg" alt="Report — Recommended Actions" width="380">
+</p>
 
 ---
 
