@@ -31,6 +31,25 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 
 ---
 
+## Table of Contents
+
+- [What It Does](#what-it-does)
+- [Quick Start](#quick-start)
+  - [Docker Compose](#docker-compose-recommended)
+  - [Unraid](#unraid--docker-ui-setup)
+  - [Synology DSM](#synology-dsm--container-manager)
+  - [TrueNAS SCALE](#truenas-scale)
+  - [Kubernetes](#kubernetes-k3s--k8s)
+  - [Proxmox](#proxmox-ve)
+- [Demo](#demo)
+- [Configuration](#configuration)
+- [API Reference](#api-reference)
+- [Project Structure](#project-structure)
+- [Platform Support](#platform-support)
+- [Contributing](#contributing)
+
+---
+
 ## What It Does
 
 ### Diagnostics
@@ -158,13 +177,17 @@ services:
       - nas-doctor-data:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/log:/host/log:ro
+      - /dev:/dev:ro                       # SMART device access
+      - /sys:/sys:ro                       # GPU telemetry
       # Mount your storage volumes (platform-specific):
-      - /mnt:/host/mnt:ro              # Unraid, TrueNAS
-      # - /volume1:/host/volume1:ro    # Synology (add each volume)
-      # - /volume2:/host/volume2:ro    # Synology
+      - /mnt:/host/mnt:ro                  # Unraid, TrueNAS
+      # - /volume1:/host/volume1:ro        # Synology (add each volume)
+      # - /volume2:/host/volume2:ro        # Synology
       # Unraid-specific (optional, omit on other platforms):
       - /boot:/host/boot:ro
       - /etc/unraid-version:/etc/unraid-version:ro
+    devices:
+      - /dev/dri:/dev/dri                  # GPU monitoring (Intel/AMD)
     environment:
       - TZ=Europe/Lisbon
       - NAS_DOCTOR_INTERVAL=6h
@@ -232,6 +255,7 @@ services:
       - /volume1/docker/nas-doctor:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/log:/host/log:ro
+      - /dev:/dev:ro                       # Required for SMART device access
       - /volume1:/host/volume1:ro
       - /volume2:/host/volume2:ro          # add more volumes as needed
     environment:
@@ -243,10 +267,12 @@ services:
 Then open `http://your-synology-ip:8060`.
 
 > **Synology notes**:
-> - **Privileged mode is required** for SMART access (`smartctl` needs raw device access)
+> - **Privileged mode is required** for SMART access — `smartctl` needs raw device access via `SYS_RAWIO` capability
+> - **Mount `/dev:/dev:ro`** — Synology drive bays use `/dev/sata*` device nodes which must be visible to the container for SMART queries. NAS Doctor automatically tries SCSI-to-ATA translation (`--device=sat`) as a fallback
 > - Mount each `/volume<#>` you want monitored — Synology uses `/volume1`, `/volume2`, etc. instead of `/mnt`
 > - There is no `/boot` or `/etc/unraid-version` on Synology — omit those mounts
 > - Parity analysis is Unraid-specific and will be skipped automatically
+> - If SMART still shows warnings, try adding `cap_add: [SYS_RAWIO]` explicitly
 
 ### TrueNAS SCALE
 
@@ -264,6 +290,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/log:/host/log:ro
       - /mnt:/host/mnt:ro
+      - /dev:/dev:ro                       # Required for SMART device access
+      - /sys:/sys:ro                       # Required for GPU monitoring
+    devices:
+      - /dev/dri:/dev/dri                  # Intel/AMD GPU access (if applicable)
     environment:
       - TZ=America/New_York
       - NAS_DOCTOR_INTERVAL=6h
@@ -274,8 +304,11 @@ Then open `http://your-truenas-ip:8060`.
 
 > **TrueNAS notes**:
 > - **Privileged mode is required** for SMART access
+> - **Mount `/dev:/dev:ro`** for SMART device access and **`/sys:/sys:ro`** for GPU telemetry
+> - **`/dev/dri`** device passthrough enables Intel iGPU monitoring (usage, temperature, power)
 > - ZFS pool health, scrub status, ARC hit rate, and dataset listing work automatically
 > - Mount `/mnt` to see all pool/dataset storage usage
+> - TrueNAS version is detected from `/etc/version` or `/etc/os-release` — no API auth needed
 > - Parity analysis is Unraid-specific and will be skipped automatically
 > - UPS monitoring works if NUT is configured (TrueNAS has built-in NUT support)
 
