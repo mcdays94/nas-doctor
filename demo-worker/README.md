@@ -84,7 +84,7 @@ The demo Worker contains **zero hardcoded mock data**. Every API response it ser
 ### KV Namespace
 
 - **Name**: `DEMO_DATA`
-- **ID**: `8a68c1992ad443de8f415f8dc6158428`
+- **ID**: stored in GitHub secret `CF_KV_NAMESPACE_ID`
 - **Key format**: `{type}:{platform}:{endpoint}`
   - `seed:unraid:snapshot` — original data from Go binary (immutable)
   - `api:unraid:snapshot` — live data served to visitors (refreshed by feeder)

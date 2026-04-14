@@ -36,8 +36,14 @@ dist/
 nas-doctor-linux-amd64
 nas-doctor-docker.tar.gz
 
-# Agent context (session-specific)
+# Agent context and internal docs (never commit)
 AGENT-CONTEXT.md
+AGENTS.md
+docs/alerts-2.0-design.md
+
+# Wrangler config (contains account IDs — use wrangler.toml.example)
+demo-worker/wrangler.toml
+demo-worker/feeder/wrangler.toml
 
 # Reference files
 unraid-diagnostic-report.pdf
