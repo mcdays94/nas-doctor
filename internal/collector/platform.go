@@ -129,7 +129,13 @@ func runDetection(hp internal.HostPaths) Platform {
 	if procVer, err := os.ReadFile("/proc/version"); err == nil {
 		if strings.Contains(string(procVer), "+truenas") {
 			p.Name = PlatformTrueNAS
-			for _, path := range []string{"/host/etc/version", "/etc/version"} {
+			// Try file-based version detection first (no auth needed)
+			for _, path := range []string{
+				"/host/etc/version",
+				"/etc/version",
+				"/host/etc/truenas_version",
+				"/etc/truenas_version",
+			} {
 				if data, err := os.ReadFile(path); err == nil {
 					ver := strings.TrimSpace(string(data))
 					if ver != "" {
@@ -138,6 +144,23 @@ func runDetection(hp internal.HostPaths) Platform {
 					}
 				}
 			}
+			// Try os-release for PRETTY_NAME
+			if p.Version == "" {
+				for _, path := range []string{"/host/etc/os-release", "/etc/os-release"} {
+					if data, err := os.ReadFile(path); err == nil {
+						for _, line := range strings.Split(string(data), "\n") {
+							if strings.HasPrefix(line, "PRETTY_NAME=") {
+								p.Version = strings.Trim(strings.TrimPrefix(line, "PRETTY_NAME="), "\"")
+								break
+							}
+						}
+						if p.Version != "" {
+							break
+						}
+					}
+				}
+			}
+			// Last resort: try the API (may require auth)
 			if p.Version == "" {
 				p.Version = fetchTrueNASVersionAPI()
 			}
@@ -243,6 +266,9 @@ func fetchTrueNASVersionAPI() string {
 		return ""
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "" // API requires auth — skip gracefully
+	}
 	buf := make([]byte, 256)
 	n, _ := resp.Body.Read(buf)
 	ver := strings.Trim(strings.TrimSpace(string(buf[:n])), "\"")
