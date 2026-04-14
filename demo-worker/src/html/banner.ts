@@ -13,7 +13,7 @@ const PLATFORMS: { key: Platform; label: string; icon: string }[] = [
   { key: "kubernetes", label: "Kubernetes", icon: "☸️" },
 ];
 
-function bannerHTML(currentPlatform: Platform, currentPath: string): string {
+function bannerHTML(currentPlatform: Platform, currentPath: string, version = "demo"): string {
   const isSettings = currentPath === "/settings";
 
   const buttons = PLATFORMS.map((p) => {
@@ -90,6 +90,7 @@ function bannerHTML(currentPlatform: Platform, currentPath: string): string {
   </style>
   <div class="dp-left">
     <span class="dp-badge">Live Demo</span>
+    <span style="font-size:11px;color:#64748b;font-weight:500">${version}</span>
     <span class="dp-label">Platform:</span>
     <div class="dp-btns">${buttons}</div>
   </div>
@@ -107,8 +108,8 @@ function bannerHTML(currentPlatform: Platform, currentPath: string): string {
  * Inject the platform switcher banner into an HTML page.
  * Also greys out sensitive settings inputs in the settings page.
  */
-export function injectBanner(html: string, platform: Platform, path: string): string {
-  const banner = bannerHTML(platform, path);
+export function injectBanner(html: string, platform: Platform, path: string, version = "demo"): string {
+  const banner = bannerHTML(platform, path, version);
 
   // Inject after <body> tag
   const bodyIdx = html.indexOf("<body");
