@@ -40,9 +40,12 @@ export default {
       return handleAPI(path, url, platform, env);
     }
 
+    // ── Version from deploy-time env var ──
+    const version = env.VERSION || "demo";
+
     // ── Health endpoint ──
     if (path === "/health") {
-      return json({ nas_doctor: true, status: "ok", demo: true, themes: ["midnight", "clean", "ember"], version: "demo" });
+      return json({ nas_doctor: true, status: "ok", demo: true, themes: ["midnight", "clean", "ember"], version });
     }
 
     // ── Prometheus metrics ──
@@ -69,7 +72,7 @@ export default {
     if (pageFile) {
       const html = await fetchAsset(env, url, request, pageFile);
       if (html !== null) {
-        return new Response(injectBanner(html, platform, path), {
+        return new Response(injectBanner(html, platform, path, version), {
           headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache", ...platformCookie(platform) },
         });
       }
@@ -99,7 +102,7 @@ export default {
     if (!path.includes(".")) {
       const html = await fetchAsset(env, url, request, "_pages/midnight.html");
       if (html !== null) {
-        return new Response(injectBanner(html, platform, path), {
+        return new Response(injectBanner(html, platform, path, version), {
           headers: { "Content-Type": "text/html; charset=utf-8", ...platformCookie(platform) },
         });
       }
@@ -142,7 +145,7 @@ async function handleAPI(path: string, url: URL, platform: Platform, env: Env): 
 
   // Health is always generated live
   if (path === "/api/v1/health") {
-    return json({ nas_doctor: true, status: "ok", demo: true, themes: ["midnight", "clean", "ember"], uptime: "14d " + new Date().getHours() + "h", version: "demo" });
+    return json({ nas_doctor: true, status: "ok", demo: true, themes: ["midnight", "clean", "ember"], uptime: "14d " + new Date().getHours() + "h", version: env.VERSION || "demo" });
   }
 
   // Match alerts by ID
@@ -208,4 +211,5 @@ async function fetchAsset(env: Env, baseUrl: URL, request: Request, filename: st
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DEMO_DATA: KVNamespace;
+  VERSION: string;
 }
