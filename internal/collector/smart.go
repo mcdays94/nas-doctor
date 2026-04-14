@@ -365,20 +365,38 @@ func resolveArraySlot(device string) string {
 	if !GetPlatform().IsUnraid() {
 		return ""
 	}
-	// Check Unraid's emhttp disk assignments
-	data, err := os.ReadFile("/var/local/emhttp/disks.ini")
-	if err != nil {
-		return ""
-	}
-	devName := filepath.Base(device)
-	currentSlot := ""
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			currentSlot = strings.Trim(line, "[]")
+	devName := filepath.Base(device) // "sdb"
+
+	// Primary: Unraid's emhttp disk assignments (host file)
+	for _, path := range []string{"/var/local/emhttp/disks.ini", "/host/var/local/emhttp/disks.ini"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
 		}
-		if strings.Contains(line, "device=") && strings.Contains(line, devName) {
-			return currentSlot
+		currentSlot := ""
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+				currentSlot = strings.Trim(line, "[]")
+			}
+			if strings.Contains(line, "device=") && strings.Contains(line, devName) {
+				return currentSlot
+			}
 		}
 	}
+
+	// Fallback: resolve via /sys/block/md*/slaves/ (works inside Docker with /sys mounted)
+	mdMap := buildMDToPhysicalMap()
+	if mdNum, ok := mdMap[devName]; ok {
+		return "disk" + mdNum
+	}
+	// Check if this is the cache drive (mounted at /mnt/cache on a partition of this device)
+	if out, err := execCmd("findmnt", "-n", "-o", "SOURCE", "/mnt/cache"); err == nil {
+		cacheDev := strings.TrimRight(strings.TrimSpace(out), "0123456789") // "/dev/sdc1" -> "/dev/sdc"
+		cacheDev = filepath.Base(cacheDev)                                  // "sdc"
+		if cacheDev == devName {
+			return "cache"
+		}
+	}
+
 	return ""
 }
