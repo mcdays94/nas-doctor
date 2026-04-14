@@ -647,17 +647,15 @@ Demo includes: 7 SMART drives (with Backblaze-informed findings), 14 Docker cont
 
 ## Diagnostic Report
 
-Click **Export Report** on the dashboard to generate a print-ready diagnostic report covering all monitored subsystems. Open in your browser and use Print > Save as PDF.
+Click **Export Report** on the dashboard to generate a print-ready diagnostic report. Open in your browser and use Print > Save as PDF. [View demo report (PDF)](docs/nas-doctor-demo-report.pdf).
 
-The report includes 16 sections: System Overview, Findings, Drive Health & SMART, Docker (with net/block I/O), GPU, Backup Monitoring, Speed Test, ZFS, UPS, Network, Service Checks (with speed check details), Proxmox, Kubernetes, Tunnels & VPN, Parity, and Recommended Actions.
+16 sections: System Overview, Findings, Drive Health & SMART, Docker, GPU, Backup, Speed Test, ZFS, UPS, Network, Service Checks, Proxmox, Kubernetes, Tunnels, Parity, Recommended Actions.
 
 <p>
-  <img src="screenshots/report-cover.jpg" alt="Report — Cover Page" width="380">
-  <img src="screenshots/report-findings.jpg" alt="Report — Findings" width="380">
-</p>
-<p>
-  <img src="screenshots/report-drives.jpg" alt="Report — Drive Health" width="380">
-  <img src="screenshots/report-actions.jpg" alt="Report — Recommended Actions" width="380">
+  <img src="screenshots/report-cover.jpg" alt="Report — Cover" width="240">
+  <img src="screenshots/report-findings.jpg" alt="Report — Findings" width="240">
+  <img src="screenshots/report-drives.jpg" alt="Report — Drives" width="240">
+  <img src="screenshots/report-actions.jpg" alt="Report — Actions" width="240">
 </p>
 
 ---
