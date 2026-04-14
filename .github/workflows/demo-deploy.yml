@@ -35,11 +35,13 @@ jobs:
         id: version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            VER="${GITHUB_REF_NAME#v}"
           else
-            LATEST_TAG=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
-            echo "value=${LATEST_TAG:-v0.0.0}" | sed 's/^v//' >> "$GITHUB_OUTPUT"
+            VER=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1 | sed 's/^v//')
           fi
+          VER="${VER:-0.0.0}"
+          echo "value=$VER" >> "$GITHUB_OUTPUT"
+          echo "Version: $VER"
 
       - name: Build NAS Doctor
         run: go build -ldflags="-X main.version=${{ steps.version.outputs.value }}" -o nas-doctor ./cmd/nas-doctor
