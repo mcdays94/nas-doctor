@@ -28,10 +28,19 @@ LABEL org.opencontainers.image.title="NAS Doctor" \
 COPY --from=builder /nas-doctor /app/nas-doctor
 
 # Critical packages
-RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata
+RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata curl
 # Optional packages (may not be available on all architectures)
 RUN apk add --no-cache hdparm iproute2 || true
 RUN apk add --no-cache dmidecode ethtool || true
+# Ookla speedtest CLI (for network speed test feature)
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then SARCH="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ]; then SARCH="aarch64"; \
+    else SARCH=""; fi && \
+    if [ -n "$SARCH" ]; then \
+      curl -sL "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${SARCH}.tgz" | tar xz -C /usr/local/bin speedtest && \
+      chmod +x /usr/local/bin/speedtest; \
+    fi || true
 
 WORKDIR /app
 VOLUME /data
