@@ -89,11 +89,8 @@ type Scheduler struct {
 	interval          time.Duration
 	speedTestInterval time.Duration
 	speedTestSchedule []string // specific HH:MM times, overrides interval when set
-<<<<<<< HEAD
 	speedTestDay      string   // "monday"-"sunday" or "1","15" for monthly
 	speedTestFreq     string   // "24h", "weekly", "monthly" — only when schedule is set
-=======
->>>>>>> origin/main
 	retention         RetentionConfig
 	alerting          AlertingConfig
 	serviceChecks     []internal.ServiceCheckConfig
@@ -217,7 +214,6 @@ func (s *Scheduler) Start() {
 				s.mu.RUnlock()
 				now := time.Now()
 				if len(schedule) > 0 {
-<<<<<<< HEAD
 					s.mu.RLock()
 					day := s.speedTestDay
 					freq := s.speedTestFreq
@@ -234,12 +230,6 @@ func (s *Scheduler) Start() {
 					nowHHMM := now.Format("15:04")
 					for _, t := range schedule {
 						if dayMatch && nowHHMM == t && now.Sub(lastRun) > 5*time.Minute {
-=======
-					// Scheduled mode: run at specific HH:MM times
-					nowHHMM := now.Format("15:04")
-					for _, t := range schedule {
-						if nowHHMM == t && now.Sub(lastRun) > 5*time.Minute {
->>>>>>> origin/main
 							s.runSpeedTest()
 							lastRun = now
 							break
@@ -272,7 +262,6 @@ func (s *Scheduler) SetSpeedTestInterval(d time.Duration) {
 }
 
 // SetSpeedTestSchedule sets specific times of day to run speed tests.
-<<<<<<< HEAD
 func (s *Scheduler) SetSpeedTestSchedule(times []string, day string, freq string) {
 	s.mu.Lock()
 	s.speedTestSchedule = times
@@ -281,16 +270,6 @@ func (s *Scheduler) SetSpeedTestSchedule(times []string, day string, freq string
 	s.mu.Unlock()
 	if len(times) > 0 {
 		s.logger.Info("speed test schedule set", "times", times, "day", day, "freq", freq)
-=======
-// When set, overrides the interval-based schedule.
-// Times are in HH:MM format (24h, local timezone).
-func (s *Scheduler) SetSpeedTestSchedule(times []string) {
-	s.mu.Lock()
-	s.speedTestSchedule = times
-	s.mu.Unlock()
-	if len(times) > 0 {
-		s.logger.Info("speed test schedule set", "times", times)
->>>>>>> origin/main
 	}
 }
 
