@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -187,21 +188,22 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 type statusResponse struct {
-	Hostname          string             `json:"hostname"`
-	Platform          string             `json:"platform"`
-	Version           string             `json:"version"`
-	Uptime            string             `json:"uptime"`
-	LastScan          string             `json:"last_scan"`
-	ScanIntervalSecs  int                `json:"scan_interval_secs"`
-	ScanRunning       bool               `json:"scan_running"`
-	CriticalCount     int                `json:"critical_count"`
-	WarningCount      int                `json:"warning_count"`
-	InfoCount         int                `json:"info_count"`
-	OverallHealth     string             `json:"overall_health"`
-	Sections          *DashboardSections `json:"sections,omitempty"`
-	ChartRangeHours   int                `json:"chart_range_hours"`
-	SectionHeights    map[string]int     `json:"section_heights,omitempty"`
-	DismissedFindings []string           `json:"dismissed_findings,omitempty"`
+	Hostname          string              `json:"hostname"`
+	Platform          string              `json:"platform"`
+	Version           string              `json:"version"`
+	Uptime            string              `json:"uptime"`
+	LastScan          string              `json:"last_scan"`
+	ScanIntervalSecs  int                 `json:"scan_interval_secs"`
+	ScanRunning       bool                `json:"scan_running"`
+	CriticalCount     int                 `json:"critical_count"`
+	WarningCount      int                 `json:"warning_count"`
+	InfoCount         int                 `json:"info_count"`
+	OverallHealth     string              `json:"overall_health"`
+	Sections          *DashboardSections  `json:"sections,omitempty"`
+	ChartRangeHours   int                 `json:"chart_range_hours"`
+	SectionHeights    map[string]int      `json:"section_heights,omitempty"`
+	SectionOrder      map[string][]string `json:"section_order,omitempty"`
+	DismissedFindings []string            `json:"dismissed_findings,omitempty"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -260,6 +262,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		resp.ChartRangeHours = 1
 	}
 	resp.SectionHeights = settings.SectionHeights
+	resp.SectionOrder = settings.SectionOrder
 	resp.DismissedFindings = settings.DismissedFindings
 
 	writeJSON(w, http.StatusOK, resp)
@@ -278,7 +281,36 @@ func (s *Server) handleLatestSnapshot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Enrich parity checks with avg/max array temperature from smart_history
+	s.enrichParityTemps(snap)
 	writeJSON(w, http.StatusOK, snap)
+}
+
+// enrichParityTemps computes avg/max array temperature during each parity check
+// by querying smart_history for the check's time window.
+func (s *Server) enrichParityTemps(snap *internal.Snapshot) {
+	if snap == nil || snap.Parity == nil || len(snap.Parity.History) == 0 {
+		return
+	}
+	for i := range snap.Parity.History {
+		pc := &snap.Parity.History[i]
+		if pc.Duration <= 0 || pc.Date == "" {
+			continue
+		}
+		start, err := time.Parse("2006 Jan  2 15:04:05", pc.Date)
+		if err != nil {
+			start, err = time.Parse("2006 Jan 2 15:04:05", pc.Date)
+		}
+		if err != nil {
+			continue
+		}
+		end := start.Add(time.Duration(pc.Duration) * time.Second)
+		avg, max, err := s.store.GetAvgTempDuringRange(start, end)
+		if err == nil && avg > 0 {
+			pc.AvgTempC = math.Round(avg*10) / 10
+			pc.MaxTempC = math.Round(max*10) / 10
+		}
+	}
 }
 
 func (s *Server) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {

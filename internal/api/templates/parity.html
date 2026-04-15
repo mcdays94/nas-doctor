@@ -60,6 +60,7 @@
     <div class="chart-wrap"><canvas id="speed-chart" style="width:100%;height:100%"></canvas></div>
   </div>
 
+  <div id="parity-sort"></div>
   <div id="parity-list"><div style="padding:40px;text-align:center;color:var(--text2)">Loading...</div></div>
 </div>
 
@@ -129,16 +130,18 @@
     sh+='<div class="summary-stat errors"><span class="stat-count">'+totalErr+'</span><span>Total Errors</span></div>';
     sh+='<div class="summary-stat"><span class="stat-count" style="color:var(--text)">'+esc(parity.status||"idle")+'</span><span>Current Status</span></div>';
 
-    // Sort controls
+    document.getElementById("summary").innerHTML=sh;
+
+    // Sort controls (between chart and cards)
     var sortBtns=[{f:"date",l:"Date"},{f:"duration",l:"Duration"},{f:"speed",l:"Speed"},{f:"errors",l:"Errors"},{f:"size",l:"Size"}];
-    var sortH='<div style="display:flex;gap:4px;align-items:center;margin-bottom:12px"><span style="font-size:11px;color:var(--text2);margin-right:4px">Sort by:</span>';
+    var sortH='<div style="display:flex;gap:4px;align-items:center;padding:12px 0"><span style="font-size:11px;color:var(--text2);margin-right:4px">Sort by:</span>';
     for(var si=0;si<sortBtns.length;si++){
       var sb=sortBtns[si],active=_sortField===sb.f;
       var arrow=active?(_sortAsc?" \u2191":" \u2193"):"";
       sortH+='<button onclick="setSortField(\''+sb.f+'\')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);cursor:pointer;background:'+(active?"var(--bg-elevated)":"transparent")+';color:'+(active?"var(--text)":"var(--text2)")+';font-weight:'+(active?"600":"400")+'">'+sb.l+arrow+'</button>';
     }
     sortH+='</div>';
-    document.getElementById("summary").innerHTML=sh+sortH;
+    document.getElementById("parity-sort").innerHTML=sortH;
 
     // Speed trend chart (oldest to newest)
     var speedData=[];
@@ -163,6 +166,8 @@
       h+='<span><span class="label">Duration</span> '+fmtDur(pc.duration_seconds)+'</span>';
       h+='<span><span class="label">Speed</span> '+(pc.speed_mb_s||0).toFixed(1)+' MB/s</span>';
       if(pc.size_gb)h+='<span><span class="label">Size</span> '+fmtSize(pc.size_gb)+'</span>';
+      if(pc.avg_temp_c>0){var tc=pc.avg_temp_c>45?'color:var(--red)':pc.avg_temp_c>38?'color:var(--amber,#f59e0b)':'';h+='<span><span class="label">Avg Temp</span> <span style="'+tc+'">'+pc.avg_temp_c.toFixed(1)+'°C</span></span>';}
+      if(pc.max_temp_c>0)h+='<span><span class="label">Peak</span> '+pc.max_temp_c.toFixed(0)+'°C</span>';
       h+='</div>';
       h+='</div>';
       // Expandable detail

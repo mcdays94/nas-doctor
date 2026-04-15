@@ -95,11 +95,35 @@ Dedicated `/alerts` page with:
 ### Service Checks
 
 Dedicated `/service-checks` page with uptime monitoring:
-- **HTTP/HTTPS**, **TCP**, **DNS**, **Ping/ICMP**, **SMB**, **NFS** check types
+- **HTTP/HTTPS**, **TCP**, **DNS**, **Ping/ICMP**, **SMB**, **NFS**, **Speed Test** check types
+- **Speed checks**: compare download/upload against contracted speeds with configurable margin of error. Three-state result: green (both pass), orange (degraded), red (both fail)
 - **Per-check configurable intervals** (30s to 1h) with independent scheduling loop
 - **Heartbeat badge cards** — colored dots showing recent check status per service, with favicon for HTTP targets
 - **Paginated log table** with filters (check name, status, time range)
 - Historical response time tracking and uptime percentages
+
+### Drive Replacement Planner
+
+Dedicated `/replacement-planner` page with proactive drive lifecycle management:
+- **Health scoring** per drive — composite score based on age, temperature, SMART attributes, and Backblaze annualized failure rates (337k+ drives, Q4-2025 data)
+- **Urgency classification**: Replace Now, Replace Soon, Monitor, Healthy — with color-coded cards
+- **Bathtub curve aging model** — failure multiplier increases at infant (<6 months) and wear-out (>4 years) phases
+- **Cost estimates** per drive — configurable cost-per-TB in Settings, shows per-drive and total replacement cost
+- **Risk factors** — lists specific concerns per drive (age, temperature, reallocated sectors, power-on hours)
+- **Remaining life estimate** — projected years remaining based on current age and rated endurance
+
+### Backup Monitoring
+
+- **Borg**, **Restic**, **Proxmox Backup Server (PBS)**, **Duplicati** detection via CLI probing
+- Tracks last backup time, size, snapshot count, duration, encryption status
+- **Stale backup alerts**: warning >24h, critical >48h, failed backups
+
+### Network Speed Test
+
+- Periodic speed test via **Ookla CLI** or **speedtest-cli** (auto-detected)
+- Download, upload, latency, jitter with historical charts (1H/1D/1W)
+- Independent 4-hour schedule (configurable)
+- Server name, ISP, and external IP reported
 
 ### Tunnel Monitoring
 
@@ -184,9 +208,10 @@ services:
       - /mnt:/host/mnt:ro                  # Unraid, TrueNAS
       # - /volume1:/host/volume1:ro        # Synology (add each volume)
       # - /volume2:/host/volume2:ro        # Synology
-      # Unraid-specific (optional, omit on other platforms):
+      # Unraid-specific (omit on other platforms):
       - /boot:/host/boot:ro
       - /etc/unraid-version:/etc/unraid-version:ro
+      - /var/local/emhttp:/var/local/emhttp:ro  # Drive slot mapping (merged drive view)
     devices:
       - /dev/dri:/dev/dri                  # GPU monitoring (Intel/AMD)
     environment:
@@ -228,6 +253,7 @@ Then open `http://your-nas:8060`. See platform-specific sections below for Unrai
 | System Logs | `/host/log` | `/var/log` | RO | dmesg, syslog analysis |
 | Host Mounts | `/host/mnt` | `/mnt` | RO | Per-disk space monitoring |
 | Unraid Version | `/etc/unraid-version` | `/etc/unraid-version` | RO | OS update detection |
+| Disk Slots | `/var/local/emhttp` | `/var/local/emhttp` | RO | Drive slot mapping for merged drive view |
 
 4. Add this **variable**:
 

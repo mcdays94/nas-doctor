@@ -27,6 +27,7 @@ a{color:var(--accent);text-decoration:none}
 a:hover{color:var(--hover)}
 
 .container{max-width:1200px;margin:0 auto}
+.container.dash-wide{max-width:none;padding:0 24px}
 
 /* Header */
 .header{display:flex;align-items:center;justify-content:space-between;padding:calc(var(--sp)*2) 0;margin-bottom:0;border-bottom:1px solid var(--border)}
@@ -465,9 +466,12 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     h += '</div>';
 
     // Two-column layout — sections auto-distributed by height
+    var numCols = (statusData && statusData.sections && statusData.sections.dash_columns) || 2;
+    if (numCols < 1) numCols = 2;
     h += '<div class="two-col fade-in" id="two-col">';
     h += '<div class="col-left" id="col-left"></div>';
     h += '<div class="col-right" id="col-right"></div>';
+    for (var _ci = 3; _ci <= numCols; _ci++) h += '<div class="col-right" id="col-' + _ci + '"></div>';
     h += '</div>';
 
     // Hidden staging area for sections — JS will measure and distribute
@@ -1405,8 +1409,25 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
 
-    // Get section visibility from status response
     var sec = (statusData && statusData.sections) ? statusData.sections : {};
+
+    // Dashboard columns: 0=auto(2), 1, 2, 3, 4
+    var numCols = sec.dash_columns || 2;
+    if (numCols < 1) numCols = 2;
+    var container = document.querySelector(".container");
+    var twoCol = document.getElementById("two-col");
+    if (numCols >= 3 && container) container.classList.add("dash-wide");
+    else if (container) container.classList.remove("dash-wide");
+    if (twoCol) twoCol.style.gridTemplateColumns = "repeat(" + numCols + ", 1fr)";
+
+    // Collect all column divs
+    var colL = document.getElementById("col-left");
+    var colR = document.getElementById("col-right");
+    var allCols = [colL, colR];
+    for (var ci = 3; ci <= numCols; ci++) {
+      var extraCol = document.getElementById("col-" + ci);
+      if (extraCol) allCols.push(extraCol);
+    }
     var sectionMap = {
       "findings": sec.findings !== false,
       "drives": sec.disk_space !== false || sec.smart !== false,
@@ -1446,12 +1467,19 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       visibleItems.push({ el: blocks[i], name: name, h: blocks[i].offsetHeight });
     }
 
-    // Apply saved order or default height-balanced distribution
-    if (!window.NasDrag || !NasDrag.applySavedOrder(blockMap, visibleItems, colL, colR)) {
-      var leftH = 0, rightH = 0;
+    // Pass server-saved section order to NasDrag
+    window._serverSectionOrder = (statusData && statusData.section_order) || null;
+
+    // Apply saved order or default height-balanced distribution across N columns
+    if (!window.NasDrag || !NasDrag.applySavedOrder(blockMap, visibleItems, allCols)) {
+      var colHeights = allCols.map(function() { return 0; });
       for (var j = 0; j < visibleItems.length; j++) {
-        if (leftH <= rightH) { colL.appendChild(visibleItems[j].el); leftH += visibleItems[j].h; }
-        else { colR.appendChild(visibleItems[j].el); rightH += visibleItems[j].h; }
+        var minIdx = 0;
+        for (var k = 1; k < colHeights.length; k++) {
+          if (colHeights[k] < colHeights[minIdx]) minIdx = k;
+        }
+        allCols[minIdx].appendChild(visibleItems[j].el);
+        colHeights[minIdx] += visibleItems[j].h;
       }
     }
 

@@ -523,12 +523,21 @@ window.NasChart=NasChart;
 "use strict";
 
 var LAYOUT_KEY = "nas-doctor-dashboard-order";
-var dragging = null;   // { el, placeholder, startX, startY, offsetX, offsetY, col }
+var dragging = null;
 var columns = [];
 
 function init() {
-  columns = [document.getElementById("col-left"), document.getElementById("col-right")];
-  if (!columns[0] || !columns[1]) return;
+  // Support N columns: col-left, col-right, col-3, col-4, ...
+  columns = [];
+  var cl = document.getElementById("col-left");
+  var cr = document.getElementById("col-right");
+  if (cl) columns.push(cl);
+  if (cr) columns.push(cr);
+  for (var ci = 3; ci <= 6; ci++) {
+    var extra = document.getElementById("col-" + ci);
+    if (extra) columns.push(extra);
+  }
+  if (columns.length === 0) return;
 
   var sections = document.querySelectorAll(".section-block[data-section]");
   var gripSVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="pointer-events:none"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>';
@@ -699,19 +708,61 @@ function getSavedOrder() {
 }
 
 function saveOrder() {
-  var order = { left: [], right: [] };
-  if (columns[0]) { var bs = columns[0].querySelectorAll(".section-block[data-section]"); for (var i=0;i<bs.length;i++) order.left.push(bs[i].getAttribute("data-section")); }
-  if (columns[1]) { var bs2 = columns[1].querySelectorAll(".section-block[data-section]"); for (var j=0;j<bs2.length;j++) order.right.push(bs2[j].getAttribute("data-section")); }
+  // Build order: { "col-0": ["findings","docker"], "col-1": ["drives","gpu"], ... }
+  var order = {};
+  for (var c = 0; c < columns.length; c++) {
+    var arr = [];
+    var bs = columns[c].querySelectorAll(".section-block[data-section]");
+    for (var i = 0; i < bs.length; i++) arr.push(bs[i].getAttribute("data-section"));
+    order["col-" + c] = arr;
+  }
+  // Save to server (persists across updates/reboots)
+  fetch("/api/v1/settings/section-order", { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify(order) }).catch(function(){});
+  // Also save to localStorage as immediate cache
   try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(order)); } catch(e) {}
 }
 
-function applySavedOrder(blockMap, visibleItems, colL, colR) {
-  var saved = getSavedOrder();
-  if (!saved || !saved.left || !saved.right) return false;
+function applySavedOrder(blockMap, visibleItems, allCols) {
+  // Try server-saved order first (from statusData.section_order), then localStorage
+  var saved = null;
+  if (window._serverSectionOrder) saved = window._serverSectionOrder;
+  if (!saved) saved = getSavedOrder();
+  if (!saved) return false;
+
+  // Normalize: server sends {"col-0":[...],"col-1":[...]}, localStorage may have {cols:[...]} or {left:[...],right:[...]}
+  var colArrays = [];
+  if (saved["col-0"]) {
+    for (var i = 0; i < allCols.length; i++) {
+      colArrays.push(saved["col-" + i] || []);
+    }
+  } else if (saved.cols) {
+    colArrays = saved.cols;
+  } else if (saved.left && saved.right) {
+    colArrays = [saved.left, saved.right];
+  }
+  if (colArrays.length === 0) return false;
+
   var used = {};
-  for (var sl=0;sl<saved.left.length;sl++){if(blockMap[saved.left[sl]]&&!used[saved.left[sl]]){colL.appendChild(blockMap[saved.left[sl]]);used[saved.left[sl]]=true;}}
-  for (var sr=0;sr<saved.right.length;sr++){if(blockMap[saved.right[sr]]&&!used[saved.right[sr]]){colR.appendChild(blockMap[saved.right[sr]]);used[saved.right[sr]]=true;}}
-  for (var k=0;k<visibleItems.length;k++){if(!used[visibleItems[k].name]){if(colL.offsetHeight<=colR.offsetHeight)colL.appendChild(visibleItems[k].el);else colR.appendChild(visibleItems[k].el);}}
+  for (var c = 0; c < Math.min(colArrays.length, allCols.length); c++) {
+    var colOrder = colArrays[c] || [];
+    for (var s = 0; s < colOrder.length; s++) {
+      var name = colOrder[s];
+      if (blockMap[name] && !used[name]) {
+        allCols[c].appendChild(blockMap[name]);
+        used[name] = true;
+      }
+    }
+  }
+  // Distribute remaining sections not in saved order
+  for (var k = 0; k < visibleItems.length; k++) {
+    if (!used[visibleItems[k].name]) {
+      var minIdx = 0, minH = allCols[0].offsetHeight;
+      for (var m = 1; m < allCols.length; m++) {
+        if (allCols[m].offsetHeight < minH) { minH = allCols[m].offsetHeight; minIdx = m; }
+      }
+      allCols[minIdx].appendChild(visibleItems[k].el);
+    }
+  }
   return true;
 }
 

@@ -44,6 +44,7 @@ type Settings struct {
 	CostPerTB         float64                 `json:"cost_per_tb,omitempty"`     // Drive replacement cost per TB (user's currency)
 	ChartRangeHours   int                     `json:"chart_range_hours"`         // Persisted chart time range (1, 24, 168)
 	SectionHeights    map[string]int          `json:"section_heights,omitempty"` // Persisted section resize heights (section name → px)
+	SectionOrder      map[string][]string     `json:"section_order,omitempty"`   // Persisted drag-and-drop column order ({"cols": [["findings","docker"], ...]})
 }
 
 const currentSettingsVersion = 1
@@ -68,6 +69,7 @@ type DashboardSections struct {
 	MergedDrives     bool `json:"merged_drives"`     // Combine SMART + storage into one card per drive
 	Backup           bool `json:"backup"`
 	SpeedTest        bool `json:"speed_test"`
+	DashColumns      int  `json:"dash_columns"` // Dashboard column count: 0=auto (default 2), 1, 2, 3, 4
 }
 
 // BackupSettings controls automatic backup of the application database.
@@ -206,6 +208,7 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Post("/api/v1/settings/test-webhook", s.handleTestWebhook)
 	r.Put("/api/v1/settings/chart-range", s.handleSetChartRange)
 	r.Put("/api/v1/settings/section-heights", s.handleSetSectionHeights)
+	r.Put("/api/v1/settings/section-order", s.handleSetSectionOrder)
 	r.Get("/api/v1/disks", s.handleListDisks)
 	r.Get("/api/v1/disks/{serial}", s.handleGetDisk)
 	r.Get("/api/v1/history/system", s.handleSystemHistory)
@@ -1158,6 +1161,28 @@ func (s *Server) handleSetSectionHeights(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, clean)
+}
+
+// handleSetSectionOrder persists the dashboard drag-and-drop section order.
+// PUT /api/v1/settings/section-order
+func (s *Server) handleSetSectionOrder(w http.ResponseWriter, r *http.Request) {
+	var body map[string][]string
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	settings := s.getSettings()
+	settings.SectionOrder = body
+	data, err := json.Marshal(settings)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to marshal settings"})
+		return
+	}
+	if err := s.store.SetConfig(settingsConfigKey, string(data)); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // ---------- Notification log handler ----------

@@ -382,6 +382,8 @@ type ParityCheck struct {
 	ExitCode int     `json:"exit_code"`
 	Action   string  `json:"action"` // check, correct, recon
 	SizeGB   float64 `json:"size_gb"`
+	AvgTempC float64 `json:"avg_temp_c,omitempty"` // average array temperature during this check (computed from smart_history)
+	MaxTempC float64 `json:"max_temp_c,omitempty"` // peak temperature during this check
 }
 
 // ---------- Fleet / Multi-Server ----------

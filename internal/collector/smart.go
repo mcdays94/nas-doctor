@@ -376,7 +376,7 @@ func resolveArraySlot(device string) string {
 		currentSlot := ""
 		for _, line := range strings.Split(string(data), "\n") {
 			if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-				currentSlot = strings.Trim(line, "[]")
+				currentSlot = strings.Trim(line, "[]\"'")
 			}
 			if strings.Contains(line, "device=") && strings.Contains(line, devName) {
 				return currentSlot

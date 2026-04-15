@@ -511,6 +511,19 @@ type ContainerHistoryPoint struct {
 	BlockWrite float64   `json:"block_write_bytes"`
 }
 
+// GetAvgTempDuringRange returns the average and max temperature across all drives
+// for a given time range. Used to compute array temps during parity checks.
+func (d *DB) GetAvgTempDuringRange(start, end time.Time) (avg float64, max float64, err error) {
+	row := d.db.QueryRow(
+		`SELECT COALESCE(AVG(temperature), 0), COALESCE(MAX(temperature), 0)
+		 FROM smart_history
+		 WHERE timestamp BETWEEN ? AND ? AND temperature > 0`,
+		start, end,
+	)
+	err = row.Scan(&avg, &max)
+	return
+}
+
 // GetContainerHistory returns container stats history for the given time range.
 func (d *DB) GetContainerHistory(hours int) ([]ContainerHistoryPoint, error) {
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)

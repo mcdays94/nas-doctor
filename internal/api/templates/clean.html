@@ -32,6 +32,7 @@ body {
   margin: 0 auto;
   padding: 0 24px 80px;
 }
+.wrapper.dash-wide { max-width: none; padding: 0 24px; }
 
 /* ---- Header ---- */
 .header {
@@ -993,9 +994,12 @@ body {
       html += '</div>';
     }
 
+    var numCols = (_cachedStatus && _cachedStatus.sections && _cachedStatus.sections.dash_columns) || 2;
+    if (numCols < 1) numCols = 2;
     html += '<div class="two-col" id="two-col">';
     html += '<div class="col-left" id="col-left"></div>';
     html += '<div class="col-right" id="col-right"></div>';
+    for (var _ci = 3; _ci <= numCols; _ci++) html += '<div class="col-right" id="col-' + _ci + '"></div>';
     html += '</div>';
 
     html += '<div id="section-staging" style="position:absolute;visibility:hidden;width:50%;left:-9999px">';
@@ -1637,15 +1641,40 @@ body {
     var colR = document.getElementById("col-right");
     if (!staging || !colL || !colR) return;
     var sec = (_cachedStatus && _cachedStatus.sections) ? _cachedStatus.sections : {};
+
+    var numCols = sec.dash_columns || 2;
+    if (numCols < 1) numCols = 2;
+    var wrapper = document.querySelector(".wrapper");
+    var twoCol = document.getElementById("two-col");
+    if (numCols >= 3 && wrapper) wrapper.classList.add("dash-wide");
+    else if (wrapper) wrapper.classList.remove("dash-wide");
+    if (twoCol) twoCol.style.gridTemplateColumns = "repeat(" + numCols + ", 1fr)";
+
+    var allCols = [colL, colR];
+    for (var ci = 3; ci <= numCols; ci++) {
+      var extraCol = document.getElementById("col-" + ci);
+      if (extraCol) allCols.push(extraCol);
+    }
+
     var sectionMap = { "findings": sec.findings !== false, "drives": sec.disk_space !== false || sec.smart !== false, "docker": sec.docker !== false, "container_metrics": sec.container_metrics !== false, "zfs": sec.zfs !== false, "gpu": sec.gpu !== false, "ups": sec.ups !== false, "backup": sec.backup !== false, "services": true, "network": sec.network !== false, "speedtest": sec.speedtest !== false, "tunnels": sec.tunnels !== false, "proxmox": sec.proxmox !== false, "kubernetes": sec.kubernetes !== false, "k8s_nodes": sec.kubernetes !== false, "k8s_problems": sec.kubernetes !== false, "k8s_deployments": sec.kubernetes !== false, "k8s_events": sec.kubernetes !== false, "parity": sec.parity !== false };
     var blocks = staging.querySelectorAll(".section-block");
     if (blocks.length === 0) return;
     var blockMap={};var visibleItems=[];
     for(var i=0;i<blocks.length;i++){var name=blocks[i].getAttribute("data-section");var resolved=sectionMap[name];if(resolved===undefined&&name&&name.indexOf("k8s_node_")===0)resolved=sec.kubernetes!==false;if(resolved===false)continue;if(blocks[i].offsetHeight<10)continue;blockMap[name]=blocks[i];visibleItems.push({el:blocks[i],name:name,h:blocks[i].offsetHeight});}
-    if (!window.NasDrag || !NasDrag.applySavedOrder(blockMap, visibleItems, colL, colR)) {
-      var leftH=0,rightH=0;
-      for(var j=0;j<visibleItems.length;j++){if(leftH<=rightH){colL.appendChild(visibleItems[j].el);leftH+=visibleItems[j].h;}else{colR.appendChild(visibleItems[j].el);rightH+=visibleItems[j].h;}}
+
+    window._serverSectionOrder = (_cachedStatus && _cachedStatus.section_order) || null;
+    if (!window.NasDrag || !NasDrag.applySavedOrder(blockMap, visibleItems, allCols)) {
+      var colHeights = allCols.map(function() { return 0; });
+      for (var j = 0; j < visibleItems.length; j++) {
+        var minIdx = 0;
+        for (var k = 1; k < colHeights.length; k++) {
+          if (colHeights[k] < colHeights[minIdx]) minIdx = k;
+        }
+        allCols[minIdx].appendChild(visibleItems[j].el);
+        colHeights[minIdx] += visibleItems[j].h;
+      }
     }
+
     staging.parentNode.removeChild(staging);
     if (window.NasDrag) NasDrag.init();
     if (window.NasSwipe) NasSwipe.init();
