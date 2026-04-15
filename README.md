@@ -441,6 +441,9 @@ go build -o nas-doctor ./cmd/nas-doctor
   <img src="screenshots/settings-page.jpg" alt="Settings" width="380">
   <img src="screenshots/parity-page.jpg" alt="Parity" width="380">
 </p>
+<p>
+  <img src="screenshots/planner-page.jpg" alt="Replacement Planner" width="380">
+</p>
 
 ---
 
