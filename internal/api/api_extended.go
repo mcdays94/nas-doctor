@@ -29,8 +29,12 @@ type Settings struct {
 	SettingsVersion   int                     `json:"settings_version"`
 	ScanInterval      string                  `json:"scan_interval"`
 	SpeedTestInterval string                  `json:"speedtest_interval,omitempty"` // e.g. "4h", "1h", "30m"
+<<<<<<< HEAD
 	SpeedTestSchedule []string                `json:"speedtest_schedule,omitempty"` // specific times: ["03:00"]
 	SpeedTestDay      string                  `json:"speedtest_day,omitempty"`      // "monday"-"sunday" or "1","15" for monthly
+=======
+	SpeedTestSchedule []string                `json:"speedtest_schedule,omitempty"` // specific times: ["06:00","12:00","18:00","00:00"]
+>>>>>>> origin/main
 	Theme             string                  `json:"theme"`
 	Icon              string                  `json:"icon"`
 	Notifications     SettingsNotifications   `json:"notifications"`
@@ -148,7 +152,11 @@ const settingsConfigKey = "settings"
 func defaultSettings() Settings {
 	return Settings{
 		SettingsVersion: currentSettingsVersion,
+<<<<<<< HEAD
 		ScanInterval:    "30m",
+=======
+		ScanInterval:    "1h",
+>>>>>>> origin/main
 		Theme:           ThemeMidnight,
 		Icon:            "icon3",
 		Notifications: SettingsNotifications{
@@ -369,7 +377,11 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Basic validation
 	if settings.ScanInterval == "" {
+<<<<<<< HEAD
 		settings.ScanInterval = "30m"
+=======
+		settings.ScanInterval = "1h"
+>>>>>>> origin/main
 	}
 	if _, err := time.ParseDuration(settings.ScanInterval); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid scan_interval: " + err.Error()})
@@ -561,7 +573,11 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 				s.scheduler.SetSpeedTestInterval(d)
 			}
 		}
+<<<<<<< HEAD
 		s.scheduler.SetSpeedTestSchedule(settings.SpeedTestSchedule, settings.SpeedTestDay, settings.SpeedTestInterval)
+=======
+		s.scheduler.SetSpeedTestSchedule(settings.SpeedTestSchedule)
+>>>>>>> origin/main
 		// Update retention config
 		s.scheduler.UpdateRetention(scheduler.RetentionConfig{
 			SnapshotDays:  settings.Retention.SnapshotDays,
