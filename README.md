@@ -216,7 +216,7 @@ services:
       - /dev/dri:/dev/dri                  # GPU monitoring (Intel/AMD)
     environment:
       - TZ=Europe/Lisbon
-      - NAS_DOCTOR_INTERVAL=6h
+      - NAS_DOCTOR_INTERVAL=30m
     restart: unless-stopped
 
 volumes:
@@ -287,7 +287,7 @@ services:
       - /volume2:/host/volume2:ro          # add more volumes as needed
     environment:
       - TZ=Europe/Lisbon
-      - NAS_DOCTOR_INTERVAL=6h
+      - NAS_DOCTOR_INTERVAL=30m
     restart: unless-stopped
 ```
 
@@ -323,7 +323,7 @@ services:
       - /dev/dri:/dev/dri                  # Intel/AMD GPU access (if applicable)
     environment:
       - TZ=America/New_York
-      - NAS_DOCTOR_INTERVAL=6h
+      - NAS_DOCTOR_INTERVAL=30m
     restart: unless-stopped
 ```
 
@@ -424,7 +424,7 @@ Then go to Settings → Proxmox VE, enter your PVE API URL (`https://proxmox:800
 git clone https://github.com/mcdays94/nas-doctor.git
 cd nas-doctor
 go build -o nas-doctor ./cmd/nas-doctor
-./nas-doctor -listen :8060 -data ./data -interval 6h
+./nas-doctor -listen :8060 -data ./data -interval 30m
 ```
 
 ---
@@ -464,7 +464,7 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 |---|---|---|
 | `NAS_DOCTOR_LISTEN` | `:8060` | HTTP listen address |
 | `NAS_DOCTOR_DATA` | `/data` | SQLite database directory |
-| `NAS_DOCTOR_INTERVAL` | `6h` | Diagnostic scan interval |
+| `NAS_DOCTOR_INTERVAL` | `30m` | Diagnostic scan interval |
 | `NAS_DOCTOR_UPS_NAME` | (auto-detect) | NUT UPS name (skip auto-detect from `upsc -l`) |
 | `NAS_DOCTOR_NUT_HOST` | (local) | Remote NUT server host (queries `upsname@host`) |
 | `NAS_DOCTOR_APCUPSD_HOST` | (local) | Remote apcupsd daemon `host:port` |
