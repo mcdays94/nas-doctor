@@ -61,6 +61,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <a href="#card-fleet" class="btn btn-secondary btn-sm" style="text-decoration:none">Fleet</a>
     <a href="#card-sections" class="btn btn-secondary btn-sm" style="text-decoration:none">Dashboard</a>
     <a href="#card-retention" class="btn btn-secondary btn-sm" style="text-decoration:none">Data</a>
+    <a href="#card-speedtest" class="btn btn-secondary btn-sm" style="text-decoration:none">Speed Test</a>
     <a href="#card-backup" class="btn btn-secondary btn-sm" style="text-decoration:none">Backup</a>
   </div>
 
@@ -70,16 +71,17 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <div class="card-desc">Configure scan interval and appearance.</div>
     <div class="form-row">
       <div>
-        <label for="scan-preset">Scan Interval</label>
+        <label for="scan-preset">Diagnostic Scan Interval</label>
         <select id="scan-preset" onchange="onPresetChange()">
           <option value="30m">Every 30 minutes</option>
-          <option value="1h">Every 1 hour</option>
+          <option value="1h" selected>Every 1 hour</option>
           <option value="2h">Every 2 hours</option>
-          <option value="6h" selected>Every 6 hours</option>
+          <option value="6h">Every 6 hours</option>
           <option value="12h">Every 12 hours</option>
           <option value="24h">Every 24 hours</option>
           <option value="custom">Custom...</option>
         </select>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">Controls how often NAS Doctor runs a full diagnostic: SMART health, disk usage, Docker state, ZFS pools, UPS, GPU, network, and backup detection. Service checks (30s), container metrics (5m), and speed tests run on their own schedules regardless of this setting.</div>
       </div>
       <div></div>
     </div>
@@ -747,6 +749,51 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     </div>
   </div>
 
+  <!-- 7b. Speed Test Settings -->
+  <div class="card" id="card-speedtest">
+    <div class="card-title">Speed Test</div>
+    <div class="card-desc">Configure how often NAS Doctor runs network speed tests. Results appear on the dashboard and in the Speed Test section. Requires the <code>speedtest</code> CLI (bundled in the Docker image).</div>
+    <div class="form-row">
+      <div>
+        <label>Mode</label>
+        <select id="speedtest-mode" onchange="onSpeedTestModeChange();saveSettings()" style="margin-bottom:8px">
+          <option value="interval">Run on interval</option>
+          <option value="schedule">Run at specific times</option>
+        </select>
+      </div>
+      <div></div>
+    </div>
+    <div id="speedtest-interval-wrap">
+      <div class="form-row">
+        <div>
+          <label for="speedtest-interval">Run every</label>
+          <select id="speedtest-interval" onchange="saveSettings()">
+            <option value="30m">30 minutes</option>
+            <option value="1h">1 hour</option>
+            <option value="2h">2 hours</option>
+            <option value="4h" selected>4 hours</option>
+            <option value="6h">6 hours</option>
+            <option value="12h">12 hours</option>
+            <option value="24h">24 hours</option>
+          </select>
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">First test runs 2 minutes after startup, then repeats at this interval.</div>
+        </div>
+        <div></div>
+      </div>
+    </div>
+    <div id="speedtest-schedule-wrap" style="display:none">
+      <label>Run at these times <span style="font-size:11px;color:var(--text2)">(24h format, local timezone)</span></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px" id="speedtest-times">
+        <input type="time" class="form-input st-time" value="06:00" onchange="saveSettings()" style="width:auto">
+        <input type="time" class="form-input st-time" value="12:00" onchange="saveSettings()" style="width:auto">
+        <input type="time" class="form-input st-time" value="18:00" onchange="saveSettings()" style="width:auto">
+        <input type="time" class="form-input st-time" value="00:00" onchange="saveSettings()" style="width:auto">
+        <button class="btn btn-secondary btn-sm" onclick="addSpeedTestTime()" style="align-self:center">+ Add</button>
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">Speed tests will run within 1 minute of each scheduled time.</div>
+    </div>
+  </div>
+
   <!-- 8. Backup -->
   <div class="card" id="card-backup">
     <div class="card-title">Automatic Backup</div>
@@ -935,6 +982,35 @@ function durationToCron(dur) {
   return "0 */" + totalHrs + " * * *";
 }
 
+function onSpeedTestModeChange() {
+  var mode = document.getElementById("speedtest-mode").value;
+  document.getElementById("speedtest-interval-wrap").style.display = (mode === "interval") ? "" : "none";
+  document.getElementById("speedtest-schedule-wrap").style.display = (mode === "schedule") ? "" : "none";
+}
+
+function addSpeedTestTime() {
+  var container = document.getElementById("speedtest-times");
+  var input = document.createElement("input");
+  input.type = "time";
+  input.className = "form-input st-time";
+  input.value = "12:00";
+  input.onchange = saveSettings;
+  input.style.width = "auto";
+  // Insert before the + button
+  var btn = container.querySelector("button");
+  container.insertBefore(input, btn);
+}
+
+function getSpeedTestSchedule() {
+  var inputs = document.querySelectorAll(".st-time");
+  var times = [];
+  for (var i = 0; i < inputs.length; i++) {
+    var v = inputs[i].value;
+    if (v) times.push(v.substring(0, 5)); // "HH:MM"
+  }
+  return times;
+}
+
 function onPresetChange() {
   var preset = document.getElementById("scan-preset").value;
   var panel = document.getElementById("custom-interval-panel");
@@ -982,6 +1058,28 @@ function loadSettings() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       settings = data;
+      /* Speed test settings */
+      var stSel = document.getElementById("speedtest-interval");
+      if (stSel && data.speedtest_interval) stSel.value = data.speedtest_interval;
+      var stMode = document.getElementById("speedtest-mode");
+      if (stMode && data.speedtest_schedule && data.speedtest_schedule.length > 0) {
+        stMode.value = "schedule";
+        // Populate time inputs
+        var container = document.getElementById("speedtest-times");
+        var btn = container.querySelector("button");
+        // Remove existing time inputs
+        var existing = container.querySelectorAll(".st-time");
+        for (var sti = 0; sti < existing.length; sti++) existing[sti].remove();
+        // Add saved times
+        for (var stj = 0; stj < data.speedtest_schedule.length; stj++) {
+          var inp = document.createElement("input");
+          inp.type = "time"; inp.className = "form-input st-time";
+          inp.value = data.speedtest_schedule[stj];
+          inp.onchange = saveSettings; inp.style.width = "auto";
+          container.insertBefore(inp, btn);
+        }
+      }
+      onSpeedTestModeChange();
       /* Scan interval — check if it matches a preset */
       var sel = document.getElementById("scan-preset");
       if (isPresetValue(data.scan_interval)) {
@@ -1083,6 +1181,8 @@ function buildSettingsPayload() {
 
   return {
     scan_interval: getScanInterval(),
+    speedtest_interval: document.getElementById("speedtest-interval").value,
+    speedtest_schedule: document.getElementById("speedtest-mode").value === "schedule" ? getSpeedTestSchedule() : [],
     theme: getSelectedTheme(),
     icon: getSelectedIcon(),
     notifications: notifications,

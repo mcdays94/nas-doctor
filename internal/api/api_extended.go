@@ -28,6 +28,8 @@ import (
 type Settings struct {
 	SettingsVersion   int                     `json:"settings_version"`
 	ScanInterval      string                  `json:"scan_interval"`
+	SpeedTestInterval string                  `json:"speedtest_interval,omitempty"` // e.g. "4h", "1h", "30m"
+	SpeedTestSchedule []string                `json:"speedtest_schedule,omitempty"` // specific times: ["06:00","12:00","18:00","00:00"]
 	Theme             string                  `json:"theme"`
 	Icon              string                  `json:"icon"`
 	Notifications     SettingsNotifications   `json:"notifications"`
@@ -145,7 +147,7 @@ const settingsConfigKey = "settings"
 func defaultSettings() Settings {
 	return Settings{
 		SettingsVersion: currentSettingsVersion,
-		ScanInterval:    "6h",
+		ScanInterval:    "1h",
 		Theme:           ThemeMidnight,
 		Icon:            "icon3",
 		Notifications: SettingsNotifications{
@@ -366,7 +368,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Basic validation
 	if settings.ScanInterval == "" {
-		settings.ScanInterval = "6h"
+		settings.ScanInterval = "1h"
 	}
 	if _, err := time.ParseDuration(settings.ScanInterval); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid scan_interval: " + err.Error()})
@@ -552,6 +554,13 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if d, err := time.ParseDuration(settings.ScanInterval); err == nil {
 			s.scheduler.UpdateInterval(d)
 		}
+		// Update speed test interval and schedule
+		if settings.SpeedTestInterval != "" {
+			if d, err := time.ParseDuration(settings.SpeedTestInterval); err == nil {
+				s.scheduler.SetSpeedTestInterval(d)
+			}
+		}
+		s.scheduler.SetSpeedTestSchedule(settings.SpeedTestSchedule)
 		// Update retention config
 		s.scheduler.UpdateRetention(scheduler.RetentionConfig{
 			SnapshotDays:  settings.Retention.SnapshotDays,
