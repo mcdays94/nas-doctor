@@ -81,16 +81,20 @@ type AlertingConfig struct {
 
 // Scheduler periodically runs diagnostic collections and analysis.
 type Scheduler struct {
-	collector     *collector.Collector
-	store         *storage.DB
-	notifier      *notifier.Notifier
-	metrics       *notifier.Metrics
-	logger        *slog.Logger
-	interval      time.Duration
-	retention     RetentionConfig
-	alerting      AlertingConfig
-	serviceChecks []internal.ServiceCheckConfig
-	lastCheckRun  map[string]time.Time // per-check last execution time
+	collector         *collector.Collector
+	store             *storage.DB
+	notifier          *notifier.Notifier
+	metrics           *notifier.Metrics
+	logger            *slog.Logger
+	interval          time.Duration
+	speedTestInterval time.Duration
+	speedTestSchedule []string // specific HH:MM times, overrides interval when set
+	speedTestDay      string   // "monday"-"sunday" or "1","15" for monthly
+	speedTestFreq     string   // "24h", "weekly", "monthly" — only when schedule is set
+	retention         RetentionConfig
+	alerting          AlertingConfig
+	serviceChecks     []internal.ServiceCheckConfig
+	lastCheckRun      map[string]time.Time // per-check last execution time
 
 	logForwarder *logfwd.Forwarder
 
@@ -112,12 +116,13 @@ func New(
 	interval time.Duration,
 ) *Scheduler {
 	return &Scheduler{
-		collector: col,
-		store:     store,
-		notifier:  notif,
-		metrics:   metrics,
-		logger:    logger,
-		interval:  interval,
+		collector:         col,
+		store:             store,
+		notifier:          notif,
+		metrics:           metrics,
+		logger:            logger,
+		interval:          interval,
+		speedTestInterval: 4 * time.Hour,
 		retention: RetentionConfig{
 			SnapshotDays:  90,
 			MaxDBSizeMB:   500,
@@ -193,17 +198,50 @@ func (s *Scheduler) Start() {
 		}
 	}()
 
-	// Independent speed test loop — default 4h interval
+	// Independent speed test loop — runs on interval or at scheduled times
 	go func() {
-		// Run first test 2 minutes after startup
 		time.Sleep(2 * time.Minute)
 		s.runSpeedTest()
-		ticker := time.NewTicker(4 * time.Hour)
+		ticker := time.NewTicker(1 * time.Minute) // check every minute for schedule hits
 		defer ticker.Stop()
+		lastRun := time.Now()
 		for {
 			select {
 			case <-ticker.C:
-				s.runSpeedTest()
+				s.mu.RLock()
+				schedule := s.speedTestSchedule
+				interval := s.speedTestInterval
+				s.mu.RUnlock()
+				now := time.Now()
+				if len(schedule) > 0 {
+					s.mu.RLock()
+					day := s.speedTestDay
+					freq := s.speedTestFreq
+					s.mu.RUnlock()
+					// Check if today matches the schedule day
+					dayMatch := true
+					if freq == "weekly" && day != "" {
+						dayMatch = strings.EqualFold(now.Weekday().String(), day)
+					} else if freq == "monthly" && day != "" {
+						dayNum, _ := strconv.Atoi(day)
+						dayMatch = dayNum > 0 && now.Day() == dayNum
+					}
+					// Scheduled mode: run at specific HH:MM times on matching days
+					nowHHMM := now.Format("15:04")
+					for _, t := range schedule {
+						if dayMatch && nowHHMM == t && now.Sub(lastRun) > 5*time.Minute {
+							s.runSpeedTest()
+							lastRun = now
+							break
+						}
+					}
+				} else {
+					// Interval mode
+					if now.Sub(lastRun) >= interval {
+						s.runSpeedTest()
+						lastRun = now
+					}
+				}
 			case <-s.stop:
 				return
 			}
@@ -212,6 +250,29 @@ func (s *Scheduler) Start() {
 }
 
 // UpdateInterval dynamically changes the scan interval without restarting.
+// SetSpeedTestInterval updates how often the speed test runs.
+func (s *Scheduler) SetSpeedTestInterval(d time.Duration) {
+	if d < 5*time.Minute {
+		d = 5 * time.Minute
+	}
+	s.mu.Lock()
+	s.speedTestInterval = d
+	s.mu.Unlock()
+	s.logger.Info("speed test interval updated", "interval", d)
+}
+
+// SetSpeedTestSchedule sets specific times of day to run speed tests.
+func (s *Scheduler) SetSpeedTestSchedule(times []string, day string, freq string) {
+	s.mu.Lock()
+	s.speedTestSchedule = times
+	s.speedTestDay = day
+	s.speedTestFreq = freq
+	s.mu.Unlock()
+	if len(times) > 0 {
+		s.logger.Info("speed test schedule set", "times", times, "day", day, "freq", freq)
+	}
+}
+
 func (s *Scheduler) UpdateInterval(d time.Duration) {
 	if d < 1*time.Second {
 		d = 1 * time.Second // minimum 1 second

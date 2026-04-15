@@ -8,7 +8,7 @@
 //
 //	-listen     HTTP listen address (default ":8080")
 //	-data       Data directory for SQLite database (default "/data")
-//	-interval   Diagnostic scan interval (default "6h")
+//	-interval   Diagnostic scan interval (default "1h")
 //	-config     Path to JSON config file (optional)
 //	-demo       Run with realistic mock data (for previewing themes)
 package main
@@ -45,7 +45,7 @@ func main() {
 	// Flags
 	listenAddr := flag.String("listen", envOr("NAS_DOCTOR_LISTEN", ":8060"), "HTTP listen address")
 	dataDir := flag.String("data", envOr("NAS_DOCTOR_DATA", "/tmp/nas-doctor-data"), "Data directory for SQLite DB")
-	intervalStr := flag.String("interval", envOr("NAS_DOCTOR_INTERVAL", "6h"), "Diagnostic scan interval")
+	intervalStr := flag.String("interval", envOr("NAS_DOCTOR_INTERVAL", "1h"), "Diagnostic scan interval")
 	configPath := flag.String("config", envOr("NAS_DOCTOR_CONFIG", ""), "Path to JSON config file")
 	demoMode := flag.Bool("demo", false, "Run with realistic mock data (for previewing themes)")
 	flag.Parse()
