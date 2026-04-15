@@ -973,7 +973,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
         var scClass = scStatus === 'up' ? 'td-healthy' : 'td-crit';
         var fails = sc.consecutive_failures || 0;
         var dots = ''; for (var di = 0; di < 8; di++) { var isRed = di >= (8 - fails); dots += '<span style="display:inline-block;width:4px;height:12px;border-radius:1px;margin-right:1px;background:' + (isRed ? 'var(--red)' : 'var(--green)') + '"></span>'; }
-        h += '<tr>';
+        h += '<tr style="cursor:pointer" data-sc-filter="' + esc(sc.name || '') + '">';
         h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><div style="font-weight:500">' + esc(sc.name || 'Service') + '</div><div style="font-size:11px;color:var(--text-quaternary)">' + esc(sc.target || '') + '</div></td>';
         h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);text-align:center"><div style="display:inline-flex;align-items:center;gap:0">' + dots + '</div></td>';
         h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc((sc.type || '').toUpperCase()) + '</td>';
@@ -1490,6 +1490,11 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     if (window.NasSwipe) NasSwipe.init();
     initSortBars();
     NasScrollFade.init();
+    // Service check click-through to /service-checks?filter=name
+    document.addEventListener("click", function(e) {
+      var row = e.target.closest("[data-sc-filter]");
+      if (row) window.location.href = "/service-checks?filter=" + encodeURIComponent(row.getAttribute("data-sc-filter"));
+    });
   }
 
   window.NasScrollFade = {

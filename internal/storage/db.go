@@ -1455,18 +1455,15 @@ func (d *DB) ListLatestServiceChecks(limit int) ([]ServiceCheckEntry, error) {
 		limit = 200
 	}
 	rows, err := d.db.Query(
-		`SELECT h.check_key, h.name, h.check_type, h.target, h.status,
-				COALESCE(h.response_ms, 0), COALESCE(h.error_message, ''),
-				COALESCE(h.consecutive_failures, 0), COALESCE(h.failure_threshold, 1), COALESCE(h.failure_severity, 'warning'),
-				h.checked_at
-		 FROM service_checks_history h
-		 INNER JOIN (
-			SELECT check_key, MAX(checked_at) AS checked_at
-			FROM service_checks_history
-			GROUP BY check_key
-		 ) latest
-		 ON latest.check_key = h.check_key AND latest.checked_at = h.checked_at
-		 ORDER BY h.checked_at DESC
+		`SELECT check_key, name, check_type, target, status,
+				COALESCE(response_ms, 0), COALESCE(error_message, ''),
+				COALESCE(consecutive_failures, 0), COALESCE(failure_threshold, 1), COALESCE(failure_severity, 'warning'),
+				checked_at
+		 FROM service_checks_history
+		 WHERE id IN (
+			SELECT MAX(id) FROM service_checks_history GROUP BY check_key
+		 )
+		 ORDER BY checked_at DESC
 		 LIMIT ?`,
 		limit,
 	)

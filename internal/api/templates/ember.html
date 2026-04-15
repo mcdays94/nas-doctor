@@ -1793,7 +1793,7 @@ td.mono {
         var scClr = (sc.status === "up") ? "var(--green)" : "var(--red)";
         var fails = sc.consecutive_failures || 0;
         var dots = ""; for (var di = 0; di < 8; di++) { var isRed = di >= (8 - fails); dots += "<span style=\"display:inline-block;width:4px;height:12px;border-radius:1px;margin-right:1px;background:" + (isRed ? "var(--red)" : "var(--green)") + "\"></span>"; }
-        html += "<tr><td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\"><div style=\"font-weight:500\">" + esc(sc.name || "Service") + "</div><div style=\"font-size:11px;color:var(--text-dim)\">" + esc(sc.target || "") + "</div></td>";
+        html += "<tr style=\"cursor:pointer\" data-sc-filter=\"" + esc(sc.name || "") + "\"><td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\"><div style=\"font-weight:500\">" + esc(sc.name || "Service") + "</div><div style=\"font-size:11px;color:var(--text-dim)\">" + esc(sc.target || "") + "</div></td>";
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border);text-align:center\"><div style=\"display:inline-flex;align-items:center;gap:0\">" + dots + "</div></td>";
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border)\">" + esc((sc.type || "").toUpperCase()) + "</td>";
         html += "<td style=\"padding:5px 8px;border-bottom:1px solid var(--border);color:" + scClr + "\">" + esc(sc.status || "unknown") + "</td>";
@@ -2086,6 +2086,10 @@ td.mono {
     if(window.NasSwipe)NasSwipe.init();
     initSortBars();
     NasScrollFade.init();
+    document.addEventListener("click", function(e) {
+      var row = e.target.closest("[data-sc-filter]");
+      if (row) window.location.href = "/service-checks?filter=" + encodeURIComponent(row.getAttribute("data-sc-filter"));
+    });
   }
 
   window.NasScrollFade = {

@@ -29,7 +29,7 @@
 .detail-item{background:var(--bg-elevated);border-radius:var(--radius);padding:12px}
 .detail-item .dl{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
 .detail-item .dv{font-size:18px;font-weight:700;margin-top:4px}
-.chart-wrap{margin-top:20px;height:140px;background:var(--bg-elevated);border-radius:var(--radius);overflow:hidden}
+.chart-wrap{margin-top:12px;height:180px;background:var(--bg-elevated);border-radius:var(--radius);overflow:visible}
 .chart-label{font-size:11px;color:var(--text3);margin-bottom:4px;margin-top:16px}
 </style>
 </head>
@@ -57,7 +57,7 @@
   <!-- Speed trend chart -->
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:20px">
     <div class="chart-label">Speed Trend (MB/s over time)</div>
-    <div class="chart-wrap"><canvas id="speed-chart" style="width:100%;height:100%"></canvas></div>
+    <div class="chart-wrap"><canvas id="speed-chart"></canvas></div>
   </div>
 
   <div id="parity-sort"></div>
@@ -143,14 +143,25 @@
     sortH+='</div>';
     document.getElementById("parity-sort").innerHTML=sortH;
 
-    // Speed trend chart (oldest to newest)
-    var speedData=[];
-    for(var i=hist.length-1;i>=0;i--)speedData.push(hist[i].speed_mb_s||0);
+    // Speed trend chart (oldest to newest, with date labels and axes)
+    var speedData=[],speedLabels=[],tempData=[];
+    for(var i=hist.length-1;i>=0;i--){
+      var spd=hist[i].speed_mb_s||0;
+      speedData.push(spd);
+      tempData.push(hist[i].avg_temp_c||0);
+      // Parse date for label
+      var dt=new Date(hist[i]._ts);
+      if(isNaN(dt.getTime())){speedLabels.push("");}
+      else if(hist.length>50){speedLabels.push(dt.getFullYear()+"-"+(dt.getMonth()+1));}
+      else{speedLabels.push((dt.getMonth()+1)+"/"+dt.getDate()+"/"+String(dt.getFullYear()).slice(2));}
+    }
     var canvas=document.getElementById("speed-chart");
     if(canvas&&window.NasChart){
-      canvas.width=canvas.parentElement.offsetWidth;
-      canvas.height=canvas.parentElement.offsetHeight;
-      NasChart.sparkline("speed-chart",{data:speedData,color:"#5e6ad2",width:canvas.width,height:canvas.height,fill:true});
+      var datasets=[{data:speedData,color:"#5e6ad2",label:"Speed (MB/s)"}];
+      // Add temp overlay if any entries have temp data
+      var hasTemps=tempData.some(function(t){return t>0;});
+      if(hasTemps)datasets.push({data:tempData,color:"#f59e0b",label:"Avg Temp (\u00b0C)"});
+      NasChart.area("speed-chart",{datasets:datasets,labels:speedLabels,width:canvas.parentElement.offsetWidth,height:180,showDots:speedData.length<40,margins:{top:10,bottom:28,left:44,right:hasTemps?44:10}});
     }
 
     // Parity cards (newest first)

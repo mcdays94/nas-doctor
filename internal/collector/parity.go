@@ -13,25 +13,20 @@ func collectParity(hp internal.HostPaths) (*internal.ParityInfo, error) {
 	info := &internal.ParityInfo{}
 
 	// Current parity status from var.ini
+	// mdResyncPos > 0 means a sync is in progress
+	// mdResyncAction describes the type (check, recon, etc) but persists after completion
 	varIniPath := "/var/local/emhttp/var.ini"
 	if data, err := os.ReadFile(varIniPath); err == nil {
+		var resyncPos string
 		for _, line := range strings.Split(string(data), "\n") {
 			if strings.HasPrefix(line, "mdResyncPos=") {
-				val := strings.TrimPrefix(line, "mdResyncPos=")
-				val = strings.Trim(val, "\"")
-				if val == "0" || val == "" {
-					info.Status = "idle"
-				} else {
-					info.Status = "running"
-				}
+				resyncPos = strings.Trim(strings.TrimPrefix(line, "mdResyncPos="), "\"")
 			}
-			if strings.HasPrefix(line, "mdResyncAction=") {
-				val := strings.TrimPrefix(line, "mdResyncAction=")
-				val = strings.Trim(val, "\"")
-				if val != "" && val != "idle" {
-					info.Status = "running"
-				}
-			}
+		}
+		if resyncPos != "" && resyncPos != "0" {
+			info.Status = "running"
+		} else {
+			info.Status = "idle"
 		}
 	}
 

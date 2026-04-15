@@ -368,6 +368,15 @@
       }
       renderSummary();
       populateCheckFilter();
+      // Apply URL filter param (from dashboard click-through)
+      var urlFilter = new URLSearchParams(window.location.search).get("filter");
+      if (urlFilter) {
+        var sel = document.getElementById("f-check");
+        // Match by name (URL has name, dropdown has key as value)
+        for (var fi = 0; fi < checksData.length; fi++) {
+          if (checksData[fi].name === urlFilter) { sel.value = checksData[fi].key; break; }
+        }
+      }
       // Load history for all checks then render
       var promises=[];
       for(var i=0;i<checksData.length;i++){
