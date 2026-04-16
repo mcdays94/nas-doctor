@@ -268,11 +268,13 @@ type SystemInfo struct {
 }
 
 type ProcessInfo struct {
-	PID     int     `json:"pid"`
-	User    string  `json:"user"`
-	CPU     float64 `json:"cpu_percent"`
-	Mem     float64 `json:"mem_percent"`
-	Command string  `json:"command"`
+	PID           int     `json:"pid"`
+	User          string  `json:"user"`
+	CPU           float64 `json:"cpu_percent"`
+	Mem           float64 `json:"mem_percent"`
+	Command       string  `json:"command"`
+	ContainerName string  `json:"container_name"`
+	ContainerID   string  `json:"container_id"`
 }
 
 // ---------- Disk ----------
