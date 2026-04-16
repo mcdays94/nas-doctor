@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +39,9 @@ type FakeStore struct {
 
 	// Alert suppression: fingerprint → reason (e.g., "acknowledged", "snoozed").
 	suppressedAlerts map[string]string
+
+	// Process history.
+	processHistory []ProcessHistoryPoint
 
 	// Finding history keyed by category.
 	findingsByCategory map[string][]internal.Finding
@@ -407,6 +411,65 @@ func (f *FakeStore) SaveContainerStats(_ *internal.DockerInfo) error {
 func (f *FakeStore) GetContainerHistory(_ int) ([]ContainerHistoryPoint, error) {
 	// TODO: implement for testing
 	return nil, nil
+}
+
+func (f *FakeStore) SaveProcessStats(procs []internal.ProcessInfo) error {
+	if len(procs) == 0 {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := time.Now()
+	for _, p := range procs {
+		name := extractProcessName(p.Command)
+		if name == "" {
+			continue
+		}
+		f.processHistory = append(f.processHistory, ProcessHistoryPoint{
+			Timestamp: now,
+			PID:       p.PID,
+			User:      p.User,
+			Name:      name,
+			Command:   p.Command,
+			CPUPct:    p.CPU,
+			MemPct:    p.Mem,
+		})
+	}
+	return nil
+}
+
+func (f *FakeStore) GetProcessHistory(_ int) ([]ProcessHistoryPoint, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	// Return a copy sorted by name ASC, container_name ASC, timestamp ASC.
+	out := make([]ProcessHistoryPoint, len(f.processHistory))
+	copy(out, f.processHistory)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		if out[i].ContainerName != out[j].ContainerName {
+			return out[i].ContainerName < out[j].ContainerName
+		}
+		return out[i].Timestamp.Before(out[j].Timestamp)
+	})
+	return out, nil
+}
+
+// extractProcessName extracts a short name from a command string (same logic as processName in db.go).
+func extractProcessName(command string) string {
+	if command == "" {
+		return ""
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	exe := fields[0]
+	if idx := strings.LastIndex(exe, "/"); idx >= 0 && idx < len(exe)-1 {
+		exe = exe[idx+1:]
+	}
+	return exe
 }
 
 func (f *FakeStore) SaveSpeedTest(_ string, _ *internal.SpeedTestResult) error {

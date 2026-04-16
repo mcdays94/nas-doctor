@@ -242,6 +242,24 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_service_checks_key_ts ON service_checks_history(check_key, checked_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_service_checks_ts ON service_checks_history(checked_at DESC)`,
+		// --- Process history ---
+		`CREATE TABLE IF NOT EXISTS process_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			snapshot_id TEXT NOT NULL,
+			pid INTEGER NOT NULL,
+			user TEXT,
+			name TEXT NOT NULL,
+			command TEXT,
+			container_name TEXT DEFAULT '',
+			container_id TEXT DEFAULT '',
+			cpu_pct REAL,
+			mem_pct REAL,
+			timestamp DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_process_history_ts ON process_history(timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_process_history_name ON process_history(name, container_name, timestamp DESC)`,
+
 		// Disk usage history for capacity forecasting
 		`CREATE TABLE IF NOT EXISTS disk_usage_history (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -543,6 +561,89 @@ func (d *DB) GetContainerHistory(hours int) ([]ContainerHistoryPoint, error) {
 	for rows.Next() {
 		var p ContainerHistoryPoint
 		if err := rows.Scan(&p.Timestamp, &p.Name, &p.Image, &p.CPUPct, &p.MemMB, &p.MemPct, &p.NetIn, &p.NetOut, &p.BlockRead, &p.BlockWrite); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
+}
+
+// ProcessHistoryPoint represents a single time-series data point for a process.
+type ProcessHistoryPoint struct {
+	Timestamp     time.Time `json:"timestamp"`
+	PID           int       `json:"pid"`
+	User          string    `json:"user"`
+	Name          string    `json:"name"`
+	Command       string    `json:"command"`
+	ContainerName string    `json:"container_name"`
+	ContainerID   string    `json:"container_id"`
+	CPUPct        float64   `json:"cpu_percent"`
+	MemPct        float64   `json:"mem_percent"`
+}
+
+// processName extracts a short process name from a full command string.
+// e.g. "/usr/bin/python3 app.py" → "python3", "nginx: worker" → "nginx:"
+func processName(command string) string {
+	if command == "" {
+		return ""
+	}
+	// Take the first field (the executable path/name).
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	exe := fields[0]
+	// Strip leading path: /usr/bin/python3 → python3
+	if idx := strings.LastIndex(exe, "/"); idx >= 0 && idx < len(exe)-1 {
+		exe = exe[idx+1:]
+	}
+	return exe
+}
+
+// SaveProcessStats saves a standalone process stats snapshot.
+// Used by the lightweight process stats collection loop (similar to SaveContainerStats).
+func (d *DB) SaveProcessStats(procs []internal.ProcessInfo) error {
+	if len(procs) == 0 {
+		return nil
+	}
+	now := time.Now()
+	snapshotID := fmt.Sprintf("pstats-%d", now.UnixMilli())
+	for _, p := range procs {
+		name := processName(p.Command)
+		if name == "" {
+			continue // skip processes with empty name
+		}
+		_, err := d.db.Exec(
+			`INSERT INTO process_history (snapshot_id, pid, user, name, command, container_name, container_id, cpu_pct, mem_pct, timestamp)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snapshotID, p.PID, p.User, name, p.Command, "", "", p.CPU, p.Mem, now,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetProcessHistory returns process history for the given time range.
+func (d *DB) GetProcessHistory(hours int) ([]ProcessHistoryPoint, error) {
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	rows, err := d.db.Query(
+		`SELECT timestamp, pid, COALESCE(user, ''), name, COALESCE(command, ''), COALESCE(container_name, ''), COALESCE(container_id, ''), cpu_pct, mem_pct
+		 FROM process_history
+		 WHERE timestamp >= ?
+		 ORDER BY name ASC, container_name ASC, timestamp ASC`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []ProcessHistoryPoint
+	for rows.Next() {
+		var p ProcessHistoryPoint
+		if err := rows.Scan(&p.Timestamp, &p.PID, &p.User, &p.Name, &p.Command, &p.ContainerName, &p.ContainerID, &p.CPUPct, &p.MemPct); err != nil {
 			return nil, err
 		}
 		points = append(points, p)
@@ -1638,7 +1739,7 @@ func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 
 	// Explicitly delete from history tables for the snapshots being pruned,
 	// in case foreign_keys or CASCADE is not fully honoured at runtime.
-	for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history", "speedtest_history"} {
+	for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history", "speedtest_history", "process_history"} {
 		_, err := tx.Exec(fmt.Sprintf(
 			`DELETE FROM %s WHERE snapshot_id IN (%s)`, table, pruneQuery,
 		), keepMin, cutoff)
@@ -2018,7 +2119,7 @@ func (d *DB) PruneToSizeMB(targetMB float64) (int, error) {
 		if err != nil {
 			return totalPruned, err
 		}
-		for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history", "speedtest_history"} {
+		for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history", "speedtest_history", "process_history"} {
 			d.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE snapshot_id IN (
 				SELECT id FROM snapshots ORDER BY timestamp ASC LIMIT ?
 			)`, table), batchSize)
