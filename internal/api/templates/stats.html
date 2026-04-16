@@ -478,7 +478,7 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
     ranked.sort(function(a, b) { return b.total - a.total; });
     ranked = ranked.slice(0, 8);
     if (ranked.length === 0) return '';
-    var h = '<div class="system-section"><div class="system-section-title">Process CPU History (top ' + ranked.length + ' by cumulative CPU)</div>';
+    var h = '<div class="system-section" id="process-history"><div class="system-section-title">Process CPU History (top ' + ranked.length + ' by cumulative CPU)</div>';
     h += '<div class="chart-card"><div class="chart-label">CPU Usage (%) by Process</div>';
     h += '<canvas id="chart-process-cpu" width="600" height="200" style="width:100%;height:200px"></canvas></div>';
     // Legend

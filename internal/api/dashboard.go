@@ -1020,7 +1020,7 @@ sections.processes = function(sn) {
   if (procs.length > 0) {
     var showCount = Math.min(procs.length, 10);
     h += '<div>';
-    h += '<div class="section-title">Top Processes (' + procs.length + ')</div>';
+    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between"><span>Top Processes (' + procs.length + ')</span><a href="/stats#process-history" style="font-size:11px;color:var(--text-quaternary);text-decoration:none;font-weight:400;margin-left:16px;white-space:nowrap">View history &rarr;</a></div>';
     h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden">';
     h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
     h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
