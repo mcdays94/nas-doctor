@@ -176,8 +176,9 @@ func (s *Scheduler) Start() {
 		}
 	}()
 
-	// Independent container stats loop — collects Docker metrics every 5 minutes
-	// for chart history (full scans happen every 6h which is too infrequent for charts)
+	// Independent container & process stats loop — collects Docker metrics and
+	// top processes every 5 minutes for chart history (full scans happen at the
+	// configured interval which is too infrequent for granular charts).
 	go func() {
 		time.Sleep(30 * time.Second) // let first scan finish
 		ticker := time.NewTicker(5 * time.Minute)
@@ -186,6 +187,7 @@ func (s *Scheduler) Start() {
 			select {
 			case <-ticker.C:
 				s.collectContainerStats()
+				s.collectProcessStats()
 			case <-s.stop:
 				return
 			}
@@ -332,6 +334,15 @@ func (s *Scheduler) RunOnce() {
 	// Store
 	if err := s.store.SaveSnapshot(snap); err != nil {
 		s.logger.Error("failed to save snapshot", "error", err)
+	}
+
+	// Also persist process stats to the dedicated history table (same data
+	// that the 5-minute loop collects, but captured during full scans too
+	// so there are no gaps in the chart timeline).
+	if len(snap.System.TopProcesses) > 0 {
+		if err := s.store.SaveProcessStats(snap.System.TopProcesses); err != nil {
+			s.logger.Warn("failed to save process stats during full scan", "error", err)
+		}
 	}
 
 	// Update Prometheus metrics
@@ -762,6 +773,41 @@ func (s *Scheduler) collectContainerStats() {
 	s.mu.Lock()
 	if s.latest != nil {
 		s.latest.Docker = *docker
+	}
+	s.mu.Unlock()
+}
+
+// collectProcessStats runs a lightweight top-processes collection and saves to DB.
+// This runs every 5 minutes alongside collectContainerStats to provide enough
+// data points for the process resource usage charts.
+func (s *Scheduler) collectProcessStats() {
+	procs := s.collector.CollectTopProcesses(15)
+	if len(procs) == 0 {
+		return
+	}
+
+	// Enrich with container attribution from cached Docker data
+	s.mu.RLock()
+	var containers []internal.ContainerInfo
+	if s.latest != nil && s.latest.Docker.Available {
+		containers = s.latest.Docker.Containers
+	}
+	s.mu.RUnlock()
+
+	if len(containers) > 0 {
+		collector.EnrichProcessContainers(procs, containers, "")
+	}
+
+	// Persist to process_history table
+	if err := s.store.SaveProcessStats(procs); err != nil {
+		s.logger.Warn("failed to save process stats", "error", err)
+		return
+	}
+
+	// Update cached snapshot with fresh process data
+	s.mu.Lock()
+	if s.latest != nil {
+		s.latest.System.TopProcesses = procs
 	}
 	s.mu.Unlock()
 }
