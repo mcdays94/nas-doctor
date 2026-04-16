@@ -474,8 +474,8 @@ function escapeHtml(str) {
 
 /* ========== Theme ========== */
 function applyTheme(theme) {
-  document.body.classList.remove("theme-midnight", "theme-clean", "theme-ember");
-  if (theme === "clean" || theme === "ember") {
+  document.body.classList.remove("theme-midnight", "theme-clean");
+  if (theme === "clean") {
     document.body.classList.add("theme-" + theme);
   } else {
     document.body.classList.add("theme-midnight");

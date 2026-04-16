@@ -30,18 +30,6 @@ body.theme-clean{
   --red:#dc2626;--red-bg:rgba(220,38,38,0.08);
   --border:rgba(0,0,0,0.08);
 }
-body.theme-ember{
-  --bg-base:#07080a;--bg-surface:#101111;--bg-elevated:#1a1b1c;
-  --text-primary:#f9f9f9;--text-secondary:#d0d0d0;--text-tertiary:#9c9c9d;
-  --accent:#55b3ff;--accent-hover:#7ec8ff;
-  --green:#5fc992;--green-bg:rgba(95,201,146,0.1);
-  --amber:#FACC15;--amber-bg:rgba(250,204,21,0.1);
-  --red:#FF6363;--red-bg:rgba(255,99,99,0.1);
-  --border:rgba(255,255,255,0.06);
-}
-body.theme-ember{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif}
-body.theme-ember .drive-title,body.theme-ember .section-title{font-family:'Literata','Georgia',serif}
-body.theme-ember .badge,body.theme-ember .attr-raw,body.theme-ember .attr-value{font-family:'JetBrains Mono',ui-monospace,'SF Mono',monospace}
 html{background:var(--bg-base);color:var(--text-primary);font-family:"Inter",system-ui,-apple-system,sans-serif;font-feature-settings:"cv01","ss03";font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
 body{min-height:100vh;padding:calc(var(--sp)*3);transition:background 0.2s,color 0.2s}
 a{color:var(--accent);text-decoration:none}
@@ -161,7 +149,7 @@ a:hover{color:var(--accent-hover)}
 fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
 /* Theme detection */
 (function(){
-  function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
+  function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean");document.body.classList.add("theme-"+(t||"midnight"));}
   try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
   fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
 })();

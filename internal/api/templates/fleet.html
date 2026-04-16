@@ -122,9 +122,6 @@ body.theme-clean .mini-stat{background:rgba(0,0,0,0.04)}
 .empty{text-align:center;padding:60px 20px;color:var(--text2)}
 .empty-title{font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px}
 
-/* Ember overrides */
-body.theme-ember .node-name,.theme-ember .fleet-stat-val,.theme-ember .section-hdr{font-family:var(--font-serif)}
-body.theme-ember .meta-val,.theme-ember .metric-pct,.theme-ember .finding-cat{font-family:var(--font-mono)}
 </style>
 </head>
 <body>
@@ -149,7 +146,7 @@ body.theme-ember .meta-val,.theme-ember .metric-pct,.theme-ember .finding-cat{fo
 </div>
 <script>
 (function(){
-  function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean","theme-ember");document.body.classList.add("theme-"+(t||"midnight"));}
+  function applyTheme(t){document.body.classList.remove("theme-midnight","theme-clean");document.body.classList.add("theme-"+(t||"midnight"));}
   try{var s=localStorage.getItem("nas-doctor-theme");if(s)applyTheme(s);}catch(e){}
   fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){if(d.theme){applyTheme(d.theme);try{localStorage.setItem("nas-doctor-theme",d.theme)}catch(e){}}}).catch(function(){});
   fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor \u2014 "+d.hostname;}).catch(function(){});
