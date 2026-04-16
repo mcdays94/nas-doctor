@@ -217,3 +217,24 @@ func (c *Collector) CollectDockerStats() (*internal.DockerInfo, error) {
 	}
 	return &info, nil
 }
+
+// CollectTopProcesses returns the top n processes by CPU usage.
+// Used by the scheduler's process stats loop for standalone collection.
+func (c *Collector) CollectTopProcesses(n int) []internal.ProcessInfo {
+	return collectTopProcesses(n)
+}
+
+// EnrichProcessContainers populates ContainerID and ContainerName on each
+// ProcessInfo by reading cgroup data and matching against known containers.
+// procRoot allows overriding the /proc filesystem root for testing (pass ""
+// for the default "/proc").
+func EnrichProcessContainers(procs []internal.ProcessInfo, containers []internal.ContainerInfo, procRoot string) {
+	if len(procs) == 0 || len(containers) == 0 {
+		return
+	}
+	containerIDMap := buildContainerIDMap(containers)
+	if procRoot == "" {
+		procRoot = "/proc"
+	}
+	enrichProcessContainers(procs, containerIDMap, procRoot)
+}

@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -148,6 +149,64 @@ func TestBuildContainerIDMap(t *testing.T) {
 	}
 	if _, ok := m[""]; ok {
 		t.Error("empty ID should not be in the map")
+	}
+}
+
+func TestCollectTopProcesses_Exported(t *testing.T) {
+	// The exported CollectTopProcesses method should delegate to collectTopProcesses.
+	// On macOS/CI where ps output may differ, we just verify it returns a non-nil
+	// slice and respects the limit.
+	c := New(internal.HostPaths{}, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	procs := c.CollectTopProcesses(5)
+	// On any platform with at least 1 process, we should get results
+	if procs == nil {
+		t.Fatal("CollectTopProcesses returned nil")
+	}
+	if len(procs) > 5 {
+		t.Errorf("CollectTopProcesses(5) returned %d processes, want <= 5", len(procs))
+	}
+}
+
+func TestEnrichProcessContainers_Exported(t *testing.T) {
+	// Create fake proc filesystem
+	tmpDir := t.TempDir()
+	fullID := "abc123def456789abc123def456789abc123def456789abc123def456789abcd"
+
+	pid10Dir := filepath.Join(tmpDir, "10")
+	if err := os.MkdirAll(pid10Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pid10Dir, "cgroup"),
+		[]byte("12:devices:/docker/"+fullID+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	procs := []internal.ProcessInfo{
+		{PID: 10, User: "root", CPU: 25.0, Mem: 10.0, Command: "nginx"},
+	}
+	containers := []internal.ContainerInfo{
+		{ID: "abc123def456", Name: "my-nginx"},
+	}
+
+	// Use the exported function
+	EnrichProcessContainers(procs, containers, tmpDir)
+
+	if procs[0].ContainerID != fullID {
+		t.Errorf("ContainerID = %q, want %q", procs[0].ContainerID, fullID)
+	}
+	if procs[0].ContainerName != "my-nginx" {
+		t.Errorf("ContainerName = %q, want %q", procs[0].ContainerName, "my-nginx")
+	}
+}
+
+func TestEnrichProcessContainers_Exported_NilContainers(t *testing.T) {
+	// Passing empty containers should be a no-op (no panic)
+	procs := []internal.ProcessInfo{
+		{PID: 10, Command: "test"},
+	}
+	EnrichProcessContainers(procs, nil, "/proc")
+	if procs[0].ContainerID != "" {
+		t.Errorf("ContainerID should remain empty, got %q", procs[0].ContainerID)
 	}
 }
 
