@@ -38,6 +38,15 @@ type FakeStore struct {
 
 	// Finding history keyed by category.
 	findingsByCategory map[string][]internal.Finding
+
+	// LifecycleStore test hooks.
+	VacuumCalled bool    // observable by tests
+	DBSizeMB     float64 // simulated DB file size for GetDBStats/PruneToSizeMB
+	BackupCalls  int     // number of CreateBackup invocations
+
+	// Orphaned findings: findings whose snapshot ID doesn't match any snapshot.
+	// Seeded by tests via AddOrphanedFindings().
+	orphanedFindingCount int
 }
 
 // NewFakeStore creates a ready-to-use in-memory store.
@@ -278,9 +287,28 @@ func (f *FakeStore) GetServiceCheckHistory(checkKey string, limit int) ([]Servic
 	return entries, nil
 }
 
-func (f *FakeStore) PruneServiceCheckHistory(_ time.Duration) (int, error) {
-	// TODO: implement for testing
-	return 0, nil
+// PruneServiceCheckHistory removes service check entries older than olderThan.
+func (f *FakeStore) PruneServiceCheckHistory(olderThan time.Duration) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	cutoff := time.Now().Add(-olderThan)
+	var kept []internal.ServiceCheckResult
+	pruned := 0
+	for _, r := range f.serviceChecks {
+		checkedAt, err := time.Parse(time.RFC3339, r.CheckedAt)
+		if err != nil {
+			kept = append(kept, r)
+			continue
+		}
+		if checkedAt.Before(cutoff) {
+			pruned++
+		} else {
+			kept = append(kept, r)
+		}
+	}
+	f.serviceChecks = kept
+	return pruned, nil
 }
 
 func (f *FakeStore) DeleteServiceCheckByKey(key string) (int, error) {
@@ -469,46 +497,132 @@ func (f *FakeStore) GetFindingHistory(category string, limit int) ([]internal.Fi
 
 // ── LifecycleStore ──
 
-func (f *FakeStore) PruneSnapshots(_ time.Duration, _ int) (int, error) {
-	// TODO: implement for testing
-	return 0, nil
+// PruneSnapshots removes snapshots older than olderThan, but always keeps at
+// least keepMin snapshots (the most recent ones). Returns the count removed.
+func (f *FakeStore) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.snapshots) == 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().Add(-olderThan)
+	sorted := make([]*internal.Snapshot, len(f.snapshots))
+	copy(sorted, f.snapshots)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Timestamp.After(sorted[j].Timestamp)
+	})
+	keep := make(map[string]bool)
+	for i := 0; i < keepMin && i < len(sorted); i++ {
+		keep[sorted[i].ID] = true
+	}
+	var kept []*internal.Snapshot
+	pruned := 0
+	for _, s := range f.snapshots {
+		if !keep[s.ID] && s.Timestamp.Before(cutoff) {
+			pruned++
+		} else {
+			kept = append(kept, s)
+		}
+	}
+	f.snapshots = kept
+	return pruned, nil
 }
 
-func (f *FakeStore) PruneNotificationLog(_ time.Duration) (int, error) {
-	// TODO: implement for testing
-	return 0, nil
+// PruneNotificationLog removes notification log entries older than olderThan.
+func (f *FakeStore) PruneNotificationLog(olderThan time.Duration) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cutoff := time.Now().Add(-olderThan)
+	var kept []NotificationLogEntry
+	pruned := 0
+	for _, entry := range f.notificationLog {
+		if entry.CreatedAt.Before(cutoff) {
+			pruned++
+		} else {
+			kept = append(kept, entry)
+		}
+	}
+	f.notificationLog = kept
+	return pruned, nil
 }
 
-func (f *FakeStore) PruneAlerts(_ time.Duration) (int, error) {
-	// TODO: implement for testing
-	return 0, nil
+// PruneAlerts removes resolved alerts older than olderThan.
+func (f *FakeStore) PruneAlerts(olderThan time.Duration) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cutoff := time.Now().Add(-olderThan)
+	var kept []AlertRecord
+	pruned := 0
+	for _, a := range f.alerts {
+		if a.Status == "resolved" && a.ResolvedAt != "" {
+			resolvedAt, err := time.Parse(time.RFC3339, a.ResolvedAt)
+			if err == nil && resolvedAt.Before(cutoff) {
+				pruned++
+				continue
+			}
+		}
+		kept = append(kept, a)
+	}
+	f.alerts = kept
+	return pruned, nil
 }
 
+// PruneOrphanedFindings removes orphaned findings and returns the count.
 func (f *FakeStore) PruneOrphanedFindings() (int, error) {
-	// TODO: implement for testing
-	return 0, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := f.orphanedFindingCount
+	f.orphanedFindingCount = 0
+	return n, nil
 }
 
-func (f *FakeStore) PruneToSizeMB(_ float64) (int, error) {
-	// TODO: implement for testing
-	return 0, nil
+// PruneToSizeMB removes the oldest snapshots until the simulated DB size is
+// at or below targetMB.
+func (f *FakeStore) PruneToSizeMB(targetMB float64) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.DBSizeMB <= targetMB || len(f.snapshots) == 0 {
+		return 0, nil
+	}
+	sort.Slice(f.snapshots, func(i, j int) bool {
+		return f.snapshots[i].Timestamp.Before(f.snapshots[j].Timestamp)
+	})
+	perSnapshot := f.DBSizeMB / float64(len(f.snapshots))
+	pruned := 0
+	for f.DBSizeMB > targetMB && len(f.snapshots) > 0 {
+		f.snapshots = f.snapshots[1:]
+		f.DBSizeMB -= perSnapshot
+		pruned++
+	}
+	return pruned, nil
 }
 
+// Vacuum records that vacuum was called.
 func (f *FakeStore) Vacuum() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.VacuumCalled = true
 	return nil
 }
 
+// GetDBStats returns statistics about the in-memory store contents.
 func (f *FakeStore) GetDBStats() (*DBStats, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return &DBStats{
+		FileSizeMB:       f.DBSizeMB,
 		SnapshotCount:    len(f.snapshots),
 		ServiceCheckRows: len(f.serviceChecks),
 		NotifyLogRows:    len(f.notificationLog),
+		AlertRows:        len(f.alerts),
 	}, nil
 }
 
+// CreateBackup records the call and returns a fake result.
 func (f *FakeStore) CreateBackup(_ string, _ *slog.Logger) (*BackupResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.BackupCalls++
 	return &BackupResult{
 		Path:      "/tmp/fake-backup.db.gz",
 		SizeMB:    0.1,
@@ -522,4 +636,62 @@ func (f *FakeStore) Close() error {
 
 func (f *FakeStore) DataDir() string {
 	return "/tmp/fake-store"
+}
+
+// ── Test helpers (not part of Store interface) ──
+
+// AddOrphanedFindings seeds orphaned finding count for PruneOrphanedFindings.
+func (f *FakeStore) AddOrphanedFindings(count int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.orphanedFindingCount += count
+}
+
+// AddAlert adds an alert record for testing.
+func (f *FakeStore) AddAlert(a AlertRecord) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.alerts = append(f.alerts, a)
+}
+
+// AddNotificationLogEntry adds a notification log entry with a specific timestamp.
+func (f *FakeStore) AddNotificationLogEntry(entry NotificationLogEntry) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.notificationLog = append(f.notificationLog, entry)
+}
+
+// SnapshotCount returns the current number of snapshots.
+func (f *FakeStore) SnapshotCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return len(f.snapshots)
+}
+
+// AlertCount returns the current number of alerts.
+func (f *FakeStore) AlertCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return len(f.alerts)
+}
+
+// NotificationLogCount returns the current number of notification log entries.
+func (f *FakeStore) NotificationLogCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return len(f.notificationLog)
+}
+
+// ServiceCheckCount returns the current number of service check entries.
+func (f *FakeStore) ServiceCheckCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return len(f.serviceChecks)
+}
+
+// ResetVacuum resets the VacuumCalled flag.
+func (f *FakeStore) ResetVacuum() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.VacuumCalled = false
 }
