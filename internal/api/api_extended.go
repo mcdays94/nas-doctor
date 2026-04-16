@@ -219,6 +219,7 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/history/gpu", s.handleGPUHistory)
 	r.Get("/api/v1/history/containers", s.handleContainerHistory)
 	r.Get("/api/v1/history/speedtest", s.handleSpeedTestHistory)
+	r.Get("/api/v1/history/processes", s.handleProcessHistory)
 	r.Get("/api/v1/notifications/log", s.handleNotificationLog)
 	r.Get("/api/v1/service-checks", s.handleServiceChecks)
 	r.Get("/api/v1/service-checks/history", s.handleServiceCheckHistory)
@@ -1085,6 +1086,30 @@ func (s *Server) handleContainerHistory(w http.ResponseWriter, r *http.Request) 
 	}
 	if points == nil {
 		points = []storage.ContainerHistoryPoint{}
+	}
+	writeJSON(w, http.StatusOK, points)
+}
+
+// handleProcessHistory returns per-process CPU/memory history for chart rendering.
+// GET /api/v1/history/processes?hours=N
+func (s *Server) handleProcessHistory(w http.ResponseWriter, r *http.Request) {
+	hoursStr := r.URL.Query().Get("hours")
+	hours := 24
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 {
+			hours = h
+		}
+	}
+	if hours > 720 { // cap at 30 days
+		hours = 720
+	}
+	points, err := s.store.GetProcessHistory(hours)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get process history: " + err.Error()})
+		return
+	}
+	if points == nil {
+		points = []storage.ProcessHistoryPoint{}
 	}
 	writeJSON(w, http.StatusOK, points)
 }
