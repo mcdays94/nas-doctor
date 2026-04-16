@@ -20,7 +20,6 @@
 .swatch{width:24px;height:24px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);flex-shrink:0}
 .swatch-midnight{background:linear-gradient(135deg,#0f1011 50%,#5e6ad2 50%)}
 .swatch-clean{background:linear-gradient(135deg,#ffffff 50%,#000000 50%)}
-.swatch-ember{background:linear-gradient(135deg,#1a1a1a 50%,#f97316 50%)}
 .theme-name{font-size:13px;font-weight:500;color:var(--text)}
 /* cron preview mono */
 #scan-cron-preview{font-family:var(--font-mono);font-size:11px}
@@ -121,11 +120,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         <div class="swatch swatch-clean"></div>
         <span class="theme-name">Clean</span>
       </div>
-      <div class="theme-option" data-theme="ember" onclick="selectTheme(this)">
-        <input type="radio" name="theme" value="ember">
-        <div class="swatch swatch-ember"></div>
-        <span class="theme-name">Ember</span>
-      </div>
+
     </div>
     <div style="margin-top:20px">
       <label>App Icon</label>
@@ -1795,8 +1790,8 @@ function escapeHtml(str) {
 
 /* ---------- Apply saved theme ---------- */
 function applyTheme(theme) {
-  document.body.classList.remove("theme-midnight", "theme-clean", "theme-ember");
-  if (theme === "clean" || theme === "ember") {
+  document.body.classList.remove("theme-midnight", "theme-clean");
+  if (theme === "clean") {
     document.body.classList.add("theme-" + theme);
   } else {
     document.body.classList.add("theme-midnight");

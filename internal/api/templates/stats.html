@@ -14,7 +14,6 @@ body{padding:0}
 /* Additional tokens for stats page */
 :root,body.theme-midnight{--elevated:#242526;--text3:#5a5f6a}
 body.theme-clean{--elevated:#fafafa;--text3:#b3b3b3}
-body.theme-ember{--elevated:#1a1b1c;--text3:#5a5b5c}
 body.theme-clean .drive,.theme-clean .summary-box,.theme-clean .chart-card,.theme-clean .smart-table{box-shadow:0 0 0 1px rgba(0,0,0,0.08)}
 body.theme-clean .drive:hover{box-shadow:0 0 0 1px rgba(0,0,0,0.15)}
 .summary{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
@@ -110,11 +109,6 @@ body.theme-clean .drive-detail-inner{border-top-color:rgba(0,0,0,0.08)}
 body.theme-clean .bb-box{background:var(--elevated);border-color:rgba(0,0,0,0.08)}
 body.theme-clean .badge{border:1px solid rgba(0,0,0,0.06)}
 body.theme-clean a{color:var(--accent)}
-
-/* Ember theme overrides */
-body.theme-ember .drive-name,body.theme-ember .smart-section-title,body.theme-ember .summary-val{font-family:'Literata','Georgia',serif}
-body.theme-ember .drive-model,body.theme-ember .detail-value,body.theme-ember .mono{font-family:'JetBrains Mono',ui-monospace,monospace}
-body.theme-ember .drive-clickable:hover{border-color:rgba(255,255,255,0.12)}
 
 /* Sort pill inline (stats page doesn't use shared.css for dashboards) */
 .sort-bar{display:inline-flex;gap:1px;padding:0;border-radius:6px;background:none;border:none}
@@ -425,10 +419,10 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
   (function(){
     try {
       var t = localStorage.getItem("nas-doctor-theme");
-      if (t === "clean" || t === "ember") document.body.classList.add("theme-"+t);
+      if (t === "clean") document.body.classList.add("theme-"+t);
     } catch(e) {}
     fetch("/api/v1/settings").then(function(r){return r.json()}).then(function(d){
-      if (d.theme === "clean" || d.theme === "ember") {
+      if (d.theme === "clean") {
         document.body.className = "theme-"+d.theme;
       }
       try { localStorage.setItem("nas-doctor-theme", d.theme); } catch(e){}
