@@ -82,7 +82,7 @@ type AlertingConfig struct {
 // Scheduler periodically runs diagnostic collections and analysis.
 type Scheduler struct {
 	collector         *collector.Collector
-	store             *storage.DB
+	store             storage.Store
 	notifier          *notifier.Notifier
 	metrics           *notifier.Metrics
 	logger            *slog.Logger
@@ -109,7 +109,7 @@ type Scheduler struct {
 // New creates a new Scheduler.
 func New(
 	col *collector.Collector,
-	store *storage.DB,
+	store storage.Store,
 	notif *notifier.Notifier,
 	metrics *notifier.Metrics,
 	logger *slog.Logger,
