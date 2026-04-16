@@ -728,6 +728,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div class="toggle-wrap"><div class="toggle on" id="sec-kubernetes" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Kubernetes</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-backup" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Backup Monitoring</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-speedtest" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Speed Test</span></div>
+      <div class="toggle-wrap"><div class="toggle on" id="sec-processes" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Top Processes</span></div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div class="toggle-wrap"><div class="toggle on" id="sec-merged-containers" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Container View <span style="font-size:11px;color:var(--text2)">(combine Docker list + resource metrics into one section)</span></span></div>
         <div class="toggle-wrap" style="margin-top:8px"><div class="toggle on" id="sec-merged-drives" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Merged Drive View <span style="font-size:11px;color:var(--text2)">(combine SMART + storage into one card per drive)</span></span></div>
@@ -1128,8 +1129,8 @@ function loadSettings() {
       renderServiceChecks();
       /* Dashboard section toggles */
       var sec = data.sections || {};
-      var secMap = {findings:1,disk_space:1,smart:1,docker:1,container_metrics:1,zfs:1,ups:1,parity:1,network:1,tunnels:1,proxmox:1,kubernetes:1,backup:1,speedtest:1,merged_containers:1,merged_drives:1,dash_columns:1};
-      var secIds = {"findings":"sec-findings","disk_space":"sec-disk","smart":"sec-smart","docker":"sec-docker","container_metrics":"sec-container-metrics","zfs":"sec-zfs","gpu":"sec-gpu","ups":"sec-ups","parity":"sec-parity","network":"sec-network","tunnels":"sec-tunnels","proxmox":"sec-proxmox","kubernetes":"sec-kubernetes","backup":"sec-backup","speedtest":"sec-speedtest","merged_containers":"sec-merged-containers","merged_drives":"sec-merged-drives","dash_columns":"sec-dash-columns"};
+      var secMap = {findings:1,disk_space:1,smart:1,docker:1,container_metrics:1,zfs:1,ups:1,parity:1,network:1,tunnels:1,proxmox:1,kubernetes:1,backup:1,speedtest:1,processes:1,merged_containers:1,merged_drives:1,dash_columns:1};
+      var secIds = {"findings":"sec-findings","disk_space":"sec-disk","smart":"sec-smart","docker":"sec-docker","container_metrics":"sec-container-metrics","zfs":"sec-zfs","gpu":"sec-gpu","ups":"sec-ups","parity":"sec-parity","network":"sec-network","tunnels":"sec-tunnels","proxmox":"sec-proxmox","kubernetes":"sec-kubernetes","backup":"sec-backup","speedtest":"sec-speedtest","processes":"sec-processes","merged_containers":"sec-merged-containers","merged_drives":"sec-merged-drives","dash_columns":"sec-dash-columns"};
       for (var sk in secIds) { var el = document.getElementById(secIds[sk]); if (el) { if (sec[sk] === false) el.classList.remove("on"); else el.classList.add("on"); } }
       var dashColsSel = document.getElementById("sec-dash-columns");
       if (dashColsSel && sec.dash_columns !== undefined) dashColsSel.value = sec.dash_columns || 0;
@@ -1218,6 +1219,7 @@ function buildSettingsPayload() {
       kubernetes: document.getElementById("sec-kubernetes").classList.contains("on"),
       backup: document.getElementById("sec-backup").classList.contains("on"),
       speedtest: document.getElementById("sec-speedtest").classList.contains("on"),
+      processes: document.getElementById("sec-processes").classList.contains("on"),
       merged_drives: document.getElementById("sec-merged-drives").classList.contains("on"),
       dash_columns: parseInt(document.getElementById("sec-dash-columns").value) || 0
     },

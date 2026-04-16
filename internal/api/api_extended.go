@@ -72,6 +72,7 @@ type DashboardSections struct {
 	MergedDrives     bool `json:"merged_drives"`     // Combine SMART + storage into one card per drive
 	Backup           bool `json:"backup"`
 	SpeedTest        bool `json:"speed_test"`
+	Processes        bool `json:"processes"`
 	DashColumns      int  `json:"dash_columns"` // Dashboard column count: 0=auto (default 2), 1, 2, 3, 4
 }
 

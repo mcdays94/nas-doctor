@@ -1011,6 +1011,58 @@ sections.kubernetes = function(sn) {
   return h;
 };
 
+/* ── Section: Processes ───────────────────────────────────────── */
+sections.processes = function(sn) {
+  var esc = util.esc;
+  var h = '';
+  h += '<div class="section-block" data-section="processes">';
+  var procs = (sn && sn.system && sn.system.top_processes) ? sn.system.top_processes : [];
+  if (procs.length > 0) {
+    var showCount = Math.min(procs.length, 10);
+    h += '<div>';
+    h += '<div class="section-title">Top Processes (' + procs.length + ')</div>';
+    h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);overflow:hidden">';
+    h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+    h += '<tr style="color:var(--text-quaternary);font-size:10px;text-transform:uppercase;letter-spacing:0.5px">';
+    h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);width:28px">#</th>';
+    h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Process</th>';
+    h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Container</th>';
+    h += '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)">CPU%</th>';
+    h += '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)">Mem%</th>';
+    h += '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">User</th>';
+    h += '</tr>';
+    for (var pi = 0; pi < showCount; pi++) {
+      var p = procs[pi];
+      var cpuClass = p.cpu_percent >= 50 ? 'td-crit' : p.cpu_percent >= 20 ? 'td-warn' : '';
+      var memClass = p.mem_percent >= 50 ? 'td-crit' : p.mem_percent >= 20 ? 'td-warn' : '';
+      var containerTag = '';
+      if (p.container_name) {
+        containerTag = '<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.15);color:var(--accent);white-space:nowrap">' + esc(p.container_name) + '</span>';
+      } else {
+        containerTag = '<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(128,128,128,0.12);color:var(--text-quaternary);white-space:nowrap">host</span>';
+      }
+      var cmdDisplay = esc(p.command || '');
+      if (cmdDisplay.length > 40) cmdDisplay = cmdDisplay.substring(0, 40) + '\u2026';
+      h += '<tr>';
+      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text-quaternary)">' + (pi + 1) + '</td>';
+      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><div style="font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(p.command || '') + '">' + cmdDisplay + '</div></td>';
+      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + containerTag + '</td>';
+      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:var(--font-mono);font-size:11px" class="' + cpuClass + '">' + (p.cpu_percent || 0).toFixed(1) + '</td>';
+      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:var(--font-mono);font-size:11px" class="' + memClass + '">' + (p.mem_percent || 0).toFixed(1) + '</td>';
+      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text-tertiary);font-size:11px">' + esc(p.user || '') + '</td>';
+      h += '</tr>';
+    }
+    h += '</table>';
+    h += '</div>';
+    if (procs.length > showCount) {
+      h += '<div style="text-align:center;padding:6px 0;font-size:11px;color:var(--text-quaternary)">' + (procs.length - showCount) + ' more processes not shown</div>';
+    }
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+};
+
 /* ── Section: Parity ─────────────────────────────────────────── */
 sections.parity = function(sn) {
   var esc = util.esc;
@@ -1321,6 +1373,7 @@ function distributeSections() {
     "ups": sec.ups !== false,
     "backup": sec.backup !== false,
     "services": true,
+    "processes": sec.processes !== false,
     "network": sec.network !== false,
     "speedtest": sec.speedtest !== false,
     "tunnels": sec.tunnels !== false,
