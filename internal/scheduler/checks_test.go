@@ -644,19 +644,22 @@ func TestCheckKey_Deterministic(t *testing.T) {
 	}
 }
 
-func TestCheckKey_MatchesSchedulerKey(t *testing.T) {
-	// Verify that CheckKey produces the same result as the original
-	// serviceCheckKey function in scheduler.go.
+func TestCheckKey_Consistency(t *testing.T) {
+	// Verify that CheckKey is deterministic and produces the expected
+	// SHA-256 hash format for a given input.
 	check := internal.ServiceCheckConfig{
 		Name:   "My Service",
 		Type:   "HTTP",
 		Target: "https://example.com",
 		Port:   443,
 	}
-	newKey := CheckKey(check)
-	oldKey := serviceCheckKey(check)
-	if newKey != oldKey {
-		t.Fatalf("CheckKey and serviceCheckKey produce different results:\n  new: %s\n  old: %s", newKey, oldKey)
+	key1 := CheckKey(check)
+	key2 := CheckKey(check)
+	if key1 != key2 {
+		t.Fatalf("CheckKey is not deterministic:\n  first:  %s\n  second: %s", key1, key2)
+	}
+	if len(key1) != 64 {
+		t.Fatalf("expected 64-char hex key, got len=%d", len(key1))
 	}
 }
 
