@@ -354,6 +354,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
               <option value="system">System</option>
               <option value="zfs">ZFS</option>
               <option value="tunnels">Tunnels</option>
+              <option value="process">Process</option>
               <option value="update">Platform Update</option>
             </select>
           </div>
@@ -1437,7 +1438,7 @@ function testRule() {
   var ruleName = (document.getElementById("nr-name") || {}).value || "Unnamed rule";
 
   // Map category to a Finding category constant
-  var catMap = {findings:"system",disk_space:"disk",disk_temp:"smart",smart:"smart",service:"service",parity:"parity",ups:"ups",docker:"docker",system:"system",zfs:"zfs",tunnels:"network",update:"system"};
+  var catMap = {findings:"system",disk_space:"disk",disk_temp:"smart",smart:"smart",service:"service",parity:"parity",ups:"ups",docker:"docker",system:"system",zfs:"zfs",tunnels:"network",process:"system",update:"system"};
   var findingCat = catMap[cat] || "system";
 
   // Build a severity based on the condition
@@ -1470,8 +1471,8 @@ function testRule() {
     battery_below: "UPS battery low — " + (val || "20") + "%",
     load_above: "Load above threshold — " + (val || "80") + "%",
     stopped: "Container stopped: " + targetLabel,
-    cpu_above: "CPU usage high — " + (val || "90") + "%",
-    mem_above: "Memory usage high — " + (val || "90") + "%",
+    cpu_above: cat === "process" ? "High CPU: " + targetLabel + " — " + (val || "80") + "%" : "CPU usage high — " + (val || "90") + "%",
+    mem_above: cat === "process" ? "High memory: " + targetLabel + " — " + (val || "80") + "%" : "Memory usage high — " + (val || "90") + "%",
     iowait_above: "I/O wait high — " + (val || "20") + "%",
     degraded_pool: "ZFS pool degraded: " + targetLabel,
     scrub_errors: "ZFS scrub errors on " + targetLabel,
@@ -2363,6 +2364,7 @@ var CONDITION_MAP = {
   system:     [{v:"cpu_above",l:"CPU above %"},{v:"mem_above",l:"Memory above %"},{v:"load_above",l:"Load average above"},{v:"iowait_above",l:"I/O wait above %"}],
   zfs:        [{v:"degraded",l:"Pool degraded"},{v:"scrub_errors",l:"Scrub errors detected"},{v:"usage_above",l:"Pool usage above %"}],
   tunnels:    [{v:"cloudflared_down",l:"Cloudflared tunnel down"},{v:"tailscale_offline",l:"Tailscale node offline"}],
+  process:    [{v:"cpu_above",l:"CPU usage above %"},{v:"mem_above",l:"Memory usage above %"}],
   update:     [{v:"available",l:"Platform update available"}]
 };
 var NEEDS_VALUE = {free_below:1,above:1,avg_above:1,reallocated_above:1,pending_above:1,crc_above:1,power_hours_above:1,latency_above:1,speed_below:1,battery_below:1,load_above:1,cpu_above:1,mem_above:1,iowait_above:1,usage_above:1,download_below:1,upload_below:1};
@@ -2521,6 +2523,16 @@ function populateTargetDropdown(cat) {
   } else if (cat === "tunnels" && sn.tunnels) {
     if (sn.tunnels.cloudflared) { for (var i = 0; i < sn.tunnels.cloudflared.tunnels.length; i++) { var t = sn.tunnels.cloudflared.tunnels[i]; sel.innerHTML += '<option value="' + escapeHtml(t.name) + '">' + escapeHtml("CF: " + t.name) + '</option>'; } }
     if (sn.tunnels.tailscale && sn.tunnels.tailscale.peers) { for (var i = 0; i < sn.tunnels.tailscale.peers.length; i++) { var nd = sn.tunnels.tailscale.peers[i]; sel.innerHTML += '<option value="' + escapeHtml(nd.name) + '">' + escapeHtml("TS: " + nd.name) + '</option>'; } }
+  } else if (cat === "process" && sn.system && sn.system.top_processes) {
+    var seen = {};
+    for (var i = 0; i < sn.system.top_processes.length; i++) {
+      var p = sn.system.top_processes[i];
+      var pName = (p.command || "").split(" ")[0].split("/").pop();
+      if (!pName || seen[pName]) continue;
+      seen[pName] = true;
+      var label = pName + (p.container_name ? " (" + p.container_name + ")" : "");
+      sel.innerHTML += '<option value="' + escapeHtml(pName) + '">' + escapeHtml(label) + '</option>';
+    }
   } else if (cat === "findings") {
     // For "category" condition, target = finding category
     var cats = ["system","disk","smart","docker","network","service","memory","thermal","logs","parity","zfs","ups"];
