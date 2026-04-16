@@ -36,6 +36,9 @@ type FakeStore struct {
 	alertSeq    int64
 	alertEvents []AlertEvent
 
+	// Alert suppression: fingerprint → reason (e.g., "acknowledged", "snoozed").
+	suppressedAlerts map[string]string
+
 	// Finding history keyed by category.
 	findingsByCategory map[string][]internal.Finding
 
@@ -178,8 +181,25 @@ func (f *FakeStore) UnsnoozeAlert(_ int64, _ string, _ time.Time) (bool, error) 
 	return false, nil
 }
 
-func (f *FakeStore) IsAlertSuppressed(_ string, _ time.Time) (bool, string, error) {
+func (f *FakeStore) IsAlertSuppressed(fingerprint string, _ time.Time) (bool, string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.suppressedAlerts != nil {
+		if reason, ok := f.suppressedAlerts[fingerprint]; ok {
+			return true, reason, nil
+		}
+	}
 	return false, "", nil
+}
+
+// SuppressAlert marks a fingerprint as suppressed (acknowledged/snoozed) for testing.
+func (f *FakeStore) SuppressAlert(fingerprint, reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.suppressedAlerts == nil {
+		f.suppressedAlerts = make(map[string]string)
+	}
+	f.suppressedAlerts[fingerprint] = reason
 }
 
 func (f *FakeStore) MarkAlertsNotifiedByFingerprint(_ []string, _ time.Time) error {
