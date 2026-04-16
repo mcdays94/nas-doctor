@@ -87,6 +87,13 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 	}
 	snap.Docker = docker
 
+	// Enrich top processes with container attribution (requires Docker data)
+	if docker.Available && len(docker.Containers) > 0 && len(sys.TopProcesses) > 0 {
+		containerIDMap := buildContainerIDMap(docker.Containers)
+		enrichProcessContainers(sys.TopProcesses, containerIDMap, "/proc")
+		snap.System.TopProcesses = sys.TopProcesses
+	}
+
 	// Network
 	c.logger.Info("collecting network info")
 	net, err := collectNetwork()

@@ -232,6 +232,53 @@ func collectTopProcesses(n int) []internal.ProcessInfo {
 	return procs
 }
 
+// extractContainerID reads /proc/<pid>/cgroup and extracts the Docker
+// container ID. procRoot allows overriding the proc filesystem root for
+// testing (default: "/proc").
+func extractContainerID(pid int, procRoot string) string {
+	path := fmt.Sprintf("%s/%d/cgroup", procRoot, pid)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "" // file doesn't exist (macOS) or permission denied
+	}
+	return parseContainerIDFromCgroup(string(data))
+}
+
+// buildContainerIDMap creates a lookup map from Docker short container IDs
+// to container names, using the ContainerInfo slice from collectDocker().
+func buildContainerIDMap(containers []internal.ContainerInfo) map[string]string {
+	m := make(map[string]string, len(containers))
+	for _, c := range containers {
+		if c.ID != "" {
+			m[c.ID] = c.Name
+		}
+	}
+	return m
+}
+
+// enrichProcessContainers populates ContainerID and ContainerName on each
+// ProcessInfo by reading cgroup data and matching against the container map.
+// The containerMap keys are short Docker IDs (typically 12 chars from docker ps);
+// we match by checking if the full 64-char cgroup ID starts with a short ID.
+// procRoot allows overriding the proc filesystem root for testing.
+func enrichProcessContainers(procs []internal.ProcessInfo, containerMap map[string]string, procRoot string) {
+	for i := range procs {
+		fullID := extractContainerID(procs[i].PID, procRoot)
+		if fullID == "" {
+			continue
+		}
+		procs[i].ContainerID = fullID
+
+		// Try to find the container name by prefix-matching short IDs
+		for shortID, name := range containerMap {
+			if strings.HasPrefix(fullID, shortID) {
+				procs[i].ContainerName = name
+				break
+			}
+		}
+	}
+}
+
 // parseContainerIDFromCgroup extracts a Docker container ID (64-char hex)
 // from the contents of a /proc/PID/cgroup file. Supports:
 //   - cgroup v1 (Unraid): "12:devices:/docker/<64-hex>"
