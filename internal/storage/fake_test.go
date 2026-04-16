@@ -264,6 +264,105 @@ func TestFakeStore_DeleteServiceCheckByKey(t *testing.T) {
 	}
 }
 
+func TestFakeStore_SaveAndGetProcessStats(t *testing.T) {
+	store := NewFakeStore()
+
+	procs := []internal.ProcessInfo{
+		{PID: 1001, User: "root", CPU: 25.0, Mem: 10.0, Command: "/usr/bin/python3 app.py"},
+		{PID: 1002, User: "www", CPU: 15.0, Mem: 5.0, Command: "nginx: worker process"},
+		{PID: 1003, User: "nobody", CPU: 5.0, Mem: 2.0, Command: "/usr/sbin/sshd -D"},
+	}
+
+	if err := store.SaveProcessStats(procs); err != nil {
+		t.Fatalf("SaveProcessStats: %v", err)
+	}
+
+	history, err := store.GetProcessHistory(1) // last 1 hour
+	if err != nil {
+		t.Fatalf("GetProcessHistory: %v", err)
+	}
+	if len(history) != 3 {
+		t.Fatalf("expected 3 process history points, got %d", len(history))
+	}
+
+	// Verify results are sorted by name ASC.
+	names := make([]string, len(history))
+	for i, h := range history {
+		names[i] = h.Name
+	}
+	if names[0] != "nginx:" || names[1] != "python3" || names[2] != "sshd" {
+		t.Errorf("unexpected name order: %v", names)
+	}
+
+	// Verify content of the python3 entry.
+	var python ProcessHistoryPoint
+	for _, h := range history {
+		if h.Name == "python3" {
+			python = h
+			break
+		}
+	}
+	if python.PID != 1001 {
+		t.Errorf("expected PID 1001, got %d", python.PID)
+	}
+	if python.User != "root" {
+		t.Errorf("expected user root, got %s", python.User)
+	}
+	if python.CPUPct != 25.0 {
+		t.Errorf("expected CPU 25.0, got %f", python.CPUPct)
+	}
+	if python.MemPct != 10.0 {
+		t.Errorf("expected Mem 10.0, got %f", python.MemPct)
+	}
+	if python.Command != "/usr/bin/python3 app.py" {
+		t.Errorf("expected full command, got %s", python.Command)
+	}
+}
+
+func TestFakeStore_SaveProcessStats_SkipsEmptyCommand(t *testing.T) {
+	store := NewFakeStore()
+
+	procs := []internal.ProcessInfo{
+		{PID: 1, User: "root", CPU: 1.0, Mem: 1.0, Command: ""},
+		{PID: 2, User: "root", CPU: 2.0, Mem: 2.0, Command: "valid-process"},
+	}
+
+	if err := store.SaveProcessStats(procs); err != nil {
+		t.Fatalf("SaveProcessStats: %v", err)
+	}
+
+	history, err := store.GetProcessHistory(1)
+	if err != nil {
+		t.Fatalf("GetProcessHistory: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected 1 process (empty command skipped), got %d", len(history))
+	}
+	if history[0].Name != "valid-process" {
+		t.Errorf("expected valid-process, got %s", history[0].Name)
+	}
+}
+
+func TestFakeStore_SaveProcessStats_Empty(t *testing.T) {
+	store := NewFakeStore()
+
+	// Saving empty slice should not error.
+	if err := store.SaveProcessStats(nil); err != nil {
+		t.Fatalf("SaveProcessStats(nil): %v", err)
+	}
+	if err := store.SaveProcessStats([]internal.ProcessInfo{}); err != nil {
+		t.Fatalf("SaveProcessStats([]): %v", err)
+	}
+
+	history, err := store.GetProcessHistory(1)
+	if err != nil {
+		t.Fatalf("GetProcessHistory: %v", err)
+	}
+	if len(history) != 0 {
+		t.Errorf("expected 0 process history points, got %d", len(history))
+	}
+}
+
 func TestFakeStore_LifecycleMethods(t *testing.T) {
 	store := NewFakeStore()
 
