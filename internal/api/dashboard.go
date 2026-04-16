@@ -125,8 +125,19 @@ polling._pollStatus = function() {
     }
 
     if (scanRunning !== _wasScanRunning) {
+      var wasRunning = _wasScanRunning;
       _wasScanRunning = scanRunning;
+      _scanInProgress = scanRunning;
       polling._startPoll();
+      if (wasRunning && !scanRunning) {
+        _lastScanTime = scanTime;
+        util.fetchJSON("/api/v1/snapshot/latest").then(function(snap) {
+          _snapshotData = snap;
+          if (_renderFn) _renderFn();
+        }).catch(function() {});
+      } else if (_renderFn) {
+        _renderFn();
+      }
     }
   }).catch(function() {});
   _lastFetchTime = Date.now();
