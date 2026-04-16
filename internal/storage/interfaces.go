@@ -59,6 +59,8 @@ type HistoryStore interface {
 	GetGPUHistory(hours int) ([]GPUHistoryPoint, error)
 	SaveContainerStats(docker *internal.DockerInfo) error
 	GetContainerHistory(hours int) ([]ContainerHistoryPoint, error)
+	SaveProcessStats(procs []internal.ProcessInfo) error
+	GetProcessHistory(hours int) ([]ProcessHistoryPoint, error)
 	SaveSpeedTest(snapshotID string, result *internal.SpeedTestResult) error
 	GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error)
 }
