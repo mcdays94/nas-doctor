@@ -34,7 +34,7 @@ const (
 
 // Server holds dependencies for the HTTP API.
 type Server struct {
-	store     *storage.DB
+	store     storage.Store
 	scheduler *scheduler.Scheduler
 	collector *collector.Collector
 	metrics   *notifier.Metrics
@@ -45,7 +45,7 @@ type Server struct {
 }
 
 // New creates a new API server.
-func New(store *storage.DB, sched *scheduler.Scheduler, coll *collector.Collector, metrics *notifier.Metrics, fleetMgr *fleet.Manager, logger *slog.Logger, version string) *Server {
+func New(store storage.Store, sched *scheduler.Scheduler, coll *collector.Collector, metrics *notifier.Metrics, fleetMgr *fleet.Manager, logger *slog.Logger, version string) *Server {
 	return &Server{
 		store:     store,
 		scheduler: sched,
