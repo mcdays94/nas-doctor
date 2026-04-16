@@ -106,6 +106,13 @@ func (s *Server) Router() http.Handler {
 		w.Write([]byte(ChartJS))
 	})
 
+	// Shared dashboard rendering JS
+	r.Get("/js/dashboard.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write([]byte(DashboardJS))
+	})
+
 	// Shared design system CSS
 	r.Get("/css/shared.css", serveSharedCSS)
 
