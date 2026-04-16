@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
+	"github.com/mcdays94/nas-doctor/internal/storage"
 )
 
 func TestExecuteServiceCheckHTTPUp(t *testing.T) {
@@ -24,7 +26,8 @@ func TestExecuteServiceCheckHTTPUp(t *testing.T) {
 		Enabled: true,
 	}
 
-	result := executeServiceCheck(check, time.Now().UTC())
+	sc := NewServiceChecker(storage.NewFakeStore(), slog.Default())
+	result := sc.RunCheck(check, time.Now().UTC())
 	if result.Status != "up" {
 		t.Fatalf("expected status up, got %s (error=%q)", result.Status, result.Error)
 	}
@@ -49,7 +52,8 @@ func TestExecuteServiceCheckHTTPUnexpectedStatus(t *testing.T) {
 		Enabled: true,
 	}
 
-	result := executeServiceCheck(check, time.Now().UTC())
+	sc := NewServiceChecker(storage.NewFakeStore(), slog.Default())
+	result := sc.RunCheck(check, time.Now().UTC())
 	if result.Status != "down" {
 		t.Fatalf("expected status down, got %s", result.Status)
 	}
@@ -59,12 +63,12 @@ func TestExecuteServiceCheckHTTPUnexpectedStatus(t *testing.T) {
 }
 
 func TestNormalizeTCPAddressSMBDefaultPort(t *testing.T) {
-	addr, err := normalizeTCPAddress(internal.ServiceCheckConfig{
+	addr, err := NormalizeTCPAddress(internal.ServiceCheckConfig{
 		Type:   internal.ServiceCheckSMB,
 		Target: "nas.local",
 	})
 	if err != nil {
-		t.Fatalf("normalizeTCPAddress failed: %v", err)
+		t.Fatalf("NormalizeTCPAddress failed: %v", err)
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
