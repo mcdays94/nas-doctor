@@ -232,6 +232,55 @@ func collectTopProcesses(n int) []internal.ProcessInfo {
 	return procs
 }
 
+// parseContainerIDFromCgroup extracts a Docker container ID (64-char hex)
+// from the contents of a /proc/PID/cgroup file. Supports:
+//   - cgroup v1 (Unraid): "12:devices:/docker/<64-hex>"
+//   - cgroup v2 (TrueNAS SCALE): "0::/system.slice/docker-<64-hex>.scope"
+//
+// Returns empty string if no Docker container ID is found.
+func parseContainerIDFromCgroup(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// cgroup v1: look for "/docker/<id>" anywhere in the line
+		if idx := strings.Index(line, "/docker/"); idx != -1 {
+			candidate := line[idx+len("/docker/"):]
+			if id := extractHexID(candidate); id != "" {
+				return id
+			}
+		}
+
+		// cgroup v2: look for "docker-<id>.scope" anywhere in the line
+		if idx := strings.Index(line, "docker-"); idx != -1 {
+			candidate := line[idx+len("docker-"):]
+			// Strip ".scope" suffix if present
+			candidate = strings.TrimSuffix(candidate, ".scope")
+			if id := extractHexID(candidate); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+// extractHexID returns the first 64 hex characters from s, or "" if
+// s doesn't start with a valid 64-char hex string.
+func extractHexID(s string) string {
+	if len(s) < 64 {
+		return ""
+	}
+	candidate := s[:64]
+	for _, c := range candidate {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return ""
+		}
+	}
+	return candidate
+}
+
 func execCmd(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
