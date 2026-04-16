@@ -144,7 +144,7 @@ body.theme-clean .sort-pill.active{color:rgba(0,0,0,0.7);background:rgba(0,0,0,0
 <script>
 fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
 (function() {
-  var snapshot = null, sparklines = null, expandedIdx = -1;
+  var snapshot = null, sparklines = null, processHistory = null, expandedIdx = -1;
   function esc(s) { var d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
 
   /* ── Backblaze thresholds (mirrors backblaze_thresholds.go) ── */
@@ -273,6 +273,9 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
       h += '<div class="chart-card"><div class="chart-label">Load Average</div><canvas id="chart-load" width="600" height="140" style="width:100%;height:140px"></canvas></div>';
       h += '</div></div>';
     }
+
+    // Process CPU History section
+    h += renderProcessHistory();
 
     // Capacity forecast section
     h += renderForecast();
@@ -408,6 +411,8 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
         }
       }
     }
+    // Process CPU chart
+    drawProcessChart();
   }
 
   window._toggleDrive = function(idx) {
@@ -452,6 +457,88 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
       active: prefs.statsDrives || "health",
       onSort: function(key) { prefs.statsDrives = key; NasSort.savePrefs(prefs); render(); initStatsSortBar(); }
     });
+  }
+
+  // ── Process CPU History chart helpers ──
+  var processChartColors = ["#5e6ad2","#22c55e","#f59e0b","#ef4444","#8b5cf6","#ec4899","#06b6d4","#f97316","#14b8a6","#a855f7"];
+
+  function renderProcessHistory() {
+    if (!processHistory || processHistory.length === 0) return '';
+    // Group by (name, container_name) identity key.
+    var groups = {};
+    for (var i = 0; i < processHistory.length; i++) {
+      var p = processHistory[i];
+      var key = p.name + '|' + (p.container_name || '');
+      if (!groups[key]) groups[key] = { name: p.name, container: p.container_name || '', points: [], total: 0 };
+      groups[key].points.push(p);
+      groups[key].total += p.cpu_percent;
+    }
+    // Rank by cumulative CPU and take top 8.
+    var ranked = Object.keys(groups).map(function(k) { return groups[k]; });
+    ranked.sort(function(a, b) { return b.total - a.total; });
+    ranked = ranked.slice(0, 8);
+    if (ranked.length === 0) return '';
+    var h = '<div class="system-section"><div class="system-section-title">Process CPU History (top ' + ranked.length + ' by cumulative CPU)</div>';
+    h += '<div class="chart-card"><div class="chart-label">CPU Usage (%) by Process</div>';
+    h += '<canvas id="chart-process-cpu" width="600" height="200" style="width:100%;height:200px"></canvas></div>';
+    // Legend
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;padding:0 4px">';
+    for (var j = 0; j < ranked.length; j++) {
+      var label = ranked[j].name + (ranked[j].container ? ' (' + esc(ranked[j].container) + ')' : ' (host)');
+      var clr = processChartColors[j % processChartColors.length];
+      h += '<div style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)">';
+      h += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + clr + '"></span>';
+      h += esc(label) + '</div>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+
+  function drawProcessChart() {
+    if (!window.NasChart || !processHistory || processHistory.length === 0) return;
+    var el = document.getElementById("chart-process-cpu");
+    if (!el) return;
+    // Group by (name, container_name).
+    var groups = {};
+    var timestamps = [];
+    var tsSet = {};
+    for (var i = 0; i < processHistory.length; i++) {
+      var p = processHistory[i];
+      var key = p.name + '|' + (p.container_name || '');
+      if (!groups[key]) groups[key] = { name: p.name, container: p.container_name || '', byTs: {}, total: 0 };
+      // Bucket by minute (truncate seconds) for alignment.
+      var ts = p.timestamp.replace(/:\d{2}(\.\d+)?Z?$/, ':00Z').replace(/:\d{2}[+-]\d{2}:\d{2}$/, ':00Z');
+      if (!tsSet[ts]) { tsSet[ts] = true; timestamps.push(ts); }
+      // Take the max CPU per time bucket per group (in case of duplicates).
+      if (!groups[key].byTs[ts] || p.cpu_percent > groups[key].byTs[ts]) {
+        groups[key].byTs[ts] = p.cpu_percent;
+      }
+      groups[key].total += p.cpu_percent;
+    }
+    timestamps.sort();
+    // Rank and take top 8.
+    var ranked = Object.keys(groups).map(function(k) { return groups[k]; });
+    ranked.sort(function(a, b) { return b.total - a.total; });
+    ranked = ranked.slice(0, 8);
+    if (ranked.length === 0 || timestamps.length === 0) return;
+    // Build datasets.
+    var datasets = [];
+    for (var j = 0; j < ranked.length; j++) {
+      var g = ranked[j];
+      var data = [];
+      for (var t = 0; t < timestamps.length; t++) {
+        data.push(g.byTs[timestamps[t]] || 0);
+      }
+      var label = g.name + (g.container ? ' (' + g.container + ')' : ' (host)');
+      datasets.push({ data: data, color: processChartColors[j % processChartColors.length], label: label });
+    }
+    // Format time labels: show HH:MM.
+    var labels = timestamps.map(function(ts) {
+      var d = new Date(ts);
+      if (isNaN(d.getTime())) return ts;
+      return ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
+    });
+    try { NasChart.line("chart-process-cpu", { datasets: datasets, labels: labels, yLabel: "%" }); } catch(e) {}
   }
 
   var capacityForecast = null;
@@ -499,8 +586,9 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
   Promise.all([
     fetch("/api/v1/snapshot/latest").then(function(r){return r.json()}).catch(function(){return null}),
     fetch("/api/v1/sparklines").then(function(r){return r.json()}).catch(function(){return null}),
-    fetch("/api/v1/capacity-forecast").then(function(r){return r.json()}).catch(function(){return null})
-  ]).then(function(r){ snapshot=r[0]; sparklines=r[1]; capacityForecast=r[2]; render(); initStatsSortBar(); });
+    fetch("/api/v1/capacity-forecast").then(function(r){return r.json()}).catch(function(){return null}),
+    fetch("/api/v1/history/processes?hours=24").then(function(r){return r.json()}).catch(function(){return null})
+  ]).then(function(r){ snapshot=r[0]; sparklines=r[1]; capacityForecast=r[2]; processHistory=r[3]; render(); initStatsSortBar(); });
 })();
 </script>
 </body>
