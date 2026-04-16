@@ -376,7 +376,6 @@ func main() {
 		fmt.Printf("  Themes:\n")
 		fmt.Printf("    ⚫ Midnight:  http://localhost%s/               (default)\n", cfg.ListenAddr)
 		fmt.Printf("    ⚪ Clean:     http://localhost%s/theme/clean\n", cfg.ListenAddr)
-		fmt.Printf("    🔴 Ember:     http://localhost%s/theme/ember\n", cfg.ListenAddr)
 		fmt.Printf("  Report:        http://localhost%s/api/v1/report\n\n", cfg.ListenAddr)
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

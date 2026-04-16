@@ -379,7 +379,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		settings.Theme = DefaultTheme
 	}
 	switch settings.Theme {
-	case ThemeMidnight, ThemeClean, ThemeEmber:
+	case ThemeMidnight, ThemeClean:
 		// valid
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid theme: " + settings.Theme})

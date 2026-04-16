@@ -2,7 +2,7 @@ package api
 
 // DashboardJS is a shared vanilla JavaScript module that provides the dashboard
 // rendering engine for NAS Doctor. It extracts the duplicated inline JavaScript
-// from the three dashboard theme templates (midnight, clean, ember) into a single
+// from the two dashboard theme templates (midnight, clean) into a single
 // reusable module served at /js/dashboard.js.
 //
 // It exposes a global NasDashboard object with:

@@ -9,7 +9,6 @@ var templateFS embed.FS
 var (
 	DashboardMidnight string
 	DashboardClean    string
-	DashboardEmber    string
 )
 
 // Page HTML loaded from embedded templates.
@@ -35,7 +34,6 @@ func init() {
 
 	DashboardMidnight = read("midnight.html")
 	DashboardClean = read("clean.html")
-	DashboardEmber = read("ember.html")
 	statsPageHTML = read("stats.html")
 	fleetPageHTML = read("fleet.html")
 	alertsPageHTML = read("alerts.html")

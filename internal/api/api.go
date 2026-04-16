@@ -28,7 +28,6 @@ import (
 const (
 	ThemeMidnight = "midnight" // dark precision
 	ThemeClean    = "clean"    // light minimal
-	ThemeEmber    = "ember"    // serif with depth
 	DefaultTheme  = ThemeMidnight
 )
 
@@ -190,7 +189,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"nas_doctor": true,
 		"version":    s.version,
 		"uptime":     time.Since(s.startTime).String(),
-		"themes":     []string{ThemeMidnight, ThemeClean, ThemeEmber},
+		"themes":     []string{ThemeMidnight, ThemeClean},
 	})
 }
 
@@ -391,7 +390,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDashboardTheme(w http.ResponseWriter, r *http.Request) {
 	theme := chi.URLParam(r, "theme")
-	if theme == ThemeMidnight || theme == ThemeClean || theme == ThemeEmber {
+	if theme == ThemeMidnight || theme == ThemeClean {
 		settings := s.getSettings()
 		settings.Theme = theme
 		if data, err := json.Marshal(settings); err == nil {
@@ -406,8 +405,6 @@ func (s *Server) serveDashboard(w http.ResponseWriter, theme string) {
 	switch theme {
 	case ThemeClean:
 		html = DashboardClean
-	case ThemeEmber:
-		html = DashboardEmber
 	default:
 		html = DashboardMidnight
 	}

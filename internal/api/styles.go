@@ -51,23 +51,6 @@ body.theme-clean {
   --disabled-opacity:0.5;
 }
 
-/* Ember */
-body.theme-ember {
-  --bg:#07080a; --surface:#101111; --elevated:#1a1b1c;
-  --text:#f9f9f9; --text2:#9c9c9d; --text3:#5a5b5c;
-  --accent:#55b3ff; --accent-hover:#7ec8ff;
-  --green:#5fc992; --amber:#FACC15; --red:#FF6363;
-  --border:rgba(255,255,255,0.06); --border-hover:rgba(255,255,255,0.12);
-  --radius:8px;
-  --input-bg:rgba(255,255,255,0.04);
-  --card-bg:var(--surface); --card-border:var(--border); --card-shadow:none;
-  --btn-hover-bg:rgba(255,255,255,0.06);
-  --font-sans:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
-  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
-  --font-serif:'Literata','Georgia',serif;
-  --disabled-opacity:0.5;
-}
-
 /* ── Base ───────────────────────────────────────────────────── */
 html {
   background:var(--bg); color:var(--text);
@@ -80,28 +63,6 @@ body {
 }
 a { color:var(--accent); text-decoration:none }
 a:hover { color:var(--accent-hover) }
-
-/* ── Typography — Ember overrides ───────────────────────────── */
-body.theme-ember .card-title,
-body.theme-ember .page-title,
-body.theme-ember .header-title,
-body.theme-ember .summary-val,
-body.theme-ember .drive-name,
-body.theme-ember .drive-title,
-body.theme-ember .card-name,
-body.theme-ember .empty-title,
-body.theme-ember .section-title { font-family:var(--font-serif) }
-
-body.theme-ember .log-table td,
-body.theme-ember .status-badge,
-body.theme-ember .badge,
-body.theme-ember .detail-value,
-body.theme-ember .mono,
-body.theme-ember .stat-val,
-body.theme-ember .card-hostname,
-body.theme-ember .attr-raw,
-body.theme-ember .attr-value,
-body.theme-ember code { font-family:var(--font-mono) }
 
 /* ── Layout ─────────────────────────────────────────────────── */
 .container { max-width:1100px; margin:0 auto }
@@ -356,7 +317,6 @@ body.theme-clean .badge-generic { background:rgba(0,0,0,0.06) }
   padding:3px 10px; border-radius:4px;
 }
 .coming-soon .form-group { opacity:0.4; pointer-events:none }
-body.theme-ember .coming-soon::after { background:rgba(85,179,255,0.12) }
 
 /* ── Sticky Save Bar ────────────────────────────────────────── */
 .save-bar {
