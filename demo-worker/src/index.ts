@@ -45,7 +45,7 @@ export default {
 
     // ── Health endpoint ──
     if (path === "/health") {
-      return json({ nas_doctor: true, status: "ok", demo: true, themes: ["midnight", "clean", "ember"], version });
+      return json({ nas_doctor: true, status: "ok", demo: true, themes: ["midnight", "clean"], version });
     }
 
     // ── Prometheus metrics ──
@@ -58,7 +58,6 @@ export default {
       "/": "_pages/midnight.html",
       "/theme/midnight": "_pages/midnight.html",
       "/theme/clean": "_pages/clean.html",
-      "/theme/ember": "_pages/ember.html",
       "/settings": "_pages/settings.html",
       "/alerts": "_pages/alerts.html",
       "/fleet": "_pages/fleet.html",
@@ -145,7 +144,7 @@ async function handleAPI(path: string, url: URL, platform: Platform, env: Env): 
 
   // Health is always generated live
   if (path === "/api/v1/health") {
-    return json({ nas_doctor: true, status: "ok", demo: true, themes: ["midnight", "clean", "ember"], uptime: "14d " + new Date().getHours() + "h", version: env.VERSION || "demo" });
+    return json({ nas_doctor: true, status: "ok", demo: true, themes: ["midnight", "clean"], uptime: "14d " + new Date().getHours() + "h", version: env.VERSION || "demo" });
   }
 
   // Match alerts by ID
