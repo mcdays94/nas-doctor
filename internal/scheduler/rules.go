@@ -44,6 +44,8 @@ func evaluateRule(rule internal.NotificationRule, snap *internal.Snapshot) []int
 		return evalTunnels(cond, target, snap.Tunnels)
 	case "update":
 		return evalUpdate(snap.Update)
+	case "process":
+		return evalProcess(cond, target, val, snap)
 	}
 	return nil
 }
@@ -375,6 +377,62 @@ func evalUpdate(update *internal.UpdateInfo) []internal.Finding {
 			"Platform update available", fmt.Sprintf("%s → %s", update.InstalledVersion, update.LatestVersion))}
 	}
 	return nil
+}
+
+func evalProcess(cond, target string, val float64, snap *internal.Snapshot) []internal.Finding {
+	if val <= 0 {
+		return nil
+	}
+	procs := snap.System.TopProcesses
+	if len(procs) == 0 {
+		return nil
+	}
+	var out []internal.Finding
+	for _, proc := range procs {
+		// Extract the short process name (basename of command).
+		name := processName(proc.Command)
+
+		// Target filtering: if target is set, only match that process name.
+		if target != "" && !strings.EqualFold(target, name) {
+			continue
+		}
+
+		containerLabel := proc.ContainerName
+		if containerLabel == "" {
+			containerLabel = "host"
+		}
+		processKey := name + ":" + proc.ContainerName
+
+		switch cond {
+		case "cpu_above":
+			if proc.CPU > val {
+				out = append(out, synth("rule:process-cpu:"+processKey, internal.SeverityWarning, internal.CategorySystem,
+					fmt.Sprintf("High CPU: %s (%s)", name, containerLabel),
+					fmt.Sprintf("Process %s is using %.1f%% CPU (threshold: %.0f%%)", name, proc.CPU, val)))
+			}
+		case "mem_above":
+			if proc.Mem > val {
+				out = append(out, synth("rule:process-mem:"+processKey, internal.SeverityWarning, internal.CategorySystem,
+					fmt.Sprintf("High memory: %s (%s)", name, containerLabel),
+					fmt.Sprintf("Process %s is using %.1f%% memory (threshold: %.0f%%)", name, proc.Mem, val)))
+			}
+		}
+	}
+	return out
+}
+
+// processName extracts the short name from a command string.
+// e.g. "/usr/bin/python3 script.py" → "python3", "java -Xmx1g" → "java", "python" → "python"
+func processName(cmd string) string {
+	// Take only the first token (before any space / arguments).
+	if idx := strings.IndexByte(cmd, ' '); idx > 0 {
+		cmd = cmd[:idx]
+	}
+	// Take basename (after last /).
+	if idx := strings.LastIndexByte(cmd, '/'); idx >= 0 {
+		cmd = cmd[idx+1:]
+	}
+	return cmd
 }
 
 // -- Suppression helpers --

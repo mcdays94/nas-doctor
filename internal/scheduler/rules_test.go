@@ -23,7 +23,7 @@ func TestEvalProcess(t *testing.T) {
 				{PID: 1, Command: "python", CPU: 95.0, Mem: 10.0, ContainerName: "home-assistant"},
 			},
 			wantCount: 1,
-			wantTitle: "High CPU: python",
+			wantTitle: "High CPU: python (home-assistant)",
 		},
 		{
 			name: "cpu_below_threshold_no_finding",
@@ -40,7 +40,7 @@ func TestEvalProcess(t *testing.T) {
 				{PID: 2, Command: "java", CPU: 10.0, Mem: 85.0, ContainerName: "minecraft"},
 			},
 			wantCount: 1,
-			wantTitle: "High memory: java",
+			wantTitle: "High memory: java (minecraft)",
 		},
 		{
 			name: "target_filter_matches",
@@ -50,7 +50,7 @@ func TestEvalProcess(t *testing.T) {
 				{PID: 2, Command: "java", CPU: 95.0, Mem: 10.0}, // higher CPU but wrong name
 			},
 			wantCount: 1,
-			wantTitle: "High CPU: python",
+			wantTitle: "High CPU: python (host)",
 		},
 		{
 			name: "target_empty_checks_all",
