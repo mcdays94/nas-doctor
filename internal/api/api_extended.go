@@ -197,6 +197,7 @@ func defaultSettings() Settings {
 			MergedDrives:     true,
 			Backup:           true,
 			SpeedTest:        true,
+			Processes:        true,
 		},
 		ChartRangeHours: 1,
 	}
@@ -346,7 +347,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		settings.Sections = DashboardSections{
 			Findings: true, DiskSpace: true, SMART: true, Docker: true,
 			ZFS: true, UPS: true, Parity: true, Network: true,
-			Tunnels: true, MergedDrives: true,
+			Tunnels: true, MergedDrives: true, Processes: true,
 		}
 	}
 
