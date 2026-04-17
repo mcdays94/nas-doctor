@@ -252,7 +252,7 @@ func main() {
 					p.Mem = 0.1
 				}
 			}
-			if err := store.SaveProcessStats(procSnap.System.TopProcesses); err != nil {
+			if err := store.SaveProcessStatsAt(procSnap.System.TopProcesses, ts); err != nil {
 				logger.Warn("failed to save demo process history", "m", m, "error", err)
 			}
 		}

@@ -1,14 +1,9 @@
 name: Deploy Demo Worker
 
 on:
-  release:
-    types: [published]
   push:
-    branches: [main]
-    paths:
-      - 'demo-worker/**'
-      - 'internal/api/templates/**'
-      - '.github/workflows/demo-deploy.yml'
+    tags:
+      - 'latest'
   workflow_dispatch:
 
 env:

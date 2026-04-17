@@ -414,25 +414,30 @@ func (f *FakeStore) GetContainerHistory(_ int) ([]ContainerHistoryPoint, error) 
 }
 
 func (f *FakeStore) SaveProcessStats(procs []internal.ProcessInfo) error {
+	return f.SaveProcessStatsAt(procs, time.Now())
+}
+
+func (f *FakeStore) SaveProcessStatsAt(procs []internal.ProcessInfo, ts time.Time) error {
 	if len(procs) == 0 {
 		return nil
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	now := time.Now()
 	for _, p := range procs {
 		name := extractProcessName(p.Command)
 		if name == "" {
 			continue
 		}
 		f.processHistory = append(f.processHistory, ProcessHistoryPoint{
-			Timestamp: now,
-			PID:       p.PID,
-			User:      p.User,
-			Name:      name,
-			Command:   p.Command,
-			CPUPct:    p.CPU,
-			MemPct:    p.Mem,
+			Timestamp:     ts,
+			PID:           p.PID,
+			User:          p.User,
+			Name:          name,
+			Command:       p.Command,
+			ContainerName: p.ContainerName,
+			ContainerID:   p.ContainerID,
+			CPUPct:        p.CPU,
+			MemPct:        p.Mem,
 		})
 	}
 	return nil
