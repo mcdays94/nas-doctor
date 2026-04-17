@@ -14,7 +14,7 @@
   Beautiful dashboards, Prometheus metrics, webhook alerts — no cloud account required.<br>
 </p>
 
-> **Alpha** — NAS Doctor is in alpha. Features may be incomplete, bugs are expected, and breaking changes can occur between releases. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
+> **Beta** — NAS Doctor is in active development. Core features are stable and tested on Unraid. Other platforms may have edge cases. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
 <p align="center">
   <a href="https://nasdoctordemo.mdias.info"><img src="https://img.shields.io/badge/Live%20Demo-nasdoctordemo.mdias.info-6366f1?style=flat-square&logo=cloudflare&logoColor=white" alt="Live Demo"></a>
@@ -25,7 +25,7 @@
 
 ![NAS Doctor Dashboard](screenshots/midnight-top.jpg)
 
-NAS Doctor runs periodic health checks on your server — analyzing SMART data, disk usage, Docker containers, kernel logs, temperatures, ZFS pools, UPS power, and Unraid parity — then surfaces findings with clear severity ratings, root-cause correlation, and actionable recommendations backed by Backblaze failure rate data.
+NAS Doctor runs periodic health checks on your server — analyzing SMART data, disk usage, Docker containers, GPU, network speed, process CPU, kernel logs, temperatures, ZFS pools, UPS power, and Unraid parity — then surfaces findings with clear severity ratings, root-cause correlation, and actionable recommendations backed by Backblaze failure rate data.
 
 Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-server-diagnostic-skill) that generates professional PDF server reports, NAS Doctor packages the same intelligence into a self-hosted app anyone can install.
 
@@ -132,6 +132,18 @@ Automatic detection and monitoring of remote access tunnels:
 - **Tailscale**: Full peer graph with online status, IPs, OS, relay regions, TX/RX bytes, exit node status
 - Dashboard section in all themes with status dots per tunnel/peer
 
+### Top Processes
+
+Real-time process monitoring with Docker container attribution:
+- **Dashboard section** — Top 10 processes ranked by CPU%, each tagged with its Docker container name via Linux cgroup matching
+- **Click-through** — Click any process to jump to its CPU history chart on `/stats`
+- **Historical charts** — Per-process CPU% time series on `/stats` with **1H/1D/1W/1M** range selector
+- **Container attribution** — Reads `/proc/PID/cgroup` to match processes to Docker containers. Supports cgroup v1 (Unraid) and cgroup v2 (TrueNAS SCALE)
+- **5-minute collection** — Process stats collected every 5 minutes alongside container stats
+- **Alert rules** — Configurable `cpu_above` and `mem_above` thresholds per process
+
+> **Requires `--pid=host`** (or `pid: host` in compose) — without it, the container only sees its own processes.
+
 ### Parity Detail
 
 Dedicated `/parity` page with full parity check history:
@@ -142,7 +154,7 @@ Dedicated `/parity` page with full parity check history:
 ### Notification Rules
 
 Dropdown-driven notification builder with full granularity — no YAML, no complex policy syntax:
-- **12 categories**: Findings, Disk Space, Disk Temperature, SMART Health, Service Checks, Parity, UPS/Power, Docker, System, ZFS, Tunnels, Platform Update
+- **13 categories**: Findings, Disk Space, Disk Temperature, SMART Health, Service Checks, Process, Parity, UPS/Power, Docker, System, ZFS, Tunnels, Platform Update
 - **Condition dropdowns** that change per category — e.g., SMART offers "health fails", "reallocated above", "pending above", "CRC errors above", "power-on hours above"
 - **Target selection** from live data — pick a specific drive, service, container, ZFS pool, or tunnel from a dropdown populated by the latest scan
 - **Threshold values** — set exact numbers (e.g., disk space below 10%, temp above 55°C)
@@ -197,6 +209,7 @@ services:
     image: ghcr.io/mcdays94/nas-doctor:latest
     container_name: nas-doctor
     privileged: true          # Required for SMART access
+    pid: host                 # Required for Top Processes (see host processes)
     network_mode: host
     volumes:
       - nas-doctor-data:/data
@@ -242,6 +255,7 @@ Then open `http://your-nas:8060`. See platform-specific sections below for Unrai
 | **WebUI** | `http://[IP]:[PORT:8060]/` |
 | **Network Type** | `Host` |
 | **Privileged** | `On` (**required** — SMART access needs raw device access) |
+| **Extra Parameters** | `--pid=host` (**required** for Top Processes to see host processes) |
 
 3. Add these **path mappings** (click "Add another Path, Port, Variable..." for each):
 
@@ -254,6 +268,8 @@ Then open `http://your-nas:8060`. See platform-specific sections below for Unrai
 | Host Mounts | `/host/mnt` | `/mnt` | RO | Per-disk space monitoring |
 | Unraid Version | `/etc/unraid-version` | `/etc/unraid-version` | RO | OS update detection |
 | Disk Slots | `/var/local/emhttp` | `/var/local/emhttp` | RO | Drive slot mapping for merged drive view |
+| Device Nodes | `/dev` | `/dev` | RO | SMART and GPU device access |
+| Sysfs | `/sys` | `/sys` | RO | GPU telemetry and drive mapping |
 
 4. Add this **variable**:
 
@@ -277,6 +293,7 @@ services:
     image: ghcr.io/mcdays94/nas-doctor:latest
     container_name: nas-doctor
     privileged: true
+    pid: host
     network_mode: host
     volumes:
       - /volume1/docker/nas-doctor:/data
@@ -311,6 +328,7 @@ services:
     image: ghcr.io/mcdays94/nas-doctor:latest
     container_name: nas-doctor
     privileged: true
+    pid: host
     network_mode: host
     volumes:
       - /mnt/pool/appdata/nas-doctor:/data
@@ -396,6 +414,7 @@ services:
     image: ghcr.io/mcdays94/nas-doctor:latest
     container_name: nas-doctor
     privileged: true
+    pid: host
     network_mode: host
     restart: unless-stopped
     environment:
@@ -486,6 +505,9 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `/api/v1/snapshots` | GET | List recent snapshots |
 | `/api/v1/scan` | POST | Trigger immediate diagnostic scan |
 | `/api/v1/history/speedtest` | GET | Speed test history (query: `?hours=N`) |
+| `/api/v1/history/processes` | GET | Process CPU/memory history (query: `?hours=N`) |
+| `/api/v1/history/containers` | GET | Container stats history (query: `?hours=N`) |
+| `/api/v1/history/gpu` | GET | GPU metrics history (query: `?hours=N`) |
 | `/api/v1/settings` | GET/PUT | Read/write application settings |
 | `/api/v1/settings/test-webhook` | POST | Send test notification to a webhook |
 | `/api/v1/sparklines` | GET | Condensed system + SMART history for charts |
@@ -625,6 +647,9 @@ All configuration is stored in the SQLite database and managed via the web UI at
 | `/host/volume1` | `/volume1` | Disk space monitoring (Synology) |
 | `/host/log` | `/var/log` | System log analysis (dmesg, syslog) |
 | `/host/boot` | `/boot` | Parity logs, Unraid identification |
+| `/var/local/emhttp` | `/var/local/emhttp` | Unraid drive slot mapping (merged drive view) |
+| `/dev` | `/dev` | SMART and GPU device access |
+| `/sys` | `/sys` | GPU telemetry and drive mapping |
 | `/var/run/docker.sock` | Docker socket | Container monitoring |
 
 ### Source tree
@@ -634,7 +659,7 @@ cmd/nas-doctor/            # Entry point, CLI flags, demo mode
 internal/
 ├── analyzer/              # Diagnostic rules engine, Backblaze thresholds
 ├── api/                   # HTTP handlers, embedded HTML templates, shared CSS
-│   └── templates/         # Dashboard themes (midnight, clean, ember) + subpages
+│   └── templates/         # Dashboard themes (midnight, clean) + subpages
 ├── collector/             # Data collection (SMART, disk, docker, network, UPS, tunnels)
 ├── demo/                  # Mock data generation for demo mode
 ├── fleet/                 # Multi-server fleet polling
@@ -650,7 +675,7 @@ internal/
 
 NAS Doctor is designed to be invisible on your system:
 
-| Resource | During scan (~15s every 6h) | Between scans |
+| Resource | During scan (~15s every 30m) | Between scans |
 |---|---|---|
 | **CPU** | <2% | ~0% |
 | **Memory** | ~30-50 MB | ~30-50 MB |
