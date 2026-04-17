@@ -232,6 +232,31 @@ func main() {
 			}
 		}
 
+		// Generate process history for the past 48h (every 5 minutes = 576 snapshots)
+		for m := 576; m >= 1; m-- {
+			procSnap := demo.GenerateSnapshot()
+			ts := time.Now().Add(-time.Duration(m) * 5 * time.Minute)
+			hourOfDay := ts.Hour()
+			dayFactor := 1.0
+			if hourOfDay >= 9 && hourOfDay <= 23 {
+				dayFactor = 1.5
+			}
+			for j := range procSnap.System.TopProcesses {
+				p := &procSnap.System.TopProcesses[j]
+				p.CPU = demo.Jitter(p.CPU*dayFactor, 40)
+				if p.CPU < 0.1 {
+					p.CPU = 0.1
+				}
+				p.Mem = demo.Jitter(p.Mem, 30)
+				if p.Mem < 0.1 {
+					p.Mem = 0.1
+				}
+			}
+			if err := store.SaveProcessStats(procSnap.System.TopProcesses); err != nil {
+				logger.Warn("failed to save demo process history", "m", m, "error", err)
+			}
+		}
+
 		// Current snapshot (latest)
 		snap := demo.GenerateSnapshot()
 		snap.Findings = analyzer.Analyze(snap)
