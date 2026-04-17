@@ -20,7 +20,7 @@ type Platform = (typeof PLATFORMS)[number];
 const ENDPOINTS = [
   "status", "snapshot", "sparklines", "fleet", "service_checks",
   "alerts", "incidents", "notifications_log", "gpu_history",
-  "container_history", "system_history", "settings", "db_stats",
+  "container_history", "system_history", "process_history", "settings", "db_stats",
   "disks", "smart_trends", "replacement_plan", "capacity_forecast",
 ];
 
@@ -750,7 +750,7 @@ function refreshData(endpoint: string, data: unknown): unknown {
     case "sparklines": return refreshSparklines(data as Record<string, unknown>);
     case "fleet": return refreshFleet(data as unknown[]);
     case "service_checks": return refreshServiceChecks(data as unknown[]);
-    case "system_history": case "gpu_history": case "container_history": return refreshHistory(data as unknown[]);
+    case "system_history": case "gpu_history": case "container_history": case "process_history": return refreshHistory(data as unknown[]);
     default: return data;
   }
 }
