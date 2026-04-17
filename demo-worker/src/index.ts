@@ -82,6 +82,10 @@ export default {
       const t = await fetchAsset(env, url, request, "charts.js");
       if (t !== null) return new Response(t, { headers: { "Content-Type": "application/javascript", "Cache-Control": "public, max-age=3600" } });
     }
+    if (path === "/js/dashboard.js") {
+      const t = await fetchAsset(env, url, request, "dashboard.js");
+      if (t !== null) return new Response(t, { headers: { "Content-Type": "application/javascript", "Cache-Control": "public, max-age=3600" } });
+    }
     if (path === "/css/shared.css") {
       const t = await fetchAsset(env, url, request, "shared.css");
       if (t !== null) return new Response(t, { headers: { "Content-Type": "text/css", "Cache-Control": "public, max-age=3600" } });
@@ -124,6 +128,7 @@ async function handleAPI(path: string, url: URL, platform: Platform, env: Env): 
     "/api/v1/history/gpu": "gpu_history",
     "/api/v1/history/containers": "container_history",
     "/api/v1/history/system": "system_history",
+    "/api/v1/history/processes": "process_history",
     "/api/v1/alerts": "alerts",
     "/api/v1/service-checks": "service_checks",
     "/api/v1/service-checks/history": "service_checks", // reuse full list as history

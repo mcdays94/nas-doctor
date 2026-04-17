@@ -59,7 +59,6 @@ jobs:
           mkdir -p demo-worker/captured/_pages demo-worker/captured/api
           curl -sf http://localhost:8060/ -o demo-worker/captured/_pages/midnight.html
           curl -sf http://localhost:8060/theme/clean -o demo-worker/captured/_pages/clean.html
-          curl -sf http://localhost:8060/theme/ember -o demo-worker/captured/_pages/ember.html
           curl -sf http://localhost:8060/settings -o demo-worker/captured/_pages/settings.html
           curl -sf http://localhost:8060/alerts -o demo-worker/captured/_pages/alerts.html
           curl -sf http://localhost:8060/fleet -o demo-worker/captured/_pages/fleet.html
@@ -70,6 +69,7 @@ jobs:
 
           # Capture static assets
           curl -sf http://localhost:8060/js/charts.js -o demo-worker/captured/charts.js
+          curl -sf http://localhost:8060/js/dashboard.js -o demo-worker/captured/dashboard.js
           curl -sf http://localhost:8060/css/shared.css -o demo-worker/captured/shared.css
 
           # Capture ALL API responses (these seed the KV namespace)
@@ -80,6 +80,7 @@ jobs:
           curl -sf 'http://localhost:8060/api/v1/history/gpu?hours=24' -o demo-worker/captured/api/gpu_history.json
           curl -sf 'http://localhost:8060/api/v1/history/containers?hours=24' -o demo-worker/captured/api/container_history.json
           curl -sf http://localhost:8060/api/v1/history/system -o demo-worker/captured/api/system_history.json
+          curl -sf 'http://localhost:8060/api/v1/history/processes?hours=24' -o demo-worker/captured/api/process_history.json
           curl -sf http://localhost:8060/api/v1/alerts -o demo-worker/captured/api/alerts.json
           curl -sf http://localhost:8060/api/v1/service-checks -o demo-worker/captured/api/service_checks.json
           curl -sf http://localhost:8060/api/v1/fleet -o demo-worker/captured/api/fleet.json
