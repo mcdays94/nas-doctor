@@ -1044,10 +1044,10 @@ sections.processes = function(sn) {
       var cmdDisplay = esc(p.command || '');
       if (cmdDisplay.length > 40) cmdDisplay = cmdDisplay.substring(0, 40) + '\u2026';
       var procName = (p.command || '').split('/').pop().split(' ')[0];
-      var statsUrl = '/stats?process=' + encodeURIComponent(procName) + '&container=' + encodeURIComponent(p.container_name || '') + '#process-history';
-      h += '<tr style="cursor:pointer;transition:background 0.15s" onmouseover="this.style.background=\'rgba(94,106,210,0.08)\'" onmouseout="this.style.background=\'transparent\'" onclick="window.location.href=\'' + statsUrl + '\'">';
+      var statsHref = '/stats?process=' + encodeURIComponent(procName) + '&amp;container=' + encodeURIComponent(p.container_name || '') + '#process-history';
+      h += '<tr>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text-quaternary)">' + (pi + 1) + '</td>';
-      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><div style="font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(p.command || '') + '">' + cmdDisplay + '</div></td>';
+      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><a href="' + statsHref + '" style="display:block;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit;text-decoration:none" title="' + esc(p.command || '') + '">' + cmdDisplay + '</a></td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + containerTag + '</td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:var(--font-mono);font-size:11px" class="' + cpuClass + '">' + (p.cpu_percent || 0).toFixed(1) + '</td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:var(--font-mono);font-size:11px" class="' + memClass + '">' + (p.mem_percent || 0).toFixed(1) + '</td>';
