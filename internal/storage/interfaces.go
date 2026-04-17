@@ -60,6 +60,7 @@ type HistoryStore interface {
 	SaveContainerStats(docker *internal.DockerInfo) error
 	GetContainerHistory(hours int) ([]ContainerHistoryPoint, error)
 	SaveProcessStats(procs []internal.ProcessInfo) error
+	SaveProcessStatsAt(procs []internal.ProcessInfo, ts time.Time) error
 	GetProcessHistory(hours int) ([]ProcessHistoryPoint, error)
 	SaveSpeedTest(snapshotID string, result *internal.SpeedTestResult) error
 	GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error)

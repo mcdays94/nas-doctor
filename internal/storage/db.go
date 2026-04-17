@@ -600,14 +600,19 @@ func processName(command string) string {
 	return exe
 }
 
-// SaveProcessStats saves a standalone process stats snapshot.
-// Used by the lightweight process stats collection loop (similar to SaveContainerStats).
+// SaveProcessStats saves a standalone process stats snapshot at the current time.
 func (d *DB) SaveProcessStats(procs []internal.ProcessInfo) error {
+	return d.SaveProcessStatsAt(procs, time.Now())
+}
+
+// SaveProcessStatsAt saves a standalone process stats snapshot at the given timestamp.
+// Used by the lightweight process stats collection loop (similar to SaveContainerStats)
+// and by demo mode for seeding historical data.
+func (d *DB) SaveProcessStatsAt(procs []internal.ProcessInfo, ts time.Time) error {
 	if len(procs) == 0 {
 		return nil
 	}
-	now := time.Now()
-	snapshotID := fmt.Sprintf("pstats-%d", now.UnixMilli())
+	snapshotID := fmt.Sprintf("pstats-%d", ts.UnixMilli())
 	for _, p := range procs {
 		name := processName(p.Command)
 		if name == "" {
@@ -616,7 +621,7 @@ func (d *DB) SaveProcessStats(procs []internal.ProcessInfo) error {
 		_, err := d.db.Exec(
 			`INSERT INTO process_history (snapshot_id, pid, user, name, command, container_name, container_id, cpu_pct, mem_pct, timestamp)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			snapshotID, p.PID, p.User, name, p.Command, "", "", p.CPU, p.Mem, now,
+			snapshotID, p.PID, p.User, name, p.Command, p.ContainerName, p.ContainerID, p.CPU, p.Mem, ts,
 		)
 		if err != nil {
 			return err
