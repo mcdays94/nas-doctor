@@ -473,12 +473,26 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
       groups[key].points.push(p);
       groups[key].total += p.cpu_percent;
     }
+    // Check for highlighted process from query params (?process=name&container=ctr)
+    var urlParams = new URLSearchParams(window.location.search);
+    var highlightProc = urlParams.get('process') || '';
+    var highlightCtr = urlParams.get('container') || '';
+    var highlightKey = highlightProc ? (highlightProc + '|' + highlightCtr) : '';
+
     // Rank by cumulative CPU and take top 8.
     var ranked = Object.keys(groups).map(function(k) { return groups[k]; });
     ranked.sort(function(a, b) { return b.total - a.total; });
+    // If a specific process is highlighted, ensure it's included and first.
+    if (highlightKey && groups[highlightKey]) {
+      ranked = ranked.filter(function(r) { return (r.name + '|' + r.container) !== highlightKey; });
+      ranked.unshift(groups[highlightKey]);
+    }
     ranked = ranked.slice(0, 8);
     if (ranked.length === 0) return '';
-    var h = '<div class="system-section" id="process-history"><div class="system-section-title">Process CPU History (top ' + ranked.length + ' by cumulative CPU)</div>';
+    var title = highlightProc
+      ? esc(highlightProc) + (highlightCtr ? ' (' + esc(highlightCtr) + ')' : ' (host)') + ' — CPU History'
+      : 'Process CPU History (top ' + ranked.length + ' by cumulative CPU)';
+    var h = '<div class="system-section" id="process-history"><div class="system-section-title">' + title + '</div>';
     h += '<div class="chart-card"><div class="chart-label">CPU Usage (%) by Process</div>';
     h += '<canvas id="chart-process-cpu" width="600" height="200" style="width:100%;height:200px"></canvas></div>';
     // Legend
@@ -486,8 +500,10 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
     for (var j = 0; j < ranked.length; j++) {
       var label = ranked[j].name + (ranked[j].container ? ' (' + esc(ranked[j].container) + ')' : ' (host)');
       var clr = processChartColors[j % processChartColors.length];
-      h += '<div style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)">';
-      h += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + clr + '"></span>';
+      var isHighlighted = highlightKey && (ranked[j].name + '|' + ranked[j].container) === highlightKey;
+      var weight = isHighlighted ? 'font-weight:700' : '';
+      h += '<div style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);' + weight + '">';
+      h += '<span style="display:inline-block;width:' + (isHighlighted ? '10' : '8') + 'px;height:' + (isHighlighted ? '10' : '8') + 'px;border-radius:50%;background:' + clr + '"></span>';
       h += esc(label) + '</div>';
     }
     h += '</div></div>';
