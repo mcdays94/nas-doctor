@@ -408,6 +408,7 @@ func (s *Server) serveDashboard(w http.ResponseWriter, theme string) {
 	default:
 		html = DashboardMidnight
 	}
+	html = strings.Replace(html, "__VERSION__", s.version, -1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
 }
