@@ -5,45 +5,51 @@
   <Registry>https://github.com/mcdays94/nas-doctor/pkgs/container/nas-doctor</Registry>
   <Network>host</Network>
   <Privileged>true</Privileged>
+  <ExtraParams>--pid=host</ExtraParams>
   <Support>https://github.com/mcdays94/nas-doctor/issues</Support>
   <Project>https://github.com/mcdays94/nas-doctor</Project>
   <Overview>
-NAS Doctor is a local diagnostic and monitoring tool for your NAS. It runs periodic health checks — analyzing SMART data, disk usage, Docker containers, kernel logs, temperatures, ZFS pools, UPS power, and Unraid parity — then presents findings in a beautiful web dashboard with actionable recommendations backed by Backblaze failure rate data.
+NAS Doctor is a local diagnostic and monitoring tool for your NAS. It runs periodic health checks — analyzing SMART data, disk usage, Docker containers, GPU, network, kernel logs, temperatures, ZFS pools, UPS power, and Unraid parity — then presents findings in a beautiful web dashboard with actionable recommendations backed by Backblaze failure rate data.
 
 Features:
 - 20+ diagnostic rules with automatic root-cause correlation
 - SMART health with Backblaze failure-rate thresholds (337k+ drives)
+- Top Processes with Docker container attribution (cgroup matching)
 - Historical trend sparklines (CPU, memory, I/O, drive temps)
-- Full stats page with trend charts
+- Full stats page with trend charts and process CPU history
+- GPU monitoring (NVIDIA, Intel, AMD)
+- Speed test scheduling (Ookla CLI)
 - ZFS pool health (vdev tree, scrub/resilver, ARC stats)
 - UPS / power monitoring (NUT and apcupsd)
 - NAS OS update check (notifies when behind latest stable)
 - Parity check speed trend analysis (Unraid)
-- 3 dashboard themes (Midnight, Clean, Ember)
+- 2 dashboard themes (Midnight and Clean)
 - Export professional PDF diagnostic reports
 - Multi-server fleet monitoring (monitor all your NAS instances)
 - Prometheus /metrics endpoint (30+ gauges)
 - Webhook alerts: Discord, Slack, Gotify, Ntfy, generic HTTP
 - Automatic backups with configurable schedule and location
 - Data lifecycle management (retention policies, DB size cap)
-- Dashboard section visibility toggles
+- Dashboard section visibility toggles and multi-column layout
   </Overview>
   <Category>Tools: Monitoring Status:Stable</Category>
   <WebUI>http://[IP]:[PORT:8060]</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/mcdays94/nas-doctor/main/unraid-template.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/mcdays94/nas-doctor/main/icons/icon3.png</Icon>
-  <ExtraParams/>
   <PostArgs/>
   <DonateText>Buy Me a Coffee</DonateText>
   <DonateLink>https://buymeacoffee.com/miguelcaetanodias</DonateLink>
   <Requires/>
   <Config Name="Web UI Port" Target="8060" Default="8060" Mode="tcp" Description="Web dashboard and API port" Type="Port" Display="always" Required="true" Mask="false">8060</Config>
   <Config Name="Data Directory" Target="/data" Default="/mnt/user/appdata/nas-doctor" Mode="rw" Description="Persistent data (SQLite database, config, backups)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/nas-doctor</Config>
+  <Config Name="Docker Socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Docker socket for container monitoring" Type="Path" Display="always" Required="true" Mask="false">/var/run/docker.sock</Config>
+  <Config Name="Emhttp Status" Target="/var/local/emhttp" Default="/var/local/emhttp" Mode="ro" Description="Unraid emhttp status (required for merged drive view)" Type="Path" Display="always" Required="true" Mask="false">/var/local/emhttp</Config>
+  <Config Name="Device Nodes" Target="/dev" Default="/dev" Mode="ro" Description="Device nodes (required for SMART and GPU access)" Type="Path" Display="always" Required="true" Mask="false">/dev</Config>
+  <Config Name="Sysfs" Target="/sys" Default="/sys" Mode="ro" Description="Sysfs (required for SMART, GPU, and drive mapping)" Type="Path" Display="always" Required="true" Mask="false">/sys</Config>
   <Config Name="Boot Config" Target="/host/boot" Default="/boot" Mode="ro" Description="Unraid boot config (parity logs, ident)" Type="Path" Display="always" Required="false" Mask="false">/boot</Config>
   <Config Name="System Logs" Target="/host/log" Default="/var/log" Mode="ro" Description="System log files (syslog, messages)" Type="Path" Display="always" Required="false" Mask="false">/var/log</Config>
   <Config Name="Unraid Version" Target="/etc/unraid-version" Default="/etc/unraid-version" Mode="ro" Description="Unraid version file (for OS update detection)" Type="Path" Display="always" Required="false" Mask="false">/etc/unraid-version</Config>
   <Config Name="Host Mounts" Target="/host/mnt" Default="/mnt" Mode="ro" Description="Host disk mounts (for per-disk space monitoring)" Type="Path" Display="always" Required="false" Mask="false">/mnt</Config>
-  <Config Name="Docker Socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Docker socket for container monitoring" Type="Path" Display="always" Required="false" Mask="false">/var/run/docker.sock</Config>
-  <Config Name="Scan Interval" Target="NAS_DOCTOR_INTERVAL" Default="6h" Mode="" Description="How often to run diagnostic scans (e.g. 30m, 1h, 6h, 24h)" Type="Variable" Display="always" Required="false" Mask="false">6h</Config>
+  <Config Name="Scan Interval" Target="NAS_DOCTOR_INTERVAL" Default="30m" Mode="" Description="How often to run diagnostic scans (e.g. 30m, 1h, 6h, 24h)" Type="Variable" Display="always" Required="false" Mask="false">30m</Config>
   <Config Name="Timezone" Target="TZ" Default="UTC" Mode="" Description="Container timezone (e.g. Europe/London, America/New_York)" Type="Variable" Display="always" Required="false" Mask="false">UTC</Config>
 </Container>
