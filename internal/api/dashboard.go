@@ -1043,7 +1043,9 @@ sections.processes = function(sn) {
       }
       var cmdDisplay = esc(p.command || '');
       if (cmdDisplay.length > 40) cmdDisplay = cmdDisplay.substring(0, 40) + '\u2026';
-      h += '<tr>';
+      var procName = (p.command || '').split('/').pop().split(' ')[0];
+      var statsUrl = '/stats?process=' + encodeURIComponent(procName) + '&container=' + encodeURIComponent(p.container_name || '') + '#process-history';
+      h += '<tr style="cursor:pointer;transition:background 0.15s" onmouseover="this.style.background=\'rgba(94,106,210,0.08)\'" onmouseout="this.style.background=\'transparent\'" onclick="window.location.href=\'' + statsUrl + '\'">';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text-quaternary)">' + (pi + 1) + '</td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><div style="font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(p.command || '') + '">' + cmdDisplay + '</div></td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + containerTag + '</td>';
