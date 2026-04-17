@@ -522,8 +522,11 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
       var p = processHistory[i];
       var key = p.name + '|' + (p.container_name || '');
       if (!groups[key]) groups[key] = { name: p.name, container: p.container_name || '', byTs: {}, total: 0 };
-      // Bucket by minute (truncate seconds) for alignment.
-      var ts = p.timestamp.replace(/:\d{2}(\.\d+)?Z?$/, ':00Z').replace(/:\d{2}[+-]\d{2}:\d{2}$/, ':00Z');
+      // Bucket by minute — parse to Date then round down to the minute.
+      var d = new Date(p.timestamp);
+      if (isNaN(d.getTime())) continue;
+      d.setSeconds(0, 0);
+      var ts = d.toISOString();
       if (!tsSet[ts]) { tsSet[ts] = true; timestamps.push(ts); }
       // Take the max CPU per time bucket per group (in case of duplicates).
       if (!groups[key].byTs[ts] || p.cpu_percent > groups[key].byTs[ts]) {
@@ -548,10 +551,12 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
       var label = g.name + (g.container ? ' (' + g.container + ')' : ' (host)');
       datasets.push({ data: data, color: processChartColors[j % processChartColors.length], label: label });
     }
-    // Format time labels: show HH:MM.
-    var labels = timestamps.map(function(ts) {
+    // Format time labels: show HH:MM, thin out to ~20 visible labels max.
+    var step = Math.max(1, Math.floor(timestamps.length / 20));
+    var labels = timestamps.map(function(ts, idx) {
+      if (idx % step !== 0 && idx !== timestamps.length - 1) return '';
       var d = new Date(ts);
-      if (isNaN(d.getTime())) return ts;
+      if (isNaN(d.getTime())) return '';
       return ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
     });
     try { NasChart.line("chart-process-cpu", { datasets: datasets, labels: labels, yLabel: "%" }); } catch(e) {}
