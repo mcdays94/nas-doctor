@@ -461,6 +461,10 @@ go build -o nas-doctor ./cmd/nas-doctor
   <img src="screenshots/parity-page.jpg" alt="Parity" width="380">
 </p>
 <p>
+  <img src="screenshots/dashboard-processes.jpg" alt="Top Processes on Dashboard" width="380">
+  <img src="screenshots/stats-process-history.jpg" alt="Process CPU History Chart" width="380">
+</p>
+<p>
   <img src="screenshots/planner-page.jpg" alt="Replacement Planner" width="380">
 </p>
 
