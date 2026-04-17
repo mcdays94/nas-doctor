@@ -144,7 +144,7 @@ body.theme-clean .sort-pill.active{color:rgba(0,0,0,0.7);background:rgba(0,0,0,0
 <script>
 fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d.hostname)document.title="NAS Doctor — "+d.hostname;}).catch(function(){});
 (function() {
-  var snapshot = null, sparklines = null, processHistory = null, expandedIdx = -1;
+  var snapshot = null, sparklines = null, processHistory = null, expandedIdx = -1, processHours = 24;
   function esc(s) { var d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
 
   /* ── Backblaze thresholds (mirrors backblaze_thresholds.go) ── */
@@ -492,7 +492,17 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
     var title = highlightProc
       ? esc(highlightProc) + (highlightCtr ? ' (' + esc(highlightCtr) + ')' : ' (host)') + ' — CPU History'
       : 'Process CPU History (top ' + ranked.length + ' by cumulative CPU)';
-    var h = '<div class="system-section" id="process-history"><div class="system-section-title">' + title + '</div>';
+    var h = '<div class="system-section" id="process-history">';
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
+    h += '<div class="system-section-title" style="margin-bottom:0">' + title + '</div>';
+    h += '<div style="display:flex;gap:4px">';
+    var ranges = [{h:1,l:"1H"},{h:24,l:"1D"},{h:168,l:"1W"},{h:720,l:"1M"}];
+    for (var ri = 0; ri < ranges.length; ri++) {
+      var rng = ranges[ri];
+      var active = processHours === rng.h;
+      h += '<button onclick="window._loadProcessRange(' + rng.h + ')" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:' + (active ? 'var(--bg-elevated)' : 'transparent') + ';color:' + (active ? 'var(--text2)' : 'var(--text3)') + ';cursor:pointer">' + rng.l + '</button>';
+    }
+    h += '</div></div>';
     h += '<div class="chart-card"><div class="chart-label">CPU Usage (%) by Process</div>';
     h += '<canvas id="chart-process-cpu" width="600" height="200" style="width:100%;height:200px"></canvas></div>';
     // Legend
@@ -608,8 +618,25 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
     fetch("/api/v1/snapshot/latest").then(function(r){return r.json()}).catch(function(){return null}),
     fetch("/api/v1/sparklines").then(function(r){return r.json()}).catch(function(){return null}),
     fetch("/api/v1/capacity-forecast").then(function(r){return r.json()}).catch(function(){return null}),
-    fetch("/api/v1/history/processes?hours=24").then(function(r){return r.json()}).catch(function(){return null})
+    fetch("/api/v1/history/processes?hours=" + processHours).then(function(r){return r.json()}).catch(function(){return null})
   ]).then(function(r){ snapshot=r[0]; sparklines=r[1]; capacityForecast=r[2]; processHistory=r[3]; render(); initStatsSortBar(); });
+
+  window._loadProcessRange = function(hours) {
+    processHours = hours;
+    fetch("/api/v1/history/processes?hours=" + hours).then(function(r){return r.json()}).then(function(data) {
+      processHistory = data;
+      var section = document.getElementById("process-history");
+      if (section) {
+        var parent = section.parentNode;
+        var tmp = document.createElement("div");
+        tmp.innerHTML = renderProcessHistory();
+        if (tmp.firstChild) {
+          parent.replaceChild(tmp.firstChild, section);
+          drawProcessChart();
+        }
+      }
+    }).catch(function(){});
+  };
 })();
 </script>
 </body>
