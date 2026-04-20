@@ -2,10 +2,29 @@ package collector
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/mcdays94/nas-doctor/internal"
+)
+
+// Package-level indirections so tests can stub out exec / filesystem access.
+// They default to the real implementations; tests swap them with t.Cleanup.
+var (
+	tailscaleLookPath   = exec.LookPath
+	tailscaleRunCommand = func(name string, args ...string) ([]byte, error) {
+		return exec.Command(name, args...).CombinedOutput()
+	}
+	tailscaleSocketStat = os.Stat
+	// tailscaleSocketPath is the expected tailscaled control socket. Can be
+	// overridden with NAS_DOCTOR_TAILSCALE_SOCKET for non-default paths.
+	tailscaleSocketPath = func() string {
+		if p := os.Getenv("NAS_DOCTOR_TAILSCALE_SOCKET"); p != "" {
+			return p
+		}
+		return "/var/run/tailscale/tailscaled.sock"
+	}()
 )
 
 // collectTunnels detects cloudflared and tailscale tunnel services.
@@ -132,14 +151,29 @@ func collectTailscale(docker internal.DockerInfo) *internal.TailscaleInfo {
 	info := &internal.TailscaleInfo{}
 
 	// 1. Check host binary
-	if path, err := exec.LookPath("tailscale"); err == nil && path != "" {
+	if path, err := tailscaleLookPath("tailscale"); err == nil && path != "" {
 		info.Installed = true
-		if out, err := exec.Command("tailscale", "version").CombinedOutput(); err == nil {
+		if out, err := tailscaleRunCommand("tailscale", "version"); err == nil {
 			info.Version = strings.TrimSpace(strings.Split(string(out), "\n")[0])
 		}
 		// Get status JSON
-		if out, err := exec.Command("tailscale", "status", "--json").CombinedOutput(); err == nil {
+		if out, err := tailscaleRunCommand("tailscale", "status", "--json"); err == nil {
 			parseTailscaleStatus(out, info)
+		} else {
+			// Daemon unreachable — typical Unraid case: the host runs the
+			// tailscale-nas-util plugin but /var/run/tailscale is not
+			// bind-mounted into the container. Surface a hint so the UI can
+			// guide the user instead of silently showing "not installed".
+			info.BackendState = "Unreachable"
+			if _, statErr := tailscaleSocketStat(tailscaleSocketPath); os.IsNotExist(statErr) {
+				info.Hint = "tailscale binary found but daemon socket " + tailscaleSocketPath +
+					" is not accessible. On Unraid, bind-mount /var/run/tailscale from the host " +
+					"(see the NAS Doctor Unraid template)."
+			} else {
+				info.Hint = "tailscale binary found but `tailscale status` failed. " +
+					"Verify the daemon is running and the socket at " + tailscaleSocketPath +
+					" is reachable."
+			}
 		}
 	}
 
