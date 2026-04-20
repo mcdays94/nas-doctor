@@ -22,18 +22,30 @@ type RetentionManagerConfig struct {
 	ServiceCheckMaxAge time.Duration
 	NotificationMaxAge time.Duration
 	AlertMaxAge        time.Duration
-	MaxDBSizeMB        float64
+	// DiskUsageMaxAge bounds how long snapshot-independent capacity-forecast
+	// rows (disk_usage_history) are retained. Zero falls back to the default
+	// (365 days) — see defaultDiskUsageMaxAge.
+	DiskUsageMaxAge time.Duration
+	MaxDBSizeMB     float64
 }
+
+// defaultDiskUsageMaxAge is the hardcoded retention for disk_usage_history
+// rows used by capacity forecasting. One year of daily samples per mount
+// point is a reasonable upper bound for linear-regression inputs. A future
+// PR (tracked alongside #127) will surface this as a user-configurable
+// advanced setting.
+const defaultDiskUsageMaxAge = 365 * 24 * time.Hour
 
 // RetentionResult summarizes what a single RunRetention call pruned.
 type RetentionResult struct {
-	SnapshotsPruned     int
-	ServiceChecksPruned int
-	NotificationsPruned int
-	AlertsPruned        int
-	OrphansPruned       int
-	SizePruned          int
-	Vacuumed            bool
+	SnapshotsPruned        int
+	ServiceChecksPruned    int
+	NotificationsPruned    int
+	AlertsPruned           int
+	OrphansPruned          int
+	DiskUsageHistoryPruned int64
+	SizePruned             int
+	Vacuumed               bool
 }
 
 // RetentionManager owns all data lifecycle operations. It depends only on
@@ -109,6 +121,21 @@ func (rm *RetentionManager) RunRetention(cfg RetentionManagerConfig) RetentionRe
 			result.ServiceChecksPruned = pruned
 			needsVacuum = true
 		}
+	}
+
+	// 3c. Prune disk_usage_history (snapshot-independent, own retention horizon).
+	// Falls back to defaultDiskUsageMaxAge (365d) when unset so callers that
+	// haven't plumbed this through yet still get sensible defaults.
+	diskUsageMaxAge := cfg.DiskUsageMaxAge
+	if diskUsageMaxAge <= 0 {
+		diskUsageMaxAge = defaultDiskUsageMaxAge
+	}
+	if pruned, err := rm.store.PruneDiskUsageHistory(time.Now().Add(-diskUsageMaxAge)); err != nil {
+		rm.logger.Warn("prune disk usage history failed", "error", err)
+	} else if pruned > 0 {
+		rm.logger.Info("pruned disk usage history", "count", pruned)
+		result.DiskUsageHistoryPruned = pruned
+		needsVacuum = true
 	}
 
 	// 4. Prune resolved alerts
