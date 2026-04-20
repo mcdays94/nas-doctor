@@ -29,7 +29,7 @@ LABEL org.opencontainers.image.title="NAS Doctor" \
 COPY --from=builder /nas-doctor /app/nas-doctor
 
 # Critical packages
-RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata curl apcupsd nut-client tailscale
+RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata curl apcupsd nut tailscale
 # Optional packages (may not be available on all architectures)
 RUN apk add --no-cache hdparm iproute2 || true
 RUN apk add --no-cache dmidecode ethtool || true
