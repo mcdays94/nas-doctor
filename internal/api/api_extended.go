@@ -1304,6 +1304,46 @@ func (s *Server) handleServiceCheckHistory(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, history)
 }
 
+// handleTestServiceCheck runs a single service check synchronously using the
+// supplied config, without persisting the result or mutating any saved state.
+// POST /api/v1/service-checks/test
+//
+// Intended for the settings page "Test" button so users can validate a check
+// before saving. Supports all 7 check types. Speed-type tests run the Ookla
+// CLI and may take 10-60s — this route is registered outside the router-wide
+// 30s Timeout group (see api.go).
+func (s *Server) handleTestServiceCheck(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
+		return
+	}
+	defer r.Body.Close()
+
+	var cfg internal.ServiceCheckConfig
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+
+	if err := normalizeServiceCheckConfig(&cfg); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Build a fresh checker per request. It uses the store purely for read-only
+	// state lookups it does NOT actually perform in RunCheck (it's only touched
+	// by RunDueChecks, which we don't call). We deliberately avoid using
+	// s.scheduler here so the endpoint works in demo mode and tests.
+	checker := scheduler.NewServiceChecker(s.store, s.logger)
+	if cfg.Type == internal.ServiceCheckSpeed {
+		checker.SetSpeedTestRunner(collector.RunSpeedTest)
+	}
+
+	result := checker.RunCheck(cfg, time.Now().UTC())
+	writeJSON(w, http.StatusOK, result)
+}
+
 // handleRunServiceChecks triggers immediate service check execution.
 // POST /api/v1/service-checks/run
 func (s *Server) handleRunServiceChecks(w http.ResponseWriter, r *http.Request) {
