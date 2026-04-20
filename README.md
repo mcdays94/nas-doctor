@@ -235,6 +235,8 @@ services:
       - /boot:/host/boot:ro
       - /etc/unraid-version:/etc/unraid-version:ro
       - /var/local/emhttp:/var/local/emhttp:ro  # Drive slot mapping (merged drive view)
+      # Optional — only if you run Tailscale on the host (any platform):
+      - /var/run/tailscale:/var/run/tailscale:ro  # Tailscale peer detection
     devices:
       - /dev/dri:/dev/dri                  # GPU monitoring (Intel/AMD)
     environment:
@@ -280,6 +282,7 @@ Then open `http://your-nas:8060`. See platform-specific sections below for Unrai
 | Disk Slots | `/var/local/emhttp` | `/var/local/emhttp` | RO | Drive slot mapping for merged drive view |
 | Device Nodes | `/dev` | `/dev` | RO | SMART and GPU device access |
 | Sysfs | `/sys` | `/sys` | RO | GPU telemetry and drive mapping |
+| Tailscale Socket (optional) | `/var/run/tailscale` | `/var/run/tailscale` | RO | Tailscale peer detection via the `tailscale-nas-util` plugin. Leave blank if you don't use Tailscale. |
 
 4. Add these **variables**:
 
