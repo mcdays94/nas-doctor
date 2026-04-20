@@ -50,6 +50,7 @@ Features:
   <Config Name="System Logs" Target="/host/log" Default="/var/log" Mode="ro" Description="System log files (syslog, messages)" Type="Path" Display="always" Required="false" Mask="false">/var/log</Config>
   <Config Name="Unraid Version" Target="/etc/unraid-version" Default="/etc/unraid-version" Mode="ro" Description="Unraid version file (for OS update detection)" Type="Path" Display="always" Required="false" Mask="false">/etc/unraid-version</Config>
   <Config Name="Host Mounts" Target="/host/mnt" Default="/mnt" Mode="ro" Description="Host disk mounts (for per-disk space monitoring)" Type="Path" Display="always" Required="false" Mask="false">/mnt</Config>
+  <Config Name="Tailscale Socket" Target="/var/run/tailscale" Default="/var/run/tailscale" Mode="ro" Description="Required for Tailscale detection via host tailscaled socket (tailscale-nas-util plugin users). Leave blank if not using Tailscale." Type="Path" Display="advanced" Required="false" Mask="false">/var/run/tailscale</Config>
   <Config Name="Scan Interval" Target="NAS_DOCTOR_INTERVAL" Default="30m" Mode="" Description="How often to run diagnostic scans (e.g. 30m, 1h, 6h, 24h)" Type="Variable" Display="always" Required="false" Mask="false">30m</Config>
   <Config Name="Timezone" Target="TZ" Default="UTC" Mode="" Description="Container timezone (e.g. Europe/London, America/New_York)" Type="Variable" Display="always" Required="false" Mask="false">UTC</Config>
 </Container>
