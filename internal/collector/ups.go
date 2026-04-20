@@ -35,19 +35,52 @@ func (execRunner) Output(name string, args ...string) ([]byte, error) {
 // defaultRunner is used by the exported collectUPS / collectNUT / collectApcupsd entrypoints.
 var defaultRunner UPSRunner = execRunner{}
 
-// collectUPS tries NUT first, then apcupsd. Returns Available=false if neither is available.
+// collectUPS tries NUT first, then apcupsd.
+//
+// Both collectors return a non-nil diagnostic hint ({Status:"unreachable"}) when their
+// client binary is present but the daemon isn't reachable — this is *useful* UX when
+// it's the only signal, but on a typical Unraid box both binaries are installed and
+// only apcupsd actually reaches its daemon. We must therefore treat an "unreachable"
+// hint as "try the next source" rather than a successful detection. The hint is only
+// surfaced if EVERY source returned one.
+//
+// Returns Available=false if neither binary is installed.
 func collectUPS() (*internal.UPSInfo, error) {
+	return collectUPSWith(defaultRunner)
+}
+
+// collectUPSWith is the testable form of collectUPS — takes an injected UPSRunner.
+func collectUPSWith(r UPSRunner) (*internal.UPSInfo, error) {
+	var hint *internal.UPSInfo
+
 	// Try NUT first (works on TrueNAS, Synology, generic Linux, FreeBSD, macOS with brew)
-	if info, err := collectNUTWith(defaultRunner); err == nil && info != nil {
-		return info, nil
+	if info, err := collectNUTWith(r); err == nil && info != nil {
+		if !isUnreachableHint(info) {
+			return info, nil // NUT actually returned data
+		}
+		hint = info // remember; may surface if apcupsd also fails
 	}
 
 	// Try apcupsd (common on Unraid, available on all Linux/FreeBSD/macOS)
-	if info, err := collectApcupsdWith(defaultRunner); err == nil && info != nil {
-		return info, nil
+	if info, err := collectApcupsdWith(r); err == nil && info != nil {
+		if !isUnreachableHint(info) {
+			return info, nil // apcupsd actually returned data
+		}
+		if hint == nil {
+			hint = info // only NUT is missing; use apcupsd's hint
+		}
 	}
 
+	if hint != nil {
+		return hint, nil // neither source reached a daemon — show the first hint
+	}
 	return &internal.UPSInfo{Available: false}, nil
+}
+
+// isUnreachableHint reports whether the given UPSInfo is a diagnostic hint
+// emitted by unreachableHint() rather than a real data payload.
+func isUnreachableHint(info *internal.UPSInfo) bool {
+	return info != nil && info.Status == "unreachable"
 }
 
 // ── NUT (Network UPS Tools) via `upsc` ──────────────────────────────
