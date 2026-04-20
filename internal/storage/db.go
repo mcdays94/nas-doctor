@@ -157,9 +157,14 @@ func (d *DB) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_gpu_history_gpu ON gpu_history(gpu_index, timestamp DESC)`,
 
 		// --- Container stats history ---
+		// snapshot_id is intentionally NOT a REFERENCES FK: SaveContainerStats
+		// is called from the lightweight 5-minute collection loop with a
+		// synthetic "cstats-<ms>" ID that has no matching snapshots row.
+		// PruneSnapshots uses explicit DELETE (see PR #151 precedent) to
+		// clean up scan-captured entries, so the FK is not needed.
 		`CREATE TABLE IF NOT EXISTS container_stats_history (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+			snapshot_id TEXT NOT NULL,
 			container_id TEXT NOT NULL,
 			name TEXT NOT NULL,
 			image TEXT,
@@ -177,9 +182,12 @@ func (d *DB) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_container_stats_name ON container_stats_history(name, timestamp DESC)`,
 
 		// --- Speed test history ---
+		// See note on container_stats_history: snapshot_id is NOT a FK for
+		// the same reason. SaveSpeedTest gets "speedtest-<ts>" synthetic IDs
+		// from the scheduler when the test runs outside a scan.
 		`CREATE TABLE IF NOT EXISTS speedtest_history (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+			snapshot_id TEXT NOT NULL,
 			download_mbps REAL,
 			upload_mbps REAL,
 			latency_ms REAL,
@@ -304,7 +312,136 @@ func (d *DB) migrate() error {
 		return fmt.Errorf("create alerts snooze index: %w", err)
 	}
 
+	// Issue #155: drop the snapshots(id) FK from container_stats_history and
+	// speedtest_history for existing databases. The CREATE TABLE statements
+	// above no longer define the FK for fresh installs, but existing DBs
+	// keep the old constraint until we rebuild the tables. SQLite has no
+	// ALTER TABLE ... DROP CONSTRAINT, so we rename → create-fresh → copy
+	// → drop guarded by a PRAGMA foreign_key_list probe (idempotent).
+	if err := d.dropSnapshotFKIfPresent("container_stats_history"); err != nil {
+		return fmt.Errorf("drop FK on container_stats_history: %w", err)
+	}
+	if err := d.dropSnapshotFKIfPresent("speedtest_history"); err != nil {
+		return fmt.Errorf("drop FK on speedtest_history: %w", err)
+	}
+
 	return nil
+}
+
+// dropSnapshotFKIfPresent rebuilds the given table without its
+// `snapshot_id REFERENCES snapshots(id)` foreign key if one is currently
+// defined. No-op on fresh installs (where the CREATE TABLE above already
+// omits the FK) and on second calls. Data is preserved by copying rows
+// from the renamed old table before dropping it.
+func (d *DB) dropSnapshotFKIfPresent(table string) error {
+	// Probe for an FK that targets the snapshots table.
+	rows, err := d.db.Query(fmt.Sprintf(`PRAGMA foreign_key_list(%s)`, table))
+	if err != nil {
+		return fmt.Errorf("pragma foreign_key_list(%s): %w", table, err)
+	}
+	hasSnapshotFK := false
+	for rows.Next() {
+		var (
+			id, seq         int
+			tableRef        string
+			from, to        string
+			onUpdate, onDel string
+			match           string
+		)
+		if err := rows.Scan(&id, &seq, &tableRef, &from, &to, &onUpdate, &onDel, &match); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan foreign_key_list(%s): %w", table, err)
+		}
+		if tableRef == "snapshots" && from == "snapshot_id" {
+			hasSnapshotFK = true
+		}
+	}
+	rows.Close()
+	if !hasSnapshotFK {
+		return nil
+	}
+
+	// Per-table rebuild. We do NOT parameterise the CREATE with a helper —
+	// explicit SQL per table keeps the migration greppable and removes any
+	// doubt about column lists drifting from the migration section above.
+	switch table {
+	case "container_stats_history":
+		return d.rebuildTable(
+			table,
+			`CREATE TABLE container_stats_history (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				snapshot_id TEXT NOT NULL,
+				container_id TEXT NOT NULL,
+				name TEXT NOT NULL,
+				image TEXT,
+				cpu_pct REAL,
+				mem_mb REAL,
+				mem_pct REAL,
+				net_in_bytes REAL,
+				net_out_bytes REAL,
+				block_read_bytes REAL,
+				block_write_bytes REAL,
+				timestamp DATETIME NOT NULL,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+			[]string{
+				`CREATE INDEX IF NOT EXISTS idx_container_stats_ts ON container_stats_history(timestamp DESC)`,
+				`CREATE INDEX IF NOT EXISTS idx_container_stats_name ON container_stats_history(name, timestamp DESC)`,
+			},
+			`id, snapshot_id, container_id, name, image, cpu_pct, mem_mb, mem_pct, net_in_bytes, net_out_bytes, block_read_bytes, block_write_bytes, timestamp, created_at`,
+		)
+	case "speedtest_history":
+		return d.rebuildTable(
+			table,
+			`CREATE TABLE speedtest_history (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				snapshot_id TEXT NOT NULL,
+				download_mbps REAL,
+				upload_mbps REAL,
+				latency_ms REAL,
+				jitter_ms REAL,
+				server_name TEXT,
+				isp TEXT,
+				timestamp DATETIME NOT NULL,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+			[]string{
+				`CREATE INDEX IF NOT EXISTS idx_speedtest_ts ON speedtest_history(timestamp DESC)`,
+			},
+			`id, snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp, created_at`,
+		)
+	}
+	return fmt.Errorf("dropSnapshotFKIfPresent: no rebuild recipe for table %q", table)
+}
+
+// rebuildTable implements the SQLite FK-dropping recipe for a single table:
+// rename old → create new → copy rows → drop old → recreate indexes. All
+// steps run in a single transaction so a failure rolls back cleanly.
+func (d *DB) rebuildTable(table, createSQL string, indexSQLs []string, copyCols string) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(fmt.Sprintf(`ALTER TABLE %s RENAME TO %s_old_fk`, table, table)); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	if _, err := tx.Exec(createSQL); err != nil {
+		return fmt.Errorf("create new: %w", err)
+	}
+	if _, err := tx.Exec(fmt.Sprintf(`INSERT INTO %s (%s) SELECT %s FROM %s_old_fk`, table, copyCols, copyCols, table)); err != nil {
+		return fmt.Errorf("copy rows: %w", err)
+	}
+	if _, err := tx.Exec(fmt.Sprintf(`DROP TABLE %s_old_fk`, table)); err != nil {
+		return fmt.Errorf("drop old: %w", err)
+	}
+	for _, ix := range indexSQLs {
+		if _, err := tx.Exec(ix); err != nil {
+			return fmt.Errorf("recreate index: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (d *DB) ensureColumn(table, column, definition string) error {
