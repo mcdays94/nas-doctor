@@ -23,7 +23,7 @@ LABEL org.opencontainers.image.title="NAS Doctor" \
       org.opencontainers.image.vendor="mcdays94" \
       org.opencontainers.image.licenses="MIT" \
       net.unraid.docker.icon="https://raw.githubusercontent.com/mcdays94/nas-doctor/main/icons/icon3.png" \
-      net.unraid.docker.webui="http://[IP]:[PORT:8060]/" \
+      net.unraid.docker.webui="http://[IP]:8060/" \
       net.unraid.docker.managed="dockerman"
 
 COPY --from=builder /nas-doctor /app/nas-doctor

@@ -252,7 +252,7 @@ Then open `http://your-nas:8060`. See platform-specific sections below for Unrai
 | **Name** | `nas-doctor` |
 | **Repository** | `ghcr.io/mcdays94/nas-doctor:latest` |
 | **Icon URL** | `https://raw.githubusercontent.com/mcdays94/nas-doctor/main/icons/icon3.png` |
-| **WebUI** | `http://[IP]:[PORT:8060]/` |
+| **WebUI** | `http://[IP]:8060/` (if you change the listen port below, update this to match) |
 | **Network Type** | `Host` |
 | **Privileged** | `On` (**required** — SMART access needs raw device access) |
 | **Extra Parameters** | `--pid=host` (**required** for Top Processes to see host processes) |
@@ -271,17 +271,20 @@ Then open `http://your-nas:8060`. See platform-specific sections below for Unrai
 | Device Nodes | `/dev` | `/dev` | RO | SMART and GPU device access |
 | Sysfs | `/sys` | `/sys` | RO | GPU telemetry and drive mapping |
 
-4. Add this **variable**:
+4. Add these **variables**:
 
 | Key | Value |
 |---|---|
 | `TZ` | Your timezone (e.g. `Europe/Lisbon`, `America/New_York`) |
+| `NAS_DOCTOR_LISTEN` | HTTP listen address, default `:8060`. Change to e.g. `:8067` if port 8060 is in use (the container runs in host networking, so this is how the port is set). |
 
 5. Click **Apply**
 
-Then open `http://your-unraid-ip:8060`.
+Then open `http://your-unraid-ip:8060` (or whichever port you set).
 
 > **Important**: Privileged mode and the Host Mounts volume (`/mnt:/host/mnt:ro`) are required. Without privileged, SMART data won't work. Without `/mnt`, per-disk space won't show.
+>
+> **Changing the port**: Because the container uses host networking, the "Web UI Port" field in the template sets `NAS_DOCTOR_LISTEN` (not a Docker port mapping). If you change it, also update the WebUI URL in Unraid (container settings → Advanced View → WebUI) so the icon opens the right port.
 
 ### Synology DSM — Container Manager
 
