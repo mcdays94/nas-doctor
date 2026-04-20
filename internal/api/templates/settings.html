@@ -525,6 +525,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       </div>
       <div class="webhook-form-actions">
         <button class="btn btn-primary" onclick="saveServiceCheck()">Save Check</button>
+        <button class="btn btn-secondary" id="sc-test-btn" onclick="testServiceCheck()">Test</button>
         <button class="btn btn-secondary" onclick="cancelServiceCheckForm()">Cancel</button>
       </div>
     </div>
@@ -1719,7 +1720,11 @@ function cancelServiceCheckForm() {
   document.getElementById("service-check-form").classList.remove("visible");
 }
 
-function saveServiceCheck() {
+// readServiceCheckForm reads the service-check editor form into a plain
+// JS object matching the ServiceCheckConfig JSON schema. Returns null if
+// required fields are missing (and shows a toast in that case). Shared by
+// saveServiceCheck() and testServiceCheck() so validation cannot drift.
+function readServiceCheckForm() {
   var name = document.getElementById("sc-name").value.trim();
   var type = document.getElementById("sc-type").value;
   var target = document.getElementById("sc-target").value.trim();
@@ -1727,7 +1732,7 @@ function saveServiceCheck() {
   if (type === "speed") { target = "speedtest"; }
   if (!name || (!target && type !== "speed")) {
     showToast("Name and target are required", "error");
-    return;
+    return null;
   }
   var sc = {
     name: name,
@@ -1758,6 +1763,13 @@ function saveServiceCheck() {
     sc.margin_pct = parseFloat(document.getElementById("sc-margin").value) || 10;
     sc.target = "speedtest";
   }
+  return sc;
+}
+
+function saveServiceCheck() {
+  var sc = readServiceCheckForm();
+  if (!sc) return;
+  var name = sc.name;
 
   for (var i = 0; i < serviceChecks.length; i++) {
     if (i === parseInt(document.getElementById("sc-edit-index").value, 10)) continue;
@@ -1776,6 +1788,70 @@ function saveServiceCheck() {
   renderServiceChecks();
   cancelServiceCheckForm();
   saveSettings();
+}
+
+// testServiceCheck runs the current form's configuration through the
+// /api/v1/service-checks/test endpoint without persisting the result. It
+// surfaces status, response time, and error messages via toast. Speed-type
+// checks can take up to 60s on real hardware (Ookla CLI), so we warn the
+// user up-front and disable the button for the duration of the request.
+function testServiceCheck() {
+  var sc = readServiceCheckForm();
+  if (!sc) return;
+
+  var btn = document.getElementById("sc-test-btn");
+  var originalLabel = btn ? btn.textContent : "Test";
+  if (btn) { btn.disabled = true; btn.textContent = "Testing…"; }
+
+  if (sc.type === "speed") {
+    showToast("Running speed test (can take up to 60s)…", "info");
+  } else {
+    showToast("Testing " + sc.type + " check…", "info");
+  }
+
+  fetch("/api/v1/service-checks/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(sc)
+  })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        showToast("Test failed: " + (res.data && res.data.error ? res.data.error : "server error"), "error");
+        return;
+      }
+      var result = res.data || {};
+      var status = result.status || "unknown";
+      var ms = result.response_ms;
+      var msg;
+      var toastKind = "info";
+      if (status === "up") {
+        msg = "✓ Check is UP" + (typeof ms === "number" ? " (" + ms + " ms)" : "");
+        toastKind = "success";
+      } else if (status === "degraded") {
+        msg = "△ Degraded";
+        toastKind = "warning";
+      } else {
+        msg = "✗ Check is DOWN";
+        toastKind = "error";
+      }
+      if (sc.type === "speed" && (typeof result.download_mbps === "number" || typeof result.upload_mbps === "number")) {
+        msg += " — " + (result.download_mbps || 0).toFixed(0) + " ↓ / " +
+               (result.upload_mbps || 0).toFixed(0) + " ↑ Mbps";
+      }
+      if (result.error) {
+        msg += " — " + result.error;
+      }
+      showToast(msg, toastKind);
+    })
+    .catch(function(e) {
+      showToast("Test failed: " + (e && e.message ? e.message : "network error"), "error");
+    })
+    .finally(function() {
+      if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    });
 }
 
 function removeServiceCheck(idx) {
