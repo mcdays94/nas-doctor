@@ -60,6 +60,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <a href="#card-fleet" class="btn btn-secondary btn-sm" style="text-decoration:none">Fleet</a>
     <a href="#card-sections" class="btn btn-secondary btn-sm" style="text-decoration:none">Dashboard</a>
     <a href="#card-retention" class="btn btn-secondary btn-sm" style="text-decoration:none">Data</a>
+    <a href="#card-replacement-cost" class="btn btn-secondary btn-sm" style="text-decoration:none">Replacement Cost</a>
     <a href="#card-speedtest" class="btn btn-secondary btn-sm" style="text-decoration:none">Speed Test</a>
     <a href="#card-backup" class="btn btn-secondary btn-sm" style="text-decoration:none">Backup</a>
   </div>
@@ -671,6 +672,23 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     </div>
   </div>
 
+  <!-- 5b. Drive Replacement Cost -->
+  <div class="card" id="card-replacement-cost">
+    <div class="card-title">Drive Replacement Cost</div>
+    <div class="card-desc">Used by the <a href="/replacement-planner" style="color:var(--accent)">Replacement Planner</a> to estimate per-drive and fleet replacement costs. Leave at 0 to hide cost estimates.</div>
+    <div class="form-row">
+      <div>
+        <label for="cost-per-tb">Cost per TB</label>
+        <input type="number" id="cost-per-tb" min="0" max="10000" step="0.01" placeholder="e.g. 22.50" style="text-align:center">
+        <p style="font-size:11px;color:var(--text2);margin-top:4px">Enter the current market cost of HDD storage per terabyte, in your preferred currency. Applied uniformly across all drives.</p>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <div style="font-size:12px;color:var(--text2);line-height:1.8;padding-top:8px">Example: at 22.50/TB, replacing a 12TB drive costs ~270.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- 6. Fleet / Multi-Server -->
   <div class="card" id="card-fleet">
     <div class="card-title">Fleet Monitoring</div>
@@ -1137,6 +1155,9 @@ function loadSettings() {
       if (dashColsSel && sec.dash_columns !== undefined) dashColsSel.value = sec.dash_columns || 0;
       /* API Key */
       document.getElementById("api-key-display").value = data.api_key || "";
+      /* Drive replacement cost per TB */
+      var costEl = document.getElementById("cost-per-tb");
+      if (costEl) costEl.value = (data.cost_per_tb && data.cost_per_tb > 0) ? data.cost_per_tb : "";
       /* Proxmox VE */
       var pve = data.proxmox || {};
       if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
@@ -1247,7 +1268,8 @@ function buildSettingsPayload() {
     },
     api_key: document.getElementById("api-key-display").value.trim(),
     fleet: fleetServers || base.fleet || [],
-    dismissed_findings: base.dismissed_findings || []
+    dismissed_findings: base.dismissed_findings || [],
+    cost_per_tb: parseFloat(document.getElementById("cost-per-tb") && document.getElementById("cost-per-tb").value) || 0
   };
 }
 
