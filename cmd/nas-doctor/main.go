@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -43,7 +44,7 @@ var version = "dev"
 
 func main() {
 	// Flags
-	listenAddr := flag.String("listen", envOr("NAS_DOCTOR_LISTEN", ":8060"), "HTTP listen address")
+	listenAddr := flag.String("listen", normalizeListenAddr(envOr("NAS_DOCTOR_LISTEN", ":8060")), "HTTP listen address")
 	dataDir := flag.String("data", envOr("NAS_DOCTOR_DATA", "/tmp/nas-doctor-data"), "Data directory for SQLite DB")
 	intervalStr := flag.String("interval", envOr("NAS_DOCTOR_INTERVAL", "30m"), "Diagnostic scan interval")
 	configPath := flag.String("config", envOr("NAS_DOCTOR_CONFIG", ""), "Path to JSON config file")
@@ -472,6 +473,25 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// normalizeListenAddr accepts a listen address in either "port" (e.g. "8067"),
+// ":port" (e.g. ":8067"), or "host:port" (e.g. "0.0.0.0:8067", "[::1]:8060")
+// form and returns a form accepted by net.Listen. Bare port numbers are
+// prefixed with ":" so users who type "8067" into the Unraid template's
+// NAS_DOCTOR_LISTEN variable still get a working config.
+//
+// Empty input is returned unchanged so callers see the empty value and can
+// fall back to their own default.
+func normalizeListenAddr(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return s
+	}
+	if !strings.Contains(s, ":") {
+		return ":" + s
+	}
+	return s
 }
 
 func countSev(findings []internal.Finding, sev internal.Severity) int {
