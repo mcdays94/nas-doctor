@@ -1678,6 +1678,15 @@ function onServiceTypeChange() {
     else if (type === "dns") targetInput.placeholder = "e.g. google.com";
     else targetInput.placeholder = "https://nas.local/health, 192.168.1.10, or host:port";
   }
+  // Speed tests are expensive (Ookla CLI runs ~30-60s and saturates the
+  // connection), so bump the interval to daily when the user picks the speed
+  // type, but only if they haven't customised it yet — i.e. it's still at the
+  // new-check default of 300s. An interval of 5 minutes for a speed test
+  // would waste bandwidth and trigger ISP throttling.
+  var intervalInput = document.getElementById("sc-interval");
+  if (intervalInput && type === "speed" && parseInt(intervalInput.value, 10) === 300) {
+    intervalInput.value = "86400";
+  }
 }
 function parseScHeaders() {
   var raw = (document.getElementById("sc-headers") || {}).value || "";

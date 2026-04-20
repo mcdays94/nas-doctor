@@ -107,3 +107,70 @@ func TestSettingsHTML_TestServiceCheckShowsSpeedWarning(t *testing.T) {
 		t.Fatalf("testServiceCheck should warn users that speed tests can take up to 60s; body window:\n%s", body)
 	}
 }
+
+// TestSettingsHTML_SpeedCheckInterval_DefaultsToDaily verifies that when the
+// user selects "speed" in the service-check type dropdown, onServiceTypeChange
+// bumps the interval from the new-check default of 300s (5min) to 86400s
+// (daily). Running Ookla speedtest every 5 minutes would waste bandwidth and
+// likely trigger ISP throttling.
+func TestSettingsHTML_SpeedCheckInterval_DefaultsToDaily(t *testing.T) {
+	html := loadSettingsHTML(t)
+	startRe := regexp.MustCompile(`function\s+onServiceTypeChange\s*\(\s*\)\s*\{`)
+	loc := startRe.FindStringIndex(html)
+	if loc == nil {
+		t.Fatal("onServiceTypeChange() function not found")
+	}
+	end := loc[1] + 2000
+	if end > len(html) {
+		end = len(html)
+	}
+	body := html[loc[0]:end]
+	// Must guard on type === "speed" to avoid overwriting the interval for
+	// other types.
+	if !regexp.MustCompile(`type\s*===\s*["']speed["']`).MatchString(body) {
+		t.Error("onServiceTypeChange should check for speed type before changing interval")
+	}
+	// Must set interval to 86400 (seconds in a day).
+	if !strings.Contains(body, "86400") {
+		t.Errorf("onServiceTypeChange should default speed-type interval to 86400s (daily); got body:\n%s", body)
+	}
+	// Must guard on still-at-default-300 so user-customised values aren't overwritten.
+	if !regexp.MustCompile(`===?\s*300`).MatchString(body) {
+		t.Error("onServiceTypeChange should only change interval if user hasn't customised from the 300s default")
+	}
+}
+
+// TestHandleTestServiceCheck_DisablesWriteDeadline verifies that the handler
+// code invokes http.NewResponseController(w).SetWriteDeadline(time.Time{}) so
+// that speed tests can run longer than the 30s baseline http.Server.WriteTimeout
+// set in cmd/nas-doctor/main.go. Without this, long Ookla runs trigger a
+// transport-layer 502 Bad Gateway upstream (observed during v0.9.2-rc3 UAT).
+//
+// This is a source-level assertion rather than a behavioural test — exercising
+// the real 30s timeout would make the suite slow and flaky. The fix itself is
+// one line of well-known Go 1.20+ API, so a grep-style guard is proportionate.
+func TestHandleTestServiceCheck_DisablesWriteDeadline(t *testing.T) {
+	path := filepath.Join(".", "api_extended.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read api_extended.go: %v", err)
+	}
+	src := string(data)
+	handlerRe := regexp.MustCompile(`func\s+\(s\s+\*Server\)\s+handleTestServiceCheck\s*\(`)
+	loc := handlerRe.FindStringIndex(src)
+	if loc == nil {
+		t.Fatal("handleTestServiceCheck function not found")
+	}
+	// Look within the first ~1500 bytes of the handler body.
+	end := loc[0] + 1500
+	if end > len(src) {
+		end = len(src)
+	}
+	body := src[loc[0]:end]
+	if !strings.Contains(body, "NewResponseController") {
+		t.Error("handleTestServiceCheck should use http.NewResponseController to override WriteTimeout for long-running speed tests")
+	}
+	if !strings.Contains(body, "SetWriteDeadline(time.Time{})") {
+		t.Error("handleTestServiceCheck should call SetWriteDeadline(time.Time{}) to disable the per-connection write deadline")
+	}
+}
