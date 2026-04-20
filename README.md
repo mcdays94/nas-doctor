@@ -114,9 +114,19 @@ Dedicated `/replacement-planner` page with proactive drive lifecycle management:
 
 ### Backup Monitoring
 
-- **Borg**, **Restic**, **Proxmox Backup Server (PBS)**, **Duplicati** detection via CLI probing
+Auto-detects and tracks backups from the following tools when their CLI
+is reachable from the NAS Doctor container:
+
+- **Borg**, **Restic**, **Proxmox Backup Server (PBS)**, **Duplicati** — probed via `exec.LookPath` at each scan
 - Tracks last backup time, size, snapshot count, duration, encryption status
 - **Stale backup alerts**: warning >24h, critical >48h, failed backups
+
+> **Note**: None of these binaries ship in the NAS Doctor Docker image by
+> default. The Backup dashboard section stays empty unless you either
+> install the provider CLI inside the container (custom Dockerfile) or run
+> the provider in a sibling container that shares volumes/network with NAS
+> Doctor. There is no UI to configure this — detection is purely
+> binary-presence-based.
 
 ### Network Speed Test
 
@@ -276,7 +286,7 @@ Then open `http://your-nas:8060`. See platform-specific sections below for Unrai
 | Key | Value |
 |---|---|
 | `TZ` | Your timezone (e.g. `Europe/Lisbon`, `America/New_York`) |
-| `NAS_DOCTOR_LISTEN` | HTTP listen address, default `:8060`. Change to e.g. `:8067` if port 8060 is in use (the container runs in host networking, so this is how the port is set). |
+| `NAS_DOCTOR_LISTEN` | HTTP listen address, default `:8060`. Change to e.g. `:8067` if port 8060 is in use. Bare port numbers also work (`8067` is normalized to `:8067` automatically). Because the container runs in host networking, this variable — not a Docker port mapping — is how the listen port is set. |
 
 5. Click **Apply**
 
@@ -491,7 +501,7 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 
 | Variable | Default | Description |
 |---|---|---|
-| `NAS_DOCTOR_LISTEN` | `:8060` | HTTP listen address |
+| `NAS_DOCTOR_LISTEN` | `:8060` | HTTP listen address. Accepts `:port`, `host:port`, or bare `port` (normalized). |
 | `NAS_DOCTOR_DATA` | `/data` | SQLite database directory |
 | `NAS_DOCTOR_INTERVAL` | `30m` | Diagnostic scan interval |
 | `NAS_DOCTOR_UPS_NAME` | (auto-detect) | NUT UPS name (skip auto-detect from `upsc -l`) |
