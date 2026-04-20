@@ -140,6 +140,52 @@ func TestSettingsHTML_SpeedCheckInterval_DefaultsToDaily(t *testing.T) {
 	}
 }
 
+// TestSettingsHTML_IntervalSelect_OptionsMatchAnyAutoDefault guards against the
+// regression where onServiceTypeChange sets the interval to a value not in the
+// <select id="sc-interval"> options list. Observed in rc4: the JS set value
+// to 86400 but the select had no matching <option>, so the dropdown rendered
+// blank. Every value the JS can auto-assign MUST have a corresponding option.
+func TestSettingsHTML_IntervalSelect_OptionsMatchAnyAutoDefault(t *testing.T) {
+	html := loadSettingsHTML(t)
+
+	// Extract the <select id="sc-interval">...</select> block.
+	selectRe := regexp.MustCompile(`(?s)<select id="sc-interval">(.*?)</select>`)
+	m := selectRe.FindStringSubmatch(html)
+	if m == nil {
+		t.Fatal("<select id=\"sc-interval\"> not found")
+	}
+	optsBlock := m[1]
+
+	// Collect every value="…" occurrence.
+	optRe := regexp.MustCompile(`value="(\d+)"`)
+	present := map[string]bool{}
+	for _, match := range optRe.FindAllStringSubmatch(optsBlock, -1) {
+		present[match[1]] = true
+	}
+
+	// Every value that onServiceTypeChange or similar code can set as a
+	// default MUST be in the options.
+	required := []struct{ value, label string }{
+		{"300", "5 minutes (new-check baseline)"},
+		{"86400", "daily (auto-assigned for speed checks)"},
+	}
+	for _, r := range required {
+		if !present[r.value] {
+			t.Errorf("<select id=\"sc-interval\"> missing option value=%q (%s) — onServiceTypeChange sets this value and it must match an existing <option>", r.value, r.label)
+		}
+	}
+
+	// Nice-to-have options (don't fail loudly, but flag as missing for
+	// future richness — users who opt into daily speed tests probably want
+	// weekly as an alternative too).
+	niceTo := []string{"604800"}
+	for _, v := range niceTo {
+		if !present[v] {
+			t.Logf("NOTE: <select id=\"sc-interval\"> missing option value=%q (consider adding)", v)
+		}
+	}
+}
+
 // TestHandleTestServiceCheck_DisablesWriteDeadline verifies that the handler
 // code invokes http.NewResponseController(w).SetWriteDeadline(time.Time{}) so
 // that speed tests can run longer than the 30s baseline http.Server.WriteTimeout
