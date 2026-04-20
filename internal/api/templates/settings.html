@@ -500,6 +500,13 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         <label for="sc-headers">Custom HTTP Headers (optional — for auth, CF Access, etc.)</label>
         <textarea id="sc-headers" rows="2" placeholder="Authorization: Bearer token123&#10;CF-Access-Client-Id: xxxxx" style="width:100%;font-size:12px;font-family:var(--font-mono);padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--input-bg);color:var(--text);resize:vertical"></textarea>
       </div>
+      <div id="sc-dns-wrap" style="display:none">
+        <div>
+          <label for="sc-dns-server">DNS Server (optional)</label>
+          <input type="text" id="sc-dns-server" class="form-input" placeholder="e.g. 1.1.1.1, 8.8.8.8, 192.168.1.1">
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">Which resolver to query. Leave blank to use the system default. Port 53 assumed unless specified (e.g. 192.168.1.1:1053).</div>
+        </div>
+      </div>
       <div id="sc-speed-wrap" style="display:none">
         <div style="display:flex;gap:8px;margin-bottom:8px">
           <div style="flex:1">
@@ -1648,6 +1655,7 @@ function toggleServiceCheckForm() {
   document.getElementById("sc-contracted-down").value = "";
   document.getElementById("sc-contracted-up").value = "";
   document.getElementById("sc-margin").value = "10";
+  document.getElementById("sc-dns-server").value = "";
   setServiceCheckEnabledUI(true);
   populateInstanceSelector();
   onServiceTypeChange();
@@ -1668,11 +1676,13 @@ function onServiceTypeChange() {
   var portWrap = document.getElementById("sc-port-wrap");
   var headersWrap = document.getElementById("sc-headers-wrap");
   var speedWrap = document.getElementById("sc-speed-wrap");
+  var dnsWrap = document.getElementById("sc-dns-wrap");
   var targetWrap = document.getElementById("sc-target-wrap");
   if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
   if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
   if (headersWrap) headersWrap.style.display = (type === "http") ? "block" : "none";
   if (speedWrap) speedWrap.style.display = (type === "speed") ? "block" : "none";
+  if (dnsWrap) dnsWrap.style.display = (type === "dns") ? "block" : "none";
   // Hide target field for speed checks — speedtest auto-selects the best server
   if (targetWrap) targetWrap.style.display = (type === "speed") ? "none" : "";
   var targetInput = document.getElementById("sc-target");
@@ -1724,6 +1734,7 @@ function editServiceCheck(idx) {
   document.getElementById("sc-contracted-down").value = sc.contracted_down_mbps || "";
   document.getElementById("sc-contracted-up").value = sc.contracted_up_mbps || "";
   document.getElementById("sc-margin").value = sc.margin_pct || 10;
+  document.getElementById("sc-dns-server").value = sc.dns_server || "";
   setServiceCheckEnabledUI(sc.enabled !== false);
   onServiceTypeChange();
   document.getElementById("service-check-form").classList.add("visible");
@@ -1775,6 +1786,10 @@ function readServiceCheckForm() {
     sc.contracted_up_mbps = parseFloat(document.getElementById("sc-contracted-up").value) || 0;
     sc.margin_pct = parseFloat(document.getElementById("sc-margin").value) || 10;
     sc.target = "speedtest";
+  }
+  if (type === "dns") {
+    var dnsServer = (document.getElementById("sc-dns-server").value || "").trim();
+    if (dnsServer) sc.dns_server = dnsServer;
   }
   return sc;
 }
