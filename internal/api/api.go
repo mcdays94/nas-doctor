@@ -61,12 +61,11 @@ func New(store storage.Store, sched *scheduler.Scheduler, coll *collector.Collec
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 
-	// Middleware
+	// Baseline middleware — cheap, applied to every route.
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
-	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "OPTIONS"},
@@ -76,27 +75,39 @@ func (s *Server) Router() http.Handler {
 		MaxAge:           300,
 	}))
 
-	// Health endpoint — always public (Docker HEALTHCHECK, K8s probes, load balancers)
-	r.Get("/api/v1/health", s.handleHealth)
+	// Long-running test endpoints — registered BEFORE the Timeout group.
+	// Speed-type service-check tests invoke the Ookla CLI, which can take
+	// 10-60s, so we can't subject them to the 30s router-wide timeout.
+	// RunCheck uses its own per-check context from cfg.TimeoutSec.
+	r.Post("/api/v1/service-checks/test", s.handleTestServiceCheck)
 
-	// API routes — protected by API key when set
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(s.apiKeyMiddleware)
-		r.Get("/status", s.handleStatus)
-		r.Get("/snapshot/latest", s.handleLatestSnapshot)
-		r.Get("/snapshot/{id}", s.handleGetSnapshot)
-		r.Get("/snapshots", s.handleListSnapshots)
-		r.Post("/scan", s.handleTriggerScan)
-		r.Get("/report", s.handleReport)
+	// Standard-latency routes — 30s soft timeout via a Group so we don't
+	// apply it to the long-running route above.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Timeout(30 * time.Second))
+
+		// Health endpoint — always public (Docker HEALTHCHECK, K8s probes, load balancers)
+		r.Get("/api/v1/health", s.handleHealth)
+
+		// API routes — protected by API key when set
+		r.Route("/api/v1", func(r chi.Router) {
+			r.Use(s.apiKeyMiddleware)
+			r.Get("/status", s.handleStatus)
+			r.Get("/snapshot/latest", s.handleLatestSnapshot)
+			r.Get("/snapshot/{id}", s.handleGetSnapshot)
+			r.Get("/snapshots", s.handleListSnapshots)
+			r.Post("/scan", s.handleTriggerScan)
+			r.Get("/report", s.handleReport)
+		})
+
+		// Prometheus metrics
+		if s.metrics != nil {
+			r.Handle("/metrics", promhttp.HandlerFor(s.metrics.Registry(), promhttp.HandlerOpts{}))
+		}
+
+		// Extended API routes (settings, disks, history, notifications)
+		s.RegisterExtendedRoutes(r)
 	})
-
-	// Prometheus metrics
-	if s.metrics != nil {
-		r.Handle("/metrics", promhttp.HandlerFor(s.metrics.Registry(), promhttp.HandlerOpts{}))
-	}
-
-	// Extended API routes (settings, disks, history, notifications)
-	s.RegisterExtendedRoutes(r)
 
 	// Chart library JS
 	r.Get("/js/charts.js", func(w http.ResponseWriter, r *http.Request) {
