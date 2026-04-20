@@ -23,7 +23,7 @@ LABEL org.opencontainers.image.title="NAS Doctor" \
       org.opencontainers.image.vendor="mcdays94" \
       org.opencontainers.image.licenses="MIT" \
       net.unraid.docker.icon="https://raw.githubusercontent.com/mcdays94/nas-doctor/main/icons/icon3.png" \
-      net.unraid.docker.webui="http://[IP]:[PORT:8060]/" \
+      net.unraid.docker.webui="http://[IP]:8060/" \
       net.unraid.docker.managed="dockerman"
 
 COPY --from=builder /nas-doctor /app/nas-doctor
@@ -53,7 +53,10 @@ ENV NAS_DOCTOR_LISTEN=":8060" \
 
 EXPOSE 8060
 
+# Port-aware healthcheck: derives the port from NAS_DOCTOR_LISTEN so setting
+# the env var (e.g. ":8067", "8067", "0.0.0.0:8067") keeps the healthcheck
+# aligned with the actual listen address. Falls back to 8060 if unset/empty.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8060/api/v1/health || exit 1
+    CMD sh -c 'P="${NAS_DOCTOR_LISTEN##*:}"; P="${P:-8060}"; wget -q --tries=1 --spider "http://localhost:${P}/api/v1/health"' || exit 1
 
 ENTRYPOINT ["/app/nas-doctor"]

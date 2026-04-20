@@ -40,7 +40,7 @@ Features:
   <DonateText>Buy Me a Coffee</DonateText>
   <DonateLink>https://buymeacoffee.com/miguelcaetanodias</DonateLink>
   <Requires/>
-  <Config Name="Web UI Port" Target="8060" Default="8060" Mode="tcp" Description="Web dashboard and API port" Type="Port" Display="always" Required="true" Mask="false">8060</Config>
+  <Config Name="Web UI Port" Target="NAS_DOCTOR_LISTEN" Default=":8060" Mode="" Description="HTTP listen address (host networking). Change to e.g. :8067 to avoid port conflicts. If you type a bare number like 8067, it will be normalized to :8067 automatically. After changing, update the WebUI URL (container settings, Advanced View) to match." Type="Variable" Display="always" Required="true" Mask="false">:8060</Config>
   <Config Name="Data Directory" Target="/data" Default="/mnt/user/appdata/nas-doctor" Mode="rw" Description="Persistent data (SQLite database, config, backups)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/nas-doctor</Config>
   <Config Name="Docker Socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Docker socket for container monitoring" Type="Path" Display="always" Required="true" Mask="false">/var/run/docker.sock</Config>
   <Config Name="Emhttp Status" Target="/var/local/emhttp" Default="/var/local/emhttp" Mode="ro" Description="Unraid emhttp status (required for merged drive view)" Type="Path" Display="always" Required="true" Mask="false">/var/local/emhttp</Config>
