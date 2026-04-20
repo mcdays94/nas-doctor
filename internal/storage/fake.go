@@ -351,6 +351,36 @@ func (f *FakeStore) DeleteServiceCheckByKey(key string) (int, error) {
 	return deleted, nil
 }
 
+// DeleteServiceChecksNotIn removes every history row whose key is NOT in
+// keepKeys. A nil/empty keepKeys deletes all rows.
+func (f *FakeStore) DeleteServiceChecksNotIn(keepKeys []string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if len(keepKeys) == 0 {
+		deleted := len(f.serviceChecks)
+		f.serviceChecks = nil
+		return deleted, nil
+	}
+
+	keep := make(map[string]struct{}, len(keepKeys))
+	for _, k := range keepKeys {
+		keep[k] = struct{}{}
+	}
+
+	var kept []internal.ServiceCheckResult
+	deleted := 0
+	for _, r := range f.serviceChecks {
+		if _, ok := keep[r.Key]; ok {
+			kept = append(kept, r)
+		} else {
+			deleted++
+		}
+	}
+	f.serviceChecks = kept
+	return deleted, nil
+}
+
 // ── HistoryStore ──
 
 func (f *FakeStore) GetDiskHistory(_ string, _ int) ([]DiskHistoryPoint, error) {

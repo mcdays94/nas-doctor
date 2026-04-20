@@ -1674,6 +1674,37 @@ func (d *DB) DeleteServiceCheckByKey(key string) (int, error) {
 	return int(n), nil
 }
 
+// DeleteServiceChecksNotIn removes all history rows whose check_key is NOT in
+// the provided keepKeys slice. This is how orphaned history is cleaned up
+// after a service check is removed from the configuration. Passing a nil or
+// empty slice deletes every row in service_checks_history.
+func (d *DB) DeleteServiceChecksNotIn(keepKeys []string) (int, error) {
+	if len(keepKeys) == 0 {
+		result, err := d.db.Exec("DELETE FROM service_checks_history")
+		if err != nil {
+			return 0, err
+		}
+		n, _ := result.RowsAffected()
+		return int(n), nil
+	}
+
+	// Build placeholder list (?, ?, ?) and args slice.
+	placeholders := make([]string, len(keepKeys))
+	args := make([]interface{}, len(keepKeys))
+	for i, k := range keepKeys {
+		placeholders[i] = "?"
+		args[i] = k
+	}
+	query := "DELETE FROM service_checks_history WHERE check_key NOT IN (" +
+		strings.Join(placeholders, ",") + ")"
+	result, err := d.db.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
+}
+
 // GetFindingHistory returns how a specific finding category has changed over time.
 func (d *DB) GetFindingHistory(category string, limit int) ([]internal.Finding, error) {
 	rows, err := d.db.Query(`

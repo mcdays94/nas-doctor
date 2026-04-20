@@ -523,6 +523,10 @@ func (s *Scheduler) UpdateAlerting(cfg AlertingConfig) {
 }
 
 // UpdateServiceChecks replaces service check configuration used in each run.
+// It also purges service_checks_history rows whose keys are no longer in the
+// config — otherwise stale checks keep appearing on the /service-checks page
+// (issue #133). Because this runs both on startup (from main.go) and on every
+// settings save, it also cleans up orphans left over from upgraded installs.
 func (s *Scheduler) UpdateServiceChecks(checks []internal.ServiceCheckConfig) {
 	normalized := make([]internal.ServiceCheckConfig, 0, len(checks))
 	for _, check := range checks {
@@ -550,6 +554,19 @@ func (s *Scheduler) UpdateServiceChecks(checks []internal.ServiceCheckConfig) {
 	s.mu.Lock()
 	s.serviceChecks = normalized
 	s.mu.Unlock()
+
+	// Purge orphaned history for any check that was removed from the config.
+	if s.store != nil {
+		keepKeys := make([]string, 0, len(normalized))
+		for _, c := range normalized {
+			keepKeys = append(keepKeys, CheckKey(c))
+		}
+		if pruned, err := s.store.DeleteServiceChecksNotIn(keepKeys); err != nil {
+			s.logger.Warn("prune orphaned service check history", "error", err)
+		} else if pruned > 0 {
+			s.logger.Info("pruned orphaned service check history", "rows", pruned)
+		}
+	}
 
 	s.logger.Info("service check config updated", "checks", len(normalized))
 }
