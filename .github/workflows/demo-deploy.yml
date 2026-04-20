@@ -32,7 +32,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VER="${GITHUB_REF_NAME#v}"
           else
-            VER=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1 | sed 's/^v//')
+            VER=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -vE -- '-(rc|beta|alpha)[0-9]*$' | head -1 | sed 's/^v//')
           fi
           VER="${VER:-0.0.0}"
           echo "value=$VER" >> "$GITHUB_OUTPUT"
