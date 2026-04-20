@@ -220,6 +220,12 @@ type ServiceCheckConfig struct {
 	ContractedDownMbps float64 `json:"contracted_down_mbps,omitempty"` // expected minimum download speed
 	ContractedUpMbps   float64 `json:"contracted_up_mbps,omitempty"`   // expected minimum upload speed
 	MarginPct          float64 `json:"margin_pct,omitempty"`           // acceptable margin of error (e.g. 10 = ±10%)
+
+	// DNS check specific fields
+	// DNSServer is an optional resolver to use for DNS-type checks (e.g.
+	// "1.1.1.1", "8.8.8.8:53", "192.168.1.1:1053"). Empty means use the
+	// system resolver. Port defaults to 53 when unspecified.
+	DNSServer string `json:"dns_server,omitempty"`
 }
 
 type ServiceCheckResult struct {

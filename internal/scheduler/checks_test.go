@@ -815,3 +815,236 @@ func TestRunDueChecks_MultipleChecks(t *testing.T) {
 		t.Fatalf("expected 2 persisted entries, got %d", len(entries))
 	}
 }
+
+// ── DNS check — #159 bug fixes ─────────────────────────────────────────
+
+// TestRunDNSCheck_IPTarget_IsRejected — bug #159: a DNS check whose target
+// parses as a literal IP must be rejected at check-time, because Go's
+// resolver short-circuits on IP literals and never sends a packet,
+// causing the check to always appear "up" in 0ms regardless of whether
+// any resolver is reachable.
+func TestRunDNSCheck_IPTarget_IsRejected(t *testing.T) {
+	sc, _ := newTestChecker()
+	cases := []string{"1.1.1.1", "8.8.8.8", "192.168.1.1", "::1", "2606:4700:4700::1111"}
+	for _, target := range cases {
+		t.Run(target, func(t *testing.T) {
+			cfg := internal.ServiceCheckConfig{
+				Name:    "ip-dns",
+				Type:    internal.ServiceCheckDNS,
+				Target:  target,
+				Enabled: true,
+			}
+			result := sc.RunCheck(cfg, time.Now().UTC())
+			if result.Status == "up" {
+				t.Errorf("expected DNS check of IP %q to not report up, got status=%q", target, result.Status)
+			}
+			if !strings.Contains(strings.ToLower(result.Error), "hostname") {
+				t.Errorf("expected error message to mention hostname guidance, got: %q", result.Error)
+			}
+		})
+	}
+}
+
+// TestRunCheck_SuccessfulSubMs_FlooredAt1ms — bug #159: a check that
+// completes in under a millisecond should report 1ms, not 0ms. LAN-local
+// DNS resolvers and loopback HTTP genuinely run faster than 1ms; raw
+// int64 millisecond truncation displays "0ms" which users interpret as
+// "didn't run". Floor at 1ms so the UI shows a sane value.
+func TestRunCheck_SuccessfulSubMs_FlooredAt1ms(t *testing.T) {
+	// A loopback HTTP server responds in well under 1ms on most hosts.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	sc, _ := newTestChecker()
+	// Run the check many times; at least one iteration should complete in
+	// sub-millisecond time on any reasonable CI. We only need ONE success
+	// with the floor applied to pass.
+	var observed bool
+	for i := 0; i < 20; i++ {
+		result := sc.RunCheck(internal.ServiceCheckConfig{
+			Name:    "loopback",
+			Type:    internal.ServiceCheckHTTP,
+			Target:  ts.URL,
+			Enabled: true,
+		}, time.Now().UTC())
+		if result.Status != "up" {
+			t.Fatalf("loopback HTTP check unexpectedly failed: %q", result.Error)
+		}
+		if result.ResponseMS < 1 {
+			t.Fatalf("successful check reported ResponseMS=%d; floor should guarantee >= 1", result.ResponseMS)
+		}
+		if result.ResponseMS == 1 {
+			observed = true
+		}
+	}
+	// If none of the iterations hit the floor, note it but don't fail —
+	// the important guarantee is the >= 1 invariant above.
+	if !observed {
+		t.Logf("note: none of 20 loopback iterations hit the sub-ms floor (all were >= 2ms); invariant still holds")
+	}
+}
+
+// ── DNS check — #160 custom resolver ───────────────────────────────────
+
+// startFakeDNS stands up a minimal UDP DNS server that replies to every
+// A query with 127.0.0.1. Returns the host:port address it is listening on
+// and a teardown function. Used to exercise the custom-resolver code path
+// without depending on the host's network.
+func startFakeDNS(t *testing.T) (string, func()) {
+	t.Helper()
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen udp: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 512)
+		for {
+			_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			n, addr, err := conn.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			if n < 12 {
+				continue
+			}
+			// Build a response reusing the question section verbatim.
+			// We locate the end of the QNAME+QTYPE+QCLASS, then append a
+			// single A record answer pointing at 127.0.0.1.
+			resp := make([]byte, 0, 64)
+			// Header: copy ID, set QR=1 (response), RD+RA=1, ANCOUNT=1.
+			resp = append(resp, buf[0], buf[1]) // ID
+			resp = append(resp, 0x81, 0x80)     // flags: response, recursion available
+			resp = append(resp, 0x00, 0x01)     // QDCOUNT=1
+			resp = append(resp, 0x00, 0x01)     // ANCOUNT=1
+			resp = append(resp, 0x00, 0x00)     // NSCOUNT=0
+			resp = append(resp, 0x00, 0x00)     // ARCOUNT=0
+			// Copy the question section verbatim.
+			qStart := 12
+			qEnd := qStart
+			for qEnd < n && buf[qEnd] != 0 {
+				qEnd += int(buf[qEnd]) + 1
+				if qEnd >= n {
+					break
+				}
+			}
+			qEnd++ // consume the terminating zero
+			// QTYPE(2) + QCLASS(2)
+			qEnd += 4
+			if qEnd > n {
+				qEnd = n
+			}
+			resp = append(resp, buf[qStart:qEnd]...)
+			// Answer: pointer to the question's name (0xC00C), type A,
+			// class IN, TTL 60, rdlength 4, rdata 127.0.0.1.
+			resp = append(resp, 0xC0, 0x0C)
+			resp = append(resp, 0x00, 0x01)             // TYPE A
+			resp = append(resp, 0x00, 0x01)             // CLASS IN
+			resp = append(resp, 0x00, 0x00, 0x00, 0x3C) // TTL 60
+			resp = append(resp, 0x00, 0x04)             // RDLENGTH 4
+			resp = append(resp, 127, 0, 0, 1)           // RDATA 127.0.0.1
+			_, _ = conn.WriteTo(resp, addr)
+		}
+	}()
+	stop := func() {
+		_ = conn.Close()
+		<-done
+	}
+	return conn.LocalAddr().String(), stop
+}
+
+// TestRunDNSCheck_CustomDNSServer_UsesIt verifies that when DNSServer is
+// set, the check queries that server (not the system resolver) and
+// succeeds if the server responds.
+func TestRunDNSCheck_CustomDNSServer_UsesIt(t *testing.T) {
+	addr, stop := startFakeDNS(t)
+	defer stop()
+
+	sc, _ := newTestChecker()
+	result := sc.RunCheck(internal.ServiceCheckConfig{
+		Name:       "custom-dns",
+		Type:       internal.ServiceCheckDNS,
+		Target:     "example.test.", // trailing dot to avoid search-path expansion
+		DNSServer:  addr,
+		TimeoutSec: 3,
+		Enabled:    true,
+	}, time.Now().UTC())
+	if result.Status != "up" {
+		t.Fatalf("expected status up, got %q (error=%q)", result.Status, result.Error)
+	}
+}
+
+// TestRunDNSCheck_CustomDNSServer_Unreachable_Fails verifies that
+// pointing at an unreachable IP fails with a timeout error rather than
+// falling back to the system resolver.
+func TestRunDNSCheck_CustomDNSServer_Unreachable_Fails(t *testing.T) {
+	sc, _ := newTestChecker()
+	// Use RFC 5737 TEST-NET-1 (192.0.2.0/24) plus a closed-looking port.
+	// Note: on Linux, sending a UDP packet to an unreachable address may
+	// return ICMP port unreachable quickly rather than timing out; both
+	// outcomes produce an error, which is what we require here.
+	result := sc.RunCheck(internal.ServiceCheckConfig{
+		Name:       "unreachable-dns",
+		Type:       internal.ServiceCheckDNS,
+		Target:     "example.com.",
+		DNSServer:  "192.0.2.1:53",
+		TimeoutSec: 2,
+		Enabled:    true,
+	}, time.Now().UTC())
+	if result.Status == "up" {
+		t.Fatalf("expected status down with unreachable DNS server, got up")
+	}
+	if result.Error == "" {
+		t.Fatal("expected a non-empty error from unreachable DNS server")
+	}
+}
+
+// TestRunDNSCheck_CustomDNSServer_PortlessDefaultsTo53 verifies that a
+// bare-IP DNSServer ("1.1.1.1") is treated as "1.1.1.1:53". We don't
+// actually want to hit 1.1.1.1 in CI, so we exercise the normalisation
+// path by pointing at our fake server with the port stripped back on —
+// i.e. we construct a fake that listens on port 53 is infeasible here,
+// so we instead assert via an unreachable IP: the dial target must
+// include :53 or the check would fail with an address format error
+// rather than a timeout.
+func TestRunDNSCheck_CustomDNSServer_PortlessDefaultsTo53(t *testing.T) {
+	sc, _ := newTestChecker()
+	result := sc.RunCheck(internal.ServiceCheckConfig{
+		Name:       "portless-dns",
+		Type:       internal.ServiceCheckDNS,
+		Target:     "example.com.",
+		DNSServer:  "192.0.2.1", // no port — must default to :53
+		TimeoutSec: 1,
+		Enabled:    true,
+	}, time.Now().UTC())
+	// We expect a down/error outcome (unreachable), not an address-parse
+	// panic or a "missing port" error. Any error that ISN'T about port
+	// formatting is acceptable.
+	if result.Status == "up" {
+		t.Fatalf("expected status down, got up")
+	}
+	if strings.Contains(strings.ToLower(result.Error), "missing port") ||
+		strings.Contains(strings.ToLower(result.Error), "invalid port") {
+		t.Fatalf("bare-IP DNSServer should have been defaulted to :53; got port error: %q", result.Error)
+	}
+}
+
+// TestRunDNSCheck_NoCustomServer_UsesDefault verifies backwards
+// compatibility: when DNSServer is empty, behaviour is unchanged and a
+// lookup against a hostname that resolves via /etc/hosts (localhost)
+// reports up.
+func TestRunDNSCheck_NoCustomServer_UsesDefault(t *testing.T) {
+	sc, _ := newTestChecker()
+	result := sc.RunCheck(internal.ServiceCheckConfig{
+		Name:    "default-dns",
+		Type:    internal.ServiceCheckDNS,
+		Target:  "localhost",
+		Enabled: true,
+	}, time.Now().UTC())
+	if result.Status != "up" {
+		t.Fatalf("expected status up for localhost, got %q (error=%q)", result.Status, result.Error)
+	}
+}

@@ -170,6 +170,13 @@ func (sc *ServiceChecker) RunCheck(check internal.ServiceCheckConfig, now time.T
 	if result.ResponseMS == 0 {
 		result.ResponseMS = time.Since(start).Milliseconds()
 	}
+	// Floor successful sub-millisecond checks at 1ms. time.Since().Milliseconds()
+	// truncates fractional values (int64), so LAN-local DNS (Pi-hole, router)
+	// and loopback HTTP genuinely finishing in 200-800µs would display as "0ms"
+	// — which users read as "didn't run" rather than "near-instant". See #159.
+	if (result.Status == "up" || result.Status == "degraded") && result.ResponseMS <= 0 {
+		result.ResponseMS = 1
+	}
 	if result.Status == "up" {
 		result.Error = ""
 	}
@@ -221,7 +228,36 @@ func (sc *ServiceChecker) runDNSCheck(ctx context.Context, check internal.Servic
 		result.Error = "empty DNS target"
 		return
 	}
-	addrs, err := net.DefaultResolver.LookupHost(ctx, host)
+	// Guard against IP targets here too (validation should reject them
+	// earlier, but the test-button endpoint and pre-existing saved checks
+	// may not flow through the validator). DNS resolution of a literal IP
+	// is a silent no-op in Go's resolver — it returns immediately without
+	// querying any server, so the check would always appear "up" in 0ms.
+	// See issue #159.
+	if net.ParseIP(host) != nil {
+		result.Error = "DNS checks need a hostname like google.com; to test IP reachability use a Ping or TCP check"
+		return
+	}
+
+	resolver := net.DefaultResolver
+	if dnsServer := strings.TrimSpace(check.DNSServer); dnsServer != "" {
+		server := dnsServer
+		if _, _, err := net.SplitHostPort(server); err != nil {
+			server = net.JoinHostPort(server, "53")
+		}
+		timeoutSec := check.TimeoutSec
+		if timeoutSec <= 0 {
+			timeoutSec = 5
+		}
+		resolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				d := net.Dialer{Timeout: time.Duration(timeoutSec) * time.Second}
+				return d.DialContext(ctx, "udp", server)
+			},
+		}
+	}
+	addrs, err := resolver.LookupHost(ctx, host)
 	result.ResponseMS = time.Since(start).Milliseconds()
 	if err != nil {
 		result.Error = err.Error()
