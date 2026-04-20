@@ -156,23 +156,46 @@ func collectTailscale(docker internal.DockerInfo) *internal.TailscaleInfo {
 		if out, err := tailscaleRunCommand("tailscale", "version"); err == nil {
 			info.Version = strings.TrimSpace(strings.Split(string(out), "\n")[0])
 		}
-		// Get status JSON
-		if out, err := tailscaleRunCommand("tailscale", "status", "--json"); err == nil {
+		// Prefer the richer JSON output, but fall back to parsing the plain
+		// tabular `tailscale status` output when JSON is unavailable. The
+		// common trigger: the bundled Alpine tailscale CLI is older than the
+		// host tailscaled daemon, which makes `--json` return empty bytes
+		// (no error, no JSON) — e.g. Alpine 3.21 ships v1.76.6 against a
+		// host running v1.96+. The plain-text format is version-stable and
+		// still gives us IPs, hostnames, online state, and OS.
+		jsonPopulatedPeers := false
+		if out, err := tailscaleRunCommand("tailscale", "status", "--json"); err == nil && len(strings.TrimSpace(string(out))) > 0 {
 			parseTailscaleStatus(out, info)
-		} else {
-			// Daemon unreachable — typical Unraid case: the host runs the
-			// tailscale-nas-util plugin but /var/run/tailscale is not
-			// bind-mounted into the container. Surface a hint so the UI can
-			// guide the user instead of silently showing "not installed".
-			info.BackendState = "Unreachable"
-			if _, statErr := tailscaleSocketStat(tailscaleSocketPath); os.IsNotExist(statErr) {
-				info.Hint = "tailscale binary found but daemon socket " + tailscaleSocketPath +
-					" is not accessible. On Unraid, bind-mount /var/run/tailscale from the host " +
-					"(see the NAS Doctor Unraid template)."
+			jsonPopulatedPeers = info.Self != nil || len(info.Peers) > 0
+		}
+		if !jsonPopulatedPeers {
+			// Try plain-text format. No --json and no extra args.
+			if out, err := tailscaleRunCommand("tailscale", "status"); err == nil && len(strings.TrimSpace(string(out))) > 0 {
+				if parsePlainStatus(string(out), info) {
+					if info.BackendState == "" {
+						info.BackendState = "Running"
+					}
+					// If --json returned empty, note the version skew once so
+					// the UI can nudge the user to upgrade when convenient.
+					if info.Hint == "" {
+						info.Hint = "Using plain-text `tailscale status` parser because `--json` returned no output — likely a version skew between the container's tailscale CLI and the host tailscaled. Peer details are limited; upgrade the bundled tailscale binary to match the host for richer data."
+					}
+				}
 			} else {
-				info.Hint = "tailscale binary found but `tailscale status` failed. " +
-					"Verify the daemon is running and the socket at " + tailscaleSocketPath +
-					" is reachable."
+				// Daemon unreachable — typical Unraid case: the host runs the
+				// tailscale-nas-util plugin but /var/run/tailscale is not
+				// bind-mounted into the container. Surface a hint so the UI can
+				// guide the user instead of silently showing "not installed".
+				info.BackendState = "Unreachable"
+				if _, statErr := tailscaleSocketStat(tailscaleSocketPath); os.IsNotExist(statErr) {
+					info.Hint = "tailscale binary found but daemon socket " + tailscaleSocketPath +
+						" is not accessible. On Unraid, bind-mount /var/run/tailscale from the host " +
+						"(see the NAS Doctor Unraid template)."
+				} else {
+					info.Hint = "tailscale binary found but `tailscale status` failed. " +
+						"Verify the daemon is running and the socket at " + tailscaleSocketPath +
+						" is reachable."
+				}
 			}
 		}
 	}
@@ -293,4 +316,65 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// parsePlainStatus parses the tabular output of `tailscale status` (no --json).
+// Format (one device per line, whitespace-separated):
+//
+//	<TailscaleIP> <HostName> <Owner> <OS> <LastSeenOrDash>
+//
+// The FIRST row (where LastSeen is "-") is always Self. Subsequent rows are peers.
+// A "-" in the LastSeen column means the device is currently online. Any other
+// value (e.g. "2h22m", "Dec 12 2024") is the last-seen timestamp and means the
+// peer is offline.
+//
+// Emitted fields are limited compared to parseTailscaleStatus: we don't get
+// TxBytes, RxBytes, Tags, Relay info, DNS name, or MagicDNS. Callers should
+// prefer `--json` output when it's available.
+//
+// Returns true if at least one row was parsed (Self was set).
+func parsePlainStatus(output string, info *internal.TailscaleInfo) bool {
+	first := true
+	for _, raw := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		// Skip stderr warnings that may have been folded in (e.g. "Warning:
+		// client version ...") — these don't have the "IP hostname owner OS"
+		// shape.
+		if strings.HasPrefix(strings.ToLower(line), "warning") ||
+			strings.HasPrefix(strings.ToLower(line), "health") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		ip, hostname, _owner, opsys := fields[0], fields[1], fields[2], fields[3]
+		_ = _owner // unused; keeps layout obvious
+		// Sanity: the first field must look like an IP (contains a dot or colon).
+		if !strings.ContainsAny(ip, ".:") {
+			continue
+		}
+		online := true
+		if len(fields) >= 5 && fields[4] != "-" {
+			online = false
+		}
+		node := internal.TailscaleNode{
+			Name:   hostname,
+			IP:     ip,
+			OS:     opsys,
+			Online: online,
+		}
+		if first {
+			self := node
+			self.Online = true
+			info.Self = &self
+			first = false
+			continue
+		}
+		info.Peers = append(info.Peers, node)
+	}
+	return info.Self != nil
 }

@@ -220,3 +220,137 @@ func containsCI(haystack, needle string) bool {
 	}
 	return false
 }
+
+// ── Tailscale plain-text (`tailscale status`) parser ──
+
+// TestParsePlainStatus_RealWorldOutput reproduces the v0.9.2-rc2 hardware finding:
+// when the container's tailscale CLI is older than the host tailscaled daemon,
+// `tailscale status --json` silently returns empty bytes while `tailscale status`
+// (tabular) still works. The collector must fall back to parsing the tabular form.
+func TestParsePlainStatus_RealWorldOutput(t *testing.T) {
+	// Fixture matches what the user captured on Unraid with tailscale 1.76.6 client
+	// + tailscaled 1.96.2 server. First row = self (LastSeen "-" = online).
+	// Subsequent rows = peers.
+	output := `100.70.89.101   tower                amtccdias@   linux   -
+100.85.250.94   iphone181            amtccdias@   iOS     -
+100.92.71.34    old-laptop           amtccdias@   linux   2h22m`
+
+	info := &internal.TailscaleInfo{}
+	ok := parsePlainStatus(output, info)
+	if !ok {
+		t.Fatal("parsePlainStatus returned false; expected true for 3-row input")
+	}
+	if info.Self == nil {
+		t.Fatal("Self was nil; expected populated from first row")
+	}
+	if info.Self.Name != "tower" || info.Self.IP != "100.70.89.101" || info.Self.OS != "linux" {
+		t.Errorf("Self: got %+v", info.Self)
+	}
+	if !info.Self.Online {
+		t.Error("Self.Online should be true (LastSeen=\"-\" = currently online)")
+	}
+	if len(info.Peers) != 2 {
+		t.Fatalf("Peers: got %d, want 2", len(info.Peers))
+	}
+	var iphone, laptop *internal.TailscaleNode
+	for i, p := range info.Peers {
+		switch p.Name {
+		case "iphone181":
+			iphone = &info.Peers[i]
+		case "old-laptop":
+			laptop = &info.Peers[i]
+		}
+	}
+	if iphone == nil {
+		t.Fatal("missing peer iphone181")
+	}
+	if iphone.IP != "100.85.250.94" || iphone.OS != "iOS" || !iphone.Online {
+		t.Errorf("iphone181: got %+v", iphone)
+	}
+	if laptop == nil {
+		t.Fatal("missing peer old-laptop")
+	}
+	if laptop.Online {
+		t.Error("old-laptop.Online should be false (LastSeen=\"2h22m\" means offline)")
+	}
+}
+
+// TestParsePlainStatus_SkipsWarningLines guards against stderr bleeding into stdout
+// (e.g. `Warning: client version ...` that older tailscale CLIs sometimes print
+// alongside `status` output).
+func TestParsePlainStatus_SkipsWarningLines(t *testing.T) {
+	output := `Warning: client version "1.76.6-AlpineLinux" != tailscaled server version "1.96.2"
+100.70.89.101   tower                amtccdias@   linux   -`
+
+	info := &internal.TailscaleInfo{}
+	ok := parsePlainStatus(output, info)
+	if !ok {
+		t.Fatal("expected Self to be populated despite warning line")
+	}
+	if info.Self == nil || info.Self.Name != "tower" {
+		t.Errorf("Self: got %+v", info.Self)
+	}
+}
+
+// TestParsePlainStatus_EmptyOrMalformed returns false without populating Self.
+func TestParsePlainStatus_EmptyOrMalformed(t *testing.T) {
+	cases := []string{"", "    \n   ", "only one field", "not-an-ip hostname owner os -"}
+	for _, input := range cases {
+		info := &internal.TailscaleInfo{}
+		if parsePlainStatus(input, info) {
+			t.Errorf("parsePlainStatus(%q) = true; want false", input)
+		}
+		if info.Self != nil {
+			t.Errorf("Self populated for malformed input %q", input)
+		}
+	}
+}
+
+// TestCollectTailscale_FallsBackToPlainWhenJSONEmpty is the end-to-end test for
+// the Alpine-client vs newer-server skew fix. `tailscale status --json` returns
+// empty (no error, no bytes); the orchestration must try `tailscale status`
+// (plain) and surface the peers from there.
+func TestCollectTailscale_FallsBackToPlainWhenJSONEmpty(t *testing.T) {
+	withTailscaleStubs(t,
+		func(bin string) (string, error) {
+			if bin == "tailscale" {
+				return "/usr/bin/tailscale", nil
+			}
+			return "", errors.New("not found")
+		},
+		func(name string, args ...string) ([]byte, error) {
+			if name != "tailscale" {
+				return nil, errors.New("unexpected command")
+			}
+			switch {
+			case len(args) == 1 && args[0] == "version":
+				return []byte("1.76.6\n  tailscale commit: AlpineLinux\n"), nil
+			case len(args) == 2 && args[0] == "status" && args[1] == "--json":
+				// Empty output — the exact symptom observed in rc2.
+				return []byte(""), nil
+			case len(args) == 1 && args[0] == "status":
+				return []byte("100.70.89.101   tower                amtccdias@   linux   -\n100.85.250.94   iphone181            amtccdias@   iOS     -\n"), nil
+			}
+			return nil, errors.New("unexpected args")
+		},
+		func(string) (os.FileInfo, error) { return nil, nil },
+		"/var/run/tailscale/tailscaled.sock",
+	)
+
+	got := collectTailscale(internal.DockerInfo{})
+	if got == nil {
+		t.Fatal("expected non-nil TailscaleInfo")
+	}
+	if got.Self == nil || got.Self.Name != "tower" {
+		t.Errorf("Self: got %+v; want tower", got.Self)
+	}
+	if len(got.Peers) != 1 || got.Peers[0].Name != "iphone181" {
+		t.Errorf("Peers: got %+v", got.Peers)
+	}
+	if got.BackendState != "Running" {
+		t.Errorf("BackendState: got %q, want Running", got.BackendState)
+	}
+	if got.Hint == "" {
+		t.Error("expected a diagnostic hint explaining the --json fallback")
+	}
+}
