@@ -54,6 +54,16 @@ type FakeStore struct {
 	// Orphaned findings: findings whose snapshot ID doesn't match any snapshot.
 	// Seeded by tests via AddOrphanedFindings().
 	orphanedFindingCount int
+
+	// Disk usage history rows (snapshot-independent; keyed by timestamp).
+	// Seeded via AddDiskUsageHistoryEntry() and pruned by PruneDiskUsageHistory().
+	diskUsageHistory []diskUsageRow
+}
+
+// diskUsageRow is the minimal fake representation of a disk_usage_history row.
+type diskUsageRow struct {
+	MountPoint string
+	Timestamp  time.Time
 }
 
 // NewFakeStore creates a ready-to-use in-memory store.
@@ -685,6 +695,23 @@ func (f *FakeStore) PruneAlerts(olderThan time.Duration) (int, error) {
 	return pruned, nil
 }
 
+// PruneDiskUsageHistory removes disk_usage_history rows with timestamp < cutoff.
+func (f *FakeStore) PruneDiskUsageHistory(cutoff time.Time) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var kept []diskUsageRow
+	var pruned int64
+	for _, r := range f.diskUsageHistory {
+		if r.Timestamp.Before(cutoff) {
+			pruned++
+		} else {
+			kept = append(kept, r)
+		}
+	}
+	f.diskUsageHistory = kept
+	return pruned, nil
+}
+
 // PruneOrphanedFindings removes orphaned findings and returns the count.
 func (f *FakeStore) PruneOrphanedFindings() (int, error) {
 	f.mu.Lock()
@@ -777,6 +804,23 @@ func (f *FakeStore) AddNotificationLogEntry(entry NotificationLogEntry) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.notificationLog = append(f.notificationLog, entry)
+}
+
+// AddDiskUsageHistoryEntry seeds a disk_usage_history row for testing.
+func (f *FakeStore) AddDiskUsageHistoryEntry(mountPoint string, ts time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.diskUsageHistory = append(f.diskUsageHistory, diskUsageRow{
+		MountPoint: mountPoint,
+		Timestamp:  ts,
+	})
+}
+
+// DiskUsageHistoryCount returns the number of disk_usage_history rows in the fake store.
+func (f *FakeStore) DiskUsageHistoryCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return len(f.diskUsageHistory)
 }
 
 // SnapshotCount returns the current number of snapshots.

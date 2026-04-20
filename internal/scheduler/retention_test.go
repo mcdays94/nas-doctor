@@ -475,3 +475,51 @@ func TestRunRetention_NilServiceCheckStore(t *testing.T) {
 		t.Fatalf("expected 0 with nil svc store, got %d", result.ServiceChecksPruned)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test 18: RunRetention prunes disk_usage_history rows older than cutoff
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestRunRetention_DiskUsageHistoryPruning(t *testing.T) {
+	store := storage.NewFakeStore()
+
+	// Seed 3 rows: 2 older than 365d, 1 recent
+	store.AddDiskUsageHistoryEntry("/mnt/disk1", time.Now().Add(-400*24*time.Hour))
+	store.AddDiskUsageHistoryEntry("/mnt/disk1", time.Now().Add(-366*24*time.Hour))
+	store.AddDiskUsageHistoryEntry("/mnt/disk1", time.Now().Add(-30*24*time.Hour))
+
+	rm := NewRetentionManager(store, store, discardLogger())
+	// DiskUsageMaxAge unset → falls back to 365d default
+	result := rm.RunRetention(defaultCfg())
+
+	if result.DiskUsageHistoryPruned != 2 {
+		t.Fatalf("expected 2 disk_usage_history rows pruned (default 365d), got %d", result.DiskUsageHistoryPruned)
+	}
+	if store.DiskUsageHistoryCount() != 1 {
+		t.Fatalf("expected 1 row remaining, got %d", store.DiskUsageHistoryCount())
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test 19: RunRetention honors explicit DiskUsageMaxAge override
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestRunRetention_DiskUsageHistoryPruning_ExplicitOverride(t *testing.T) {
+	store := storage.NewFakeStore()
+
+	store.AddDiskUsageHistoryEntry("/mnt/disk1", time.Now().Add(-10*24*time.Hour))
+	store.AddDiskUsageHistoryEntry("/mnt/disk1", time.Now().Add(-1*time.Hour))
+
+	rm := NewRetentionManager(store, store, discardLogger())
+	cfg := defaultCfg()
+	cfg.DiskUsageMaxAge = 7 * 24 * time.Hour
+
+	result := rm.RunRetention(cfg)
+
+	if result.DiskUsageHistoryPruned != 1 {
+		t.Fatalf("expected 1 pruned with 7d override, got %d", result.DiskUsageHistoryPruned)
+	}
+	if store.DiskUsageHistoryCount() != 1 {
+		t.Fatalf("expected 1 row remaining, got %d", store.DiskUsageHistoryCount())
+	}
+}
