@@ -53,7 +53,10 @@ ENV NAS_DOCTOR_LISTEN=":8060" \
 
 EXPOSE 8060
 
+# Port-aware healthcheck: derives the port from NAS_DOCTOR_LISTEN so setting
+# the env var (e.g. ":8067", "8067", "0.0.0.0:8067") keeps the healthcheck
+# aligned with the actual listen address. Falls back to 8060 if unset/empty.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8060/api/v1/health || exit 1
+    CMD sh -c 'P="${NAS_DOCTOR_LISTEN##*:}"; P="${P:-8060}"; wget -q --tries=1 --spider "http://localhost:${P}/api/v1/health"' || exit 1
 
 ENTRYPOINT ["/app/nas-doctor"]
