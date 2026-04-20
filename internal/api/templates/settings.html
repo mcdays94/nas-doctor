@@ -2665,7 +2665,27 @@ function toggleAPIKeyVisibility() {
   el.type = el.type === "password" ? "text" : "password";
 }
 function generateAPIKey() {
-  var key = 'nd-' + crypto.randomUUID().replace(/-/g, '');
+  // crypto.randomUUID() requires a secure context (HTTPS or localhost); it is
+  // undefined when NAS Doctor is served over plain HTTP on a LAN, which causes
+  // the button to silently do nothing. Fall back to crypto.getRandomValues(),
+  // which is available in non-secure contexts too. See issue #126.
+  var key;
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    try { key = 'nd-' + crypto.randomUUID().replace(/-/g, ''); } catch (e) { key = null; }
+  }
+  if (!key && typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    var bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    var hex = "";
+    for (var i = 0; i < bytes.length; i++) {
+      hex += ("0" + bytes[i].toString(16)).slice(-2);
+    }
+    key = 'nd-' + hex;
+  }
+  if (!key) {
+    showToast("Your browser doesn't support secure random generation", "error");
+    return;
+  }
   document.getElementById("api-key-display").value = key;
   saveSettings();
   showToast("API key generated — save it somewhere safe", "success");
@@ -2673,7 +2693,36 @@ function generateAPIKey() {
 function copyAPIKey() {
   var el = document.getElementById("api-key-display");
   if (!el.value) { showToast("No API key to copy", "error"); return; }
-  navigator.clipboard.writeText(el.value).then(function() { showToast("Copied to clipboard", "success"); });
+  // navigator.clipboard also requires a secure context; fall back to the
+  // legacy execCommand('copy') path when it's unavailable. See issue #126.
+  if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    navigator.clipboard.writeText(el.value).then(function() {
+      showToast("Copied to clipboard", "success");
+    }, function() {
+      fallbackCopyAPIKey(el);
+    });
+    return;
+  }
+  fallbackCopyAPIKey(el);
+}
+function fallbackCopyAPIKey(el) {
+  var prevType = el.type;
+  try {
+    el.type = "text";
+    el.focus();
+    el.select();
+    el.setSelectionRange(0, el.value.length);
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    if (ok) {
+      showToast("Copied to clipboard", "success");
+    } else {
+      showToast("Copy failed — select the key and copy manually", "error");
+    }
+  } finally {
+    el.type = prevType;
+    if (typeof el.blur === "function") el.blur();
+  }
 }
 function revokeAPIKey() {
   if (!confirm("Revoke the API key? All fleet instances using this key will lose access.")) return;
