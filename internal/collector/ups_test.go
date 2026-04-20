@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -198,6 +199,109 @@ MODEL    : Smart-UPS 1500
 	}
 	if info.StatusHuman != "On Battery" {
 		t.Errorf("status human: got %q", info.StatusHuman)
+	}
+}
+
+// ── Detection: binary missing / daemon unreachable ──
+
+// fakeRunner is an injectable UPSRunner for tests — no real exec/LookPath required.
+type fakeRunner struct {
+	lookPath func(string) (string, error)
+	output   func(name string, args ...string) ([]byte, error)
+}
+
+func (f fakeRunner) LookPath(name string) (string, error) { return f.lookPath(name) }
+func (f fakeRunner) Output(name string, args ...string) ([]byte, error) {
+	return f.output(name, args...)
+}
+
+func TestCollectApcupsd_BinaryMissing_ReturnsNil(t *testing.T) {
+	r := fakeRunner{
+		lookPath: func(string) (string, error) { return "", errors.New("not found") },
+		output: func(string, ...string) ([]byte, error) {
+			t.Fatal("output should not be called when binary missing")
+			return nil, nil
+		},
+	}
+	info, err := collectApcupsdWith(r)
+	if err == nil {
+		t.Error("expected error when apcaccess missing")
+	}
+	if info != nil {
+		t.Errorf("expected nil UPSInfo, got %+v", info)
+	}
+}
+
+func TestCollectNUT_BinaryMissing_ReturnsNil(t *testing.T) {
+	r := fakeRunner{
+		lookPath: func(string) (string, error) { return "", errors.New("not found") },
+		output: func(string, ...string) ([]byte, error) {
+			t.Fatal("output should not be called when binary missing")
+			return nil, nil
+		},
+	}
+	info, err := collectNUTWith(r)
+	if err == nil {
+		t.Error("expected error when upsc missing")
+	}
+	if info != nil {
+		t.Errorf("expected nil UPSInfo, got %+v", info)
+	}
+}
+
+func TestCollectApcupsd_BinaryPresent_DaemonUnreachable_ReturnsHint(t *testing.T) {
+	// Simulate the Unraid failure mode: image has apcaccess, but the host daemon
+	// is unreachable on 127.0.0.1:3551 (e.g. apcupsd plugin not running or
+	// container not using host networking).
+	r := fakeRunner{
+		lookPath: func(name string) (string, error) { return "/usr/sbin/" + name, nil },
+		output: func(name string, args ...string) ([]byte, error) {
+			return nil, errors.New("Error contacting apcupsd @ 127.0.0.1:3551: Connection refused")
+		},
+	}
+	info, err := collectApcupsdWith(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected UPSInfo with diagnostic hint, got nil")
+	}
+	if !info.Available {
+		t.Error("expected Available=true so users see the diagnostic in the dashboard")
+	}
+	if info.Source != "apcupsd" {
+		t.Errorf("source: got %q, want apcupsd", info.Source)
+	}
+	if info.Status != "unreachable" {
+		t.Errorf("status: got %q, want unreachable", info.Status)
+	}
+	if info.StatusHuman == "" {
+		t.Error("expected a human-readable hint explaining the unreachable daemon")
+	}
+}
+
+func TestCollectNUT_BinaryPresent_DaemonUnreachable_ReturnsHint(t *testing.T) {
+	r := fakeRunner{
+		lookPath: func(name string) (string, error) { return "/usr/bin/" + name, nil },
+		output: func(name string, args ...string) ([]byte, error) {
+			return nil, errors.New("Error: Connection failure: Connection refused")
+		},
+	}
+	info, err := collectNUTWith(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected UPSInfo with diagnostic hint, got nil")
+	}
+	if !info.Available {
+		t.Error("expected Available=true so users see the diagnostic in the dashboard")
+	}
+	if info.Source != "nut" {
+		t.Errorf("source: got %q, want nut", info.Source)
+	}
+	if info.Status != "unreachable" {
+		t.Errorf("status: got %q, want unreachable", info.Status)
 	}
 }
 
