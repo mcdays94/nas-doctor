@@ -212,6 +212,12 @@ func determineUrgency(dp DrivePlan) (ReplacementUrgency, string) {
 	if dp.HealthScore < 60 {
 		return UrgencyReplaceSoon, "Degraded health — plan replacement within 3 months"
 	}
+	if dp.LifeUsedPct >= 100 {
+		return UrgencyReplaceSoon, fmt.Sprintf("%.0f%% of expected life used — exceeded design lifespan", dp.LifeUsedPct)
+	}
+	if dp.RemainingYears < 0.25 {
+		return UrgencyReplaceSoon, fmt.Sprintf("~%.1f months remaining at current degradation rate", dp.RemainingYears*12)
+	}
 	if dp.RemainingYears < 1.0 && dp.HealthScore < 80 {
 		return UrgencyReplaceSoon, fmt.Sprintf("~%.1f years remaining at current degradation rate", dp.RemainingYears)
 	}
