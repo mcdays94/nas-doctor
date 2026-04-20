@@ -195,9 +195,15 @@ func defaultSettings() Settings {
 			ContainerMetrics: false,
 			MergedContainers: true,
 			MergedDrives:     true,
-			Backup:           true,
-			SpeedTest:        true,
-			Processes:        true,
+			// Backup monitoring is a niche, opt-in surface — the feature is
+			// auto-detect-only (no config UI) and almost every NAS Doctor
+			// install has no provider CLI reachable from the container, so
+			// the section renders empty or just shows the "no provider
+			// detected" hint card. Default it off; the toggle in Settings →
+			// Dashboard Sections lets users opt in.
+			Backup:    false,
+			SpeedTest: true,
+			Processes: true,
 		},
 		ChartRangeHours: 1,
 	}
@@ -354,6 +360,70 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, settings)
 }
 
+// normalizeServiceCheckConfig validates and applies default values to a
+// single ServiceCheckConfig in place. It returns a non-nil error when the
+// config is invalid; otherwise it is behaviour-preserving with respect to
+// the historical validation loop in handleUpdateSettings.
+//
+// Callers that handle multiple checks must still enforce slice-level
+// invariants (e.g. duplicate-name detection) themselves.
+func normalizeServiceCheckConfig(check *internal.ServiceCheckConfig) error {
+	check.Name = strings.TrimSpace(check.Name)
+	check.Type = strings.ToLower(strings.TrimSpace(check.Type))
+	check.Target = strings.TrimSpace(check.Target)
+	if check.Name == "" {
+		return fmt.Errorf("service_checks.checks name is required")
+	}
+	if check.Target == "" {
+		return fmt.Errorf("service_checks.checks target is required")
+	}
+	switch check.Type {
+	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing, internal.ServiceCheckSpeed:
+		// valid
+	default:
+		return fmt.Errorf("invalid service check type: %s", check.Type)
+	}
+	if check.IntervalSec <= 0 {
+		check.IntervalSec = 300 // default 5 minutes
+	}
+	if check.IntervalSec < 30 {
+		check.IntervalSec = 30 // minimum 30 seconds
+	}
+	if check.TimeoutSec <= 0 {
+		check.TimeoutSec = 5
+	}
+	if check.TimeoutSec > 30 {
+		check.TimeoutSec = 30
+	}
+	if check.Port < 0 || check.Port > 65535 {
+		return fmt.Errorf("service check port must be between 0 and 65535")
+	}
+	if check.FailureThreshold <= 0 {
+		check.FailureThreshold = 1
+	}
+	if check.FailureSeverity == "" {
+		check.FailureSeverity = internal.SeverityWarning
+	}
+	switch check.FailureSeverity {
+	case internal.SeverityInfo, internal.SeverityWarning, internal.SeverityCritical:
+		// valid
+	default:
+		return fmt.Errorf("invalid service check failure_severity")
+	}
+	if check.Type == internal.ServiceCheckHTTP {
+		if check.ExpectedMin <= 0 {
+			check.ExpectedMin = 200
+		}
+		if check.ExpectedMax <= 0 {
+			check.ExpectedMax = 399
+		}
+		if check.ExpectedMax < check.ExpectedMin {
+			check.ExpectedMax = check.ExpectedMin
+		}
+	}
+	return nil
+}
+
 // handleUpdateSettings validates and persists the settings JSON.
 // PUT /api/v1/settings
 func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -464,15 +534,8 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	serviceNames := make(map[string]struct{}, len(settings.ServiceChecks.Checks))
 	for i := range settings.ServiceChecks.Checks {
 		check := &settings.ServiceChecks.Checks[i]
-		check.Name = strings.TrimSpace(check.Name)
-		check.Type = strings.ToLower(strings.TrimSpace(check.Type))
-		check.Target = strings.TrimSpace(check.Target)
-		if check.Name == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "service_checks.checks name is required"})
-			return
-		}
-		if check.Target == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "service_checks.checks target is required"})
+		if err := normalizeServiceCheckConfig(check); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		if _, exists := serviceNames[strings.ToLower(check.Name)]; exists {
@@ -480,53 +543,6 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		serviceNames[strings.ToLower(check.Name)] = struct{}{}
-		switch check.Type {
-		case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing, internal.ServiceCheckSpeed:
-			// valid
-		default:
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid service check type: " + check.Type})
-			return
-		}
-		if check.IntervalSec <= 0 {
-			check.IntervalSec = 300 // default 5 minutes
-		}
-		if check.IntervalSec < 30 {
-			check.IntervalSec = 30 // minimum 30 seconds
-		}
-		if check.TimeoutSec <= 0 {
-			check.TimeoutSec = 5
-		}
-		if check.TimeoutSec > 30 {
-			check.TimeoutSec = 30
-		}
-		if check.Port < 0 || check.Port > 65535 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "service check port must be between 0 and 65535"})
-			return
-		}
-		if check.FailureThreshold <= 0 {
-			check.FailureThreshold = 1
-		}
-		if check.FailureSeverity == "" {
-			check.FailureSeverity = internal.SeverityWarning
-		}
-		switch check.FailureSeverity {
-		case internal.SeverityInfo, internal.SeverityWarning, internal.SeverityCritical:
-			// valid
-		default:
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid service check failure_severity"})
-			return
-		}
-		if check.Type == internal.ServiceCheckHTTP {
-			if check.ExpectedMin <= 0 {
-				check.ExpectedMin = 200
-			}
-			if check.ExpectedMax <= 0 {
-				check.ExpectedMax = 399
-			}
-			if check.ExpectedMax < check.ExpectedMin {
-				check.ExpectedMax = check.ExpectedMin
-			}
-		}
 	}
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
@@ -1292,6 +1308,55 @@ func (s *Server) handleServiceCheckHistory(w http.ResponseWriter, r *http.Reques
 		history = []storage.ServiceCheckEntry{}
 	}
 	writeJSON(w, http.StatusOK, history)
+}
+
+// handleTestServiceCheck runs a single service check synchronously using the
+// supplied config, without persisting the result or mutating any saved state.
+// POST /api/v1/service-checks/test
+//
+// Intended for the settings page "Test" button so users can validate a check
+// before saving. Supports all 7 check types. Speed-type tests run the Ookla
+// CLI and may take 10-60s — this route is registered outside the router-wide
+// 30s Timeout group (see api.go) AND disables the http.Server WriteTimeout
+// per-request (set to 30s in cmd/nas-doctor/main.go for baseline safety).
+func (s *Server) handleTestServiceCheck(w http.ResponseWriter, r *http.Request) {
+	// Disable the per-connection write deadline for this handler. The baseline
+	// http.Server.WriteTimeout=30s would otherwise kill long-running Ookla
+	// speed tests and return a 502 upstream. RunCheck still enforces the
+	// check's own TimeoutSec, so the request cannot hang indefinitely.
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
+		return
+	}
+	defer r.Body.Close()
+
+	var cfg internal.ServiceCheckConfig
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+
+	if err := normalizeServiceCheckConfig(&cfg); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Build a fresh checker per request. It uses the store purely for read-only
+	// state lookups it does NOT actually perform in RunCheck (it's only touched
+	// by RunDueChecks, which we don't call). We deliberately avoid using
+	// s.scheduler here so the endpoint works in demo mode and tests.
+	checker := scheduler.NewServiceChecker(s.store, s.logger)
+	if cfg.Type == internal.ServiceCheckSpeed {
+		checker.SetSpeedTestRunner(collector.RunSpeedTest)
+	}
+
+	result := checker.RunCheck(cfg, time.Now().UTC())
+	writeJSON(w, http.StatusOK, result)
 }
 
 // handleRunServiceChecks triggers immediate service check execution.

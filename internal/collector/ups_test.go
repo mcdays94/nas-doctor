@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -201,6 +202,109 @@ MODEL    : Smart-UPS 1500
 	}
 }
 
+// ── Detection: binary missing / daemon unreachable ──
+
+// fakeRunner is an injectable UPSRunner for tests — no real exec/LookPath required.
+type fakeRunner struct {
+	lookPath func(string) (string, error)
+	output   func(name string, args ...string) ([]byte, error)
+}
+
+func (f fakeRunner) LookPath(name string) (string, error) { return f.lookPath(name) }
+func (f fakeRunner) Output(name string, args ...string) ([]byte, error) {
+	return f.output(name, args...)
+}
+
+func TestCollectApcupsd_BinaryMissing_ReturnsNil(t *testing.T) {
+	r := fakeRunner{
+		lookPath: func(string) (string, error) { return "", errors.New("not found") },
+		output: func(string, ...string) ([]byte, error) {
+			t.Fatal("output should not be called when binary missing")
+			return nil, nil
+		},
+	}
+	info, err := collectApcupsdWith(r)
+	if err == nil {
+		t.Error("expected error when apcaccess missing")
+	}
+	if info != nil {
+		t.Errorf("expected nil UPSInfo, got %+v", info)
+	}
+}
+
+func TestCollectNUT_BinaryMissing_ReturnsNil(t *testing.T) {
+	r := fakeRunner{
+		lookPath: func(string) (string, error) { return "", errors.New("not found") },
+		output: func(string, ...string) ([]byte, error) {
+			t.Fatal("output should not be called when binary missing")
+			return nil, nil
+		},
+	}
+	info, err := collectNUTWith(r)
+	if err == nil {
+		t.Error("expected error when upsc missing")
+	}
+	if info != nil {
+		t.Errorf("expected nil UPSInfo, got %+v", info)
+	}
+}
+
+func TestCollectApcupsd_BinaryPresent_DaemonUnreachable_ReturnsHint(t *testing.T) {
+	// Simulate the Unraid failure mode: image has apcaccess, but the host daemon
+	// is unreachable on 127.0.0.1:3551 (e.g. apcupsd plugin not running or
+	// container not using host networking).
+	r := fakeRunner{
+		lookPath: func(name string) (string, error) { return "/usr/sbin/" + name, nil },
+		output: func(name string, args ...string) ([]byte, error) {
+			return nil, errors.New("Error contacting apcupsd @ 127.0.0.1:3551: Connection refused")
+		},
+	}
+	info, err := collectApcupsdWith(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected UPSInfo with diagnostic hint, got nil")
+	}
+	if !info.Available {
+		t.Error("expected Available=true so users see the diagnostic in the dashboard")
+	}
+	if info.Source != "apcupsd" {
+		t.Errorf("source: got %q, want apcupsd", info.Source)
+	}
+	if info.Status != "unreachable" {
+		t.Errorf("status: got %q, want unreachable", info.Status)
+	}
+	if info.StatusHuman == "" {
+		t.Error("expected a human-readable hint explaining the unreachable daemon")
+	}
+}
+
+func TestCollectNUT_BinaryPresent_DaemonUnreachable_ReturnsHint(t *testing.T) {
+	r := fakeRunner{
+		lookPath: func(name string) (string, error) { return "/usr/bin/" + name, nil },
+		output: func(name string, args ...string) ([]byte, error) {
+			return nil, errors.New("Error: Connection failure: Connection refused")
+		},
+	}
+	info, err := collectNUTWith(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected UPSInfo with diagnostic hint, got nil")
+	}
+	if !info.Available {
+		t.Error("expected Available=true so users see the diagnostic in the dashboard")
+	}
+	if info.Source != "nut" {
+		t.Errorf("source: got %q, want nut", info.Source)
+	}
+	if info.Status != "unreachable" {
+		t.Errorf("status: got %q, want unreachable", info.Status)
+	}
+}
+
 // ── NUT status mapping ──
 
 func TestNutStatusToHuman(t *testing.T) {
@@ -222,5 +326,88 @@ func TestNutStatusToHuman(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("nutStatusToHuman(%q): got %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// ── collectUPS orchestration (fallback chain) ──
+
+// TestCollectUPS_NUTUnreachable_FallsThroughToApcupsd reproduces the Unraid
+// hardware bug observed in v0.9.2-rc2: both binaries are installed (Dockerfile fix
+// from #134 did its job), but the host runs apcupsd (not NUT), so upsc fails to
+// reach a daemon while apcaccess succeeds. The collector must surface apcupsd's
+// real data, not NUT's "unreachable" hint.
+func TestCollectUPS_NUTUnreachable_FallsThroughToApcupsd(t *testing.T) {
+	r := fakeRunner{
+		lookPath: func(name string) (string, error) { return "/usr/bin/" + name, nil },
+		output: func(name string, args ...string) ([]byte, error) {
+			if name == "upsc" {
+				return nil, errors.New("Error: Connection failure: Connection refused")
+			}
+			// apcaccess succeeds with real data
+			return []byte(sampleApcaccess), nil
+		},
+	}
+	info, err := collectUPSWith(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected non-nil UPSInfo")
+	}
+	if info.Source != "apcupsd" {
+		t.Errorf("source: got %q, want apcupsd (NUT unreachable, apcupsd should win)", info.Source)
+	}
+	if info.Status == "unreachable" {
+		t.Error("status should be real data, not the unreachable hint")
+	}
+	if info.Name == "" {
+		t.Error("expected UPSNAME populated from apcaccess output")
+	}
+}
+
+// TestCollectUPS_BothUnreachable_ReturnsNUTHint guards the fall-back of last resort:
+// when both daemons are unreachable, we surface the FIRST hint (NUT, since it was
+// tried first) so the user has something actionable in the dashboard.
+func TestCollectUPS_BothUnreachable_ReturnsNUTHint(t *testing.T) {
+	r := fakeRunner{
+		lookPath: func(name string) (string, error) { return "/usr/bin/" + name, nil },
+		output: func(name string, args ...string) ([]byte, error) {
+			return nil, errors.New("connection refused")
+		},
+	}
+	info, err := collectUPSWith(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected hint UPSInfo, got nil")
+	}
+	if info.Source != "nut" {
+		t.Errorf("source: got %q, want nut (first-tried hint wins)", info.Source)
+	}
+	if info.Status != "unreachable" {
+		t.Errorf("status: got %q, want unreachable", info.Status)
+	}
+}
+
+// TestCollectUPS_NeitherBinaryInstalled_ReturnsUnavailable preserves the
+// "nothing here" signal for platforms that truly have no UPS support.
+func TestCollectUPS_NeitherBinaryInstalled_ReturnsUnavailable(t *testing.T) {
+	r := fakeRunner{
+		lookPath: func(string) (string, error) { return "", errors.New("not found") },
+		output: func(string, ...string) ([]byte, error) {
+			t.Fatal("output should not be called when no binary installed")
+			return nil, nil
+		},
+	}
+	info, err := collectUPSWith(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected UPSInfo{Available:false}, got nil")
+	}
+	if info.Available {
+		t.Errorf("expected Available=false when no binaries, got %+v", info)
 	}
 }

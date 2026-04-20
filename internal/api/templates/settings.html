@@ -461,6 +461,10 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             <option value="900">15 minutes</option>
             <option value="1800">30 minutes</option>
             <option value="3600">1 hour</option>
+            <option value="21600">6 hours</option>
+            <option value="43200">12 hours</option>
+            <option value="86400">Daily</option>
+            <option value="604800">Weekly</option>
           </select>
         </div>
         <div>
@@ -525,6 +529,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       </div>
       <div class="webhook-form-actions">
         <button class="btn btn-primary" onclick="saveServiceCheck()">Save Check</button>
+        <button class="btn btn-secondary" id="sc-test-btn" onclick="testServiceCheck()">Test</button>
         <button class="btn btn-secondary" onclick="cancelServiceCheckForm()">Cancel</button>
       </div>
     </div>
@@ -745,7 +750,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <div class="toggle-wrap"><div class="toggle on" id="sec-tunnels" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Tunnels (Cloudflared / Tailscale)</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-proxmox" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Proxmox VE</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-kubernetes" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Kubernetes</span></div>
-      <div class="toggle-wrap"><div class="toggle on" id="sec-backup" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Backup Monitoring</span></div>
+      <div class="toggle-wrap"><div class="toggle" id="sec-backup" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Backup Monitoring</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-speedtest" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Speed Test</span></div>
       <div class="toggle-wrap"><div class="toggle on" id="sec-processes" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div><span class="toggle-label">Top Processes</span></div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
@@ -1677,6 +1682,15 @@ function onServiceTypeChange() {
     else if (type === "dns") targetInput.placeholder = "e.g. google.com";
     else targetInput.placeholder = "https://nas.local/health, 192.168.1.10, or host:port";
   }
+  // Speed tests are expensive (Ookla CLI runs ~30-60s and saturates the
+  // connection), so bump the interval to daily when the user picks the speed
+  // type, but only if they haven't customised it yet — i.e. it's still at the
+  // new-check default of 300s. An interval of 5 minutes for a speed test
+  // would waste bandwidth and trigger ISP throttling.
+  var intervalInput = document.getElementById("sc-interval");
+  if (intervalInput && type === "speed" && parseInt(intervalInput.value, 10) === 300) {
+    intervalInput.value = "86400";
+  }
 }
 function parseScHeaders() {
   var raw = (document.getElementById("sc-headers") || {}).value || "";
@@ -1719,7 +1733,11 @@ function cancelServiceCheckForm() {
   document.getElementById("service-check-form").classList.remove("visible");
 }
 
-function saveServiceCheck() {
+// readServiceCheckForm reads the service-check editor form into a plain
+// JS object matching the ServiceCheckConfig JSON schema. Returns null if
+// required fields are missing (and shows a toast in that case). Shared by
+// saveServiceCheck() and testServiceCheck() so validation cannot drift.
+function readServiceCheckForm() {
   var name = document.getElementById("sc-name").value.trim();
   var type = document.getElementById("sc-type").value;
   var target = document.getElementById("sc-target").value.trim();
@@ -1727,7 +1745,7 @@ function saveServiceCheck() {
   if (type === "speed") { target = "speedtest"; }
   if (!name || (!target && type !== "speed")) {
     showToast("Name and target are required", "error");
-    return;
+    return null;
   }
   var sc = {
     name: name,
@@ -1758,6 +1776,13 @@ function saveServiceCheck() {
     sc.margin_pct = parseFloat(document.getElementById("sc-margin").value) || 10;
     sc.target = "speedtest";
   }
+  return sc;
+}
+
+function saveServiceCheck() {
+  var sc = readServiceCheckForm();
+  if (!sc) return;
+  var name = sc.name;
 
   for (var i = 0; i < serviceChecks.length; i++) {
     if (i === parseInt(document.getElementById("sc-edit-index").value, 10)) continue;
@@ -1776,6 +1801,70 @@ function saveServiceCheck() {
   renderServiceChecks();
   cancelServiceCheckForm();
   saveSettings();
+}
+
+// testServiceCheck runs the current form's configuration through the
+// /api/v1/service-checks/test endpoint without persisting the result. It
+// surfaces status, response time, and error messages via toast. Speed-type
+// checks can take up to 60s on real hardware (Ookla CLI), so we warn the
+// user up-front and disable the button for the duration of the request.
+function testServiceCheck() {
+  var sc = readServiceCheckForm();
+  if (!sc) return;
+
+  var btn = document.getElementById("sc-test-btn");
+  var originalLabel = btn ? btn.textContent : "Test";
+  if (btn) { btn.disabled = true; btn.textContent = "Testing…"; }
+
+  if (sc.type === "speed") {
+    showToast("Running speed test (can take up to 60s)…", "info");
+  } else {
+    showToast("Testing " + sc.type + " check…", "info");
+  }
+
+  fetch("/api/v1/service-checks/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(sc)
+  })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        showToast("Test failed: " + (res.data && res.data.error ? res.data.error : "server error"), "error");
+        return;
+      }
+      var result = res.data || {};
+      var status = result.status || "unknown";
+      var ms = result.response_ms;
+      var msg;
+      var toastKind = "info";
+      if (status === "up") {
+        msg = "✓ Check is UP" + (typeof ms === "number" ? " (" + ms + " ms)" : "");
+        toastKind = "success";
+      } else if (status === "degraded") {
+        msg = "△ Degraded";
+        toastKind = "warning";
+      } else {
+        msg = "✗ Check is DOWN";
+        toastKind = "error";
+      }
+      if (sc.type === "speed" && (typeof result.download_mbps === "number" || typeof result.upload_mbps === "number")) {
+        msg += " — " + (result.download_mbps || 0).toFixed(0) + " ↓ / " +
+               (result.upload_mbps || 0).toFixed(0) + " ↑ Mbps";
+      }
+      if (result.error) {
+        msg += " — " + result.error;
+      }
+      showToast(msg, toastKind);
+    })
+    .catch(function(e) {
+      showToast("Test failed: " + (e && e.message ? e.message : "network error"), "error");
+    })
+    .finally(function() {
+      if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    });
 }
 
 function removeServiceCheck(idx) {
