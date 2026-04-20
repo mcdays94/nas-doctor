@@ -43,6 +43,10 @@ type ServiceCheckStore interface {
 	GetServiceCheckHistory(checkKey string, limit int) ([]ServiceCheckEntry, error)
 	PruneServiceCheckHistory(olderThan time.Duration) (int, error)
 	DeleteServiceCheckByKey(key string) (int, error)
+	// DeleteServiceChecksNotIn removes every row from service_checks_history
+	// whose check_key is NOT in keepKeys. Passing nil or an empty slice
+	// deletes all rows. Returns the number of rows deleted.
+	DeleteServiceChecksNotIn(keepKeys []string) (int, error)
 }
 
 // HistoryStore handles time-series history for disks, system, GPU, containers, and speed tests.
