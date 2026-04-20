@@ -268,10 +268,21 @@ func collectIntel() []internal.GPUDevice {
 			}
 		}
 
-		// Temperature fallback: iGPU shares die with CPU — use thermal_zone or coretemp
-		if gpu.Temperature == 0 {
-			gpu.Temperature = readThermalZoneTemp()
-		}
+		// NOTE: we do NOT fall back to CPU package temperature here, even
+		// though the iGPU shares a die with the CPU.
+		//
+		// Rationale (issue #157): on iGPUs without i915/xe hwmon temp
+		// (Haswell / Broadwell / early Skylake), surfacing x86_pkg_temp
+		// as "GPU temperature" is semantically confusing — users already
+		// see CPU temp elsewhere, and the scan loop keeps the CPU busy for
+		// ~7-8s before the GPU collector runs, inflating the reading by
+		// 10-40°C vs. idle. Leave the GPU temperature empty when no real
+		// GPU sensor exists; the guard at line ~314 then skips the GPU
+		// entirely if no other telemetry is available (typical Haswell
+		// iGPU case), which is honest rather than misleading.
+		//
+		// readThermalZoneTemp is kept below as a helper for future use by
+		// a dedicated system-level CPU temperature collector.
 
 		// GPU usage: estimate from frequency ratio (actual / max)
 		cardDir := filepath.Dir(base) // e.g., /sys/class/drm/card0
@@ -365,29 +376,80 @@ func parseInt(s string) int {
 	return v
 }
 
-// readThermalZoneTemp reads the CPU/package temperature from thermal zones.
-// Intel iGPUs share the die with the CPU, so the CPU package temp is the
-// closest approximation of GPU temperature.
+// sysClassBase is the root path for sysfs class entries. Tests override this
+// to point at a temp directory simulating /sys/class.
+var sysClassBase = "/sys/class"
+
+// readThermalZoneTemp reads a CPU package temperature in °C.
+//
+// Preference order:
+//  1. {sysClassBase}/thermal/thermal_zone*/type == "x86_pkg_temp"  (canonical Intel package temp)
+//  2. {sysClassBase}/hwmon/hwmon*/name == "coretemp" → temp1_input  (Package id 0 on Intel)
+//  3. {sysClassBase}/thermal/thermal_zone*/type starting with "cpu"  (e.g. "cpu_thermal" on ARM/AMD)
+//
+// Explicitly SKIPPED: "acpitz" thermal zones — they commonly report the ACPI
+// critical trip point (often 98°C) instead of current temperature on systems
+// where ACPI thermal tables are incomplete, producing dangerously misleading
+// readings. Seen on the Unraid community's Haswell-era boards in issue #157.
+//
+// Returns 0 if no reliable source is found — callers treat that as "no CPU
+// temp available" rather than displaying a bogus fallback.
+//
+// Not currently wired into the GPU collector (see collectIntel comment); kept
+// available for a future system-level CPU temperature collector.
 func readThermalZoneTemp() int {
-	zones, _ := filepath.Glob("/sys/class/thermal/thermal_zone*/type")
+	// 1. x86_pkg_temp thermal zone (Intel canonical)
+	zones, _ := filepath.Glob(filepath.Join(sysClassBase, "thermal", "thermal_zone*", "type"))
 	for _, typePath := range zones {
-		zoneType := readSysfs(typePath)
-		// Prefer x86_pkg_temp (package), then coretemp, then any zone
-		if strings.Contains(zoneType, "x86_pkg") || strings.Contains(zoneType, "pkg") {
-			tempStr := readSysfs(filepath.Join(filepath.Dir(typePath), "temp"))
-			if tempStr != "" {
-				return parseInt(tempStr) / 1000
+		zoneType := strings.TrimSpace(readSysfs(typePath))
+		if zoneType == "x86_pkg_temp" {
+			if t := parseInt(readSysfs(filepath.Join(filepath.Dir(typePath), "temp"))) / 1000; t > 0 && t < 120 {
+				return t
 			}
 		}
 	}
-	// Fallback: try first thermal zone with a non-zero temperature
-	zones2, _ := filepath.Glob("/sys/class/thermal/thermal_zone*/temp")
-	for _, tempPath := range zones2 {
-		t := parseInt(readSysfs(tempPath)) / 1000
-		if t > 0 && t < 120 {
+
+	// 2. coretemp hwmon (Package id 0 on Intel, same sensor as x86_pkg_temp
+	//    but via a different driver; exists on CPUs that don't register an
+	//    x86_pkg_temp thermal zone)
+	hwmons, _ := filepath.Glob(filepath.Join(sysClassBase, "hwmon", "hwmon*", "name"))
+	for _, namePath := range hwmons {
+		if strings.TrimSpace(readSysfs(namePath)) != "coretemp" {
+			continue
+		}
+		dir := filepath.Dir(namePath)
+		// Prefer Package (label "Package id 0"), fall back to temp1_input which is
+		// normally the package on Intel coretemp drivers.
+		tempInputs, _ := filepath.Glob(filepath.Join(dir, "temp*_input"))
+		for _, tempPath := range tempInputs {
+			base := strings.TrimSuffix(filepath.Base(tempPath), "_input")
+			labelPath := filepath.Join(dir, base+"_label")
+			label := strings.ToLower(readSysfs(labelPath))
+			if strings.HasPrefix(label, "package") {
+				if t := parseInt(readSysfs(tempPath)) / 1000; t > 0 && t < 120 {
+					return t
+				}
+			}
+		}
+		// No Package label found — use temp1_input as the conventional package sensor.
+		if t := parseInt(readSysfs(filepath.Join(dir, "temp1_input"))) / 1000; t > 0 && t < 120 {
 			return t
 		}
 	}
+
+	// 3. cpu_thermal zones (ARM / AMD on some boards)
+	for _, typePath := range zones {
+		zoneType := strings.TrimSpace(readSysfs(typePath))
+		if zoneType == "acpitz" {
+			continue // known unreliable — skip
+		}
+		if strings.HasPrefix(zoneType, "cpu") {
+			if t := parseInt(readSysfs(filepath.Join(filepath.Dir(typePath), "temp"))) / 1000; t > 0 && t < 120 {
+				return t
+			}
+		}
+	}
+
 	return 0
 }
 
