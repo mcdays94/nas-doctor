@@ -17,25 +17,78 @@ import (
 	"github.com/mcdays94/nas-doctor/internal"
 )
 
-// collectUPS tries NUT first, then apcupsd. Returns Available=false if neither is available.
+// UPSRunner abstracts binary discovery (LookPath) and command execution (Output)
+// so the UPS collectors can be exercised from tests without real exec calls.
+type UPSRunner interface {
+	LookPath(name string) (string, error)
+	Output(name string, args ...string) ([]byte, error)
+}
+
+// execRunner is the production UPSRunner backed by os/exec.
+type execRunner struct{}
+
+func (execRunner) LookPath(name string) (string, error) { return exec.LookPath(name) }
+func (execRunner) Output(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).Output()
+}
+
+// defaultRunner is used by the exported collectUPS / collectNUT / collectApcupsd entrypoints.
+var defaultRunner UPSRunner = execRunner{}
+
+// collectUPS tries NUT first, then apcupsd.
+//
+// Both collectors return a non-nil diagnostic hint ({Status:"unreachable"}) when their
+// client binary is present but the daemon isn't reachable — this is *useful* UX when
+// it's the only signal, but on a typical Unraid box both binaries are installed and
+// only apcupsd actually reaches its daemon. We must therefore treat an "unreachable"
+// hint as "try the next source" rather than a successful detection. The hint is only
+// surfaced if EVERY source returned one.
+//
+// Returns Available=false if neither binary is installed.
 func collectUPS() (*internal.UPSInfo, error) {
+	return collectUPSWith(defaultRunner)
+}
+
+// collectUPSWith is the testable form of collectUPS — takes an injected UPSRunner.
+func collectUPSWith(r UPSRunner) (*internal.UPSInfo, error) {
+	var hint *internal.UPSInfo
+
 	// Try NUT first (works on TrueNAS, Synology, generic Linux, FreeBSD, macOS with brew)
-	if info, err := collectNUT(); err == nil && info != nil {
-		return info, nil
+	if info, err := collectNUTWith(r); err == nil && info != nil {
+		if !isUnreachableHint(info) {
+			return info, nil // NUT actually returned data
+		}
+		hint = info // remember; may surface if apcupsd also fails
 	}
 
 	// Try apcupsd (common on Unraid, available on all Linux/FreeBSD/macOS)
-	if info, err := collectApcupsd(); err == nil && info != nil {
-		return info, nil
+	if info, err := collectApcupsdWith(r); err == nil && info != nil {
+		if !isUnreachableHint(info) {
+			return info, nil // apcupsd actually returned data
+		}
+		if hint == nil {
+			hint = info // only NUT is missing; use apcupsd's hint
+		}
 	}
 
+	if hint != nil {
+		return hint, nil // neither source reached a daemon — show the first hint
+	}
 	return &internal.UPSInfo{Available: false}, nil
+}
+
+// isUnreachableHint reports whether the given UPSInfo is a diagnostic hint
+// emitted by unreachableHint() rather than a real data payload.
+func isUnreachableHint(info *internal.UPSInfo) bool {
+	return info != nil && info.Status == "unreachable"
 }
 
 // ── NUT (Network UPS Tools) via `upsc` ──────────────────────────────
 
-func collectNUT() (*internal.UPSInfo, error) {
-	if _, err := exec.LookPath("upsc"); err != nil {
+func collectNUT() (*internal.UPSInfo, error) { return collectNUTWith(defaultRunner) }
+
+func collectNUTWith(r UPSRunner) (*internal.UPSInfo, error) {
+	if _, err := r.LookPath("upsc"); err != nil {
 		return nil, err
 	}
 
@@ -48,12 +101,16 @@ func collectNUT() (*internal.UPSInfo, error) {
 		if nutHost != "" {
 			listArgs = append(listArgs, nutHost)
 		}
-		listOut, err := exec.Command("upsc", listArgs...).Output()
+		listOut, err := r.Output("upsc", listArgs...)
 		if err != nil {
 			// Some older NUT versions use -L (capital). Try fallback.
-			listOut, err = exec.Command("upsc", "-L").Output()
+			listOut, err = r.Output("upsc", "-L")
 			if err != nil {
-				return nil, err
+				// Binary is present but we can't reach a NUT server. Surface a
+				// diagnostic hint so the user sees *something* in the dashboard
+				// rather than a silent "no UPS" — especially important on
+				// container-networked setups where the daemon is on the host.
+				return unreachableHint("nut", err), nil
 			}
 		}
 
@@ -79,9 +136,9 @@ func collectNUT() (*internal.UPSInfo, error) {
 		upsID = upsName + "@" + nutHost
 	}
 
-	out, err := exec.Command("upsc", upsID).Output()
+	out, err := r.Output("upsc", upsID)
 	if err != nil {
-		return nil, err
+		return unreachableHint("nut", err), nil
 	}
 
 	return parseNUT(upsName, string(out)), nil
@@ -185,8 +242,10 @@ func nutStatusToHuman(status string) string {
 
 // ── apcupsd via `apcaccess` ─────────────────────────────────────────
 
-func collectApcupsd() (*internal.UPSInfo, error) {
-	if _, err := exec.LookPath("apcaccess"); err != nil {
+func collectApcupsd() (*internal.UPSInfo, error) { return collectApcupsdWith(defaultRunner) }
+
+func collectApcupsdWith(r UPSRunner) (*internal.UPSInfo, error) {
+	if _, err := r.LookPath("apcaccess"); err != nil {
 		return nil, err
 	}
 
@@ -196,12 +255,40 @@ func collectApcupsd() (*internal.UPSInfo, error) {
 		args = append(args, "-h", host)
 	}
 
-	out, err := exec.Command("apcaccess", args...).Output()
+	out, err := r.Output("apcaccess", args...)
 	if err != nil {
-		return nil, err
+		// Binary present but daemon unreachable — typical on Unraid when the
+		// apcupsd plugin isn't running or the container isn't on host network.
+		// Surface a diagnostic so the UPS section shows a helpful hint instead
+		// of silently disappearing.
+		return unreachableHint("apcupsd", err), nil
 	}
 
 	return parseApcaccess(string(out)), nil
+}
+
+// unreachableHint builds a UPSInfo that tells the user the client binary is
+// present but the daemon can't be reached (wrong host/port, service down, or
+// non-host-networked container). Available=true so the dashboard renders a row.
+func unreachableHint(source string, cause error) *internal.UPSInfo {
+	var hint string
+	switch source {
+	case "apcupsd":
+		hint = "apcupsd client present but daemon unreachable — check the host apcupsd plugin is running and listening on 127.0.0.1:3551, or set NAS_DOCTOR_APCUPSD_HOST"
+	case "nut":
+		hint = "NUT client present but server unreachable — check upsd is running, or set NAS_DOCTOR_NUT_HOST for remote setups"
+	default:
+		hint = "UPS client present but daemon unreachable"
+	}
+	if cause != nil {
+		hint += " (" + strings.TrimSpace(cause.Error()) + ")"
+	}
+	return &internal.UPSInfo{
+		Available:   true,
+		Source:      source,
+		Status:      "unreachable",
+		StatusHuman: hint,
+	}
 }
 
 // parseApcaccess parses `apcaccess` output (KEY : VALUE pairs).
