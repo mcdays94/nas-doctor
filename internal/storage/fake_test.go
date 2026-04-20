@@ -264,6 +264,98 @@ func TestFakeStore_DeleteServiceCheckByKey(t *testing.T) {
 	}
 }
 
+func TestFakeStore_DeleteServiceChecksNotIn_KeepsSpecifiedKeys(t *testing.T) {
+	store := NewFakeStore()
+
+	now := time.Now().UTC()
+	store.SaveServiceCheckResults([]internal.ServiceCheckResult{
+		{Key: "a", Name: "A", CheckedAt: now.Format(time.RFC3339)},
+		{Key: "b", Name: "B", CheckedAt: now.Format(time.RFC3339)},
+		{Key: "b", Name: "B", CheckedAt: now.Add(time.Minute).Format(time.RFC3339)},
+		{Key: "c", Name: "C", CheckedAt: now.Format(time.RFC3339)},
+		{Key: "c", Name: "C", CheckedAt: now.Add(time.Minute).Format(time.RFC3339)},
+	})
+
+	deleted, err := store.DeleteServiceChecksNotIn([]string{"a", "b"})
+	if err != nil {
+		t.Fatalf("DeleteServiceChecksNotIn: %v", err)
+	}
+	if deleted != 2 {
+		t.Errorf("expected 2 rows deleted (for key c), got %d", deleted)
+	}
+
+	entries, _ := store.ListLatestServiceChecks(10)
+	gotKeys := make(map[string]bool)
+	for _, e := range entries {
+		gotKeys[e.Key] = true
+	}
+	if len(gotKeys) != 2 || !gotKeys["a"] || !gotKeys["b"] {
+		t.Errorf("expected remaining keys {a,b}, got %v", gotKeys)
+	}
+	if gotKeys["c"] {
+		t.Error("key c should have been purged")
+	}
+}
+
+func TestFakeStore_DeleteServiceChecksNotIn_EmptyKeepList_DeletesAll(t *testing.T) {
+	store := NewFakeStore()
+
+	now := time.Now().UTC()
+	store.SaveServiceCheckResults([]internal.ServiceCheckResult{
+		{Key: "a", Name: "A", CheckedAt: now.Format(time.RFC3339)},
+		{Key: "b", Name: "B", CheckedAt: now.Format(time.RFC3339)},
+		{Key: "c", Name: "C", CheckedAt: now.Format(time.RFC3339)},
+	})
+
+	deleted, err := store.DeleteServiceChecksNotIn(nil)
+	if err != nil {
+		t.Fatalf("DeleteServiceChecksNotIn(nil): %v", err)
+	}
+	if deleted != 3 {
+		t.Errorf("expected 3 rows deleted, got %d", deleted)
+	}
+
+	entries, _ := store.ListLatestServiceChecks(10)
+	if len(entries) != 0 {
+		t.Errorf("expected 0 remaining entries, got %d", len(entries))
+	}
+
+	// Also verify empty (non-nil) slice deletes all.
+	store.SaveServiceCheckResults([]internal.ServiceCheckResult{
+		{Key: "x", Name: "X", CheckedAt: now.Format(time.RFC3339)},
+	})
+	deleted, err = store.DeleteServiceChecksNotIn([]string{})
+	if err != nil {
+		t.Fatalf("DeleteServiceChecksNotIn([]): %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("expected 1 row deleted with empty slice, got %d", deleted)
+	}
+}
+
+func TestFakeStore_DeleteServiceChecksNotIn_NoOpWhenAllKeysKept(t *testing.T) {
+	store := NewFakeStore()
+
+	now := time.Now().UTC()
+	store.SaveServiceCheckResults([]internal.ServiceCheckResult{
+		{Key: "a", Name: "A", CheckedAt: now.Format(time.RFC3339)},
+		{Key: "b", Name: "B", CheckedAt: now.Format(time.RFC3339)},
+	})
+
+	deleted, err := store.DeleteServiceChecksNotIn([]string{"a", "b", "c"})
+	if err != nil {
+		t.Fatalf("DeleteServiceChecksNotIn: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("expected 0 rows deleted, got %d", deleted)
+	}
+
+	entries, _ := store.ListLatestServiceChecks(10)
+	if len(entries) != 2 {
+		t.Errorf("expected 2 remaining entries, got %d", len(entries))
+	}
+}
+
 func TestFakeStore_SaveAndGetProcessStats(t *testing.T) {
 	store := NewFakeStore()
 
