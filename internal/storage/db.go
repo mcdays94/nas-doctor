@@ -1775,7 +1775,13 @@ func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 
 	// Explicitly delete from history tables for the snapshots being pruned,
 	// in case foreign_keys or CASCADE is not fully honoured at runtime.
-	for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history", "speedtest_history", "process_history"} {
+	//
+	// NOTE: disk_usage_history is intentionally NOT in this list — it has no
+	// snapshot_id column (capacity-forecast rows outlive snapshot pruning).
+	// It is pruned independently via PruneDiskUsageHistory. Including it here
+	// previously caused the whole transaction to roll back on every run
+	// ("no such column: snapshot_id"), making snapshot+history pruning a no-op.
+	for _, table := range []string{"smart_history", "system_history", "gpu_history", "container_stats_history", "speedtest_history", "process_history"} {
 		_, err := tx.Exec(fmt.Sprintf(
 			`DELETE FROM %s WHERE snapshot_id IN (%s)`, table, pruneQuery,
 		), keepMin, cutoff)
@@ -2130,6 +2136,22 @@ func (d *DB) GetDBStats() (*DBStats, error) {
 	return stats, nil
 }
 
+// PruneDiskUsageHistory removes disk_usage_history rows whose timestamp is
+// strictly before cutoff. Returns the number of rows deleted.
+//
+// disk_usage_history is snapshot-independent (no snapshot_id column): it's
+// keyed by mount_point + timestamp so capacity-forecast data survives
+// snapshot pruning. It has its own retention policy, managed independently
+// of PruneSnapshots.
+func (d *DB) PruneDiskUsageHistory(cutoff time.Time) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM disk_usage_history WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune disk_usage_history: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // PruneToSizeMB aggressively deletes the oldest snapshots until the DB is under the target size.
 // Returns the number of snapshots deleted.
 func (d *DB) PruneToSizeMB(targetMB float64) (int, error) {
@@ -2155,7 +2177,8 @@ func (d *DB) PruneToSizeMB(targetMB float64) (int, error) {
 		if err != nil {
 			return totalPruned, err
 		}
-		for _, table := range []string{"smart_history", "system_history", "disk_usage_history", "gpu_history", "container_stats_history", "speedtest_history", "process_history"} {
+		// NOTE: disk_usage_history excluded — no snapshot_id column; see PruneSnapshots.
+		for _, table := range []string{"smart_history", "system_history", "gpu_history", "container_stats_history", "speedtest_history", "process_history"} {
 			d.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE snapshot_id IN (
 				SELECT id FROM snapshots ORDER BY timestamp ASC LIMIT ?
 			)`, table), batchSize)
