@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -419,6 +420,57 @@ func normalizeServiceCheckConfig(check *internal.ServiceCheckConfig) error {
 		}
 		if check.ExpectedMax < check.ExpectedMin {
 			check.ExpectedMax = check.ExpectedMin
+		}
+	}
+	// DNS-specific validation.
+	check.DNSServer = strings.TrimSpace(check.DNSServer)
+	if check.Type == internal.ServiceCheckDNS {
+		// Bug #159: Go's resolver short-circuits when the target is a
+		// literal IP — LookupHost returns immediately without sending a
+		// packet. That makes "DNS check for 1.1.1.1" a silent no-op that
+		// always reports up in 0ms. Reject with an actionable error.
+		if net.ParseIP(check.Target) != nil {
+			return fmt.Errorf("DNS checks need a hostname like google.com; to test IP reachability use a Ping or TCP check")
+		}
+		if check.DNSServer != "" {
+			if err := validateDNSServer(check.DNSServer); err != nil {
+				return fmt.Errorf("invalid dns_server: %v", err)
+			}
+		}
+	} else if check.DNSServer != "" {
+		// dns_server is only meaningful for DNS-type checks. Rather than
+		// silently dropping it, reject explicitly so a miscategorised
+		// check isn't saved with stale config.
+		return fmt.Errorf("dns_server is only valid for DNS-type checks")
+	}
+	return nil
+}
+
+// validateDNSServer checks that a user-supplied DNS resolver address is a
+// valid host (or host:port). Port, when present, must be 1-65535.
+func validateDNSServer(server string) error {
+	host, port, err := net.SplitHostPort(server)
+	if err != nil {
+		// No port component — treat the whole string as the host.
+		host = server
+		port = ""
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return fmt.Errorf("empty host")
+	}
+	// Host must be either an IP or a non-empty hostname. We do not require
+	// it to resolve at save time — the user may be provisioning ahead of DNS.
+	if net.ParseIP(host) == nil {
+		// Basic hostname sanity: no spaces, no leading dots.
+		if strings.ContainsAny(host, " \t") || strings.HasPrefix(host, ".") {
+			return fmt.Errorf("invalid hostname %q", host)
+		}
+	}
+	if port != "" {
+		p, err := strconv.Atoi(port)
+		if err != nil || p < 1 || p > 65535 {
+			return fmt.Errorf("port must be between 1 and 65535")
 		}
 	}
 	return nil
