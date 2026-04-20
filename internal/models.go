@@ -167,11 +167,12 @@ type CloudflaredTunnel struct {
 type TailscaleInfo struct {
 	Installed    bool            `json:"installed"`
 	Version      string          `json:"version,omitempty"`
-	BackendState string          `json:"backend_state,omitempty"` // Running, Stopped, NeedsLogin
+	BackendState string          `json:"backend_state,omitempty"` // Running, Stopped, NeedsLogin, Unreachable
 	Self         *TailscaleNode  `json:"self,omitempty"`
 	Peers        []TailscaleNode `json:"peers,omitempty"`
 	MagicDNS     bool            `json:"magic_dns,omitempty"`
 	TailnetName  string          `json:"tailnet_name,omitempty"`
+	Hint         string          `json:"hint,omitempty"` // Operator hint when detection is partial (e.g. missing socket mount)
 }
 
 type TailscaleNode struct {

@@ -1,0 +1,76 @@
+{
+  "Version": "1.74.1-tff4a3f19c-g0b4c2e1",
+  "BackendState": "Running",
+  "AuthURL": "",
+  "TailscaleIPs": ["100.64.1.2", "fd7a:115c:a1e0::2"],
+  "Self": {
+    "ID": "nABCD1234",
+    "PublicKey": "nodekey:abc123",
+    "HostName": "tower",
+    "DNSName": "tower.tail-scale.ts.net.",
+    "OS": "linux",
+    "UserID": 1,
+    "TailscaleIPs": ["100.64.1.2", "fd7a:115c:a1e0::2"],
+    "Tags": ["tag:server"],
+    "Online": true,
+    "Relay": "lhr",
+    "RxBytes": 1234567,
+    "TxBytes": 7654321,
+    "Created": "2025-01-01T00:00:00Z",
+    "LastSeen": "2026-04-20T10:00:00Z"
+  },
+  "MagicDNSSuffix": "tail-scale.ts.net",
+  "CurrentTailnet": {
+    "Name": "example@github",
+    "MagicDNSSuffix": "tail-scale.ts.net",
+    "MagicDNSEnabled": true
+  },
+  "Peer": {
+    "nodekey:peer1": {
+      "ID": "nPEER1",
+      "PublicKey": "nodekey:peer1",
+      "HostName": "laptop",
+      "DNSName": "laptop.tail-scale.ts.net.",
+      "OS": "macOS",
+      "UserID": 1,
+      "TailscaleIPs": ["100.64.1.3"],
+      "Online": true,
+      "ExitNode": false,
+      "Relay": "lhr",
+      "RxBytes": 5000,
+      "TxBytes": 9000,
+      "LastSeen": "2026-04-20T09:58:00Z",
+      "Tags": ["tag:client"]
+    },
+    "nodekey:peer2": {
+      "ID": "nPEER2",
+      "PublicKey": "nodekey:peer2",
+      "HostName": "phone",
+      "DNSName": "phone.tail-scale.ts.net.",
+      "OS": "iOS",
+      "UserID": 1,
+      "TailscaleIPs": ["100.64.1.4"],
+      "Online": false,
+      "ExitNode": false,
+      "Relay": "",
+      "RxBytes": 0,
+      "TxBytes": 0,
+      "LastSeen": "2026-04-19T22:00:00Z"
+    },
+    "nodekey:peer3": {
+      "ID": "nPEER3",
+      "PublicKey": "nodekey:peer3",
+      "HostName": "exit-node",
+      "DNSName": "exit-node.tail-scale.ts.net.",
+      "OS": "linux",
+      "UserID": 1,
+      "TailscaleIPs": ["100.64.1.5"],
+      "Online": true,
+      "ExitNode": true,
+      "Relay": "fra",
+      "RxBytes": 200,
+      "TxBytes": 300,
+      "LastSeen": "2026-04-20T10:00:00Z"
+    }
+  }
+}
