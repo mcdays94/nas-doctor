@@ -195,9 +195,15 @@ func defaultSettings() Settings {
 			ContainerMetrics: false,
 			MergedContainers: true,
 			MergedDrives:     true,
-			Backup:           true,
-			SpeedTest:        true,
-			Processes:        true,
+			// Backup monitoring is a niche, opt-in surface — the feature is
+			// auto-detect-only (no config UI) and almost every NAS Doctor
+			// install has no provider CLI reachable from the container, so
+			// the section renders empty or just shows the "no provider
+			// detected" hint card. Default it off; the toggle in Settings →
+			// Dashboard Sections lets users opt in.
+			Backup:    false,
+			SpeedTest: true,
+			Processes: true,
 		},
 		ChartRangeHours: 1,
 	}
