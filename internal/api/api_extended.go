@@ -1317,8 +1317,17 @@ func (s *Server) handleServiceCheckHistory(w http.ResponseWriter, r *http.Reques
 // Intended for the settings page "Test" button so users can validate a check
 // before saving. Supports all 7 check types. Speed-type tests run the Ookla
 // CLI and may take 10-60s — this route is registered outside the router-wide
-// 30s Timeout group (see api.go).
+// 30s Timeout group (see api.go) AND disables the http.Server WriteTimeout
+// per-request (set to 30s in cmd/nas-doctor/main.go for baseline safety).
 func (s *Server) handleTestServiceCheck(w http.ResponseWriter, r *http.Request) {
+	// Disable the per-connection write deadline for this handler. The baseline
+	// http.Server.WriteTimeout=30s would otherwise kill long-running Ookla
+	// speed tests and return a 502 upstream. RunCheck still enforces the
+	// check's own TimeoutSec, so the request cannot hang indefinitely.
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
