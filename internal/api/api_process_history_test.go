@@ -141,10 +141,16 @@ func TestStatsHTMLContainsProcessHistorySection(t *testing.T) {
 		name   string
 		substr string
 	}{
-		{"section title", "Process CPU History"},
+		{"section title", "Process CPU Load"},
 		{"API fetch", "/api/v1/history/processes"},
 		{"chart canvas", "chart-process-cpu"},
 		{"NasChart.line call", "NasChart.line"},
+		// Per-core disambiguation — see issue #140. The chart plots `ps aux %CPU`
+		// which is a per-core value (N cores busy ≈ N×100%), so the label must
+		// not imply a normalized 0-100 scale.
+		{"per-core chart label", "% of 1 core"},
+		{"per-core y-axis label", "% / core"},
+		{"explanatory caption", "100% = one CPU core fully busy"},
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {
@@ -152,6 +158,11 @@ func TestStatsHTMLContainsProcessHistorySection(t *testing.T) {
 				t.Errorf("stats.html missing %q — expected substring: %q", tc.name, tc.substr)
 			}
 		})
+	}
+
+	// Ensure the ambiguous old label is gone.
+	if strings.Contains(tmpl, "CPU Usage (%) by Process") {
+		t.Errorf("stats.html still contains ambiguous label %q; should disambiguate per-core semantics (issue #140)", "CPU Usage (%) by Process")
 	}
 }
 
