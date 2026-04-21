@@ -907,10 +907,14 @@ function showToast(msg, type) {
   t.className = "toast toast-" + (type || "info");
   t.textContent = msg;
   c.appendChild(t);
+  // Multi-line toasts (Test-button diagnostics) need more read time.
+  // Rough heuristic: 3s + ~1.2s per extra line, capped at 10s.
+  var lines = String(msg).split("\n").length;
+  var hold = Math.min(3000 + Math.max(0, lines - 1) * 1200, 10000);
   setTimeout(function() {
     t.style.animation = "toast-out 0.25s ease forwards";
     setTimeout(function() { t.remove(); }, 260);
-  }, 3000);
+  }, hold);
 }
 
 /* ---------- Theme selection ---------- */
@@ -1818,11 +1822,52 @@ function saveServiceCheck() {
   saveSettings();
 }
 
+// renderServiceCheckDetails turns the per-type Details map returned by
+// POST /api/v1/service-checks/test into a human-readable multi-line
+// summary. Each check type has its own renderer so we highlight the
+// fields that matter most for diagnosing THAT type's failures (HTTP
+// status code vs DNS records vs ping loss). See issue #154.
+function renderServiceCheckDetails(type, details, result) {
+  if (!details || typeof details !== "object") return "";
+  var lines = [];
+  if (type === "http") {
+    if (typeof details.status_code === "number") lines.push("HTTP " + details.status_code);
+    if (details.content_type) lines.push("Content-Type: " + details.content_type);
+    if (typeof details.body_bytes === "number") lines.push("Body: " + details.body_bytes + " bytes");
+    if (details.final_url && details.final_url !== details.request_url) {
+      lines.push("Final URL: " + details.final_url);
+    }
+    if (details.failure_stage) lines.push("Failed at: " + details.failure_stage);
+  } else if (type === "tcp" || type === "smb" || type === "nfs") {
+    if (details.resolved_address) lines.push("Connected to: " + details.resolved_address);
+    if (details.failure_stage) lines.push("Failed at: " + details.failure_stage);
+  } else if (type === "dns") {
+    if (details.query_host) lines.push("Queried: " + details.query_host);
+    if (details.dns_server) lines.push("Server: " + details.dns_server);
+    if (details.records && details.records.length) {
+      lines.push("Records: " + details.records.join(", "));
+    }
+    if (details.failure_stage) lines.push("Failed at: " + details.failure_stage);
+  } else if (type === "ping") {
+    if (details.query_host) lines.push("Host: " + details.query_host);
+    if (typeof details.rtt_ms === "number") lines.push("RTT: " + details.rtt_ms.toFixed(2) + " ms");
+    if (typeof details.packet_loss_pct === "number") lines.push("Loss: " + details.packet_loss_pct + "%");
+    if (details.failure_stage) lines.push("Failed at: " + details.failure_stage);
+  } else if (type === "speed") {
+    if (typeof result.download_mbps === "number") lines.push("Download: " + result.download_mbps.toFixed(0) + " Mbps");
+    if (typeof result.upload_mbps === "number") lines.push("Upload: " + result.upload_mbps.toFixed(0) + " Mbps");
+    if (typeof result.latency_ms === "number") lines.push("Latency: " + result.latency_ms.toFixed(1) + " ms");
+  }
+  return lines.join("\n");
+}
+
 // testServiceCheck runs the current form's configuration through the
 // /api/v1/service-checks/test endpoint without persisting the result. It
-// surfaces status, response time, and error messages via toast. Speed-type
-// checks can take up to 60s on real hardware (Ookla CLI), so we warn the
-// user up-front and disable the button for the duration of the request.
+// surfaces status, response time, error messages, and the per-type
+// Details map (HTTP status code, resolved IPs, DNS records, ping RTT,
+// etc.) via toast. Speed-type checks can take up to 60s on real hardware
+// (Ookla CLI), so we warn the user up-front and disable the button for
+// the duration of the request. See issue #154.
 function testServiceCheck() {
   var sc = readServiceCheckForm();
   if (!sc) return;
@@ -1853,24 +1898,29 @@ function testServiceCheck() {
       var result = res.data || {};
       var status = result.status || "unknown";
       var ms = result.response_ms;
-      var msg;
+      var headline;
       var toastKind = "info";
       if (status === "up") {
-        msg = "✓ Check is UP" + (typeof ms === "number" ? " (" + ms + " ms)" : "");
+        headline = "✓ Check is UP" + (typeof ms === "number" ? " (" + ms + " ms)" : "");
         toastKind = "success";
       } else if (status === "degraded") {
-        msg = "△ Degraded";
+        headline = "△ Degraded";
         toastKind = "warning";
       } else {
-        msg = "✗ Check is DOWN";
+        headline = "✗ Check is DOWN";
         toastKind = "error";
       }
-      if (sc.type === "speed" && (typeof result.download_mbps === "number" || typeof result.upload_mbps === "number")) {
-        msg += " — " + (result.download_mbps || 0).toFixed(0) + " ↓ / " +
-               (result.upload_mbps || 0).toFixed(0) + " ↑ Mbps";
+
+      // Per-type details + optional error message. Build a multi-line
+      // toast so users can see WHY a check failed (404? connection
+      // refused? NXDOMAIN?) rather than just THAT it failed.
+      var msg = headline;
+      var detailsText = renderServiceCheckDetails(sc.type, result.details, result);
+      if (detailsText) {
+        msg += "\n" + detailsText;
       }
       if (result.error) {
-        msg += " — " + result.error;
+        msg += "\n" + result.error;
       }
       showToast(msg, toastKind);
     })

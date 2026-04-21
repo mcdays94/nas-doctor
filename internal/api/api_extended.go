@@ -1424,6 +1424,12 @@ func (s *Server) handleTestServiceCheck(w http.ResponseWriter, r *http.Request) 
 	// by RunDueChecks, which we don't call). We deliberately avoid using
 	// s.scheduler here so the endpoint works in demo mode and tests.
 	checker := scheduler.NewServiceChecker(s.store, s.logger)
+	// Opt into the per-type rich details map — status codes, resolved IPs,
+	// DNS records, failure stages — so the settings UI can render an
+	// actionable diagnosis, not just "down". See issue #154. The
+	// scheduled-check path does NOT set this flag, so 30s loops remain
+	// lean.
+	checker.SetCollectDetails(true)
 	if cfg.Type == internal.ServiceCheckSpeed {
 		checker.SetSpeedTestRunner(collector.RunSpeedTest)
 	}

@@ -301,10 +301,12 @@ body.theme-clean .badge-generic { background:rgba(0,0,0,0.06) }
   padding:10px 18px; border-radius:var(--radius);
   font-size:13px; font-weight:500; color:#fff;
   animation:toast-in 0.25s ease; pointer-events:none;
+  max-width:420px; white-space:pre-wrap;
 }
 .toast-success { background:var(--green) }
 .toast-error   { background:var(--red) }
 .toast-info    { background:var(--accent) }
+.toast-warning { background:var(--orange, #f59e0b) }
 @keyframes toast-in { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
 @keyframes toast-out { from{opacity:1} to{opacity:0;transform:translateY(-8px)} }
 

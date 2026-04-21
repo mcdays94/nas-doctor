@@ -312,6 +312,39 @@ func TestHandleTestServiceCheck_DoesNotTouchConsecutiveFailures(t *testing.T) {
 	}
 }
 
+// TestHandleTestServiceCheck_HTTP_ReturnsDetails — the /test endpoint must
+// opt-in to rich details so the UI can display status_code, content_type,
+// body_bytes, final_url, etc. (issue #154).
+func TestHandleTestServiceCheck_HTTP_ReturnsDetails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	srv := newSettingsTestServer()
+	rec := postServiceCheckTest(t, srv, map[string]any{
+		"name": "details-http", "type": "http", "target": ts.URL,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// Decode through a generic map so we can assert details keys without
+	// losing the numeric type fidelity that Go's json encoder produces.
+	var generic map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &generic); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	details, ok := generic["details"].(map[string]any)
+	if !ok || len(details) == 0 {
+		t.Fatalf("expected details in response, got %+v", generic["details"])
+	}
+	if _, hasCode := details["status_code"]; !hasCode {
+		t.Fatalf("expected status_code in details, got keys: %+v", details)
+	}
+}
+
 // TestRegisterExtendedRoutes_ExposesServiceCheckTest — the new route is registered
 // and responds on POST through the router.
 func TestRegisterExtendedRoutes_ExposesServiceCheckTest(t *testing.T) {
