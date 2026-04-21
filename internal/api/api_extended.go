@@ -1040,7 +1040,13 @@ type diskDetailResponse struct {
 }
 
 // handleGetDisk returns SMART data, history, and related findings for a specific disk.
-// GET /api/v1/disks/{serial}
+// GET /api/v1/disks/{serial}[?hours=N]
+//
+// When `hours` is supplied (valid positive integer), history is filtered by
+// time window so the chart range selector (1D / 1W / 1M / 1Y — issue #166)
+// returns a legible number of points regardless of scan cadence. When
+// omitted or malformed, the legacy 500-row behavior is preserved for
+// backward compatibility with any external callers of this endpoint.
 func (s *Server) handleGetDisk(w http.ResponseWriter, r *http.Request) {
 	serial := chi.URLParam(r, "serial")
 	if serial == "" {
@@ -1050,8 +1056,23 @@ func (s *Server) handleGetDisk(w http.ResponseWriter, r *http.Request) {
 
 	resp := diskDetailResponse{}
 
-	// Get history from the dedicated SMART history table.
-	history, err := s.store.GetDiskHistory(serial, 500)
+	// Parse optional ?hours= query param. Valid positive ints route to the
+	// time-windowed query; anything else (missing, malformed, <=0) falls
+	// back to the legacy row-limited query.
+	var (
+		history []storage.DiskHistoryPoint
+		err     error
+	)
+	hoursStr := r.URL.Query().Get("hours")
+	if hours, parseErr := strconv.Atoi(hoursStr); parseErr == nil && hours > 0 {
+		// Cap at 1 year so runaway params don't generate absurd ranges.
+		if hours > 8760 {
+			hours = 8760
+		}
+		history, err = s.store.GetDiskHistoryInRange(serial, time.Duration(hours)*time.Hour)
+	} else {
+		history, err = s.store.GetDiskHistory(serial, 500)
+	}
 	if err != nil {
 		s.logger.Error("failed to get disk history", "serial", serial, "error", err)
 	}
