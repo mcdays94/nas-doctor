@@ -42,7 +42,15 @@
 .log-panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
 .log-table{width:100%;font-size:12px;border-collapse:collapse}
 .log-table th{text-align:left;padding:8px 12px;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0}
-.log-table td{padding:6px 12px;border-bottom:1px solid var(--border)}
+/* white-space:normal (unsets nowrap from shared styles.go), word-break,
+   and overflow-wrap together let long tokens in any cell break at
+   character boundaries instead of pushing the column — and transitively
+   the table — wider than the surrounding panel. Without this, a long
+   unbreakable Check Name stretches the table past the panel, and the
+   colspan=6 detail row inherits that width, pushing the expanded grid
+   past the card edge (#176). Cells with intentional ellipsis (e.g. the
+   error column) still opt out via inline `white-space:nowrap`. */
+.log-table td{padding:6px 12px;border-bottom:1px solid var(--border);white-space:normal;word-break:break-word;overflow-wrap:anywhere}
 .log-table .status-up{color:var(--green);font-weight:600}
 .log-table .status-down{color:var(--red);font-weight:600}
 .log-table .status-degraded{color:var(--amber);font-weight:600}
@@ -61,9 +69,17 @@
 .log-detail{padding:12px 16px;background:var(--bg-elevated);font-size:12px;display:none}
 .log-detail.open{display:block}
 .log-detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
-.log-detail-item{padding:6px 8px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)}
+/* min-width:0 lets this grid track shrink below the intrinsic width
+   of long unbreakable content (URLs, check keys). Without it the track
+   refuses to collapse and the whole grid blows past the parent card's
+   right edge — see #176. */
+.log-detail-item{padding:6px 8px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);min-width:0}
 .log-detail-item .ld-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.3px}
-.log-detail-item .ld-val{font-size:13px;font-weight:600;margin-top:2px}
+/* overflow-wrap:anywhere + word-break:break-word together force wrapping
+   at any character boundary for tokens without whitespace. Both are set
+   because older engines honor word-break and modern engines prefer
+   overflow-wrap; keeping both is the broadest-compat pattern. */
+.log-detail-item .ld-val{font-size:13px;font-weight:600;margin-top:2px;overflow-wrap:anywhere;word-break:break-word}
 /* Orphan badge */
 .orphan-badge{font-size:9px;padding:1px 6px;border-radius:999px;background:rgba(217,119,6,0.12);color:var(--amber);margin-left:6px}
 .btn-delete-check{font-size:10px;padding:2px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--red);cursor:pointer;margin-left:auto}
