@@ -154,9 +154,22 @@ function drawAxes(ctx,m,w,h,yInfo,labels,opts){
   /* x labels */
   if(labels&&labels.length){
     ctx.textAlign="center"; ctx.textBaseline="top";
-    var step=Math.max(1,Math.floor(labels.length/(cw/50)));
+    /* Derive stride from the widest rendered label so adjacent labels never
+       overlap. The old hardcoded ~50px label budget silently broke once
+       labels exceeded that width — datetime strings like "4/17 23:11"
+       measure ~70px in 11px sans-serif. See issue #165. */
+    var maxLabelWidth=0;
+    for(var mi=0;mi<labels.length;mi++){
+      var lw=ctx.measureText(labels[mi]==null?"":String(labels[mi])).width;
+      if(lw>maxLabelWidth) maxLabelWidth=lw;
+    }
+    var LABEL_PAD=12; /* horizontal gutter between adjacent labels */
+    var minLabelDist=maxLabelWidth+LABEL_PAD;
+    var intervals=labels.length-1||1;
+    /* Smallest stride s such that s*(cw/intervals) >= minLabelDist. */
+    var step=Math.max(1,Math.ceil(minLabelDist*intervals/cw));
     for(var j=0;j<labels.length;j+=step){
-      var px=m.l+j/(labels.length-1||1)*cw;
+      var px=m.l+j/intervals*cw;
       ctx.fillStyle=th.text;
       ctx.fillText(labels[j],px,h-m.b+8);
     }
