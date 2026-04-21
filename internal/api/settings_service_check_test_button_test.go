@@ -186,6 +186,50 @@ func TestSettingsHTML_IntervalSelect_OptionsMatchAnyAutoDefault(t *testing.T) {
 	}
 }
 
+// TestSettingsHTML_TestServiceCheckRendersDetails verifies that
+// testServiceCheck (or a helper it invokes) renders the rich per-type
+// Details map returned by the /service-checks/test endpoint (issue #154)
+// — at a minimum, HTTP status_code, DNS records, TCP resolved_address,
+// and ping rtt_ms must appear in the human-readable output. A regression
+// here silently drops the new diagnostic fields even though the backend
+// returns them.
+func TestSettingsHTML_TestServiceCheckRendersDetails(t *testing.T) {
+	html := loadSettingsHTML(t)
+
+	// testServiceCheck itself must read the details payload. We scan a
+	// generous window from the function declaration so the test tolerates
+	// details rendering being factored into a helper above or below.
+	testRe := regexp.MustCompile(`function\s+testServiceCheck\s*\(\s*\)\s*\{`)
+	testLoc := testRe.FindStringIndex(html)
+	if testLoc == nil {
+		t.Fatal("testServiceCheck() function not found")
+	}
+	testEnd := testLoc[1] + 4000
+	if testEnd > len(html) {
+		testEnd = len(html)
+	}
+	testBody := html[testLoc[0]:testEnd]
+	if !regexp.MustCompile(`result\s*\.\s*details|\bdetails\b`).MatchString(testBody) {
+		t.Fatalf("testServiceCheck should read result.details to render per-type diagnostics; body window:\n%s", testBody)
+	}
+
+	// Per-type renderer keys MUST be present somewhere in the template —
+	// the whole value of issue #154 is that users can distinguish 404
+	// from connection-refused, DNS failures from connect failures, etc.
+	mustSurface := []string{"status_code", "records", "resolved_address", "rtt_ms"}
+	for _, key := range mustSurface {
+		if !strings.Contains(html, key) {
+			t.Errorf("settings.html missing detail renderer key %q — test button won't display this field", key)
+		}
+	}
+
+	// A dedicated per-type renderer is clearer than a flat dump. Expect
+	// explicit branching on check type somewhere in the page.
+	if !regexp.MustCompile(`type\s*===?\s*["']http["']|type\s*===?\s*["']dns["']`).MatchString(html) {
+		t.Error("settings.html should branch on check type for per-type rendering (expected type===\"http\" or type===\"dns\")")
+	}
+}
+
 // TestHandleTestServiceCheck_DisablesWriteDeadline verifies that the handler
 // code invokes http.NewResponseController(w).SetWriteDeadline(time.Time{}) so
 // that speed tests can run longer than the 30s baseline http.Server.WriteTimeout
