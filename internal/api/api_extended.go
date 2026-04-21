@@ -584,17 +584,33 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		settings.ServiceChecks.Checks = []internal.ServiceCheckConfig{}
 	}
 	serviceNames := make(map[string]struct{}, len(settings.ServiceChecks.Checks))
+	// Accumulate per-check validation errors so users with multiple
+	// invalid checks see all of them at once, and each error names
+	// the offending check. Issue #169: a flat error that didn't
+	// identify WHICH check failed led upgraders to assume the check
+	// they were currently editing was broken, even when the real
+	// problem was a pre-existing check left over from v0.9.2.
+	var checkErrs []string
 	for i := range settings.ServiceChecks.Checks {
 		check := &settings.ServiceChecks.Checks[i]
+		label := strings.TrimSpace(check.Name)
+		if label == "" {
+			label = fmt.Sprintf("#%d", i+1)
+		}
 		if err := normalizeServiceCheckConfig(check); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
+			checkErrs = append(checkErrs, fmt.Sprintf("%q: %s", label, err.Error()))
 		}
 		if _, exists := serviceNames[strings.ToLower(check.Name)]; exists {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "duplicate service check name: " + check.Name})
-			return
+			checkErrs = append(checkErrs, fmt.Sprintf("%q: duplicate service check name", label))
+			continue
 		}
 		serviceNames[strings.ToLower(check.Name)] = struct{}{}
+	}
+	if len(checkErrs) > 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "service_checks: " + strings.Join(checkErrs, "; "),
+		})
+		return
 	}
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
