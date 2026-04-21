@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -41,6 +42,12 @@ type ServiceChecker struct {
 	lastRun        map[string]time.Time
 	mu             sync.Mutex
 	speedTestRunFn SpeedTestRunner // nil → speed checks return "no tool"
+	// collectDetails, when true, enriches RunCheck results with the
+	// per-check-type Details map (HTTP status code, resolved IPs, DNS
+	// records, etc.). The scheduled-check path (RunDueChecks) explicitly
+	// strips Details regardless of this flag — only the ad-hoc Test-button
+	// endpoint opts into this richer output. See issue #154.
+	collectDetails bool
 }
 
 // NewServiceChecker creates a ready-to-use ServiceChecker.
@@ -57,6 +64,17 @@ func (sc *ServiceChecker) SetSpeedTestRunner(fn SpeedTestRunner) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	sc.speedTestRunFn = fn
+}
+
+// SetCollectDetails toggles the opt-in rich-details output. Call with true
+// from the ad-hoc /service-checks/test endpoint to get diagnostic context
+// (HTTP status code, resolved IPs, DNS records, etc.) alongside the usual
+// status/response_ms/error triple. The scheduled-check path never emits
+// details — see RunDueChecks. Issue #154.
+func (sc *ServiceChecker) SetCollectDetails(enabled bool) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.collectDetails = enabled
 }
 
 // RunDueChecks evaluates which checks are due based on their intervals,
@@ -90,6 +108,11 @@ func (sc *ServiceChecker) RunDueChecks(checks []internal.ServiceCheckConfig, now
 	results := make([]internal.ServiceCheckResult, 0, len(due))
 	for _, check := range due {
 		result := sc.RunCheck(check, now)
+		// Scheduled path never emits Details — those are only for the
+		// ad-hoc Test-button flow. Strip them defensively in case the
+		// checker was flipped into collect-details mode elsewhere. See
+		// #154 (keeps history rows lean and JSON payloads small).
+		result.Details = nil
 
 		// Track consecutive failures from store history.
 		state, ok, err := sc.store.GetLatestServiceCheckState(result.Key)
@@ -148,6 +171,13 @@ func (sc *ServiceChecker) RunCheck(check internal.ServiceCheckConfig, now time.T
 		FailureSeverity:  severity,
 	}
 
+	sc.mu.Lock()
+	collect := sc.collectDetails
+	sc.mu.Unlock()
+	if collect {
+		result.Details = make(map[string]any, 4)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
@@ -165,6 +195,13 @@ func (sc *ServiceChecker) RunCheck(check internal.ServiceCheckConfig, now time.T
 		sc.runSpeedCheck(check, &result, start)
 	default:
 		result.Error = "unsupported service check type"
+	}
+
+	// If collection is off, ensure Details is nil (zero-length maps would
+	// still serialise as "details":{}). This guarantees backward-compat
+	// JSON output for the scheduled path.
+	if !collect {
+		result.Details = nil
 	}
 
 	if result.ResponseMS == 0 {
@@ -187,9 +224,15 @@ func (sc *ServiceChecker) RunCheck(check internal.ServiceCheckConfig, now time.T
 
 func (sc *ServiceChecker) runHTTPCheck(ctx context.Context, check internal.ServiceCheckConfig, result *internal.ServiceCheckResult, start time.Time, timeoutSec int) {
 	urlValue := NormalizeHTTPURL(check.Target)
+	if result.Details != nil {
+		result.Details["request_url"] = urlValue
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlValue, nil)
 	if err != nil {
 		result.Error = err.Error()
+		if result.Details != nil {
+			result.Details["failure_stage"] = "request_build"
+		}
 		return
 	}
 	req.Header.Set("User-Agent", "nas-doctor-service-check/1.0")
@@ -200,9 +243,29 @@ func (sc *ServiceChecker) runHTTPCheck(ctx context.Context, check internal.Servi
 	result.ResponseMS = time.Since(start).Milliseconds()
 	if err != nil {
 		result.Error = err.Error()
+		if result.Details != nil {
+			result.Details["failure_stage"] = classifyHTTPError(err)
+		}
 		return
 	}
-	_ = resp.Body.Close()
+	defer resp.Body.Close()
+
+	if result.Details != nil {
+		result.Details["status_code"] = resp.StatusCode
+		if ct := resp.Header.Get("Content-Type"); ct != "" {
+			result.Details["content_type"] = ct
+		}
+		if resp.Request != nil && resp.Request.URL != nil {
+			result.Details["final_url"] = resp.Request.URL.String()
+		} else {
+			result.Details["final_url"] = urlValue
+		}
+		// Read body (capped) so we can report size AND release the
+		// connection cleanly. Cap at 1 MiB to bound memory for users
+		// who accidentally test a file-server URL.
+		n, _ := io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		result.Details["body_bytes"] = n
+	}
 
 	minStatus := check.ExpectedMin
 	maxStatus := check.ExpectedMax
@@ -217,13 +280,44 @@ func (sc *ServiceChecker) runHTTPCheck(ctx context.Context, check internal.Servi
 	}
 	if resp.StatusCode < minStatus || resp.StatusCode > maxStatus {
 		result.Error = fmt.Sprintf("unexpected HTTP status %d", resp.StatusCode)
+		if result.Details != nil {
+			result.Details["failure_stage"] = "http_status"
+		}
 		return
 	}
 	result.Status = "up"
 }
 
+// classifyHTTPError maps the common failure shapes to a short diagnostic
+// label the UI can render (e.g. "connection refused", "dns lookup failed",
+// "tls handshake failed", "timeout"). We look at both the error text and
+// the typed wrappers Go's net stack produces; best-effort, not exhaustive.
+func classifyHTTPError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "x509") || strings.Contains(msg, "tls"):
+		return "tls"
+	case strings.Contains(msg, "no such host") || strings.Contains(msg, "dns"):
+		return "dns"
+	case strings.Contains(msg, "connection refused"):
+		return "connection_refused"
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded"):
+		return "timeout"
+	case strings.Contains(msg, "unreachable") || strings.Contains(msg, "no route"):
+		return "network_unreachable"
+	default:
+		return "connect"
+	}
+}
+
 func (sc *ServiceChecker) runDNSCheck(ctx context.Context, check internal.ServiceCheckConfig, result *internal.ServiceCheckResult, start time.Time) {
 	host := NormalizeDNSHost(check.Target)
+	if result.Details != nil {
+		result.Details["query_host"] = host
+	}
 	if host == "" {
 		result.Error = "empty DNS target"
 		return
@@ -236,15 +330,20 @@ func (sc *ServiceChecker) runDNSCheck(ctx context.Context, check internal.Servic
 	// See issue #159.
 	if net.ParseIP(host) != nil {
 		result.Error = "DNS checks need a hostname like google.com; to test IP reachability use a Ping or TCP check"
+		if result.Details != nil {
+			result.Details["failure_stage"] = "ip_target_rejected"
+		}
 		return
 	}
 
 	resolver := net.DefaultResolver
+	resolvedServer := "system"
 	if dnsServer := strings.TrimSpace(check.DNSServer); dnsServer != "" {
 		server := dnsServer
 		if _, _, err := net.SplitHostPort(server); err != nil {
 			server = net.JoinHostPort(server, "53")
 		}
+		resolvedServer = server
 		timeoutSec := check.TimeoutSec
 		if timeoutSec <= 0 {
 			timeoutSec = 5
@@ -257,30 +356,72 @@ func (sc *ServiceChecker) runDNSCheck(ctx context.Context, check internal.Servic
 			},
 		}
 	}
+	if result.Details != nil {
+		result.Details["dns_server"] = resolvedServer
+	}
 	addrs, err := resolver.LookupHost(ctx, host)
 	result.ResponseMS = time.Since(start).Milliseconds()
 	if err != nil {
 		result.Error = err.Error()
+		if result.Details != nil {
+			result.Details["failure_stage"] = classifyDNSError(err)
+		}
 		return
 	}
 	if len(addrs) == 0 {
 		result.Error = "no DNS records found"
+		if result.Details != nil {
+			result.Details["failure_stage"] = "empty_answer"
+		}
 		return
 	}
+	if result.Details != nil {
+		result.Details["records"] = addrs
+	}
 	result.Status = "up"
+}
+
+// classifyDNSError buckets the common lookup failures so the UI can
+// explain why a DNS check is down.
+func classifyDNSError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "no such host"):
+		return "nxdomain"
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded"):
+		return "timeout"
+	case strings.Contains(msg, "refused"):
+		return "refused"
+	case strings.Contains(msg, "server misbehaving"):
+		return "servfail"
+	default:
+		return "resolver_error"
+	}
 }
 
 func (sc *ServiceChecker) runTCPCheck(ctx context.Context, check internal.ServiceCheckConfig, result *internal.ServiceCheckResult, start time.Time, timeoutSec int) {
 	addr, err := NormalizeTCPAddress(check)
 	if err != nil {
 		result.Error = err.Error()
+		if result.Details != nil {
+			result.Details["failure_stage"] = "address_parse"
+		}
 		return
+	}
+	if result.Details != nil {
+		result.Details["resolved_address"] = addr
 	}
 	dialer := net.Dialer{Timeout: time.Duration(timeoutSec) * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	result.ResponseMS = time.Since(start).Milliseconds()
 	if err != nil {
 		result.Error = err.Error()
+		if result.Details != nil {
+			result.Details["failure_stage"] = classifyHTTPError(err) // reuse: same net.Error families
+		}
 		return
 	}
 	_ = conn.Close()
@@ -289,6 +430,9 @@ func (sc *ServiceChecker) runTCPCheck(ctx context.Context, check internal.Servic
 
 func (sc *ServiceChecker) runPingCheck(ctx context.Context, check internal.ServiceCheckConfig, result *internal.ServiceCheckResult, start time.Time, timeoutSec int) {
 	host := NormalizeDNSHost(check.Target)
+	if result.Details != nil {
+		result.Details["query_host"] = host
+	}
 	if host == "" {
 		result.Error = "empty ping target"
 		return
@@ -304,6 +448,9 @@ func (sc *ServiceChecker) runPingCheck(ctx context.Context, check internal.Servi
 	result.ResponseMS = time.Since(start).Milliseconds()
 	if err != nil {
 		result.Error = "host unreachable"
+		if result.Details != nil {
+			result.Details["failure_stage"] = "unreachable"
+		}
 		return
 	}
 	// Parse round-trip time from ping output if available.
@@ -313,10 +460,49 @@ func (sc *ServiceChecker) runPingCheck(ctx context.Context, check internal.Servi
 		if sp := strings.IndexAny(sub, " m\n"); sp > 0 {
 			if ms, parseErr := strconv.ParseFloat(sub[:sp], 64); parseErr == nil {
 				result.ResponseMS = int64(ms)
+				if result.Details != nil {
+					result.Details["rtt_ms"] = ms
+				}
 			}
 		}
 	}
+	// Best-effort loss parsing — ping prints e.g. "0% packet loss" on both
+	// Linux and Darwin. Not all ping implementations include a space before
+	// "packet loss"; we look for the "%" and walk backwards.
+	if result.Details != nil {
+		if pct := extractPacketLossPercent(outStr); pct >= 0 {
+			result.Details["packet_loss_pct"] = pct
+		}
+	}
 	result.Status = "up"
+}
+
+// extractPacketLossPercent parses "0% packet loss" / "0.0% packet loss" out
+// of ping stdout. Returns -1 when the token is absent so callers can skip
+// recording the key rather than lying about zero loss.
+func extractPacketLossPercent(out string) float64 {
+	idx := strings.Index(out, "% packet loss")
+	if idx <= 0 {
+		return -1
+	}
+	// Walk back until we hit a non-digit/non-dot character.
+	i := idx - 1
+	for i >= 0 {
+		c := out[i]
+		if (c >= '0' && c <= '9') || c == '.' {
+			i--
+			continue
+		}
+		break
+	}
+	num := out[i+1 : idx]
+	if num == "" {
+		return -1
+	}
+	if f, err := strconv.ParseFloat(num, 64); err == nil {
+		return f
+	}
+	return -1
 }
 
 func (sc *ServiceChecker) runSpeedCheck(check internal.ServiceCheckConfig, result *internal.ServiceCheckResult, start time.Time) {
