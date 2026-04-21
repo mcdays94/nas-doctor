@@ -52,6 +52,7 @@ type ServiceCheckStore interface {
 // HistoryStore handles time-series history for disks, system, GPU, containers, and speed tests.
 type HistoryStore interface {
 	GetDiskHistory(serial string, limit int) ([]DiskHistoryPoint, error)
+	GetDiskHistoryInRange(serial string, window time.Duration) ([]DiskHistoryPoint, error)
 	GetAvgTempDuringRange(start, end time.Time) (float64, float64, error)
 	ListDisks() ([]DiskSummary, error)
 	GetAllDiskSparklines(pointsPerDisk int) ([]DiskSparklines, error)

@@ -398,6 +398,11 @@ func (f *FakeStore) GetDiskHistory(_ string, _ int) ([]DiskHistoryPoint, error) 
 	return nil, nil
 }
 
+func (f *FakeStore) GetDiskHistoryInRange(_ string, _ time.Duration) ([]DiskHistoryPoint, error) {
+	// TODO: implement for testing
+	return nil, nil
+}
+
 func (f *FakeStore) GetAvgTempDuringRange(_, _ time.Time) (float64, float64, error) {
 	// TODO: implement for testing
 	return 0, 0, nil
