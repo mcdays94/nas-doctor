@@ -226,6 +226,15 @@ type ServiceCheckConfig struct {
 	// "1.1.1.1", "8.8.8.8:53", "192.168.1.1:1053"). Empty means use the
 	// system resolver. Port defaults to 53 when unspecified.
 	DNSServer string `json:"dns_server,omitempty"`
+
+	// Warning is a transient, load-time-populated message shown when the
+	// stored check configuration is invalid under the current schema but
+	// was valid under a previous version (e.g. issue #169 — a DNS check
+	// with an IP target saved under v0.9.2 is invalid under v0.9.3+).
+	// The load path sets Enabled=false and populates this so the UI can
+	// surface the issue; it is NOT persisted back to the store
+	// automatically — user must acknowledge and resave.
+	Warning string `json:"warning,omitempty"`
 }
 
 type ServiceCheckResult struct {

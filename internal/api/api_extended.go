@@ -335,6 +335,10 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	if settings.ServiceChecks.Checks == nil {
 		settings.ServiceChecks.Checks = []internal.ServiceCheckConfig{}
 	}
+	// Issue #169 — soft-disable service checks that were valid under
+	// older schemas but fail current validation, so upgraders aren't
+	// soft-bricked on Save. Does not rewrite the stored config.
+	settings.ServiceChecks.Checks = applyLegacyCheckMigration(settings.ServiceChecks.Checks)
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
 	}
@@ -445,6 +449,91 @@ func normalizeServiceCheckConfig(check *internal.ServiceCheckConfig) error {
 	}
 	return nil
 }
+
+// normalizeLegacyDisabledServiceCheckConfig applies the subset of
+// normalization that is safe for a check that has been flagged by the
+// load-time migration (Warning set, Enabled=false). It skips the
+// strict target validation that the current schema enforces so the
+// check can round-trip through save without blocking unrelated edits.
+//
+// Issue #169: pre-v0.9.3 DNS checks with IP targets are the only
+// currently-known legacy shape that needs grandfathering; the branch
+// is intentionally narrow so a latent bug here cannot whitewash
+// freshly-authored bad config.
+func normalizeLegacyDisabledServiceCheckConfig(check *internal.ServiceCheckConfig) error {
+	check.Name = strings.TrimSpace(check.Name)
+	check.Type = strings.ToLower(strings.TrimSpace(check.Type))
+	check.Target = strings.TrimSpace(check.Target)
+	check.DNSServer = strings.TrimSpace(check.DNSServer)
+	if check.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	// A disabled check must stay disabled — if a user wants to re-enable
+	// it, they also need to fix the Target (which strips the Warning).
+	check.Enabled = false
+	// Apply lenient defaults so the struct is internally consistent.
+	if check.IntervalSec <= 0 {
+		check.IntervalSec = 300
+	}
+	if check.IntervalSec < 30 {
+		check.IntervalSec = 30
+	}
+	if check.TimeoutSec <= 0 {
+		check.TimeoutSec = 5
+	}
+	if check.TimeoutSec > 30 {
+		check.TimeoutSec = 30
+	}
+	if check.FailureThreshold <= 0 {
+		check.FailureThreshold = 1
+	}
+	if check.FailureSeverity == "" {
+		check.FailureSeverity = internal.SeverityWarning
+	}
+	return nil
+}
+
+// applyLegacyCheckMigration scans loaded service checks for configs
+// that are valid under older schemas but fail the current validator,
+// and flips them to Enabled=false with a user-visible Warning. This is
+// a read-time transform only; the stored config is NOT rewritten —
+// the user must acknowledge and resave.
+//
+// Issue #169: the known case is DNS-type checks whose target is a
+// literal IP — a silent no-op under v0.9.0-v0.9.2, now rejected at
+// save time by #159. Without this migration an upgrader's entire
+// settings payload bounces with a misleading error.
+func applyLegacyCheckMigration(checks []internal.ServiceCheckConfig) []internal.ServiceCheckConfig {
+	out := make([]internal.ServiceCheckConfig, len(checks))
+	copy(out, checks)
+	for i := range out {
+		c := &out[i]
+		if !isLegacyDisableTarget(c) {
+			continue
+		}
+		c.Enabled = false
+		if strings.TrimSpace(c.Warning) == "" {
+			c.Warning = legacyDNSIPWarning
+		}
+	}
+	return out
+}
+
+// isLegacyDisableTarget reports whether a stored check is a shape that
+// the load-time migration should flag. Keep narrow: only patterns we
+// have explicitly triaged.
+func isLegacyDisableTarget(c *internal.ServiceCheckConfig) bool {
+	if strings.ToLower(strings.TrimSpace(c.Type)) == internal.ServiceCheckDNS {
+		if net.ParseIP(strings.TrimSpace(c.Target)) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// legacyDNSIPWarning is the user-facing message surfaced for auto-
+// disabled DNS-IP checks (issue #169).
+const legacyDNSIPWarning = "This DNS check has an IP target (invalid since v0.9.3) and has been auto-disabled. Change the target to a hostname like google.com, or delete it. To test IP reachability use a Ping or TCP check."
 
 // validateDNSServer checks that a user-supplied DNS resolver address is a
 // valid host (or host:port). Port, when present, must be 1-65535.
@@ -585,11 +674,10 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	serviceNames := make(map[string]struct{}, len(settings.ServiceChecks.Checks))
 	// Accumulate per-check validation errors so users with multiple
-	// invalid checks see all of them at once, and each error names
-	// the offending check. Issue #169: a flat error that didn't
-	// identify WHICH check failed led upgraders to assume the check
-	// they were currently editing was broken, even when the real
-	// problem was a pre-existing check left over from v0.9.2.
+	// legacy-invalid checks see all of them at once, and each error
+	// names the offending check. Issue #169: pre-v0.9.3 DNS-IP checks
+	// would fail save silently with a flat error that looked like it
+	// referred to whatever check the user happened to be editing.
 	var checkErrs []string
 	for i := range settings.ServiceChecks.Checks {
 		check := &settings.ServiceChecks.Checks[i]
@@ -597,7 +685,15 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if label == "" {
 			label = fmt.Sprintf("#%d", i+1)
 		}
-		if err := normalizeServiceCheckConfig(check); err != nil {
+		// Legacy grandfather: a check that was flagged invalid on load
+		// (Warning set) AND is disabled cannot run, so its invalid
+		// target is harmless. Exempt it from strict target validation
+		// so upgraders can still save unrelated settings.
+		if !check.Enabled && strings.TrimSpace(check.Warning) != "" {
+			if err := normalizeLegacyDisabledServiceCheckConfig(check); err != nil {
+				checkErrs = append(checkErrs, fmt.Sprintf("%q: %s", label, err.Error()))
+			}
+		} else if err := normalizeServiceCheckConfig(check); err != nil {
 			checkErrs = append(checkErrs, fmt.Sprintf("%q: %s", label, err.Error()))
 		}
 		if _, exists := serviceNames[strings.ToLower(check.Name)]; exists {
