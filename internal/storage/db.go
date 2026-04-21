@@ -1990,6 +1990,38 @@ func (d *DB) GetDiskHistory(serial string, limit int) ([]DiskHistoryPoint, error
 	return points, rows.Err()
 }
 
+// GetDiskHistoryInRange returns historical SMART data for a specific drive
+// whose timestamp falls within the last `window` duration. Returned rows are
+// ordered by timestamp ASC.
+//
+// Unlike GetDiskHistory (which caps by row count), this filters by time —
+// which is what the /disk/<serial> charts need so the x-axis density stays
+// legible regardless of scan frequency or retention depth. See issue #166.
+func (d *DB) GetDiskHistoryInRange(serial string, window time.Duration) ([]DiskHistoryPoint, error) {
+	cutoff := time.Now().UTC().Add(-window)
+	rows, err := d.db.Query(
+		`SELECT timestamp, temperature, reallocated, pending, udma_crc, command_timeout, power_on_hours, health_passed
+		 FROM smart_history
+		 WHERE serial = ? AND timestamp >= ?
+		 ORDER BY timestamp ASC`,
+		serial, cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []DiskHistoryPoint
+	for rows.Next() {
+		var p DiskHistoryPoint
+		if err := rows.Scan(&p.Timestamp, &p.Temperature, &p.Reallocated, &p.Pending, &p.UDMACRC, &p.CmdTimeout, &p.PowerHours, &p.Health); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
+}
+
 // ---------- System history ----------
 
 // SystemHistoryPoint represents a single system metrics data point.
