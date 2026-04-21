@@ -133,6 +133,63 @@ function computeYTicks(dMin,dMax,yMax,count){
   return {min:mn,max:mx,ticks:ticks};
 }
 
+/* ── decimateLabels ──────────────────────────────────────────────
+   Given N label slots spread evenly across chart-pixel-width cw, the
+   widest rendered label width maxLabelWidth, and a minimum horizontal
+   gap minGap between adjacent labels, return the set of label indices
+   to render without any two labels overlapping.
+
+   Guarantees:
+     - Index 0 (first) is always present when N>=1.
+     - Index N-1 (last) is always present when N>=2.
+     - No two consecutive returned indices i<j produce rendered labels
+       whose pixel bounding boxes intersect. (Spacing between their
+       centers is stride*(cw/(N-1)) which is >= maxLabelWidth+minGap
+       by construction — except for the final "snap to last" entry,
+       which is guaranteed spacing >= maxLabelWidth+minGap because
+       we drop the previous anchor if it would collide with the last.)
+
+   Edge cases:
+     - N<=1         → [0] (or [] if N=0)
+     - cw<=0 or L=0 → just [0, N-1] (degenerate, no width info)
+     - L+G >= cw    → [0, N-1] (only first and last fit)
+
+   This is exported as a pure function on NasChart so it can be unit-
+   tested in isolation (see internal/api/charts_decimation_test.go and
+   scripts/charts_decimation.test.js). Issue #165. */
+function decimateLabels(n,cw,maxLabelWidth,minGap){
+  if(minGap==null) minGap=12;
+  if(!(n>0)) return [];
+  if(n===1) return [0];
+  if(!(cw>0)||!(maxLabelWidth>0)) return [0,n-1];
+  var per=maxLabelWidth+minGap;
+  var intervals=n-1;
+  /* How many labels fit? (cw + gap) / (label + gap) because the last
+     label doesn't need a trailing gap. */
+  var maxLabels=Math.floor((cw+minGap)/per);
+  if(maxLabels<2) return [0,n-1];
+  if(maxLabels>=n) {
+    /* every label fits */
+    var out=[];
+    for(var i=0;i<n;i++) out.push(i);
+    return out;
+  }
+  /* Smallest stride s such that s*(cw/intervals) >= per. */
+  var stride=Math.max(1,Math.ceil(per*intervals/cw));
+  var idx=[];
+  for(var j=0;j<n;j+=stride) idx.push(j);
+  /* Always include the last label. Drop the previous anchor if it
+     would collide with the last (pixel distance < per). */
+  var last=n-1;
+  if(idx[idx.length-1]!==last){
+    var lastAnchor=idx[idx.length-1];
+    var gapPx=(last-lastAnchor)*(cw/intervals);
+    if(gapPx<per) idx.pop();
+    idx.push(last);
+  }
+  return idx;
+}
+
 /* ── drawAxes ────────────────────────────────────────────────────── */
 function drawAxes(ctx,m,w,h,yInfo,labels,opts){
   var th=theme();
@@ -151,12 +208,25 @@ function drawAxes(ctx,m,w,h,yInfo,labels,opts){
     var lbl=vy%1===0?vy.toString():vy.toFixed(1);
     ctx.fillText(lbl,m.l-8,py);
   }
-  /* x labels */
+  /* x labels — decimate to prevent overlap. Measure real label widths
+     via ctx.measureText() and derive which indices to render from
+     decimateLabels(). Fixes issue #165: the old
+       step = floor(labels.length / (cw / 50))
+     hardcoded a ~50px label budget, so datetime labels like "4/17 23:11"
+     (~65-75px in 11px sans-serif) would collide into an unreadable wall
+     of overlapping text once enough history accumulated. */
   if(labels&&labels.length){
     ctx.textAlign="center"; ctx.textBaseline="top";
-    var step=Math.max(1,Math.floor(labels.length/(cw/50)));
-    for(var j=0;j<labels.length;j+=step){
-      var px=m.l+j/(labels.length-1||1)*cw;
+    var maxLabelWidth=0;
+    for(var mi=0;mi<labels.length;mi++){
+      var lw=ctx.measureText(labels[mi]==null?"":String(labels[mi])).width;
+      if(lw>maxLabelWidth) maxLabelWidth=lw;
+    }
+    var keep=decimateLabels(labels.length,cw,maxLabelWidth,12);
+    var intervals=labels.length-1||1;
+    for(var ki=0;ki<keep.length;ki++){
+      var j=keep[ki];
+      var px=m.l+j/intervals*cw;
       ctx.fillStyle=th.text;
       ctx.fillText(labels[j],px,h-m.b+8);
     }
@@ -509,7 +579,12 @@ var NasChart={
   area:      drawArea,
   bar:       drawBar,
   gauge:     drawGauge,
-  sparkline: drawSparkline
+  sparkline: drawSparkline,
+  /* _decimateLabels is exposed for unit tests only. It is not part of
+     the public API — name is prefixed with an underscore to signal
+     "internal / subject to change". See issue #165 and
+     internal/api/charts_decimation_test.go. */
+  _decimateLabels: decimateLabels
 };
 
 window.NasChart=NasChart;
