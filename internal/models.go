@@ -247,6 +247,13 @@ type ServiceCheckResult struct {
 	LatencyMs    float64 `json:"latency_ms,omitempty"`
 	DownloadOK   *bool   `json:"download_ok,omitempty"` // nil for non-speed checks
 	UploadOK     *bool   `json:"upload_ok,omitempty"`
+
+	// Details carries per-check-type diagnostic context surfaced by the
+	// ad-hoc Test-button flow (HTTP status code, resolved IPs, DNS records,
+	// ping RTT, failure stage, etc.). It is intentionally NOT populated on
+	// the scheduled-check path — see ServiceChecker.SetCollectDetails —
+	// so every 30s run stays lean and history rows don't bloat. See #154.
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // ---------- System ----------
