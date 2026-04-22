@@ -889,7 +889,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           <div class="toggle" id="wake-drives-for-smart" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
           <span class="toggle-label">Wake drives for SMART check</span>
         </div>
-        <p style="font-size:12px;color:var(--text2);margin-top:8px;line-height:1.5;max-width:720px">
+        <p style="font-size:12px;color:var(--text2);margin-top:8px;line-height:1.5">
           By default, NAS Doctor skips drives that are in standby — SMART history will show gaps when drives are sleeping, and that's intentional (reduces wear).
           Enabling this option forces smartctl to <strong>wake spun-down drives</strong> on every scan cycle.
           At the default 30-min scan interval, that's roughly 48 extra spin-ups per drive per day.
