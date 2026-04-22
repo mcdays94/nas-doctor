@@ -716,12 +716,17 @@ sections.speedtest = function(sn) {
   var h = '';
   h += '<div class="section-block" data-section="speedtest">';
   var spd = sn ? sn.speed_test : null;
+  /* Gray panel wrapper to match other dashboard sections (UPS, Docker
+     table-wrap, etc). Without this the speed-test tile has no card
+     background and looks visually detached from every other section. */
+  var panelStyle = 'background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px';
   if (spd && spd.available && spd.latest) {
     var r = spd.latest;
     h += '<div>';
     h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Speed Test';
     h += sections._rangeButtons("st", "loadSpeedTestChart", _chartRange);
     h += '</div>';
+    h += '<div style="' + panelStyle + '">';
     h += '<div style="display:flex;gap:16px;font-size:13px;color:var(--text-tertiary);flex-wrap:wrap;margin-bottom:12px">';
     h += '<span>Download: <strong style="color:var(--text-primary);font-size:15px">' + r.download_mbps.toFixed(0) + ' Mbps</strong></span>';
     h += '<span>Upload: <strong style="color:var(--text-primary);font-size:15px">' + r.upload_mbps.toFixed(0) + ' Mbps</strong></span>';
@@ -733,6 +738,7 @@ sections.speedtest = function(sn) {
     if (r.isp) h += 'ISP: ' + esc(r.isp);
     h += '</div>';
     h += '<canvas id="speedtest-chart" style="width:100%;height:80px"></canvas>';
+    h += '</div>'; /* close panel */
     h += '</div>';
   } else if (spd && spd.last_attempt && spd.last_attempt.status === 'pending') {
     // Fresh-install gap: scheduler has kicked off the first-ever speed
@@ -741,7 +747,7 @@ sections.speedtest = function(sn) {
     // something, rather than silently rendering an empty tile.
     h += '<div>';
     h += '<div class="section-title">Speed Test</div>';
-    h += '<div style="font-size:13px;color:var(--text-tertiary);font-style:italic">Running initial speed test&hellip;</div>';
+    h += '<div style="' + panelStyle + ';font-size:13px;color:var(--text-tertiary);font-style:italic">Running initial speed test&hellip;</div>';
     h += '</div>';
   }
   h += '</div>';
