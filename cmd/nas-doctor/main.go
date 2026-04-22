@@ -331,6 +331,17 @@ func main() {
 
 		sched = scheduler.New(coll, store, notif, metrics, logger, interval)
 		applySchedulerSettingsFromStore(sched, persistedSettings)
+		// Defense-in-depth: guarantee the scheduler's in-memory service check
+		// set matches whatever history the DB carries, even when the settings
+		// payload failed to load or was nil (empty DB, corrupt JSON). Without
+		// this, a prior-boot orphan row in service_checks_history would
+		// continue to surface on /api/v1/service-checks as a phantom check
+		// the user cannot remove via the settings UI. Issue #181.
+		if pruned, err := sched.PurgeOrphanServiceCheckHistory(); err != nil {
+			logger.Warn("startup: purge orphan service check history", "error", err)
+		} else if pruned > 0 {
+			logger.Info("startup: pruned orphan service check history", "rows", pruned)
+		}
 		// Apply Proxmox config to collector on startup
 		if persistedSettings != nil && persistedSettings.Proxmox.Enabled {
 			coll.SetProxmoxConfig(collector.ProxmoxConfig{
