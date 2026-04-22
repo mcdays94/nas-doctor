@@ -305,7 +305,52 @@ func (s *Server) handleLatestSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	// Enrich parity checks with avg/max array temperature from smart_history
 	s.enrichParityTemps(snap)
+	// Apply user's Docker hidden-containers filter (issue #204). Scope is
+	// intentionally narrow: only DockerInfo.Containers is filtered — Top
+	// Processes container attribution is preserved so users still see
+	// which container is chewing CPU even when the Docker tile hides it.
+	s.applyDockerHiddenContainers(snap)
 	writeJSON(w, http.StatusOK, snap)
+}
+
+// applyDockerHiddenContainers filters out containers in the user's hidden
+// list from the snapshot's Docker.Containers slice and stamps the hidden
+// count onto DockerInfo.HiddenCount for the frontend header. Mutates the
+// snapshot in place. Issue #204.
+//
+// Scope boundary — this function must NOT modify snap.System.TopProcesses.
+// Users want to know which container is chewing CPU even when they've
+// hidden the Docker tile for scroll-length reasons.
+func (s *Server) applyDockerHiddenContainers(snap *internal.Snapshot) {
+	if snap == nil {
+		return
+	}
+	settings := s.getSettings()
+	if len(settings.DockerHiddenContainers) == 0 {
+		return
+	}
+	hidden := make(map[string]struct{}, len(settings.DockerHiddenContainers))
+	for _, n := range settings.DockerHiddenContainers {
+		trimmed := strings.TrimSpace(n)
+		if trimmed == "" {
+			continue
+		}
+		hidden[trimmed] = struct{}{}
+	}
+	if len(hidden) == 0 {
+		return
+	}
+	kept := snap.Docker.Containers[:0:0]
+	hiddenCount := 0
+	for _, c := range snap.Docker.Containers {
+		if _, match := hidden[c.Name]; match {
+			hiddenCount++
+			continue
+		}
+		kept = append(kept, c)
+	}
+	snap.Docker.Containers = kept
+	snap.Docker.HiddenCount = hiddenCount
 }
 
 // enrichParityTemps computes avg/max array temperature during each parity check

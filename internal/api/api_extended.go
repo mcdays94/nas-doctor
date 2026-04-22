@@ -55,6 +55,14 @@ type Settings struct {
 	// Default (false) is standby-aware: smartctl runs with `-n standby` and
 	// skips sleeping drives. See issue #198.
 	WakeDrivesForSMART bool `json:"wake_drives_for_smart,omitempty"`
+
+	// DockerHiddenContainers is a list of container names that should be
+	// omitted from the Docker Containers dashboard section. Exact-match
+	// only (MVP — glob/regex is a follow-up). Stats history is still
+	// collected for hidden containers, and Top Processes container
+	// attribution is NOT affected — this is a rendering preference for
+	// the Docker section tile only. See issue #204.
+	DockerHiddenContainers []string `json:"docker_hidden_containers,omitempty"`
 }
 
 const currentSettingsVersion = 1

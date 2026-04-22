@@ -446,9 +446,15 @@ sections.docker = function(sn, st) {
     var containers = docker.containers;
     var runningCsMerged = containers.filter(function(c) { return c.state === "running"; });
     var stoppedCs = containers.filter(function(c) { return c.state !== "running"; });
+    /* Header count string — when hidden_count > 0 show "(N shown, M hidden)"
+       so the user knows the Advanced-settings filter is in effect (#204). */
+    var hiddenCount = (docker.hidden_count || 0);
+    var countStr = hiddenCount > 0
+      ? (containers.length + ' shown, ' + hiddenCount + ' hidden')
+      : String(containers.length);
     h += '<div>';
     if (mergedContainers && runningCsMerged.length > 0) {
-      h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Docker Containers (' + containers.length + ')';
+      h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Docker Containers (' + countStr + ')';
       h += sections._rangeButtons("cmetrics", "loadContainerChart", _chartRange);
       h += '</div>';
       for (var cmi = 0; cmi < runningCsMerged.length; cmi++) {
@@ -460,7 +466,7 @@ sections.docker = function(sn, st) {
         h += '</div>';
       }
     } else {
-      h += '<div class="section-title">Docker Containers (' + containers.length + ')</div>';
+      h += '<div class="section-title">Docker Containers (' + countStr + ')</div>';
       h += '<div class="table-wrap">';
       h += '<table><thead><tr>';
       h += '<th>Name</th><th>Image</th><th>Status</th><th>CPU</th><th>Memory</th><th>Uptime</th>';
