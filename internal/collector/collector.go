@@ -17,6 +17,7 @@ type Collector struct {
 	logger        *slog.Logger
 	proxmoxConfig ProxmoxConfig
 	kubeConfig    KubeConfig
+	smartConfig   SMARTConfig
 }
 
 // SetProxmoxConfig updates the Proxmox VE API connection settings.
@@ -27,6 +28,12 @@ func (c *Collector) SetProxmoxConfig(cfg ProxmoxConfig) {
 // SetKubeConfig updates the Kubernetes cluster connection settings.
 func (c *Collector) SetKubeConfig(cfg KubeConfig) {
 	c.kubeConfig = cfg
+}
+
+// SetSMARTConfig updates SMART-collector behaviour flags — primarily the
+// WakeDrives toggle introduced for issue #198.
+func (c *Collector) SetSMARTConfig(cfg SMARTConfig) {
+	c.smartConfig = cfg
 }
 
 // New creates a new Collector with the given host path mappings.
@@ -62,8 +69,8 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 	snap.Disks = disks
 
 	// SMART data
-	c.logger.Info("collecting SMART data")
-	smart, err := collectSMART()
+	c.logger.Info("collecting SMART data", "wake_drives", c.smartConfig.WakeDrives)
+	smart, err := collectSMART(c.smartConfig)
 	if err != nil {
 		c.logger.Warn("SMART collection partial failure", "error", err)
 	}
