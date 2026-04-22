@@ -1359,8 +1359,8 @@ function distributeSections() {
   if (!staging || !colL || !colR) return;
 
   var sec = (_statusData && _statusData.sections) ? _statusData.sections : {};
-  var numCols = sec.dash_columns || 2;
-  if (numCols < 1) numCols = 2;
+  var numCols = sec.dash_columns || 3;
+  if (numCols < 1) numCols = 3;
   var container = document.querySelector(".container");
   var twoCol = document.getElementById("two-col");
   if (numCols >= 3 && container) container.classList.add("dash-wide");

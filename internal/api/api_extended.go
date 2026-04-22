@@ -80,7 +80,7 @@ type DashboardSections struct {
 	Backup           bool `json:"backup"`
 	SpeedTest        bool `json:"speed_test"`
 	Processes        bool `json:"processes"`
-	DashColumns      int  `json:"dash_columns"` // Dashboard column count: 0=auto (default 2), 1, 2, 3, 4
+	DashColumns      int  `json:"dash_columns"` // Dashboard column count: 0=auto (default 3), 1, 2, 3, 4
 }
 
 // BackupSettings controls automatic backup of the application database.
@@ -211,6 +211,12 @@ func defaultSettings() Settings {
 			Backup:    false,
 			SpeedTest: true,
 			Processes: true,
+			// DashColumns: 3 is the explicit default for fresh installs
+			// (issue #208). 0 (unset) also maps to 3 via the renderer's
+			// || 3 fallback, so existing users who never touched this
+			// setting also see 3 columns after upgrading. Explicit 1/2/3/4
+			// users are unaffected.
+			DashColumns: 3,
 		},
 		ChartRangeHours: 1,
 	}
