@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
 )
@@ -32,6 +33,7 @@ type SMARTConfig struct {
 var errDriveInStandby = errors.New("drive in standby; skipped SMART read")
 
 func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, error) {
+	startedAt := time.Now()
 	devices := discoverDrives()
 	if len(devices) == 0 {
 		// Fallback: try smartctl --scan. (The --scan subcommand does not
@@ -46,6 +48,17 @@ func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, e
 		}
 	}
 	if len(devices) == 0 {
+		// Emit the summary even for the no-drive edge case so operators
+		// see a consistent per-cycle line in the logs (issue #203).
+		if logger != nil {
+			logger.Info("SMART collection complete",
+				"total", 0,
+				"active", 0,
+				"standby", 0,
+				"failed", 0,
+				"duration", time.Since(startedAt).Round(time.Millisecond).String(),
+			)
+		}
 		return nil, fmt.Errorf("no drives discovered")
 	}
 
@@ -77,6 +90,23 @@ func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, e
 		}
 		results = append(results, info)
 	}
+
+	// Per-cycle INFO summary (issue #203). `standby` and `skipped` are
+	// disjoint counters (both branches use `continue` before incrementing
+	// either one), so total = active + standby + failed holds by
+	// construction, where active=len(results) and failed=skipped.
+	// Emit this before any error-return paths below so the summary fires
+	// even when the cycle ultimately fails.
+	if logger != nil {
+		logger.Info("SMART collection complete",
+			"total", len(devices),
+			"active", len(results),
+			"standby", standby,
+			"failed", skipped,
+			"duration", time.Since(startedAt).Round(time.Millisecond).String(),
+		)
+	}
+
 	// If every discovered drive is in standby and nothing else failed,
 	// that's a legitimate outcome (all disks asleep); return no error and
 	// an empty slice so the caller can persist an empty SMART snapshot
