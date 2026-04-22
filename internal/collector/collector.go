@@ -70,7 +70,7 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 
 	// SMART data
 	c.logger.Info("collecting SMART data", "wake_drives", c.smartConfig.WakeDrives)
-	smart, err := collectSMART(c.smartConfig)
+	smart, err := collectSMART(c.smartConfig, c.logger)
 	if err != nil {
 		c.logger.Warn("SMART collection partial failure", "error", err)
 	}
