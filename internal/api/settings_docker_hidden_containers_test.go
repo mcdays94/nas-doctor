@@ -265,11 +265,14 @@ func keysOf(m map[string]interface{}) []string {
 	return out
 }
 
-// TestSettingsHTMLIncludesDockerHiddenContainersInput verifies the settings
-// page template ships the Advanced-section input for docker_hidden_containers
-// with the load/save wiring. Cross-reference test: any future refactor that
-// renames one side without the other will break this.
-func TestSettingsHTMLIncludesDockerHiddenContainersInput(t *testing.T) {
+// TestSettingsHTMLIncludesDockerHiddenContainersCheckboxList verifies the
+// settings page template ships the Advanced-section checkbox-list UI for
+// docker_hidden_containers with the load/save wiring. v0.9.6 UX rework:
+// the old comma-separated text input was replaced with a checkbox list
+// populated from live containers + ghost entries for stored-but-not-
+// running names. Cross-reference test: any future refactor that renames
+// one side without the other will break this.
+func TestSettingsHTMLIncludesDockerHiddenContainersCheckboxList(t *testing.T) {
 	path := filepath.Join("templates", "settings.html")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -281,16 +284,25 @@ func TestSettingsHTMLIncludesDockerHiddenContainersInput(t *testing.T) {
 		name   string
 		substr string
 	}{
-		// Input element with the stable id used by load/save.
-		{"input element", `id="docker-hidden-containers"`},
+		// Container div that JS populates with checkboxes (replaces old text input).
+		{"checkbox list container", `id="docker-hidden-containers-list"`},
 		// Lives inside the Advanced card (regression: not inside Dashboard Sections).
 		{"advanced card anchor", `id="card-advanced"`},
-		// Load path reads the JSON field.
+		// Load path reads the JSON field and hands off to the renderer.
 		{"load binds field", `data.docker_hidden_containers`},
-		// Save payload emits the JSON field.
-		{"save sends field", `docker_hidden_containers:`},
-		// Helper text should mention this affects the Docker section only.
+		{"load calls renderer", `loadDockerHiddenContainersCheckboxes(hidden)`},
+		// Save payload emits the JSON field via the collector.
+		{"save sends field", `docker_hidden_containers: collectCheckedHiddenContainers()`},
+		// Helper text should mention tick-boxes (not commas) and scope.
+		{"helper mentions ticking", `Tick the containers`},
 		{"helper mentions docker section", `Docker Containers section`},
+		// The key JS helpers must exist by their stable names.
+		{"renderer defined", `function renderDockerHiddenContainersCheckboxes`},
+		{"collector defined", `function collectCheckedHiddenContainers`},
+		// Checkbox class used to collect checked state at save time.
+		{"checkbox class", `docker-hidden-checkbox`},
+		// Ghost-entry label for stored names not currently running.
+		{"ghost label", `not running`},
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {
@@ -298,6 +310,36 @@ func TestSettingsHTMLIncludesDockerHiddenContainersInput(t *testing.T) {
 				t.Errorf("settings.html missing %q — expected substring: %q", tc.name, tc.substr)
 			}
 		})
+	}
+}
+
+// TestSettingsHTMLDoesNotShipCommaTextInput is a negative test for the
+// UX rework. The old text input id and the parse helper must NOT be
+// present — if they reappear, it means a stale copy was restored and
+// we'd be shipping the worse UX by accident.
+func TestSettingsHTMLDoesNotShipCommaTextInput(t *testing.T) {
+	path := filepath.Join("templates", "settings.html")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings.html: %v", err)
+	}
+	content := string(data)
+
+	forbidden := []string{
+		// Old text input id (the one people used to type commas into).
+		// The NEW id is docker-hidden-containers-list — checked in the
+		// positive test above. This guard catches a regression to the
+		// old input element specifically.
+		`id="docker-hidden-containers"`,
+		// Old parse helper; replaced by collectCheckedHiddenContainers.
+		`function parseHiddenContainerList`,
+		// Old placeholder copy hinting at comma-separated input.
+		`Comma-separated container names`,
+	}
+	for _, substr := range forbidden {
+		if strings.Contains(content, substr) {
+			t.Errorf("settings.html still contains legacy comma-input artifact: %q", substr)
+		}
 	}
 }
 
@@ -325,36 +367,15 @@ func TestDashboardJS_DockerSectionHeaderShowsHiddenCount(t *testing.T) {
 	}
 }
 
-// TestSettingsHTML_DockerHiddenContainers_ParseHelperHandlesWhitespace is
-// a cross-reference test: the JS parseHiddenContainerList helper must be
-// tolerant of trailing commas and whitespace, which is how real users
-// type comma-separated lists. Verifying the helper is shipped (and its
-// trim + empty-drop behavior is still present) guards against a future
-// refactor that strips the trimming logic.
-func TestSettingsHTML_DockerHiddenContainers_ParseHelperHandlesWhitespace(t *testing.T) {
-	path := filepath.Join("templates", "settings.html")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read settings.html: %v", err)
-	}
-	content := string(data)
-	checks := []struct {
-		name   string
-		substr string
-	}{
-		{"helper is defined", "function parseHiddenContainerList"},
-		{"helper trims entries", ".trim()"},
-		{"helper drops empty entries", "if (t) out.push(t)"},
-		{"helper splits on comma", `.split(",")`},
-	}
-	for _, tc := range checks {
-		t.Run(tc.name, func(t *testing.T) {
-			if !strings.Contains(content, tc.substr) {
-				t.Errorf("settings.html missing %q — expected substring: %q", tc.name, tc.substr)
-			}
-		})
-	}
-}
+// (Removed: TestSettingsHTML_DockerHiddenContainers_ParseHelperHandlesWhitespace)
+//
+// The v0.9.6 UX rework replaced the comma-separated text input with a
+// checkbox list, so parseHiddenContainerList no longer exists. Its
+// positive coverage is now split across:
+//   - TestSettingsHTMLIncludesDockerHiddenContainersCheckboxList
+//     (checkbox list + renderer + collector are all present)
+//   - TestSettingsHTMLDoesNotShipCommaTextInput (negative guard —
+//     the parse helper must NOT come back)
 
 // TestSettings_DockerHiddenContainers_EmptyArrayDoesNotFilter verifies that
 // an explicitly-empty list (as opposed to nil) behaves identically to nil:

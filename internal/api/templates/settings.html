@@ -897,13 +897,15 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           Only enable if your drives never spin down, or if you deliberately need every-cycle SMART monitoring and accept the wear cost.
         </p>
         <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
-          <label for="docker-hidden-containers" style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Hide Docker containers from dashboard</label>
-          <input type="text" id="docker-hidden-containers" placeholder="watchtower, portainer-agent, cloudflared" style="width:100%" onchange="saveSettings()" />
-          <p style="font-size:12px;color:var(--text2);margin-top:8px;line-height:1.5">
-            Comma-separated container names (exact match). These will be excluded from the <strong>Docker Containers section</strong> only.
+          <div style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Hide Docker containers from dashboard</div>
+          <p style="font-size:12px;color:var(--text2);margin-top:4px;margin-bottom:10px;line-height:1.5">
+            Tick the containers you want hidden from the <strong>Docker Containers section</strong>.
             Stats history is still collected and alerts still fire — the containers are hidden from the tile, not suppressed.
             Top Processes container attribution is not affected: if a hidden container is chewing CPU you'll still see its name there.
           </p>
+          <div id="docker-hidden-containers-list" style="max-height:240px;overflow-y:auto;padding:4px 8px;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius)">
+            <p style="font-size:12px;color:var(--text2);margin:8px 0;font-style:italic">Loading containers&hellip;</p>
+          </div>
         </div>
       </div>
     </details>
@@ -1213,11 +1215,8 @@ function loadSettings() {
         if (data.wake_drives_for_smart) wakeEl.classList.add("on"); else wakeEl.classList.remove("on");
       }
       /* Advanced: hide Docker containers from dashboard (#204) */
-      var hideEl = document.getElementById("docker-hidden-containers");
-      if (hideEl) {
-        var hidden = data.docker_hidden_containers;
-        hideEl.value = Array.isArray(hidden) ? hidden.join(", ") : "";
-      }
+      var hidden = Array.isArray(data.docker_hidden_containers) ? data.docker_hidden_containers : [];
+      loadDockerHiddenContainersCheckboxes(hidden);
       /* Proxmox VE */
       var pve = data.proxmox || {};
       if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
@@ -1331,22 +1330,119 @@ function buildSettingsPayload() {
     dismissed_findings: base.dismissed_findings || [],
     cost_per_tb: parseFloat(document.getElementById("cost-per-tb") && document.getElementById("cost-per-tb").value) || 0,
     wake_drives_for_smart: !!(document.getElementById("wake-drives-for-smart") && document.getElementById("wake-drives-for-smart").classList.contains("on")),
-    docker_hidden_containers: parseHiddenContainerList(document.getElementById("docker-hidden-containers") && document.getElementById("docker-hidden-containers").value)
+    docker_hidden_containers: collectCheckedHiddenContainers()
   };
 }
 
-/* ---------- Helpers: hidden Docker containers (#204) ---------- */
-/* Parse a user-entered comma-separated list into a clean string array.
-   Trims whitespace, drops empty entries so "plex, , watchtower, " becomes
-   ["plex","watchtower"]. Returns [] rather than null so the JSON payload
-   stays consistent with a non-omitempty array on the server. */
-function parseHiddenContainerList(s) {
-  if (!s || typeof s !== "string") return [];
-  var parts = s.split(",");
+/* ---------- Helpers: hidden Docker containers (#204) ----------
+
+   v0.9.6 UX rework: the text-input + comma-separated shape was
+   error-prone (typos, case mismatches, no discoverability). Replaced
+   with a checkbox list populated from the latest snapshot's live
+   container names + "ghost" entries for previously-hidden containers
+   that aren't currently running (so the hidden list is preserved
+   across container restarts and rebuilds).
+
+   Data flow:
+     - loadDockerHiddenContainersCheckboxes(stored) is called from
+       loadSettings() with the stored string array.
+     - It fetches /api/v1/snapshot/latest to discover live containers,
+       then renders checkboxes (union of live + stored-but-not-live),
+       pre-checked if the name is in `stored`.
+     - collectCheckedHiddenContainers() reads the DOM at save time
+       and returns the string array used in the settings payload. */
+
+function loadDockerHiddenContainersCheckboxes(storedHiddenNames) {
+  fetch("/api/v1/snapshot/latest")
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      var containers = data && data.docker && Array.isArray(data.docker.containers)
+        ? data.docker.containers : [];
+      renderDockerHiddenContainersCheckboxes(containers, storedHiddenNames || []);
+    })
+    .catch(function() {
+      // Snapshot fetch failed — still render ghost checkboxes for any
+      // stored names so the user can un-check them. Empty live list.
+      renderDockerHiddenContainersCheckboxes([], storedHiddenNames || []);
+    });
+}
+
+function renderDockerHiddenContainersCheckboxes(liveContainers, storedHiddenNames) {
+  var listEl = document.getElementById("docker-hidden-containers-list");
+  if (!listEl) return;
+  // Clear placeholder content.
+  while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+
+  // Build the union: live names first (alphabetical), then stored-but-
+  // not-live as ghost entries.
+  var liveNames = [];
+  var liveSet = {};
+  for (var i = 0; i < liveContainers.length; i++) {
+    var n = liveContainers[i] && liveContainers[i].name;
+    if (typeof n === "string" && n !== "" && !liveSet[n]) {
+      liveNames.push(n);
+      liveSet[n] = true;
+    }
+  }
+  liveNames.sort(function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
+
+  var ghostNames = [];
+  for (var j = 0; j < storedHiddenNames.length; j++) {
+    var s = storedHiddenNames[j];
+    if (typeof s === "string" && s !== "" && !liveSet[s]) ghostNames.push(s);
+  }
+  ghostNames.sort(function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
+
+  var allNames = liveNames.concat(ghostNames);
+  if (allNames.length === 0) {
+    var empty = document.createElement("p");
+    empty.style.cssText = "font-size:12px;color:var(--text2);margin:8px 0;font-style:italic";
+    empty.textContent = "No Docker containers detected.";
+    listEl.appendChild(empty);
+    return;
+  }
+
+  var storedSet = {};
+  for (var k = 0; k < storedHiddenNames.length; k++) storedSet[storedHiddenNames[k]] = true;
+
+  for (var m = 0; m < allNames.length; m++) {
+    var name = allNames[m];
+    var isLive = !!liveSet[name];
+
+    var label = document.createElement("label");
+    label.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer;font-size:13px";
+
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "docker-hidden-checkbox";
+    cb.setAttribute("data-name", name);
+    cb.checked = !!storedSet[name];
+    cb.addEventListener("change", saveSettings);
+    label.appendChild(cb);
+
+    var nameSpan = document.createElement("span");
+    nameSpan.textContent = name;
+    label.appendChild(nameSpan);
+
+    if (!isLive) {
+      var ghost = document.createElement("span");
+      ghost.style.cssText = "font-size:11px;color:var(--text-quaternary);font-style:italic";
+      ghost.textContent = "(not running)";
+      label.appendChild(ghost);
+    }
+
+    listEl.appendChild(label);
+  }
+}
+
+function collectCheckedHiddenContainers() {
   var out = [];
-  for (var i = 0; i < parts.length; i++) {
-    var t = parts[i].trim();
-    if (t) out.push(t);
+  var boxes = document.querySelectorAll(".docker-hidden-checkbox");
+  for (var i = 0; i < boxes.length; i++) {
+    if (boxes[i].checked) {
+      var n = boxes[i].getAttribute("data-name");
+      if (n) out.push(n);
+    }
   }
   return out;
 }
