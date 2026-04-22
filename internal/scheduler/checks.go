@@ -771,7 +771,8 @@ func IsSupportedCheckType(checkType string) bool {
 		internal.ServiceCheckSMB,
 		internal.ServiceCheckNFS,
 		internal.ServiceCheckPing,
-		internal.ServiceCheckSpeed:
+		internal.ServiceCheckSpeed,
+		internal.ServiceCheckTraceroute:
 		return true
 	default:
 		return false

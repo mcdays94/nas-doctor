@@ -192,13 +192,14 @@ type TailscaleNode struct {
 // ---------- Service Checks ----------
 
 const (
-	ServiceCheckHTTP  = "http"
-	ServiceCheckTCP   = "tcp"
-	ServiceCheckDNS   = "dns"
-	ServiceCheckSMB   = "smb"
-	ServiceCheckNFS   = "nfs"
-	ServiceCheckPing  = "ping"
-	ServiceCheckSpeed = "speed"
+	ServiceCheckHTTP       = "http"
+	ServiceCheckTCP        = "tcp"
+	ServiceCheckDNS        = "dns"
+	ServiceCheckSMB        = "smb"
+	ServiceCheckNFS        = "nfs"
+	ServiceCheckPing       = "ping"
+	ServiceCheckSpeed      = "speed"
+	ServiceCheckTraceroute = "traceroute"
 )
 
 type ServiceCheckConfig struct {
@@ -226,6 +227,14 @@ type ServiceCheckConfig struct {
 	// "1.1.1.1", "8.8.8.8:53", "192.168.1.1:1053"). Empty means use the
 	// system resolver. Port defaults to 53 when unspecified.
 	DNSServer string `json:"dns_server,omitempty"`
+
+	// Traceroute check specific fields
+	// MaxLossPct is the optional end-to-end packet loss threshold (in
+	// percent) above which a traceroute check reports "degraded" rather
+	// than "up". nil means reachability-only: if the final hop responds
+	// the check is up regardless of loss. Pointer type so we can
+	// distinguish "unset" from "explicitly 0". See issue #189.
+	MaxLossPct *float64 `json:"max_loss_pct,omitempty"`
 
 	// Warning is a transient, load-time-populated message shown when the
 	// stored check configuration is invalid under the current schema but

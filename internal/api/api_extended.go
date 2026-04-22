@@ -455,7 +455,7 @@ func normalizeServiceCheckConfig(check *internal.ServiceCheckConfig) error {
 		return fmt.Errorf("service_checks.checks target is required")
 	}
 	switch check.Type {
-	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing, internal.ServiceCheckSpeed:
+	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing, internal.ServiceCheckSpeed, internal.ServiceCheckTraceroute:
 		// valid
 	default:
 		return fmt.Errorf("invalid service check type: %s", check.Type)
