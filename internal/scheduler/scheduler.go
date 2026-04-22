@@ -130,6 +130,14 @@ func New(
 		restart:       make(chan time.Duration, 1),
 	}
 	s.checker = NewServiceChecker(store, logger)
+	// Opt into the per-type Details map on the scheduled path too —
+	// HTTP status codes, resolved IPs, DNS records, Ping RTT, failure
+	// stages are persisted into service_checks_history.details_json so
+	// the /service-checks log UI can render the same rich context the
+	// Test button already shows. Overhead is well under 1ms per check
+	// (the runners already compute these values; we just stop
+	// discarding them). See issue #182.
+	s.checker.SetCollectDetails(true)
 	s.retentionMgr = NewRetentionManager(store, store, logger)
 	return s
 }
