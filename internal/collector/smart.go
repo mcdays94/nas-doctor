@@ -32,6 +32,15 @@ type SMARTConfig struct {
 // that should create a history row or surface in logs.
 var errDriveInStandby = errors.New("drive in standby; skipped SMART read")
 
+// errDriveUnsupported is returned by readSMARTDevice when smartctl
+// reported the target device cannot be read over SMART — classic
+// example is an Unraid boot flash at /dev/sda presenting as
+// "Unknown USB bridge", but also applies to other SMART-incapable
+// devices. The collector distinguishes this from a real failure so
+// the cycle summary log doesn't categorise benign non-SMART devices
+// as failed drives (issue #206).
+var errDriveUnsupported = errors.New("device does not support SMART")
+
 func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, error) {
 	startedAt := time.Now()
 	devices := discoverDrives()
@@ -64,7 +73,7 @@ func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, e
 
 	var results []internal.SMARTInfo
 	var lastErr error
-	var skipped, standby int
+	var skipped, standby, unsupported int
 	for _, dev := range devices {
 		info, err := readSMARTDevice(dev, cfg.WakeDrives)
 		if err != nil {
@@ -79,6 +88,25 @@ func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, e
 				standby++
 				continue
 			}
+			if errors.Is(err, errDriveUnsupported) {
+				// Classic cause: /dev/sda on Unraid is the boot flash
+				// and presents as "Unknown USB bridge". Not a failure
+				// — just a device that cannot expose SMART. Categorised
+				// separately from `failed` so the summary log doesn't
+				// alarm operators about a drive that isn't a drive
+				// (issue #206). Per-drive INFO log mirrors the standby
+				// pattern from #202 so operators can see which device
+				// was skipped and why without cross-referencing
+				// discoverDrives() output.
+				if logger != nil {
+					logger.Info("skipped SMART read: unsupported device",
+						"device", dev,
+						"reason", err.Error(),
+					)
+				}
+				unsupported++
+				continue
+			}
 			lastErr = err
 			skipped++
 			continue
@@ -91,28 +119,31 @@ func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, e
 		results = append(results, info)
 	}
 
-	// Per-cycle INFO summary (issue #203). `standby` and `skipped` are
-	// disjoint counters (both branches use `continue` before incrementing
-	// either one), so total = active + standby + failed holds by
-	// construction, where active=len(results) and failed=skipped.
-	// Emit this before any error-return paths below so the summary fires
-	// even when the cycle ultimately fails.
+	// Per-cycle INFO summary (issue #203 + #206). `standby`, `unsupported`,
+	// and `skipped` are disjoint counters (each branch uses `continue`
+	// before incrementing exactly one), so the identity
+	//   total = active + standby + unsupported + failed
+	// holds by construction, where active=len(results) and
+	// failed=skipped. Emit this before any error-return paths below so
+	// the summary fires even when the cycle ultimately fails.
 	if logger != nil {
 		logger.Info("SMART collection complete",
 			"total", len(devices),
 			"active", len(results),
 			"standby", standby,
+			"unsupported", unsupported,
 			"failed", skipped,
 			"duration", time.Since(startedAt).Round(time.Millisecond).String(),
 		)
 	}
 
-	// If every discovered drive is in standby and nothing else failed,
-	// that's a legitimate outcome (all disks asleep); return no error and
-	// an empty slice so the caller can persist an empty SMART snapshot
-	// rather than treating it as a collection failure.
+	// If every discovered drive is in standby / unsupported and nothing
+	// else failed, that's a legitimate outcome (all disks asleep or the
+	// only thing discovered was an Unraid boot flash); return no error
+	// and an empty slice so the caller can persist an empty SMART
+	// snapshot rather than treating it as a collection failure.
 	if len(results) == 0 && lastErr != nil {
-		return nil, fmt.Errorf("all %d drives failed SMART read (%d skipped, %d standby), last error: %w", len(devices), skipped, standby, lastErr)
+		return nil, fmt.Errorf("all %d drives failed SMART read (%d failed, %d standby, %d unsupported), last error: %w", len(devices), skipped, standby, unsupported, lastErr)
 	}
 	return results, nil
 }
@@ -206,7 +237,7 @@ func readSMARTDevice(device string, wakeDrives bool) (internal.SMARTInfo, error)
 
 	// Check for USB bridge / unsupported device
 	if strings.Contains(out, "Unknown USB bridge") || strings.Contains(out, "Please specify device type") {
-		return info, fmt.Errorf("unsupported device (USB bridge): %s", device)
+		return info, fmt.Errorf("%w: %s (USB bridge / requires -d option)", errDriveUnsupported, device)
 	}
 
 	// Fallback to text parsing (also ignore exit code)
@@ -218,7 +249,7 @@ func readSMARTDevice(device string, wakeDrives bool) (internal.SMARTInfo, error)
 		return info, fmt.Errorf("smartctl returned no output for %s", device)
 	}
 	if strings.Contains(out, "Unknown USB bridge") || strings.Contains(out, "Please specify device type") {
-		return info, fmt.Errorf("unsupported device (USB bridge): %s", device)
+		return info, fmt.Errorf("%w: %s (USB bridge / requires -d option)", errDriveUnsupported, device)
 	}
 	return parseSMARTText(device, out), nil
 }
