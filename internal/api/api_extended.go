@@ -55,6 +55,14 @@ type Settings struct {
 	// Default (false) is standby-aware: smartctl runs with `-n standby` and
 	// skips sleeping drives. See issue #198.
 	WakeDrivesForSMART bool `json:"wake_drives_for_smart,omitempty"`
+
+	// DockerHiddenContainers is a list of container names that should be
+	// omitted from the Docker Containers dashboard section. Exact-match
+	// only (MVP — glob/regex is a follow-up). Stats history is still
+	// collected for hidden containers, and Top Processes container
+	// attribution is NOT affected — this is a rendering preference for
+	// the Docker section tile only. See issue #204.
+	DockerHiddenContainers []string `json:"docker_hidden_containers,omitempty"`
 }
 
 const currentSettingsVersion = 1
@@ -80,7 +88,7 @@ type DashboardSections struct {
 	Backup           bool `json:"backup"`
 	SpeedTest        bool `json:"speed_test"`
 	Processes        bool `json:"processes"`
-	DashColumns      int  `json:"dash_columns"` // Dashboard column count: 0=auto (default 2), 1, 2, 3, 4
+	DashColumns      int  `json:"dash_columns"` // Dashboard column count: 0=auto (default 3), 1, 2, 3, 4
 }
 
 // BackupSettings controls automatic backup of the application database.
@@ -152,13 +160,47 @@ type LogForwardDestination struct {
 
 const settingsConfigKey = "settings"
 
+// parseSpeedTestInterval converts the wire-level value of
+// Settings.SpeedTestInterval into a Duration for the scheduler. It
+// returns (duration, true) on success and (0, false) when the input
+// does not represent a concrete interval.
+//
+// Two distinct success cases:
+//   - "disabled" → scheduler.SpeedTestIntervalDisabled (issue #180)
+//   - any time.ParseDuration-compatible string, e.g. "4h", "30m"
+//
+// Keyword values used by the schedule path ("weekly", "monthly") are
+// deliberately rejected here — they're consumed by SetSpeedTestSchedule,
+// not SetSpeedTestInterval.
+func parseSpeedTestInterval(v string) (time.Duration, bool) {
+	if v == "" {
+		return 0, false
+	}
+	if v == "disabled" {
+		return scheduler.SpeedTestIntervalDisabled, true
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, false
+	}
+	return d, true
+}
+
 // defaultSettings returns the default settings used when none are persisted.
 func defaultSettings() Settings {
 	return Settings{
 		SettingsVersion: currentSettingsVersion,
 		ScanInterval:    "30m",
-		Theme:           ThemeMidnight,
-		Icon:            "icon3",
+		// Speed test default cadence: once a day at 03:00 local time.
+		// Previously defaulted to 4h, which meant ~10 GB/month of speed-test
+		// bandwidth for a home NAS — unfriendly for metered connections and
+		// overkill for threshold alerting (speed trends don't move hour-to-hour).
+		// Daily@3am runs during a low-usage window. Users can tune or disable
+		// entirely from Settings → Speed Test. See #210.
+		SpeedTestInterval: "24h",
+		SpeedTestSchedule: []string{"03:00"},
+		Theme:             ThemeMidnight,
+		Icon:              "icon3",
 		Notifications: SettingsNotifications{
 			Webhooks:           []internal.WebhookConfig{},
 			Policies:           []scheduler.AlertPolicy{},
@@ -171,8 +213,26 @@ func defaultSettings() Settings {
 			},
 			DefaultCooldownSec: 900,
 		},
+		// Fresh installs ship with one default "Internet Speed" service check
+		// so the speed-test feature is discoverable from day one. Blank
+		// contracted-speed thresholds mean the check acts as a heartbeat
+		// (reports up whenever speedtest_history has fresh data) rather than
+		// firing false alerts. Users tune thresholds in Settings → Service
+		// Checks once they know their line's sustained speed. See #210.
+		//
+		// Note: the seed only applies when no settings have been persisted
+		// yet (fresh install). Existing users who have ever saved settings
+		// keep their current service-check list verbatim — the unmarshal in
+		// getSettings() replaces this default with the persisted value.
 		ServiceChecks: SettingsServiceChecks{
-			Checks: []internal.ServiceCheckConfig{},
+			Checks: []internal.ServiceCheckConfig{{
+				Name:        "Internet Speed",
+				Type:        "speed",
+				Target:      "speedtest",
+				Enabled:     true,
+				IntervalSec: 60,
+				MarginPct:   10,
+			}},
 		},
 		LogPush: SettingsLogForward{
 			Enabled:      false,
@@ -211,6 +271,12 @@ func defaultSettings() Settings {
 			Backup:    false,
 			SpeedTest: true,
 			Processes: true,
+			// DashColumns: 3 is the explicit default for fresh installs
+			// (issue #208). 0 (unset) also maps to 3 via the renderer's
+			// || 3 fallback, so existing users who never touched this
+			// setting also see 3 columns after upgrading. Explicit 1/2/3/4
+			// users are unaffected.
+			DashColumns: 3,
 		},
 		ChartRangeHours: 1,
 	}
@@ -744,11 +810,13 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if d, err := time.ParseDuration(settings.ScanInterval); err == nil {
 			s.scheduler.UpdateInterval(d)
 		}
-		// Update speed test interval and schedule
-		if settings.SpeedTestInterval != "" {
-			if d, err := time.ParseDuration(settings.SpeedTestInterval); err == nil {
-				s.scheduler.SetSpeedTestInterval(d)
-			}
+		// Update speed test interval and schedule. The wire format accepts
+		// real duration strings ("4h", "30m") AND the sentinel "disabled"
+		// for users on metered connections who want the standalone loop
+		// turned off entirely (issue #180). Keyword values ("weekly",
+		// "monthly") are consumed by SetSpeedTestSchedule below, not here.
+		if d, ok := parseSpeedTestInterval(settings.SpeedTestInterval); ok {
+			s.scheduler.SetSpeedTestInterval(d)
 		}
 		s.scheduler.SetSpeedTestSchedule(settings.SpeedTestSchedule, settings.SpeedTestDay, settings.SpeedTestInterval)
 		// Update retention config
@@ -1554,7 +1622,11 @@ func (s *Server) handleTestServiceCheck(w http.ResponseWriter, r *http.Request) 
 	// lean.
 	checker.SetCollectDetails(true)
 	if cfg.Type == internal.ServiceCheckSpeed {
-		checker.SetSpeedTestRunner(collector.RunSpeedTest)
+		runner := s.speedTestRunner
+		if runner == nil {
+			runner = collector.RunSpeedTest
+		}
+		checker.SetSpeedTestRunner(runner)
 	}
 
 	result := checker.RunCheck(cfg, time.Now().UTC())

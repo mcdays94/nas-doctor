@@ -481,16 +481,38 @@ func TestRunDueChecks_UnsupportedType_Skipped(t *testing.T) {
 }
 
 // ── Speed check tests ──────────────────────────────────────────────────
+//
+// As of issue #210 the scheduled type=speed service check reads from
+// the shared LastSpeedTestAttempt state + latest speedtest_history row
+// rather than running Ookla via SetSpeedTestRunner. These tests are
+// the classic threshold cases updated to seed the store instead of
+// injecting a runner; the extended state-machine coverage lives in
+// checks_speed_history_test.go.
+
+// seedSpeedTestSuccess writes a "success" attempt + a matching history
+// row so RunCheck's success path has data to read.
+func seedSpeedTestSuccess(t *testing.T, store *storage.FakeStore, dl, ul, latency float64) {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := store.SaveSpeedTestAttempt(storage.LastSpeedTestAttempt{
+		Timestamp: now,
+		Status:    "success",
+	}); err != nil {
+		t.Fatalf("SaveSpeedTestAttempt: %v", err)
+	}
+	if err := store.SaveSpeedTest("seed", &internal.SpeedTestResult{
+		Timestamp:    now,
+		DownloadMbps: dl,
+		UploadMbps:   ul,
+		LatencyMs:    latency,
+	}); err != nil {
+		t.Fatalf("SaveSpeedTest: %v", err)
+	}
+}
 
 func TestRunCheck_Speed_AboveThreshold_Up(t *testing.T) {
-	sc, _ := newTestChecker()
-	sc.SetSpeedTestRunner(func() *internal.SpeedTestResult {
-		return &internal.SpeedTestResult{
-			DownloadMbps: 500,
-			UploadMbps:   100,
-			LatencyMs:    5,
-		}
-	})
+	sc, store := newTestChecker()
+	seedSpeedTestSuccess(t, store, 500, 100, 5)
 
 	check := internal.ServiceCheckConfig{
 		Name:               "speed-ok",
@@ -521,14 +543,8 @@ func TestRunCheck_Speed_AboveThreshold_Up(t *testing.T) {
 }
 
 func TestRunCheck_Speed_BelowThreshold_Degraded(t *testing.T) {
-	sc, _ := newTestChecker()
-	sc.SetSpeedTestRunner(func() *internal.SpeedTestResult {
-		return &internal.SpeedTestResult{
-			DownloadMbps: 500,
-			UploadMbps:   30, // below 80 * 0.9 = 72
-			LatencyMs:    5,
-		}
-	})
+	sc, store := newTestChecker()
+	seedSpeedTestSuccess(t, store, 500, 30 /* below 80 * 0.9 = 72 */, 5)
 
 	check := internal.ServiceCheckConfig{
 		Name:               "speed-degraded",
@@ -550,14 +566,8 @@ func TestRunCheck_Speed_BelowThreshold_Degraded(t *testing.T) {
 }
 
 func TestRunCheck_Speed_BothBelow_Down(t *testing.T) {
-	sc, _ := newTestChecker()
-	sc.SetSpeedTestRunner(func() *internal.SpeedTestResult {
-		return &internal.SpeedTestResult{
-			DownloadMbps: 50, // below 400 * 0.9 = 360
-			UploadMbps:   10, // below 80 * 0.9 = 72
-			LatencyMs:    100,
-		}
-	})
+	sc, store := newTestChecker()
+	seedSpeedTestSuccess(t, store, 50 /* below 400*0.9=360 */, 10 /* below 80*0.9=72 */, 100)
 
 	check := internal.ServiceCheckConfig{
 		Name:               "speed-down",
@@ -570,9 +580,6 @@ func TestRunCheck_Speed_BothBelow_Down(t *testing.T) {
 	}
 
 	result := sc.RunCheck(check, time.Now().UTC())
-	// When both are below threshold, the status is "down" (not "degraded" — no side passes).
-	// Actually from the code: default case when neither dlOK nor ulOK → no explicit "down" set,
-	// it stays as the initial "down".
 	if result.Status != "down" {
 		t.Fatalf("expected status down, got %s (error=%q)", result.Status, result.Error)
 	}
@@ -581,12 +588,15 @@ func TestRunCheck_Speed_BothBelow_Down(t *testing.T) {
 	}
 }
 
-func TestRunCheck_Speed_NoRunner(t *testing.T) {
+// Pre-#210 this asserted "no speedtest tool available" when the runner
+// was nil. Under option B there is no runner — the equivalent failure
+// mode is "no attempt recorded yet" (fresh install, pre-first tick).
+func TestRunCheck_Speed_NoAttemptRecorded(t *testing.T) {
 	sc, _ := newTestChecker()
-	// No speed test runner set (default nil).
+	// No attempt state seeded.
 
 	check := internal.ServiceCheckConfig{
-		Name:    "speed-no-tool",
+		Name:    "speed-fresh",
 		Type:    internal.ServiceCheckSpeed,
 		Target:  "speedtest",
 		Enabled: true,
@@ -594,10 +604,49 @@ func TestRunCheck_Speed_NoRunner(t *testing.T) {
 
 	result := sc.RunCheck(check, time.Now().UTC())
 	if result.Status != "down" {
-		t.Fatalf("expected status down when no speed test runner, got %s", result.Status)
+		t.Fatalf("expected status down when no attempt recorded, got %s", result.Status)
 	}
-	if !strings.Contains(result.Error, "no speedtest tool available") {
-		t.Fatalf("expected 'no speedtest tool available' error, got %q", result.Error)
+	if result.Error == "" {
+		t.Fatal("expected non-empty error when no attempt recorded")
+	}
+}
+
+// TestRunCheck_Speed_ZeroThroughput_ReportsDown verifies that a runner
+// returning an all-zero SpeedTestResult is NOT reported as "up (1 ms)".
+// Regression for #170: when contracted speeds aren't set, the threshold
+// logic (`ContractedDownMbps <= 0 || ...`) unconditionally passed any
+// non-nil result, including a zero-valued struct, producing a misleading
+// UP status with response_ms=1 (from the sub-ms floor in RunCheck).
+func TestRunCheck_Speed_ZeroThroughput_ReportsDown(t *testing.T) {
+	sc, _ := newTestChecker()
+	sc.SetSpeedTestRunner(func() *internal.SpeedTestResult {
+		return &internal.SpeedTestResult{
+			DownloadMbps: 0,
+			UploadMbps:   0,
+			LatencyMs:    0,
+		}
+	})
+
+	check := internal.ServiceCheckConfig{
+		Name:    "speed-zero",
+		Type:    internal.ServiceCheckSpeed,
+		Target:  "speedtest",
+		Enabled: true,
+		// Contracted speeds deliberately NOT set — this is the default
+		// configuration that triggered the original bug.
+	}
+
+	result := sc.RunCheck(check, time.Now().UTC())
+	if result.Status == "up" {
+		t.Fatalf("expected non-up status for zero-throughput result, got up (error=%q, response_ms=%d)",
+			result.Error, result.ResponseMS)
+	}
+	if result.Error == "" {
+		t.Fatal("expected non-empty error explaining zero-throughput result")
+	}
+	if !strings.Contains(strings.ToLower(result.Error), "no measurements") &&
+		!strings.Contains(strings.ToLower(result.Error), "speedtest") {
+		t.Fatalf("expected error to mention missing measurements or speedtest, got %q", result.Error)
 	}
 }
 

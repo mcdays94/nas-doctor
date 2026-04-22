@@ -446,9 +446,15 @@ sections.docker = function(sn, st) {
     var containers = docker.containers;
     var runningCsMerged = containers.filter(function(c) { return c.state === "running"; });
     var stoppedCs = containers.filter(function(c) { return c.state !== "running"; });
+    /* Header count string — when hidden_count > 0 show "(N shown, M hidden)"
+       so the user knows the Advanced-settings filter is in effect (#204). */
+    var hiddenCount = (docker.hidden_count || 0);
+    var countStr = hiddenCount > 0
+      ? (containers.length + ' shown, ' + hiddenCount + ' hidden')
+      : String(containers.length);
     h += '<div>';
     if (mergedContainers && runningCsMerged.length > 0) {
-      h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Docker Containers (' + containers.length + ')';
+      h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Docker Containers (' + countStr + ')';
       h += sections._rangeButtons("cmetrics", "loadContainerChart", _chartRange);
       h += '</div>';
       for (var cmi = 0; cmi < runningCsMerged.length; cmi++) {
@@ -460,7 +466,7 @@ sections.docker = function(sn, st) {
         h += '</div>';
       }
     } else {
-      h += '<div class="section-title">Docker Containers (' + containers.length + ')</div>';
+      h += '<div class="section-title">Docker Containers (' + countStr + ')</div>';
       h += '<div class="table-wrap">';
       h += '<table><thead><tr>';
       h += '<th>Name</th><th>Image</th><th>Status</th><th>CPU</th><th>Memory</th><th>Uptime</th>';
@@ -710,12 +716,17 @@ sections.speedtest = function(sn) {
   var h = '';
   h += '<div class="section-block" data-section="speedtest">';
   var spd = sn ? sn.speed_test : null;
+  /* Gray panel wrapper to match other dashboard sections (UPS, Docker
+     table-wrap, etc). Without this the speed-test tile has no card
+     background and looks visually detached from every other section. */
+  var panelStyle = 'background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px';
   if (spd && spd.available && spd.latest) {
     var r = spd.latest;
     h += '<div>';
     h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Speed Test';
     h += sections._rangeButtons("st", "loadSpeedTestChart", _chartRange);
     h += '</div>';
+    h += '<div style="' + panelStyle + '">';
     h += '<div style="display:flex;gap:16px;font-size:13px;color:var(--text-tertiary);flex-wrap:wrap;margin-bottom:12px">';
     h += '<span>Download: <strong style="color:var(--text-primary);font-size:15px">' + r.download_mbps.toFixed(0) + ' Mbps</strong></span>';
     h += '<span>Upload: <strong style="color:var(--text-primary);font-size:15px">' + r.upload_mbps.toFixed(0) + ' Mbps</strong></span>';
@@ -727,6 +738,16 @@ sections.speedtest = function(sn) {
     if (r.isp) h += 'ISP: ' + esc(r.isp);
     h += '</div>';
     h += '<canvas id="speedtest-chart" style="width:100%;height:80px"></canvas>';
+    h += '</div>'; /* close panel */
+    h += '</div>';
+  } else if (spd && spd.last_attempt && spd.last_attempt.status === 'pending') {
+    // Fresh-install gap: scheduler has kicked off the first-ever speed
+    // test but Ookla hasn't returned yet (~30-60s window). Render the
+    // running state so the user knows the feature is actually doing
+    // something, rather than silently rendering an empty tile.
+    h += '<div>';
+    h += '<div class="section-title">Speed Test</div>';
+    h += '<div style="' + panelStyle + ';font-size:13px;color:var(--text-tertiary);font-style:italic">Running initial speed test&hellip;</div>';
     h += '</div>';
   }
   h += '</div>';
@@ -1359,8 +1380,8 @@ function distributeSections() {
   if (!staging || !colL || !colR) return;
 
   var sec = (_statusData && _statusData.sections) ? _statusData.sections : {};
-  var numCols = sec.dash_columns || 2;
-  if (numCols < 1) numCols = 2;
+  var numCols = sec.dash_columns || 3;
+  if (numCols < 1) numCols = 3;
   var container = document.querySelector(".container");
   var twoCol = document.getElementById("two-col");
   if (numCols >= 3 && container) container.classList.add("dash-wide");
