@@ -83,6 +83,12 @@
 /* Orphan badge */
 .orphan-badge{font-size:9px;padding:1px 6px;border-radius:999px;background:rgba(217,119,6,0.12);color:var(--amber);margin-left:6px}
 .btn-delete-check{font-size:10px;padding:2px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--red);cursor:pointer;margin-left:auto}
+/* Auto-refresh paused indicator (#187). Shown while any log row is
+   expanded so the user knows data won't tick forward until they
+   collapse. Hidden by default; toggled by JS via .hidden. */
+.refresh-paused{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(217,119,6,0.12);color:var(--amber);margin-right:10px;vertical-align:middle}
+.refresh-paused.hidden{display:none}
+.refresh-paused::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber)}
 </style>
 </head>
 <body>
@@ -129,6 +135,7 @@
     <div><span class="filter-label">Time range</span><br>
       <select id="f-range" onchange="applyFilters()"><option value="1h">Last hour</option><option value="6h">Last 6 hours</option><option value="24h" selected>Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></div>
     <div style="margin-left:auto;align-self:flex-end">
+      <span id="refresh-paused-indicator" class="refresh-paused hidden" title="Auto-refresh paused while a log entry is expanded. Collapse all entries to resume.">Refresh paused</span>
       <span id="log-count" style="font-size:12px;color:var(--text3)"></span>
     </div>
   </div>
@@ -166,6 +173,21 @@
   var allLogs=[];          // merged+filtered log entries for the table
   var currentPage=0;
   var activeFilter="";
+  // expandedRows tracks which log-detail row IDs are currently open.
+  // Auto-refresh (setInterval → loadAll) is skipped while any row is
+  // expanded so the user's expanded inspection isn't collapsed by a
+  // DOM rebuild mid-read. See #187. On explicit user actions that
+  // intentionally rebuild the table (filter change, pagination), we
+  // clear this set since the old row IDs no longer refer to the same
+  // entries.
+  var expandedRows={};
+  function anyRowExpanded(){for(var k in expandedRows){if(expandedRows[k])return true;}return false;}
+  function updatePausedIndicator(){
+    var el=document.getElementById("refresh-paused-indicator");
+    if(!el)return;
+    if(anyRowExpanded())el.classList.remove("hidden");
+    else el.classList.add("hidden");
+  }
 
   function esc(s){var d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
   function fetchJSON(url){return fetch(url).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()});}
@@ -322,6 +344,11 @@
     }
     allLogs.sort(function(a,b){return(b.checked_at||"").localeCompare(a.checked_at||"");});
     currentPage=0;
+    // Filter change rebuilds the table with potentially different
+    // entries at each row index; stale expandedRows entries would
+    // wrongly keep auto-refresh paused. #187.
+    expandedRows={};
+    updatePausedIndicator();
     renderLogTable();
   };
 
@@ -385,9 +412,25 @@
     tbody.innerHTML=h;
   }
 
-  window.prevPage=function(){if(currentPage>0){currentPage--;renderLogTable();}};
-  window.nextPage=function(){currentPage++;renderLogTable();};
-  window.toggleLogDetail=function(id){var el=document.getElementById(id);if(el)el.classList.toggle("open");};
+  // prevPage/nextPage/applyFilters rebuild the log table DOM, which
+  // strips the "open" class from every detail row. Clear the tracked
+  // expandedRows set so anyRowExpanded() reflects reality — otherwise
+  // auto-refresh would stay paused forever after paginating away from
+  // an expanded row. #187.
+  window.prevPage=function(){if(currentPage>0){currentPage--;expandedRows={};updatePausedIndicator();renderLogTable();}};
+  window.nextPage=function(){currentPage++;expandedRows={};updatePausedIndicator();renderLogTable();};
+  window.toggleLogDetail=function(id){
+    var el=document.getElementById(id);
+    if(!el)return;
+    el.classList.toggle("open");
+    // Mirror the DOM "open" class into expandedRows so the refresh
+    // tick can consult it. Using the classList as source of truth
+    // (rather than pre-computing) handles both open and close paths
+    // with one branch. #187.
+    if(el.classList.contains("open"))expandedRows[id]=true;
+    else delete expandedRows[id];
+    updatePausedIndicator();
+  };
 
   window.filterByCheck=function(key){
     var sel=document.getElementById("f-check");
@@ -476,7 +519,16 @@
   }
 
   loadAll();
-  setInterval(loadAll,60000);
+  // Auto-refresh guard (#187): skip the tick if the user has any log
+  // row expanded. loadAll() rebuilds the entire log table DOM, which
+  // would collapse the row mid-read. The pause is announced by the
+  // "refresh-paused" badge in the filter bar; it resumes automatically
+  // once all rows are collapsed (see window.toggleLogDetail and the
+  // renderLogTable-callers which clear expandedRows).
+  setInterval(function(){
+    if(anyRowExpanded())return;
+    loadAll();
+  },60000);
 })();
 </script>
 </body>
