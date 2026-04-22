@@ -556,19 +556,50 @@ func (s *Scheduler) UpdateServiceChecks(checks []internal.ServiceCheckConfig) {
 	s.mu.Unlock()
 
 	// Purge orphaned history for any check that was removed from the config.
-	if s.store != nil {
-		keepKeys := make([]string, 0, len(normalized))
-		for _, c := range normalized {
-			keepKeys = append(keepKeys, CheckKey(c))
-		}
-		if pruned, err := s.store.DeleteServiceChecksNotIn(keepKeys); err != nil {
-			s.logger.Warn("prune orphaned service check history", "error", err)
-		} else if pruned > 0 {
-			s.logger.Info("pruned orphaned service check history", "rows", pruned)
-		}
-	}
+	s.pruneOrphanServiceCheckHistory(normalized)
 
 	s.logger.Info("service check config updated", "checks", len(normalized))
+}
+
+// PurgeOrphanServiceCheckHistory removes history rows for any check_key NOT
+// present in the currently configured service checks. Safe to call at any
+// time — idempotent, and a no-op when the store has no orphans.
+//
+// This is a defense-in-depth API: normally UpdateServiceChecks handles the
+// purge automatically as part of config updates. Callers that cannot
+// guarantee UpdateServiceChecks has run (e.g. startup paths where the
+// persisted settings failed to load) can invoke this directly to collapse
+// any drift between in-memory config and the history table. Issue #181.
+//
+// Returns the number of rows deleted.
+func (s *Scheduler) PurgeOrphanServiceCheckHistory() (int, error) {
+	s.mu.RLock()
+	checks := make([]internal.ServiceCheckConfig, len(s.serviceChecks))
+	copy(checks, s.serviceChecks)
+	s.mu.RUnlock()
+	return s.pruneOrphanServiceCheckHistory(checks), nil
+}
+
+// pruneOrphanServiceCheckHistory is the shared implementation for the orphan
+// purge. It derives keep-keys from the supplied (already-normalized) checks
+// and delegates to the store. Returns the count of rows pruned.
+func (s *Scheduler) pruneOrphanServiceCheckHistory(checks []internal.ServiceCheckConfig) int {
+	if s.store == nil {
+		return 0
+	}
+	keepKeys := make([]string, 0, len(checks))
+	for _, c := range checks {
+		keepKeys = append(keepKeys, CheckKey(c))
+	}
+	pruned, err := s.store.DeleteServiceChecksNotIn(keepKeys)
+	if err != nil {
+		s.logger.Warn("prune orphaned service check history", "error", err)
+		return 0
+	}
+	if pruned > 0 {
+		s.logger.Info("pruned orphaned service check history", "rows", pruned)
+	}
+	return pruned
 }
 
 // RunServiceChecksNow executes configured service checks immediately and persists results.
