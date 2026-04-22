@@ -419,6 +419,18 @@ func (sc *ServiceChecker) runTCPCheck(ctx context.Context, check internal.Servic
 	}
 	if result.Details != nil {
 		result.Details["resolved_address"] = addr
+		// protocol_hint is purely informational — drives the small
+		// badge in the expanded log entry + Test toast (issue #188).
+		// Absent from the map when the port is not in the
+		// well-known table so the JS renderer can use key-presence
+		// to decide whether to draw the badge.
+		if _, portStr, splitErr := net.SplitHostPort(addr); splitErr == nil {
+			if portNum, convErr := strconv.Atoi(portStr); convErr == nil {
+				if hint := ProtocolHint(portNum); hint != "" {
+					result.Details["protocol_hint"] = hint
+				}
+			}
+		}
 	}
 	dialer := net.Dialer{Timeout: time.Duration(timeoutSec) * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
