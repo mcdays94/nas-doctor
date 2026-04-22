@@ -364,6 +364,13 @@ func main() {
 			})
 			logger.Info("kubernetes integration loaded", "url", persistedSettings.Kubernetes.URL, "in_cluster", persistedSettings.Kubernetes.InCluster)
 		}
+		// Apply SMART standby-awareness preference on startup (#198). Default
+		// (false) uses `-n standby` so spun-down drives aren't woken by scans.
+		if persistedSettings != nil {
+			coll.SetSMARTConfig(collector.SMARTConfig{
+				WakeDrives: persistedSettings.WakeDrivesForSMART,
+			})
+		}
 		sched.Start()
 		defer sched.Stop()
 	}
