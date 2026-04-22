@@ -260,6 +260,42 @@
         var lossColor = details.packet_loss_pct > 0 ? "var(--red)" : "var(--text)";
         out += cell("Packet Loss", '<span style="color:'+lossColor+'">'+details.packet_loss_pct+'%</span>');
       }
+    } else if (t === "traceroute") {
+      if (details.target) out += cell("Target", '<span style="font-family:var(--font-mono)">'+esc(String(details.target))+'</span>');
+      if (typeof details.hops_count === "number") out += cell("Hops", String(details.hops_count));
+      if (typeof details.final_rtt_ms === "number") out += cell("End-to-end RTT", details.final_rtt_ms.toFixed(1) + " ms");
+      if (typeof details.end_to_end_loss_pct === "number") {
+        var trLossColor = details.end_to_end_loss_pct > 0 ? "var(--red)" : "var(--text)";
+        out += cell("End-to-end Loss", '<span style="color:'+trLossColor+'">'+details.end_to_end_loss_pct.toFixed(1)+'%</span>');
+      }
+      // Full hop-by-hop table in a row-spanning cell so the expanded
+      // log entry surfaces the same routing info the Test button does.
+      // Each hop renders as one table row with index, host, avg RTT,
+      // and loss %.
+      if (Array.isArray(details.hops) && details.hops.length) {
+        var hopsRows = "";
+        for (var hi = 0; hi < details.hops.length; hi++) {
+          var hh = details.hops[hi];
+          var hopHost = hh.host || "???";
+          var hopAvg = (typeof hh.Avg === "number") ? hh.Avg.toFixed(1) + " ms" : "—";
+          var hopLossPct = (typeof hh["Loss%"] === "number") ? hh["Loss%"].toFixed(1) + "%" : "—";
+          var hopHostColor = hopHost === "???" ? "var(--text3)" : "var(--text)";
+          hopsRows += '<tr>'
+            + '<td style="padding:2px 8px 2px 0;color:var(--text3)">'+(hi+1)+'</td>'
+            + '<td style="padding:2px 8px;font-family:var(--font-mono);color:'+hopHostColor+'">'+esc(String(hopHost))+'</td>'
+            + '<td style="padding:2px 8px;text-align:right">'+esc(hopAvg)+'</td>'
+            + '<td style="padding:2px 8px;text-align:right">'+esc(hopLossPct)+'</td>'
+            + '</tr>';
+        }
+        var hopsTable = '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px">'
+          + '<thead><tr style="color:var(--text2);text-align:left">'
+          + '<th style="padding:2px 8px 2px 0">#</th>'
+          + '<th style="padding:2px 8px">Host</th>'
+          + '<th style="padding:2px 8px;text-align:right">Avg RTT</th>'
+          + '<th style="padding:2px 8px;text-align:right">Loss</th>'
+          + '</tr></thead><tbody>'+hopsRows+'</tbody></table>';
+        out += '<div class="log-detail-item" style="grid-column:1/-1"><div class="ld-label">Hops</div><div class="ld-val">'+hopsTable+'</div></div>';
+      }
     }
     // failure_stage is shared across types; only meaningful on non-up
     // results so we skip on "up" to keep the happy-path grid tight.
@@ -268,7 +304,7 @@
     }
     return out;
   }
-  function pillClass(t){t=(t||"").toLowerCase();if(t==="http")return"pill-http";if(t==="tcp")return"pill-tcp";if(t==="dns")return"pill-dns";if(t==="ping")return"pill-ping";if(t==="smb"||t==="nfs")return"pill-smb";if(t==="speed")return"pill-speed";return"pill-http";}
+  function pillClass(t){t=(t||"").toLowerCase();if(t==="http")return"pill-http";if(t==="tcp")return"pill-tcp";if(t==="dns")return"pill-dns";if(t==="ping")return"pill-ping";if(t==="smb"||t==="nfs")return"pill-smb";if(t==="speed")return"pill-speed";if(t==="traceroute")return"pill-trace";return"pill-http";}
   function fmtInterval(sec){if(sec<60)return sec+"s";if(sec<3600)return Math.floor(sec/60)+"m";return Math.floor(sec/3600)+"h";}
   function faviconHTML(type,target){
     if((type||"").toLowerCase()!=="http")return"";

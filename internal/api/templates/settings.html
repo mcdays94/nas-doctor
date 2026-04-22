@@ -430,6 +430,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             <option value="smb">SMB</option>
             <option value="nfs">NFS</option>
             <option value="speed">Speed Test</option>
+            <option value="traceroute">Traceroute</option>
           </select>
         </div>
       </div>
@@ -523,6 +524,13 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           <label class="form-label">Margin of Error (%)</label>
           <input type="number" id="sc-margin" class="form-input" placeholder="10" step="1" min="0" max="50" value="10">
           <div style="font-size:11px;color:var(--text2);margin-top:4px">Speeds within this % of contracted speed are considered acceptable</div>
+        </div>
+      </div>
+      <div id="sc-traceroute-wrap" style="display:none">
+        <div>
+          <label class="form-label">Max end-to-end loss (%)</label>
+          <input type="number" id="sc-max-loss-pct" class="form-input" placeholder="leave blank for reachability-only" step="0.1" min="0" max="100">
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">If set, traceroute reports <b>degraded</b> when end-to-end packet loss exceeds this value. Leave blank to report up whenever the destination is reachable, regardless of loss.</div>
         </div>
       </div>
       <div class="form-row">
@@ -1745,6 +1753,7 @@ function serviceTypePillClass(t) {
   if (type === "smb") return "pill-smb";
   if (type === "nfs") return "pill-nfs";
   if (type === "speed") return "pill-speed";
+  if (type === "traceroute") return "pill-trace";
   return "pill-http";
 }
 
@@ -1818,6 +1827,8 @@ function toggleServiceCheckForm() {
   document.getElementById("sc-contracted-up").value = "";
   document.getElementById("sc-margin").value = "10";
   document.getElementById("sc-dns-server").value = "";
+  var maxLossInput = document.getElementById("sc-max-loss-pct");
+  if (maxLossInput) maxLossInput.value = "";
   setServiceCheckEnabledUI(true);
   populateInstanceSelector();
   onServiceTypeChange();
@@ -1838,12 +1849,14 @@ function onServiceTypeChange() {
   var portWrap = document.getElementById("sc-port-wrap");
   var headersWrap = document.getElementById("sc-headers-wrap");
   var speedWrap = document.getElementById("sc-speed-wrap");
+  var traceWrap = document.getElementById("sc-traceroute-wrap");
   var dnsWrap = document.getElementById("sc-dns-wrap");
   var targetWrap = document.getElementById("sc-target-wrap");
   if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
   if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
   if (headersWrap) headersWrap.style.display = (type === "http") ? "block" : "none";
   if (speedWrap) speedWrap.style.display = (type === "speed") ? "block" : "none";
+  if (traceWrap) traceWrap.style.display = (type === "traceroute") ? "block" : "none";
   if (dnsWrap) dnsWrap.style.display = (type === "dns") ? "block" : "none";
   // Hide target field for speed checks — speedtest auto-selects the best server
   if (targetWrap) targetWrap.style.display = (type === "speed") ? "none" : "";
@@ -1852,6 +1865,7 @@ function onServiceTypeChange() {
     if (type === "speed") { targetInput.value = "speedtest"; }
     else if (type === "ping") targetInput.placeholder = "e.g. 8.8.8.8 or gateway.local";
     else if (type === "dns") targetInput.placeholder = "e.g. google.com";
+    else if (type === "traceroute") targetInput.placeholder = "e.g. 8.8.8.8 or google.com";
     else targetInput.placeholder = "https://nas.local/health, 192.168.1.10, or host:port";
   }
   // Speed tests are expensive (Ookla CLI runs ~30-60s and saturates the
@@ -1897,6 +1911,8 @@ function editServiceCheck(idx) {
   document.getElementById("sc-contracted-up").value = sc.contracted_up_mbps || "";
   document.getElementById("sc-margin").value = sc.margin_pct || 10;
   document.getElementById("sc-dns-server").value = sc.dns_server || "";
+  var maxLossInputEdit = document.getElementById("sc-max-loss-pct");
+  if (maxLossInputEdit) maxLossInputEdit.value = (sc.max_loss_pct != null) ? sc.max_loss_pct : "";
   setServiceCheckEnabledUI(sc.enabled !== false);
   onServiceTypeChange();
   document.getElementById("service-check-form").classList.add("visible");
@@ -1952,6 +1968,16 @@ function readServiceCheckForm() {
   if (type === "dns") {
     var dnsServer = (document.getElementById("sc-dns-server").value || "").trim();
     if (dnsServer) sc.dns_server = dnsServer;
+  }
+  if (type === "traceroute") {
+    // Blank max-loss input = reachability-only mode (no degraded state).
+    // Send the field as null so the Go pointer stays nil; any other
+    // value parses as a float.
+    var rawMaxLoss = (document.getElementById("sc-max-loss-pct") || {}).value;
+    if (rawMaxLoss != null && String(rawMaxLoss).trim() !== "") {
+      var parsedMaxLoss = parseFloat(rawMaxLoss);
+      if (!isNaN(parsedMaxLoss)) sc.max_loss_pct = parsedMaxLoss;
+    }
   }
   return sc;
 }
@@ -2022,6 +2048,25 @@ function renderServiceCheckDetails(type, details, result) {
     if (typeof result.download_mbps === "number") lines.push("Download: " + result.download_mbps.toFixed(0) + " Mbps");
     if (typeof result.upload_mbps === "number") lines.push("Upload: " + result.upload_mbps.toFixed(0) + " Mbps");
     if (typeof result.latency_ms === "number") lines.push("Latency: " + result.latency_ms.toFixed(1) + " ms");
+  } else if (type === "traceroute") {
+    if (details.target) lines.push("Target: " + details.target);
+    if (typeof details.hops_count === "number") lines.push("Hops: " + details.hops_count);
+    if (typeof details.final_rtt_ms === "number") lines.push("End-to-end RTT: " + details.final_rtt_ms.toFixed(1) + " ms");
+    if (typeof details.end_to_end_loss_pct === "number") lines.push("Loss: " + details.end_to_end_loss_pct.toFixed(1) + "%");
+    if (details.failure_stage) lines.push("Failed at: " + details.failure_stage);
+    // Per-hop table: one line per hop with index, host, avg RTT, loss.
+    // Shown as plain-text rows in the toast so users can copy-paste the
+    // trace into a bug report without fighting HTML.
+    if (details.hops && details.hops.length) {
+      lines.push("");
+      lines.push("Hops:");
+      for (var i = 0; i < details.hops.length; i++) {
+        var h = details.hops[i];
+        var avg = (typeof h.Avg === "number") ? h.Avg.toFixed(1) + " ms" : "—";
+        var lossPct = (typeof h["Loss%"] === "number") ? h["Loss%"].toFixed(1) + "%" : "—";
+        lines.push("  " + (i + 1) + ". " + (h.host || "???") + "  avg " + avg + "  loss " + lossPct);
+      }
+    }
   }
   return lines.join("\n");
 }
