@@ -539,6 +539,15 @@ func (sc *ServiceChecker) runSpeedCheck(check internal.ServiceCheckConfig, resul
 		return
 	}
 
+	// Reject zero-throughput results regardless of contracted-speed config.
+	// Without this guard the threshold logic below unconditionally passes
+	// when both contracted fields are unset (the default), producing a
+	// misleading UP status. See issue #170.
+	if stResult.DownloadMbps <= 0 && stResult.UploadMbps <= 0 {
+		result.Error = "speed test returned no measurements (speedtest CLI may have failed)"
+		return
+	}
+
 	result.DownloadMbps = stResult.DownloadMbps
 	result.UploadMbps = stResult.UploadMbps
 	result.LatencyMs = stResult.LatencyMs
