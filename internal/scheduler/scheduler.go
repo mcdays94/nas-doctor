@@ -912,12 +912,21 @@ func (s *Scheduler) collectProcessStats() {
 //   - failed → runner returned nil (Ookla missing, network error,
 //     zero-throughput parse failure per #170); attempt flips to
 //     status=failed with a descriptive error message.
+//
+// Each branch persists the attempt to the store AND mirrors it onto
+// s.latest.SpeedTest.LastAttempt so the dashboard widget can pick it
+// up from the next /api/v1/snapshot/latest call without a separate
+// DB round-trip. The cached-snapshot mirror is best-effort: if
+// s.latest is still nil (first scan hasn't completed), the store
+// copy is canonical and the snapshot will pick it up on rebuild.
 func (s *Scheduler) runSpeedTest() {
 	// Disabled branch: check current state first; only write on transition.
 	s.mu.RLock()
 	interval := s.speedTestInterval
 	runner := s.speedTestRunFn
 	s.mu.RUnlock()
+
+	now := time.Now().UTC()
 
 	if interval == SpeedTestIntervalDisabled {
 		// Idempotent: if the last stored status is already "disabled",
@@ -928,23 +937,13 @@ func (s *Scheduler) runSpeedTest() {
 			return
 		}
 		s.logger.Info("speed test: disabled in settings, recording state")
-		if err := s.store.SaveSpeedTestAttempt(storage.LastSpeedTestAttempt{
-			Timestamp: time.Now().UTC(),
-			Status:    "disabled",
-		}); err != nil {
-			s.logger.Warn("failed to save disabled attempt state", "error", err)
-		}
+		s.recordSpeedTestAttempt(now, "disabled", "")
 		return
 	}
 
 	// Write pending state first so the widget + scheduled check see
 	// "in progress" for the duration of the Ookla invocation.
-	if err := s.store.SaveSpeedTestAttempt(storage.LastSpeedTestAttempt{
-		Timestamp: time.Now().UTC(),
-		Status:    "pending",
-	}); err != nil {
-		s.logger.Warn("failed to save pending attempt state", "error", err)
-	}
+	s.recordSpeedTestAttempt(now, "pending", "")
 
 	s.logger.Info("running speed test")
 	var result *internal.SpeedTestResult
@@ -954,13 +953,8 @@ func (s *Scheduler) runSpeedTest() {
 
 	if result == nil {
 		s.logger.Info("speed test failed: no speedtest tool available or zero-throughput result")
-		if err := s.store.SaveSpeedTestAttempt(storage.LastSpeedTestAttempt{
-			Timestamp: time.Now().UTC(),
-			Status:    "failed",
-			ErrorMsg:  "no speedtest tool available (install speedtest or speedtest-cli) or test returned zero throughput",
-		}); err != nil {
-			s.logger.Warn("failed to save failed attempt state", "error", err)
-		}
+		s.recordSpeedTestAttempt(time.Now().UTC(), "failed",
+			"no speedtest tool available (install speedtest or speedtest-cli) or test returned zero throughput")
 		return
 	}
 
@@ -973,21 +967,64 @@ func (s *Scheduler) runSpeedTest() {
 	if err := s.store.SaveSpeedTest("speedtest-"+time.Now().Format("20060102-150405"), result); err != nil {
 		s.logger.Warn("failed to save speed test result", "error", err)
 	}
+	s.recordSpeedTestSuccess(time.Now().UTC(), result)
+}
+
+// recordSpeedTestAttempt persists the attempt state to the store AND
+// mirrors it onto s.latest.SpeedTest.LastAttempt (if the cached
+// snapshot exists) so the dashboard widget sees the current state on
+// the next /api/v1/snapshot/latest call. Preserves any existing
+// s.latest.SpeedTest.Latest value — only overwrites LastAttempt.
+//
+// Does NOT write speedtest_history: that's the caller's responsibility
+// (only the success branch of runSpeedTest writes a history row).
+func (s *Scheduler) recordSpeedTestAttempt(ts time.Time, status, errorMsg string) {
 	if err := s.store.SaveSpeedTestAttempt(storage.LastSpeedTestAttempt{
-		Timestamp: time.Now().UTC(),
+		Timestamp: ts,
+		Status:    status,
+		ErrorMsg:  errorMsg,
+	}); err != nil {
+		s.logger.Warn("failed to save attempt state", "status", status, "error", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.latest == nil {
+		return
+	}
+	if s.latest.SpeedTest == nil {
+		s.latest.SpeedTest = &internal.SpeedTestInfo{}
+	}
+	s.latest.SpeedTest.LastAttempt = &internal.SpeedTestAttempt{
+		Timestamp: ts,
+		Status:    status,
+		ErrorMsg:  errorMsg,
+	}
+}
+
+// recordSpeedTestSuccess is the success-branch counterpart: writes the
+// attempt row AND updates s.latest.SpeedTest.{Latest,LastAttempt,
+// Available} atomically so the widget sees Latest + LastAttempt
+// transition together.
+func (s *Scheduler) recordSpeedTestSuccess(ts time.Time, result *internal.SpeedTestResult) {
+	if err := s.store.SaveSpeedTestAttempt(storage.LastSpeedTestAttempt{
+		Timestamp: ts,
 		Status:    "success",
 	}); err != nil {
 		s.logger.Warn("failed to save success attempt state", "error", err)
 	}
-	// Update the cached snapshot's speed test field
 	s.mu.Lock()
-	if s.latest != nil {
-		s.latest.SpeedTest = &internal.SpeedTestInfo{
-			Available: true,
-			Latest:    result,
-		}
+	defer s.mu.Unlock()
+	if s.latest == nil {
+		return
 	}
-	s.mu.Unlock()
+	s.latest.SpeedTest = &internal.SpeedTestInfo{
+		Available: true,
+		Latest:    result,
+		LastAttempt: &internal.SpeedTestAttempt{
+			Timestamp: ts,
+			Status:    "success",
+		},
+	}
 }
 
 func (s *Scheduler) runDueServiceChecks() {

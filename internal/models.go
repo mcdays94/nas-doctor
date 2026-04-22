@@ -575,6 +575,24 @@ type BackupJob struct {
 type SpeedTestInfo struct {
 	Available bool             `json:"available"`
 	Latest    *SpeedTestResult `json:"latest,omitempty"`
+	// LastAttempt is the scheduler's most recent speed-test outcome,
+	// carried alongside Latest so the dashboard widget can render
+	// "Running initial speed test…" when the first-ever test is in
+	// flight (status=pending with no Latest yet) and so the widget
+	// can distinguish a truly-broken state from a never-ran state.
+	// Populated on every runSpeedTest tick (success/failed/pending/
+	// disabled). See #210.
+	LastAttempt *SpeedTestAttempt `json:"last_attempt,omitempty"`
+}
+
+// SpeedTestAttempt mirrors storage.LastSpeedTestAttempt as an API-facing
+// type. The status values are a closed set: "success", "failed",
+// "pending", "disabled". Widget + scheduled type=speed check switch on
+// Status to decide what to render / report. See #210.
+type SpeedTestAttempt struct {
+	Timestamp time.Time `json:"timestamp"`
+	Status    string    `json:"status"`
+	ErrorMsg  string    `json:"error_msg,omitempty"`
 }
 
 type SpeedTestResult struct {
