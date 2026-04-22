@@ -171,18 +171,43 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
     return;
   }
 
+  /* ── Time-window for history charts (issue #166) ──────────────
+     Default to 1D (24h) so first-paint charts are legible regardless
+     of how much SMART history has accumulated. User can widen via
+     the selector buttons rendered above the Temperature History chart.
+  */
+  var diskHistoryHours = 24;
+
   /* ── Fetch disk data ──────────────────────────────────────────── */
-  fetch("/api/v1/disks/" + encodeURIComponent(serial))
-    .then(function(resp) {
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      return resp.json();
-    })
+  function fetchAndRender(hours) {
+    return fetch("/api/v1/disks/" + encodeURIComponent(serial) + "?hours=" + hours)
+      .then(function(resp) {
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        return resp.json();
+      });
+  }
+
+  fetchAndRender(diskHistoryHours)
     .then(function(data) {
       renderPage(data);
     })
     .catch(function(err) {
       showError("Failed to load disk data: " + err.message);
     });
+
+  /* ── Range selector handler ────────────────────────────────────
+     Re-fetch with a new window, re-render the full page so the
+     range selector itself updates its active-button styling and
+     the charts regenerate off the new history array. The legacy
+     (no-?hours=) code path is preserved server-side for external
+     callers — see issue #166 for the backward-compat contract.
+  */
+  window._loadDiskHistoryRange = function(hours) {
+    diskHistoryHours = hours;
+    fetchAndRender(hours)
+      .then(function(data) { renderPage(data); })
+      .catch(function(err) { showError("Failed to load disk data: " + err.message); });
+  };
 
   /* ── Error state ──────────────────────────────────────────────── */
   function showError(msg) {
@@ -422,7 +447,19 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
     html += "</tbody></table></div>";
 
     /* ── Temperature History Chart ─────────────────────────────── */
-    html += "<div class=\"section-heading\">Temperature History</div>";
+    /* Range selector row: heading on the left, 1D/1W/1M/1Y pills on
+       the right. Drives both the Temperature History and the SMART
+       Trends charts below it — single fetch, single state, per #166. */
+    html += "<div style=\"display:flex;align-items:center;justify-content:space-between;margin-top:calc(var(--sp)*5);margin-bottom:calc(var(--sp)*2)\">";
+    html += "<div class=\"section-heading\" style=\"margin-top:0;margin-bottom:0\">Temperature History</div>";
+    html += "<div style=\"display:flex;gap:4px\">";
+    var diskRanges = [{h:24,l:"1D"},{h:168,l:"1W"},{h:720,l:"1M"},{h:8760,l:"1Y"}];
+    for (var dri = 0; dri < diskRanges.length; dri++) {
+      var drng = diskRanges[dri];
+      var dactive = diskHistoryHours === drng.h;
+      html += "<button onclick=\"window._loadDiskHistoryRange(" + drng.h + ")\" style=\"font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid var(--border);background:" + (dactive ? "var(--bg-elevated)" : "transparent") + ";color:" + (dactive ? "var(--text-secondary)" : "var(--text-tertiary)") + ";cursor:pointer;font-weight:" + (dactive ? "600" : "500") + "\">" + drng.l + "</button>";
+    }
+    html += "</div></div>";
     if (history.length > 1) {
       html += "<div class=\"chart-card\">";
       html += "<div class=\"chart-wrap\"><canvas id=\"chartTemp\" height=\"220\"></canvas></div>";
