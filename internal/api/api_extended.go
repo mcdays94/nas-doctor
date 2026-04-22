@@ -152,6 +152,32 @@ type LogForwardDestination struct {
 
 const settingsConfigKey = "settings"
 
+// parseSpeedTestInterval converts the wire-level value of
+// Settings.SpeedTestInterval into a Duration for the scheduler. It
+// returns (duration, true) on success and (0, false) when the input
+// does not represent a concrete interval.
+//
+// Two distinct success cases:
+//   - "disabled" → scheduler.SpeedTestIntervalDisabled (issue #180)
+//   - any time.ParseDuration-compatible string, e.g. "4h", "30m"
+//
+// Keyword values used by the schedule path ("weekly", "monthly") are
+// deliberately rejected here — they're consumed by SetSpeedTestSchedule,
+// not SetSpeedTestInterval.
+func parseSpeedTestInterval(v string) (time.Duration, bool) {
+	if v == "" {
+		return 0, false
+	}
+	if v == "disabled" {
+		return scheduler.SpeedTestIntervalDisabled, true
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, false
+	}
+	return d, true
+}
+
 // defaultSettings returns the default settings used when none are persisted.
 func defaultSettings() Settings {
 	return Settings{
@@ -744,11 +770,13 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if d, err := time.ParseDuration(settings.ScanInterval); err == nil {
 			s.scheduler.UpdateInterval(d)
 		}
-		// Update speed test interval and schedule
-		if settings.SpeedTestInterval != "" {
-			if d, err := time.ParseDuration(settings.SpeedTestInterval); err == nil {
-				s.scheduler.SetSpeedTestInterval(d)
-			}
+		// Update speed test interval and schedule. The wire format accepts
+		// real duration strings ("4h", "30m") AND the sentinel "disabled"
+		// for users on metered connections who want the standalone loop
+		// turned off entirely (issue #180). Keyword values ("weekly",
+		// "monthly") are consumed by SetSpeedTestSchedule below, not here.
+		if d, ok := parseSpeedTestInterval(settings.SpeedTestInterval); ok {
+			s.scheduler.SetSpeedTestInterval(d)
 		}
 		s.scheduler.SetSpeedTestSchedule(settings.SpeedTestSchedule, settings.SpeedTestDay, settings.SpeedTestInterval)
 		// Update retention config

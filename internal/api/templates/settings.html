@@ -796,6 +796,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           <option value="24h">Once a day</option>
           <option value="weekly">Once a week</option>
           <option value="monthly">Once a month</option>
+          <option value="disabled">Disabled</option>
         </select>
       </div>
       <div style="display:flex;gap:8px">
@@ -1072,6 +1073,7 @@ function updateSpeedTestPreview() {
   var freq = document.getElementById("speedtest-interval").value;
   var el = document.getElementById("st-preview");
   if (!el) return;
+  if (freq === "disabled") { el.textContent = "Speed tests are disabled. The dashboard widget will stop updating. The Test button on speed-type service checks continues to work on-demand."; return; }
   var labels = {"30m":"every 30 minutes","1h":"every hour","2h":"every 2 hours","4h":"every 4 hours","6h":"every 6 hours","12h":"every 12 hours"};
   if (labels[freq]) { el.textContent = "Speed tests run " + labels[freq] + ". First test runs 2 minutes after startup."; return; }
   var time = (document.getElementById("st-time").value || "03:00").trim();
