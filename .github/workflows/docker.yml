@@ -61,8 +61,13 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
-            # Use latest git tag as version for main branch builds
-            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+            # Use latest v* git tag as version for main branch builds.
+            # --match="v*" is essential: without it, the force-pushed `latest`
+            # tag (also pointing at a release commit) races with v0.9.4 for
+            # "closest tag" and git picks alphabetically — "latest" < "v0.9.4" —
+            # so VERSION gets set to "latest", which is how v0.9.4 shipped with
+            # the dashboard footer showing "latest" instead of "0.9.4".
+            LATEST_TAG=$(git describe --tags --abbrev=0 --match="v*" 2>/dev/null || echo "dev")
             echo "value=${LATEST_TAG#v}" >> "$GITHUB_OUTPUT"
           fi
 
