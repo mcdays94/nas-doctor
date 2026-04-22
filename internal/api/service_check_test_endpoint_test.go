@@ -345,6 +345,71 @@ func TestHandleTestServiceCheck_HTTP_ReturnsDetails(t *testing.T) {
 	}
 }
 
+// TestHandleTestServiceCheck_Speed_ZeroThroughput_ReportsDown — when the
+// injected speed-test runner returns a zero-throughput result (e.g. because
+// the Ookla CLI exited 0 with empty JSON, or a transient network failure),
+// the Test endpoint must NOT report "up (1 ms)". It must report a non-up
+// status and a descriptive error the UI can surface. Regression for #170.
+func TestHandleTestServiceCheck_Speed_ZeroThroughput_ReportsDown(t *testing.T) {
+	srv := newSettingsTestServer()
+	srv.speedTestRunner = func() *internal.SpeedTestResult {
+		return &internal.SpeedTestResult{
+			DownloadMbps: 0,
+			UploadMbps:   0,
+			LatencyMs:    0,
+		}
+	}
+
+	rec := postServiceCheckTest(t, srv, map[string]any{
+		"name":   "speed-zero",
+		"type":   "speed",
+		"target": "speedtest",
+		// Contracted speeds deliberately omitted — default configuration.
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 (check ran, down), got %d: %s", rec.Code, rec.Body.String())
+	}
+	r := decodeResult(t, rec)
+	if r.Status == "up" {
+		t.Fatalf("expected non-up status for zero-throughput runner, got up (error=%q, response_ms=%d)",
+			r.Error, r.ResponseMS)
+	}
+	if r.Error == "" {
+		t.Fatal("expected non-empty error on zero-throughput speed test result")
+	}
+}
+
+// TestHandleTestServiceCheck_Speed_NonZero_ReportsUp — sanity check that the
+// injected-runner seam still reports UP for a realistic non-zero result.
+// Guards against over-aggressive zero-rejection (e.g. treating legitimate
+// sub-1-Mbps results as failures).
+func TestHandleTestServiceCheck_Speed_NonZero_ReportsUp(t *testing.T) {
+	srv := newSettingsTestServer()
+	srv.speedTestRunner = func() *internal.SpeedTestResult {
+		return &internal.SpeedTestResult{
+			DownloadMbps: 500,
+			UploadMbps:   100,
+			LatencyMs:    5,
+		}
+	}
+
+	rec := postServiceCheckTest(t, srv, map[string]any{
+		"name":   "speed-ok",
+		"type":   "speed",
+		"target": "speedtest",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	r := decodeResult(t, rec)
+	if r.Status != "up" {
+		t.Fatalf("expected status up for non-zero throughput, got %q (error=%q)", r.Status, r.Error)
+	}
+	if r.DownloadMbps != 500 || r.UploadMbps != 100 {
+		t.Fatalf("expected download=500 upload=100, got %v/%v", r.DownloadMbps, r.UploadMbps)
+	}
+}
+
 // TestRegisterExtendedRoutes_ExposesServiceCheckTest — the new route is registered
 // and responds on POST through the router.
 func TestRegisterExtendedRoutes_ExposesServiceCheckTest(t *testing.T) {

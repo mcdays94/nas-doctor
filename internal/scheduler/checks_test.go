@@ -601,6 +601,45 @@ func TestRunCheck_Speed_NoRunner(t *testing.T) {
 	}
 }
 
+// TestRunCheck_Speed_ZeroThroughput_ReportsDown verifies that a runner
+// returning an all-zero SpeedTestResult is NOT reported as "up (1 ms)".
+// Regression for #170: when contracted speeds aren't set, the threshold
+// logic (`ContractedDownMbps <= 0 || ...`) unconditionally passed any
+// non-nil result, including a zero-valued struct, producing a misleading
+// UP status with response_ms=1 (from the sub-ms floor in RunCheck).
+func TestRunCheck_Speed_ZeroThroughput_ReportsDown(t *testing.T) {
+	sc, _ := newTestChecker()
+	sc.SetSpeedTestRunner(func() *internal.SpeedTestResult {
+		return &internal.SpeedTestResult{
+			DownloadMbps: 0,
+			UploadMbps:   0,
+			LatencyMs:    0,
+		}
+	})
+
+	check := internal.ServiceCheckConfig{
+		Name:    "speed-zero",
+		Type:    internal.ServiceCheckSpeed,
+		Target:  "speedtest",
+		Enabled: true,
+		// Contracted speeds deliberately NOT set — this is the default
+		// configuration that triggered the original bug.
+	}
+
+	result := sc.RunCheck(check, time.Now().UTC())
+	if result.Status == "up" {
+		t.Fatalf("expected non-up status for zero-throughput result, got up (error=%q, response_ms=%d)",
+			result.Error, result.ResponseMS)
+	}
+	if result.Error == "" {
+		t.Fatal("expected non-empty error explaining zero-throughput result")
+	}
+	if !strings.Contains(strings.ToLower(result.Error), "no measurements") &&
+		!strings.Contains(strings.ToLower(result.Error), "speedtest") {
+		t.Fatalf("expected error to mention missing measurements or speedtest, got %q", result.Error)
+	}
+}
+
 // ── Helper function tests ──────────────────────────────────────────────
 
 func TestIsSupportedCheckType(t *testing.T) {

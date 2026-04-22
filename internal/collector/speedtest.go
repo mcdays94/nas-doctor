@@ -69,6 +69,14 @@ func runOoklaSpeedtest() *internal.SpeedTestResult {
 		return nil
 	}
 
+	// Defense-in-depth for #170: if Ookla exited 0 but produced zero-throughput
+	// JSON (e.g. partial run, killed subprocess, or a test server returning
+	// empty measurements), treat as a failure here so the scheduler never
+	// sees a zero-valued SpeedTestResult in the first place.
+	if data.Download.Bandwidth == 0 && data.Upload.Bandwidth == 0 {
+		return nil
+	}
+
 	return &internal.SpeedTestResult{
 		Timestamp:    time.Now(),
 		DownloadMbps: float64(data.Download.Bandwidth) * 8 / 1e6, // bytes/sec → Mbps
@@ -113,6 +121,12 @@ func runSpeedtestCLI() *internal.SpeedTestResult {
 	}
 
 	if err := json.Unmarshal([]byte(out), &data); err != nil {
+		return nil
+	}
+
+	// Defense-in-depth for #170: treat zero-throughput results as failure
+	// so the scheduler never sees a zero-valued SpeedTestResult.
+	if data.Download == 0 && data.Upload == 0 {
 		return nil
 	}
 

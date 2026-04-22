@@ -41,6 +41,11 @@ type Server struct {
 	logger    *slog.Logger
 	version   string
 	startTime time.Time
+	// speedTestRunner is the function invoked by handleTestServiceCheck for
+	// speed-type checks. Nil means the handler will fall back to
+	// collector.RunSpeedTest (the default). Tests override this to inject
+	// deterministic results without needing the Ookla CLI.
+	speedTestRunner scheduler.SpeedTestRunner
 }
 
 // New creates a new API server.

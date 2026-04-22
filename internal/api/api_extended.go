@@ -1560,7 +1560,11 @@ func (s *Server) handleTestServiceCheck(w http.ResponseWriter, r *http.Request) 
 	// lean.
 	checker.SetCollectDetails(true)
 	if cfg.Type == internal.ServiceCheckSpeed {
-		checker.SetSpeedTestRunner(collector.RunSpeedTest)
+		runner := s.speedTestRunner
+		if runner == nil {
+			runner = collector.RunSpeedTest
+		}
+		checker.SetSpeedTestRunner(runner)
 	}
 
 	result := checker.RunCheck(cfg, time.Now().UTC())
