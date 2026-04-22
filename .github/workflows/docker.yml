@@ -20,6 +20,17 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# Serialize builds per ref. Rapid-fire squash merges to main (or a rebase force-push)
+# would previously trigger parallel docker builds, each racing to push `:latest`.
+# Whichever PUSH finished last won, which did NOT have to be the latest commit — we
+# shipped v0.9.4 with `:latest` stuck on the 3rd-of-5 squash-merge commit for this
+# exact reason. `cancel-in-progress: true` guarantees "last push to main wins":
+# new push arrives → any running build on the same ref is canceled → new build runs
+# to completion → deterministic `:latest`.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -30,6 +41,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Default (fetch-depth:1, fetch-tags:false) leaves `git describe --tags`
+          # failing on main branch builds, which silently falls through to
+          # VERSION=dev baked into the binary. We need the full history + tags so
+          # the "Determine version" step can find the latest v* tag and bake it
+          # into the image. This also costs <5s extra on repos this size.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Go
         uses: actions/setup-go@v5
