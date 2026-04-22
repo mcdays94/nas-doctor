@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -30,7 +31,7 @@ type SMARTConfig struct {
 // that should create a history row or surface in logs.
 var errDriveInStandby = errors.New("drive in standby; skipped SMART read")
 
-func collectSMART(cfg SMARTConfig) ([]internal.SMARTInfo, error) {
+func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, error) {
 	devices := discoverDrives()
 	if len(devices) == 0 {
 		// Fallback: try smartctl --scan. (The --scan subcommand does not
@@ -57,6 +58,11 @@ func collectSMART(cfg SMARTConfig) ([]internal.SMARTInfo, error) {
 			if errors.Is(err, errDriveInStandby) {
 				// Expected when `-n standby` is in effect and the drive
 				// is spun down. Not an error; no history row created.
+				// Emit an INFO log so operators can see per-cycle which
+				// drives were skipped for standby (issue #202).
+				if logger != nil {
+					logger.Info("skipped SMART read: drive in standby", "device", dev)
+				}
 				standby++
 				continue
 			}
