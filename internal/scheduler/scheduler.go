@@ -70,6 +70,13 @@ type AlertingConfig struct {
 	DefaultCooldownSec int                         `json:"default_cooldown_sec,omitempty"`
 }
 
+// SpeedTestIntervalDisabled is a sentinel value written to
+// speedTestInterval when the user picks "Disabled" in the settings
+// dropdown (#180). The scheduler's runSpeedTest treats this as
+// "skip invocation, record status=disabled once" rather than trying
+// to interpret a negative duration as a real interval. See #210.
+const SpeedTestIntervalDisabled time.Duration = -1
+
 // Scheduler periodically runs diagnostic collections and analysis.
 type Scheduler struct {
 	collector         *collector.Collector
@@ -82,11 +89,15 @@ type Scheduler struct {
 	speedTestSchedule []string // specific HH:MM times, overrides interval when set
 	speedTestDay      string   // "monday"-"sunday" or "1","15" for monthly
 	speedTestFreq     string   // "24h", "weekly", "monthly" — only when schedule is set
-	retention         RetentionConfig
-	alerting          AlertingConfig
-	serviceChecks     []internal.ServiceCheckConfig
-	checker           *ServiceChecker
-	retentionMgr      *RetentionManager
+	// speedTestRunFn is an injectable runner (tests swap this; production
+	// uses collector.RunSpeedTest via the default in New). Keeping it on
+	// the struct lets tests exercise runSpeedTest without spawning Ookla.
+	speedTestRunFn SpeedTestRunner
+	retention      RetentionConfig
+	alerting       AlertingConfig
+	serviceChecks  []internal.ServiceCheckConfig
+	checker        *ServiceChecker
+	retentionMgr   *RetentionManager
 
 	logForwarder *logfwd.Forwarder
 
@@ -115,6 +126,7 @@ func New(
 		logger:            logger,
 		interval:          interval,
 		speedTestInterval: 4 * time.Hour,
+		speedTestRunFn:    collector.RunSpeedTest,
 		retention: RetentionConfig{
 			SnapshotDays:  90,
 			MaxDBSizeMB:   500,
@@ -255,14 +267,29 @@ func (s *Scheduler) Start() {
 
 // UpdateInterval dynamically changes the scan interval without restarting.
 // SetSpeedTestInterval updates how often the speed test runs.
+//
+// The SpeedTestIntervalDisabled sentinel (#180/#210) short-circuits the
+// sanity clamp and is preserved as-is; the runSpeedTest branch treats it
+// as "skip + record disabled".
 func (s *Scheduler) SetSpeedTestInterval(d time.Duration) {
-	if d < 5*time.Minute {
+	if d != SpeedTestIntervalDisabled && d < 5*time.Minute {
 		d = 5 * time.Minute
 	}
 	s.mu.Lock()
 	s.speedTestInterval = d
 	s.mu.Unlock()
 	s.logger.Info("speed test interval updated", "interval", d)
+}
+
+// SetSpeedTestRunnerFn injects a custom speed-test runner. Production
+// wiring calls collector.RunSpeedTest via the constructor default;
+// tests pass a deterministic stub. Introduced as part of #210 so
+// runSpeedTest can record attempt state without spawning Ookla in
+// unit tests.
+func (s *Scheduler) SetSpeedTestRunnerFn(fn SpeedTestRunner) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.speedTestRunFn = fn
 }
 
 // SetSpeedTestSchedule sets specific times of day to run speed tests.
@@ -868,14 +895,75 @@ func (s *Scheduler) collectProcessStats() {
 	s.mu.Unlock()
 }
 
-// runSpeedTest executes a network speed test and stores the result.
+// runSpeedTest executes a network speed test and records the attempt
+// state in the store.
+//
+// Records one of four outcomes on every invocation, except the disabled
+// branch which is idempotent (first call writes status=disabled, later
+// calls no-op so the tick loop doesn't churn a row every minute):
+//
+//   - disabled → interval == SpeedTestIntervalDisabled (#180): skip the
+//     run entirely; record status=disabled once.
+//   - pending → written BEFORE invoking the runner so the dashboard
+//     widget and scheduled type=speed check can render the in-progress
+//     state during the ~30-60 second window Ookla takes to complete.
+//   - success → runner returned a result; saved to speedtest_history
+//     and the attempt state flips to status=success.
+//   - failed → runner returned nil (Ookla missing, network error,
+//     zero-throughput parse failure per #170); attempt flips to
+//     status=failed with a descriptive error message.
 func (s *Scheduler) runSpeedTest() {
-	s.logger.Info("running speed test")
-	result := collector.RunSpeedTest()
-	if result == nil {
-		s.logger.Info("speed test: no speedtest tool available (install speedtest or speedtest-cli)")
+	// Disabled branch: check current state first; only write on transition.
+	s.mu.RLock()
+	interval := s.speedTestInterval
+	runner := s.speedTestRunFn
+	s.mu.RUnlock()
+
+	if interval == SpeedTestIntervalDisabled {
+		// Idempotent: if the last stored status is already "disabled",
+		// don't write again. This matters because the 1-minute tick
+		// loop may call this path many times and we don't want to
+		// churn a row per tick.
+		if existing, err := s.store.GetLastSpeedTestAttempt(); err == nil && existing != nil && existing.Status == "disabled" {
+			return
+		}
+		s.logger.Info("speed test: disabled in settings, recording state")
+		if err := s.store.SaveSpeedTestAttempt(storage.LastSpeedTestAttempt{
+			Timestamp: time.Now().UTC(),
+			Status:    "disabled",
+		}); err != nil {
+			s.logger.Warn("failed to save disabled attempt state", "error", err)
+		}
 		return
 	}
+
+	// Write pending state first so the widget + scheduled check see
+	// "in progress" for the duration of the Ookla invocation.
+	if err := s.store.SaveSpeedTestAttempt(storage.LastSpeedTestAttempt{
+		Timestamp: time.Now().UTC(),
+		Status:    "pending",
+	}); err != nil {
+		s.logger.Warn("failed to save pending attempt state", "error", err)
+	}
+
+	s.logger.Info("running speed test")
+	var result *internal.SpeedTestResult
+	if runner != nil {
+		result = runner()
+	}
+
+	if result == nil {
+		s.logger.Info("speed test failed: no speedtest tool available or zero-throughput result")
+		if err := s.store.SaveSpeedTestAttempt(storage.LastSpeedTestAttempt{
+			Timestamp: time.Now().UTC(),
+			Status:    "failed",
+			ErrorMsg:  "no speedtest tool available (install speedtest or speedtest-cli) or test returned zero throughput",
+		}); err != nil {
+			s.logger.Warn("failed to save failed attempt state", "error", err)
+		}
+		return
+	}
+
 	s.logger.Info("speed test complete",
 		"download", fmt.Sprintf("%.1f Mbps", result.DownloadMbps),
 		"upload", fmt.Sprintf("%.1f Mbps", result.UploadMbps),
@@ -884,6 +972,12 @@ func (s *Scheduler) runSpeedTest() {
 	// Store in DB
 	if err := s.store.SaveSpeedTest("speedtest-"+time.Now().Format("20060102-150405"), result); err != nil {
 		s.logger.Warn("failed to save speed test result", "error", err)
+	}
+	if err := s.store.SaveSpeedTestAttempt(storage.LastSpeedTestAttempt{
+		Timestamp: time.Now().UTC(),
+		Status:    "success",
+	}); err != nil {
+		s.logger.Warn("failed to save success attempt state", "error", err)
 	}
 	// Update the cached snapshot's speed test field
 	s.mu.Lock()
