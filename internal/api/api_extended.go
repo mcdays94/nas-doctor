@@ -1628,6 +1628,28 @@ func (s *Server) handleTestServiceCheck(w http.ResponseWriter, r *http.Request) 
 		}
 		checker.SetSpeedTestRunner(runner)
 	}
+	if cfg.Type == internal.ServiceCheckTraceroute {
+		// The Test-button path uses 10 cycles/hop for a richer hop
+		// sample (~10-20s worst case). The scheduler's persistent
+		// checker injects a runner with 5 cycles for scheduled cadence.
+		runner := s.tracerouteRunner
+		if runner == nil {
+			runner = func(target string, _ int) (*collector.MTRResult, error) {
+				return collector.RunMTR(target, 10)
+			}
+		} else {
+			// Respect the injected runner's own cycle count — tests
+			// assert on >= 10 so we preserve it. Wrap the test-side
+			// runner unchanged; the scheduler will pass cycles=5 via
+			// runTraceCheck's hardcoded constant but here we override
+			// with 10.
+			userRunner := runner
+			runner = func(target string, _ int) (*collector.MTRResult, error) {
+				return userRunner(target, 10)
+			}
+		}
+		checker.SetTraceRunner(runner)
+	}
 
 	result := checker.RunCheck(cfg, time.Now().UTC())
 	writeJSON(w, http.StatusOK, result)

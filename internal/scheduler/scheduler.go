@@ -162,6 +162,10 @@ func New(
 	// (the runners already compute these values; we just stop
 	// discarding them). See issue #182.
 	s.checker.SetCollectDetails(true)
+	// Wire the default mtr-based traceroute runner so scheduled
+	// type=traceroute checks produce real results. cycles comes from
+	// runTraceCheck's hardcoded scheduledCycles (5). See issue #189.
+	s.checker.SetTraceRunner(collector.RunMTR)
 	s.retentionMgr = NewRetentionManager(store, store, logger)
 	return s
 }
