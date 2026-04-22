@@ -1839,7 +1839,14 @@ function renderServiceCheckDetails(type, details, result) {
     }
     if (details.failure_stage) lines.push("Failed at: " + details.failure_stage);
   } else if (type === "tcp" || type === "smb" || type === "nfs") {
-    if (details.resolved_address) lines.push("Connected to: " + details.resolved_address);
+    if (details.resolved_address) {
+      // Append the protocol badge inline — toast is a plain-text
+      // multi-line string so we bracket the label instead of using
+      // HTML. Populated by the Go ProtocolHint helper (issue #188).
+      var addrLine = "Connected to: " + details.resolved_address;
+      if (details.protocol_hint) addrLine += " [" + details.protocol_hint + "]";
+      lines.push(addrLine);
+    }
     if (details.failure_stage) lines.push("Failed at: " + details.failure_stage);
   } else if (type === "dns") {
     if (details.query_host) lines.push("Queried: " + details.query_host);
