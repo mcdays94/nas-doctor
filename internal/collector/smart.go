@@ -2,19 +2,43 @@ package collector
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
 )
 
-func collectSMART() ([]internal.SMARTInfo, error) {
+// SMARTConfig controls SMART-collector behaviour that may need to change
+// based on user preference. See issue #198 for the v0.9.5 default shift.
+type SMARTConfig struct {
+	// WakeDrives, when true, instructs smartctl to read SMART attributes
+	// even on spun-down drives — the v0.9.4 and earlier behaviour. When
+	// false (the new default), smartctl is invoked with `-n standby`,
+	// which causes it to skip (exit 2) any drive currently in standby.
+	// Users who prefer every-cycle SMART reads can opt back in via the
+	// Settings → Advanced UI.
+	WakeDrives bool
+}
+
+// errDriveInStandby is returned by readSMARTDevice when smartctl reported
+// that the target drive is spun down and therefore no SMART data was read.
+// The SMART collector treats this as "skip silently" rather than an error
+// that should create a history row or surface in logs.
+var errDriveInStandby = errors.New("drive in standby; skipped SMART read")
+
+func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, error) {
+	startedAt := time.Now()
 	devices := discoverDrives()
 	if len(devices) == 0 {
-		// Fallback: try smartctl --scan
+		// Fallback: try smartctl --scan. (The --scan subcommand does not
+		// itself wake drives; it just enumerates what's attached, so no
+		// standby flag needed here.)
 		out, _ := execCmd("smartctl", "--scan")
 		for _, line := range strings.Split(out, "\n") {
 			fields := strings.Fields(line)
@@ -24,15 +48,37 @@ func collectSMART() ([]internal.SMARTInfo, error) {
 		}
 	}
 	if len(devices) == 0 {
+		// Emit the summary even for the no-drive edge case so operators
+		// see a consistent per-cycle line in the logs (issue #203).
+		if logger != nil {
+			logger.Info("SMART collection complete",
+				"total", 0,
+				"active", 0,
+				"standby", 0,
+				"failed", 0,
+				"duration", time.Since(startedAt).Round(time.Millisecond).String(),
+			)
+		}
 		return nil, fmt.Errorf("no drives discovered")
 	}
 
 	var results []internal.SMARTInfo
 	var lastErr error
-	var skipped int
+	var skipped, standby int
 	for _, dev := range devices {
-		info, err := readSMARTDevice(dev)
+		info, err := readSMARTDevice(dev, cfg.WakeDrives)
 		if err != nil {
+			if errors.Is(err, errDriveInStandby) {
+				// Expected when `-n standby` is in effect and the drive
+				// is spun down. Not an error; no history row created.
+				// Emit an INFO log so operators can see per-cycle which
+				// drives were skipped for standby (issue #202).
+				if logger != nil {
+					logger.Info("skipped SMART read: drive in standby", "device", dev)
+				}
+				standby++
+				continue
+			}
 			lastErr = err
 			skipped++
 			continue
@@ -44,8 +90,29 @@ func collectSMART() ([]internal.SMARTInfo, error) {
 		}
 		results = append(results, info)
 	}
+
+	// Per-cycle INFO summary (issue #203). `standby` and `skipped` are
+	// disjoint counters (both branches use `continue` before incrementing
+	// either one), so total = active + standby + failed holds by
+	// construction, where active=len(results) and failed=skipped.
+	// Emit this before any error-return paths below so the summary fires
+	// even when the cycle ultimately fails.
+	if logger != nil {
+		logger.Info("SMART collection complete",
+			"total", len(devices),
+			"active", len(results),
+			"standby", standby,
+			"failed", skipped,
+			"duration", time.Since(startedAt).Round(time.Millisecond).String(),
+		)
+	}
+
+	// If every discovered drive is in standby and nothing else failed,
+	// that's a legitimate outcome (all disks asleep); return no error and
+	// an empty slice so the caller can persist an empty SMART snapshot
+	// rather than treating it as a collection failure.
 	if len(results) == 0 && lastErr != nil {
-		return nil, fmt.Errorf("all %d drives failed SMART read (%d skipped), last error: %w", len(devices), skipped, lastErr)
+		return nil, fmt.Errorf("all %d drives failed SMART read (%d skipped, %d standby), last error: %w", len(devices), skipped, standby, lastErr)
 	}
 	return results, nil
 }
@@ -90,12 +157,34 @@ func discoverDrives() []string {
 // readSMARTDevice uses `smartctl --json` for reliable parsing.
 // Note: smartctl returns non-zero exit codes even on success (bit-masked status).
 // We check the output content instead of relying on the exit code.
-func readSMARTDevice(device string) (internal.SMARTInfo, error) {
+//
+// When wakeDrives is false (the v0.9.5+ default), each smartctl invocation
+// is prefixed with `-n standby` so spun-down drives are not woken by the
+// scan cycle. If smartctl reports the drive is in standby, this function
+// returns errDriveInStandby, which the caller (collectSMART) treats as a
+// silent skip rather than a collection failure.
+func readSMARTDevice(device string, wakeDrives bool) (internal.SMARTInfo, error) {
 	info := internal.SMARTInfo{Device: device}
+
+	// smartctlArgs builds the argument slice for a smartctl call,
+	// prefixing `-n standby` when the user has not opted into waking
+	// spun-down drives.
+	smartctlArgs := func(extra ...string) []string {
+		if wakeDrives {
+			return extra
+		}
+		// Prepend -n standby. Order matters less than presence, but we
+		// keep it at the front so it's visible to anyone grepping the
+		// argv of a running smartctl.
+		return append([]string{"-n", "standby"}, extra...)
+	}
 
 	// Try JSON output first (smartctl 7.0+)
 	// Ignore exit code — smartctl uses bitmask exit codes even for successful reads
-	out, _ := execCmd("smartctl", "--json=c", "-a", device)
+	out, _ := execCmd("smartctl", smartctlArgs("--json=c", "-a", device)...)
+	if !wakeDrives && looksLikeStandbyOutput(out) {
+		return info, errDriveInStandby
+	}
 	if strings.Contains(out, "json_format_version") {
 		return parseSMARTJSON(device, out)
 	}
@@ -105,7 +194,10 @@ func readSMARTDevice(device string) (internal.SMARTInfo, error) {
 		strings.Contains(out, "INQUIRY failed") || strings.Contains(out, "unable to detect device") ||
 		out == "" {
 		for _, devType := range []string{"sat", "auto", "scsi"} {
-			out2, _ := execCmd("smartctl", "--json=c", "-a", "-d", devType, device)
+			out2, _ := execCmd("smartctl", smartctlArgs("--json=c", "-a", "-d", devType, device)...)
+			if !wakeDrives && looksLikeStandbyOutput(out2) {
+				return info, errDriveInStandby
+			}
 			if strings.Contains(out2, "json_format_version") {
 				return parseSMARTJSON(device, out2)
 			}
@@ -118,7 +210,10 @@ func readSMARTDevice(device string) (internal.SMARTInfo, error) {
 	}
 
 	// Fallback to text parsing (also ignore exit code)
-	out, _ = execCmd("smartctl", "-a", device)
+	out, _ = execCmd("smartctl", smartctlArgs("-a", device)...)
+	if !wakeDrives && looksLikeStandbyOutput(out) {
+		return info, errDriveInStandby
+	}
 	if out == "" {
 		return info, fmt.Errorf("smartctl returned no output for %s", device)
 	}
@@ -126,6 +221,31 @@ func readSMARTDevice(device string) (internal.SMARTInfo, error) {
 		return info, fmt.Errorf("unsupported device (USB bridge): %s", device)
 	}
 	return parseSMARTText(device, out), nil
+}
+
+// looksLikeStandbyOutput returns true when smartctl's output indicates the
+// target drive is spun down and was therefore skipped under `-n standby`.
+// Covers both the text-mode banner ("Device is in STANDBY mode, exit(2)")
+// and the --json=c response where power_mode carries STANDBY without the
+// json_format_version header that accompanies a full SMART read.
+func looksLikeStandbyOutput(out string) bool {
+	if out == "" {
+		return false
+	}
+	// Text-mode marker — most common on Unraid / typical Linux installs.
+	if strings.Contains(out, "STANDBY mode") || strings.Contains(out, "in standby mode") {
+		return true
+	}
+	// JSON-mode marker: smartctl emits a small envelope with power_mode
+	// set to STANDBY and no attribute table. Be conservative and require
+	// the absence of json_format_version (which only appears in a full
+	// read) so we don't mis-classify a model name containing "STANDBY".
+	if strings.Contains(out, `"power_mode"`) &&
+		strings.Contains(strings.ToUpper(out), "STANDBY") &&
+		!strings.Contains(out, "json_format_version") {
+		return true
+	}
+	return false
 }
 
 type smartctlJSON struct {

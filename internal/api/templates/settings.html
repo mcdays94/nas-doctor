@@ -63,6 +63,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <a href="#card-replacement-cost" class="btn btn-secondary btn-sm" style="text-decoration:none">Replacement Cost</a>
     <a href="#card-speedtest" class="btn btn-secondary btn-sm" style="text-decoration:none">Speed Test</a>
     <a href="#card-backup" class="btn btn-secondary btn-sm" style="text-decoration:none">Backup</a>
+    <a href="#card-advanced" class="btn btn-secondary btn-sm" style="text-decoration:none">Advanced</a>
   </div>
 
   <!-- 1. General -->
@@ -877,6 +878,27 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     </div>
   </div>
 
+  <!-- 9. Advanced -->
+  <div class="card" id="card-advanced">
+    <div class="card-title">Advanced</div>
+    <div class="card-desc">Expert-only knobs. Defaults are safe — only change these if you understand the trade-offs.</div>
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;padding:6px 0;font-weight:600;font-size:13px;color:var(--text)">Show advanced options</summary>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+        <div class="toggle-wrap">
+          <div class="toggle" id="wake-drives-for-smart" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
+          <span class="toggle-label">Wake drives for SMART check</span>
+        </div>
+        <p style="font-size:12px;color:var(--text2);margin-top:8px;line-height:1.5">
+          By default, NAS Doctor skips drives that are in standby — SMART history will show gaps when drives are sleeping, and that's intentional (reduces wear).
+          Enabling this option forces smartctl to <strong>wake spun-down drives</strong> on every scan cycle.
+          At the default 30-min scan interval, that's roughly 48 extra spin-ups per drive per day.
+          Only enable if your drives never spin down, or if you deliberately need every-cycle SMART monitoring and accept the wear cost.
+        </p>
+      </div>
+    </details>
+  </div>
+
   <!-- Alerts, Incidents, Trends, and Notification History have moved to /alerts -->
   <div class="card" style="background:transparent;border-style:dashed;text-align:center;padding:20px">
     <div style="font-size:13px;color:var(--text2)">Alerts, Incidents, Trends, and Notification History have moved to their own dedicated page.</div>
@@ -1174,6 +1196,11 @@ function loadSettings() {
       /* Drive replacement cost per TB */
       var costEl = document.getElementById("cost-per-tb");
       if (costEl) costEl.value = (data.cost_per_tb && data.cost_per_tb > 0) ? data.cost_per_tb : "";
+      /* Advanced: wake drives for SMART (#198) */
+      var wakeEl = document.getElementById("wake-drives-for-smart");
+      if (wakeEl) {
+        if (data.wake_drives_for_smart) wakeEl.classList.add("on"); else wakeEl.classList.remove("on");
+      }
       /* Proxmox VE */
       var pve = data.proxmox || {};
       if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
@@ -1285,7 +1312,8 @@ function buildSettingsPayload() {
     api_key: document.getElementById("api-key-display").value.trim(),
     fleet: fleetServers || base.fleet || [],
     dismissed_findings: base.dismissed_findings || [],
-    cost_per_tb: parseFloat(document.getElementById("cost-per-tb") && document.getElementById("cost-per-tb").value) || 0
+    cost_per_tb: parseFloat(document.getElementById("cost-per-tb") && document.getElementById("cost-per-tb").value) || 0,
+    wake_drives_for_smart: !!(document.getElementById("wake-drives-for-smart") && document.getElementById("wake-drives-for-smart").classList.contains("on"))
   };
 }
 
@@ -1839,7 +1867,14 @@ function renderServiceCheckDetails(type, details, result) {
     }
     if (details.failure_stage) lines.push("Failed at: " + details.failure_stage);
   } else if (type === "tcp" || type === "smb" || type === "nfs") {
-    if (details.resolved_address) lines.push("Connected to: " + details.resolved_address);
+    if (details.resolved_address) {
+      // Append the protocol badge inline — toast is a plain-text
+      // multi-line string so we bracket the label instead of using
+      // HTML. Populated by the Go ProtocolHint helper (issue #188).
+      var addrLine = "Connected to: " + details.resolved_address;
+      if (details.protocol_hint) addrLine += " [" + details.protocol_hint + "]";
+      lines.push(addrLine);
+    }
     if (details.failure_stage) lines.push("Failed at: " + details.failure_stage);
   } else if (type === "dns") {
     if (details.query_host) lines.push("Queried: " + details.query_host);

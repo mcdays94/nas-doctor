@@ -49,6 +49,12 @@ type Settings struct {
 	ChartRangeHours   int                     `json:"chart_range_hours"`         // Persisted chart time range (1, 24, 168)
 	SectionHeights    map[string]int          `json:"section_heights,omitempty"` // Persisted section resize heights (section name → px)
 	SectionOrder      map[string][]string     `json:"section_order,omitempty"`   // Persisted drag-and-drop column order ({"cols": [["findings","docker"], ...]})
+
+	// WakeDrivesForSMART, when true, opts back into pre-v0.9.5 behaviour of
+	// reading SMART from spun-down drives each scan cycle (waking them).
+	// Default (false) is standby-aware: smartctl runs with `-n standby` and
+	// skips sleeping drives. See issue #198.
+	WakeDrivesForSMART bool `json:"wake_drives_for_smart,omitempty"`
 }
 
 const currentSettingsVersion = 1
@@ -805,6 +811,11 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			Token:     settings.Kubernetes.Token,
 			Alias:     settings.Kubernetes.Alias,
 			InCluster: settings.Kubernetes.InCluster,
+		})
+
+		// Update SMART config on the collector (#198)
+		s.collector.SetSMARTConfig(collector.SMARTConfig{
+			WakeDrives: settings.WakeDrivesForSMART,
 		})
 
 		// Update log forwarding

@@ -328,7 +328,11 @@ func extractHexID(s string) string {
 	return candidate
 }
 
-func execCmd(name string, args ...string) (string, error) {
+// execCmd shells out to a command and returns combined stdout+stderr plus
+// any exec error. Defined as a package-level var (rather than a plain
+// function) so tests can swap in a fake implementation — see
+// smart_standby_test.go for the seam usage.
+var execCmd = func(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err

@@ -1509,14 +1509,27 @@ function setupGlobals() {
   window.loadContainerChart = function(hours, save) { charts.loadContainers(hours, save); };
   window.loadSpeedTestChart = function(hours, save) { charts.loadSpeedTest(hours, save); };
 
-  // Refresh indicator timer
+  // Refresh indicator timer — ticks the "X ago" text next to the Last
+  // scan timestamp. Elapsed time is computed from the actual scan
+  // timestamp (_statusData.last_scan, RFC3339) rather than from
+  // page-load / last-poll time; see issue #179. If we counted from
+  // _lastFetchTime, opening the page 10 minutes after a scan would
+  // show "just now" and a refresh would reset the counter — the
+  // exact bug the user reported.
   setInterval(function() {
     var el = document.getElementById("refresh-ago");
-    if (!el || !_lastFetchTime) return;
-    var secs = Math.round((Date.now() - _lastFetchTime) / 1000);
+    if (!el) return;
+    var scanTs = _statusData && _statusData.last_scan;
+    if (!scanTs) { el.textContent = ""; return; }
+    var scanMs = new Date(scanTs).getTime();
+    if (!scanMs || isNaN(scanMs)) { el.textContent = ""; return; }
+    var secs = Math.round((Date.now() - scanMs) / 1000);
+    if (secs < 0) secs = 0; // clock skew guard
     if (secs < 5) el.textContent = "just now";
     else if (secs < 60) el.textContent = secs + "s ago";
-    else el.textContent = Math.floor(secs / 60) + "m ago";
+    else if (secs < 3600) el.textContent = Math.floor(secs / 60) + "m ago";
+    else if (secs < 86400) el.textContent = Math.floor(secs / 3600) + "h ago";
+    else el.textContent = Math.floor(secs / 86400) + "d ago";
   }, 1000);
 }
 

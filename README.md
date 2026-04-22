@@ -55,7 +55,7 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 ## What It Does
 
 ### Diagnostics
-- **SMART Health**: Per-drive health, temperature, reallocated sectors, pending sectors, UDMA CRC errors, power-on hours, ATA port mapping, with **Backblaze failure-rate thresholds** (Q4-2025 data, 337k+ drives)
+- **SMART Health**: Per-drive health, temperature, reallocated sectors, pending sectors, UDMA CRC errors, power-on hours, ATA port mapping, with **Backblaze failure-rate thresholds** (Q4-2025 data, 337k+ drives). By default, NAS Doctor respects drive standby and skips spun-down drives rather than waking them for SMART reads — history will show gaps for drives that spin down, which is intentional (reduces wear). Flip **Wake drives for SMART check** in Settings → Advanced to restore every-cycle polling (v0.9.4 behaviour).
 - **Historical Sparklines**: CPU, memory, I/O wait, and per-drive temperature trends inline on the dashboard
 - **Disk Space**: Usage per mount point with color-coded thresholds
 - **System**: CPU, memory, load average, I/O wait, uptime, platform detection
@@ -493,7 +493,7 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 
 - **General**: Scan interval (preset or custom with cron preview), theme selection, app icon
 - **Webhooks**: Add/remove/test Discord, Slack, Gotify, Ntfy, or generic HTTP webhooks with optional custom headers and HMAC signing
-- **Notification Rules**: Dropdown-driven rule builder with 12 categories, live target selection, threshold inputs, one-click presets, quiet hours, and maintenance windows
+- **Notification Rules**: Dropdown-driven rule builder with 13 categories, live target selection, threshold inputs, one-click presets, quiet hours, and maintenance windows
 - **Service Checks**: HTTP, TCP, DNS, Ping/ICMP, SMB/NFS uptime monitoring with per-check configurable intervals (30s–1h)
 - **Fleet**: Add/remove remote NAS Doctor instances with optional API key auth
 - **Dashboard Sections**: Toggle visibility of individual sections (SMART, Docker, ZFS, UPS, Parity, Network, Tunnels, etc.)
