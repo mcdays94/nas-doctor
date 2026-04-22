@@ -70,6 +70,19 @@ type AlertingConfig struct {
 	DefaultCooldownSec int                         `json:"default_cooldown_sec,omitempty"`
 }
 
+// SpeedTestIntervalDisabled is the sentinel value for the standalone
+// speed-test loop's interval that means "do not run". When this is set,
+// runSpeedTest is a no-op — no Ookla invocation, no speedtest_history
+// writes, no bandwidth consumption. It maps to the "Disabled" option in
+// the settings UI (issue #180, for users on metered connections).
+//
+// A negative duration is chosen because it cannot collide with any real
+// positive interval and explicitly survives the 5-minute minimum clamp
+// in SetSpeedTestInterval. Zero is NOT used as the sentinel because
+// zero-value Duration fields would accidentally opt users into the
+// disabled state.
+const SpeedTestIntervalDisabled time.Duration = -1
+
 // Scheduler periodically runs diagnostic collections and analysis.
 type Scheduler struct {
 	collector         *collector.Collector
@@ -82,6 +95,7 @@ type Scheduler struct {
 	speedTestSchedule []string // specific HH:MM times, overrides interval when set
 	speedTestDay      string   // "monday"-"sunday" or "1","15" for monthly
 	speedTestFreq     string   // "24h", "weekly", "monthly" — only when schedule is set
+	speedTestRunner   SpeedTestRunner
 	retention         RetentionConfig
 	alerting          AlertingConfig
 	serviceChecks     []internal.ServiceCheckConfig
@@ -129,6 +143,7 @@ func New(
 		stop:          make(chan struct{}),
 		restart:       make(chan time.Duration, 1),
 	}
+	s.speedTestRunner = collector.RunSpeedTest
 	s.checker = NewServiceChecker(store, logger)
 	// Opt into the per-type Details map on the scheduled path too —
 	// HTTP status codes, resolved IPs, DNS records, Ping RTT, failure
@@ -255,14 +270,36 @@ func (s *Scheduler) Start() {
 
 // UpdateInterval dynamically changes the scan interval without restarting.
 // SetSpeedTestInterval updates how often the speed test runs.
+//
+// The disabled sentinel (SpeedTestIntervalDisabled) is preserved as-is
+// so users on metered connections can turn the loop off. All other
+// values are clamped to a 5-minute minimum to protect bandwidth.
 func (s *Scheduler) SetSpeedTestInterval(d time.Duration) {
-	if d < 5*time.Minute {
+	if d != SpeedTestIntervalDisabled && d < 5*time.Minute {
 		d = 5 * time.Minute
 	}
 	s.mu.Lock()
 	s.speedTestInterval = d
 	s.mu.Unlock()
-	s.logger.Info("speed test interval updated", "interval", d)
+	if d == SpeedTestIntervalDisabled {
+		s.logger.Info("speed test loop disabled by user setting (issue #180)")
+	} else {
+		s.logger.Info("speed test interval updated", "interval", d)
+	}
+}
+
+// SetSpeedTestRunner injects the function used by runSpeedTest to execute
+// the actual network test. This makes the scheduler's standalone speed-test
+// loop testable (the default runner is collector.RunSpeedTest, which shells
+// out to Ookla or speedtest-cli and cannot be intercepted from a unit test).
+//
+// Production code should not need to call this — New() wires up the
+// default. Tests use it to observe whether the loop invoked the runner
+// (or skipped it, when disabled).
+func (s *Scheduler) SetSpeedTestRunner(fn SpeedTestRunner) {
+	s.mu.Lock()
+	s.speedTestRunner = fn
+	s.mu.Unlock()
 }
 
 // SetSpeedTestSchedule sets specific times of day to run speed tests.
@@ -869,9 +906,26 @@ func (s *Scheduler) collectProcessStats() {
 }
 
 // runSpeedTest executes a network speed test and stores the result.
+//
+// If the interval is set to the disabled sentinel (issue #180), this is
+// a no-op: no runner invocation, no DB write, no bandwidth. The Test
+// button (handleTestServiceCheck) is unaffected — it builds its own
+// ServiceChecker and does not route through here.
 func (s *Scheduler) runSpeedTest() {
+	s.mu.RLock()
+	interval := s.speedTestInterval
+	runner := s.speedTestRunner
+	s.mu.RUnlock()
+	if interval == SpeedTestIntervalDisabled {
+		s.logger.Debug("speed test skipped: disabled by user setting")
+		return
+	}
+	if runner == nil {
+		s.logger.Info("speed test: no runner configured")
+		return
+	}
 	s.logger.Info("running speed test")
-	result := collector.RunSpeedTest()
+	result := runner()
 	if result == nil {
 		s.logger.Info("speed test: no speedtest tool available (install speedtest or speedtest-cli)")
 		return
