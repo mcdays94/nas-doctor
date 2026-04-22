@@ -69,6 +69,9 @@ type HistoryStore interface {
 	GetProcessHistory(hours int) ([]ProcessHistoryPoint, error)
 	SaveSpeedTest(snapshotID string, result *internal.SpeedTestResult) error
 	GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error)
+	// Issue #210 — last attempt state (single-row table).
+	SaveSpeedTestAttempt(att LastSpeedTestAttempt) error
+	GetLastSpeedTestAttempt() (*LastSpeedTestAttempt, error)
 }
 
 // ConfigStore handles key/value configuration persistence.
