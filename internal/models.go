@@ -257,11 +257,13 @@ type ServiceCheckResult struct {
 	DownloadOK   *bool   `json:"download_ok,omitempty"` // nil for non-speed checks
 	UploadOK     *bool   `json:"upload_ok,omitempty"`
 
-	// Details carries per-check-type diagnostic context surfaced by the
-	// ad-hoc Test-button flow (HTTP status code, resolved IPs, DNS records,
-	// ping RTT, failure stage, etc.). It is intentionally NOT populated on
-	// the scheduled-check path — see ServiceChecker.SetCollectDetails —
-	// so every 30s run stays lean and history rows don't bloat. See #154.
+	// Details carries per-check-type diagnostic context (HTTP status code,
+	// resolved IPs, DNS records, ping RTT, failure stage, etc.). Populated
+	// when the parent ServiceChecker has SetCollectDetails(true) — both
+	// the ad-hoc Test-button flow (#154) and the scheduled path (#182,
+	// since v0.9.4) opt in. The scheduled path persists this map in the
+	// service_checks_history.details_json column so the log UI can render
+	// the same rich context the Test button already shows.
 	Details map[string]any `json:"details,omitempty"`
 }
 
