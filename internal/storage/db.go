@@ -298,6 +298,43 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_disk_usage_mount_ts ON disk_usage_history(mount_point, timestamp DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_disk_usage_ts ON disk_usage_history(timestamp DESC)`,
+
+		// --- Drive maintenance events (issue #130) ---
+		// Per-slot chronological timeline of events for a drive. Two types:
+		//   "note"        — user-entered freeform content. is_auto=0, mutable.
+		//   "replacement" — system-detected when a slot's serial changes
+		//                   between scans. Content is JSON {old_serial,
+		//                   old_model, new_serial, new_model}. is_auto=1,
+		//                   immutable (Update/Delete return 403).
+		// slot_key is the ArraySlot on Unraid (stable across replacements)
+		// or the Serial on platforms without physical-slot identity.
+		`CREATE TABLE IF NOT EXISTS drive_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			slot_key TEXT NOT NULL,
+			platform TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL,
+			event_time DATETIME NOT NULL,
+			content TEXT NOT NULL DEFAULT '',
+			is_auto INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_drive_events_slot_ts ON drive_events(slot_key, event_time DESC)`,
+
+		// --- Drive slot state (issue #130, replacement detection) ---
+		// Tracks the last-observed serial+model per slot_key so the SMART
+		// collector can detect when a slot's physical drive changes.
+		// Separate from smart_history because the detection logic should
+		// be snapshot-agnostic (it compares the current cycle against the
+		// persisted last-observed state, not against an arbitrary slice
+		// of history rows). A single row per slot; UPSERT semantics.
+		`CREATE TABLE IF NOT EXISTS drive_slot_state (
+			slot_key TEXT PRIMARY KEY,
+			serial TEXT NOT NULL,
+			model TEXT NOT NULL DEFAULT '',
+			platform TEXT NOT NULL DEFAULT '',
+			observed_at DATETIME NOT NULL
+		)`,
 	}
 
 	for _, m := range migrations {
