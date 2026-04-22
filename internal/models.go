@@ -346,6 +346,11 @@ type SMARTInfo struct {
 type DockerInfo struct {
 	Available  bool            `json:"available"`
 	Containers []ContainerInfo `json:"containers"`
+	// HiddenCount reports how many running containers were filtered out
+	// by the user's DockerHiddenContainers setting when serving the
+	// dashboard snapshot. Not persisted in the stored snapshot — it is
+	// stamped onto the response only. See issue #204.
+	HiddenCount int `json:"hidden_count,omitempty"`
 }
 
 type ContainerInfo struct {
