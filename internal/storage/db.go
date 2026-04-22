@@ -199,6 +199,21 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_speedtest_ts ON speedtest_history(timestamp DESC)`,
 
+		// --- Last speed-test attempt (single-row table, see issue #210) ---
+		// Records the outcome of the most recent speed-test run — success,
+		// failure, pending, or disabled. Consumed by the scheduled
+		// type=speed service check (option B, reads attempt state + latest
+		// speedtest_history row instead of running Ookla per-check) and by
+		// the dashboard widget to render "Running initial speed test…"
+		// when no history has been produced yet. id=1 is enforced so the
+		// table never grows beyond a single row.
+		`CREATE TABLE IF NOT EXISTS speedtest_attempt (
+			id INTEGER PRIMARY KEY,
+			timestamp DATETIME NOT NULL,
+			status TEXT NOT NULL,
+			error_msg TEXT
+		)`,
+
 		// --- Notification log ---
 		`CREATE TABLE IF NOT EXISTS notification_log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -865,6 +880,58 @@ func (d *DB) GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error) {
 		points = append(points, p)
 	}
 	return points, rows.Err()
+}
+
+// LastSpeedTestAttempt records the outcome of the most recent speed-test
+// run. The scheduled type=speed service check reads this (plus the latest
+// speedtest_history row) to determine health, and the dashboard widget
+// reads it to render "Running initial speed test…" on fresh installs. See
+// issue #210.
+type LastSpeedTestAttempt struct {
+	Timestamp time.Time `json:"timestamp"`
+	// Status values: "success", "failed", "pending", "disabled".
+	// "success" — the run produced a speedtest_history row.
+	// "failed" — Ookla errored or returned zero throughput.
+	// "pending" — scheduler set this before invoking the runner;
+	//             cleared on outcome. Used by the widget to render
+	//             "Running initial speed test…" pre-first-result.
+	// "disabled" — the speed-test interval is the disabled sentinel (#180).
+	Status   string `json:"status"`
+	ErrorMsg string `json:"error_msg,omitempty"`
+}
+
+// SaveSpeedTestAttempt upserts the current speed-test attempt state into
+// the single-row speedtest_attempt table (id=1).
+func (d *DB) SaveSpeedTestAttempt(att LastSpeedTestAttempt) error {
+	_, err := d.db.Exec(
+		`INSERT INTO speedtest_attempt (id, timestamp, status, error_msg)
+		 VALUES (1, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   timestamp = excluded.timestamp,
+		   status = excluded.status,
+		   error_msg = excluded.error_msg`,
+		att.Timestamp.UTC(), att.Status, att.ErrorMsg,
+	)
+	return err
+}
+
+// GetLastSpeedTestAttempt returns the current speed-test attempt state
+// or (nil, nil) if nothing has been recorded yet (fresh install pre-first
+// scheduler tick).
+func (d *DB) GetLastSpeedTestAttempt() (*LastSpeedTestAttempt, error) {
+	row := d.db.QueryRow(
+		`SELECT timestamp, status, COALESCE(error_msg, '')
+		 FROM speedtest_attempt
+		 WHERE id = 1`,
+	)
+	var att LastSpeedTestAttempt
+	if err := row.Scan(&att.Timestamp, &att.Status, &att.ErrorMsg); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &att, nil
 }
 
 // GPUHistoryPoint represents a single time-series data point for a GPU.

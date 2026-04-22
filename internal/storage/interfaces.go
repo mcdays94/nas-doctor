@@ -36,6 +36,12 @@ type AlertStore interface {
 }
 
 // ServiceCheckStore handles service check results and history.
+//
+// As of issue #210 the scheduled type=speed service check dispatch reads
+// the shared LastSpeedTestAttempt + latest speedtest_history row rather
+// than running Ookla per-check, so the ServiceChecker needs access to
+// those two methods as well. They live on the broader HistoryStore but
+// are surfaced here so the narrow dependency remains a single interface.
 type ServiceCheckStore interface {
 	SaveServiceCheckResults(results []internal.ServiceCheckResult) error
 	GetLatestServiceCheckState(checkKey string) (ServiceCheckState, bool, error)
@@ -47,6 +53,10 @@ type ServiceCheckStore interface {
 	// whose check_key is NOT in keepKeys. Passing nil or an empty slice
 	// deletes all rows. Returns the number of rows deleted.
 	DeleteServiceChecksNotIn(keepKeys []string) (int, error)
+
+	// Speed-check dispatch (issue #210) reads attempt state + history.
+	GetLastSpeedTestAttempt() (*LastSpeedTestAttempt, error)
+	GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error)
 }
 
 // HistoryStore handles time-series history for disks, system, GPU, containers, and speed tests.
@@ -69,6 +79,9 @@ type HistoryStore interface {
 	GetProcessHistory(hours int) ([]ProcessHistoryPoint, error)
 	SaveSpeedTest(snapshotID string, result *internal.SpeedTestResult) error
 	GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error)
+	// Issue #210 — last attempt state (single-row table).
+	SaveSpeedTestAttempt(att LastSpeedTestAttempt) error
+	GetLastSpeedTestAttempt() (*LastSpeedTestAttempt, error)
 }
 
 // ConfigStore handles key/value configuration persistence.

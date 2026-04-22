@@ -58,6 +58,14 @@ type FakeStore struct {
 	// Disk usage history rows (snapshot-independent; keyed by timestamp).
 	// Seeded via AddDiskUsageHistoryEntry() and pruned by PruneDiskUsageHistory().
 	diskUsageHistory []diskUsageRow
+
+	// Speed-test history (issue #210 — consumed by type=speed service
+	// check via option B read-from-history dispatch).
+	speedTestHistory []SpeedTestHistoryPoint
+
+	// LastSpeedTestAttempt state (single-row, issue #210). nil until
+	// the scheduler writes the first attempt outcome.
+	speedTestAttempt *LastSpeedTestAttempt
 }
 
 // diskUsageRow is the minimal fake representation of a disk_usage_history row.
@@ -524,14 +532,69 @@ func extractProcessName(command string) string {
 	return exe
 }
 
-func (f *FakeStore) SaveSpeedTest(_ string, _ *internal.SpeedTestResult) error {
-	// TODO: implement for testing
+func (f *FakeStore) SaveSpeedTest(_ string, result *internal.SpeedTestResult) error {
+	if result == nil {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ts := result.Timestamp
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	f.speedTestHistory = append(f.speedTestHistory, SpeedTestHistoryPoint{
+		Timestamp:    ts,
+		DownloadMbps: result.DownloadMbps,
+		UploadMbps:   result.UploadMbps,
+		LatencyMs:    result.LatencyMs,
+		JitterMs:     result.JitterMs,
+		ServerName:   result.ServerName,
+		ISP:          result.ISP,
+	})
 	return nil
 }
 
-func (f *FakeStore) GetSpeedTestHistory(_ int) ([]SpeedTestHistoryPoint, error) {
-	// TODO: implement for testing
-	return nil, nil
+func (f *FakeStore) GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if len(f.speedTestHistory) == 0 {
+		return nil, nil
+	}
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	out := make([]SpeedTestHistoryPoint, 0, len(f.speedTestHistory))
+	for _, p := range f.speedTestHistory {
+		if p.Timestamp.Before(cutoff) {
+			continue
+		}
+		out = append(out, p)
+	}
+	// Ascending order matches the DB query.
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Timestamp.Before(out[j].Timestamp)
+	})
+	return out, nil
+}
+
+// SaveSpeedTestAttempt records the current speed-test attempt state.
+// Single-row semantics — the existing attempt is replaced.
+func (f *FakeStore) SaveSpeedTestAttempt(att LastSpeedTestAttempt) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cp := att
+	f.speedTestAttempt = &cp
+	return nil
+}
+
+// GetLastSpeedTestAttempt returns the current attempt state or (nil, nil)
+// if none has been recorded (fresh install pre-first scheduler tick).
+func (f *FakeStore) GetLastSpeedTestAttempt() (*LastSpeedTestAttempt, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.speedTestAttempt == nil {
+		return nil, nil
+	}
+	cp := *f.speedTestAttempt
+	return &cp, nil
 }
 
 // ── ConfigStore ──

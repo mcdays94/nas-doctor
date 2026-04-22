@@ -191,8 +191,16 @@ func defaultSettings() Settings {
 	return Settings{
 		SettingsVersion: currentSettingsVersion,
 		ScanInterval:    "30m",
-		Theme:           ThemeMidnight,
-		Icon:            "icon3",
+		// Speed test default cadence: once a day at 03:00 local time.
+		// Previously defaulted to 4h, which meant ~10 GB/month of speed-test
+		// bandwidth for a home NAS — unfriendly for metered connections and
+		// overkill for threshold alerting (speed trends don't move hour-to-hour).
+		// Daily@3am runs during a low-usage window. Users can tune or disable
+		// entirely from Settings → Speed Test. See #210.
+		SpeedTestInterval: "24h",
+		SpeedTestSchedule: []string{"03:00"},
+		Theme:             ThemeMidnight,
+		Icon:              "icon3",
 		Notifications: SettingsNotifications{
 			Webhooks:           []internal.WebhookConfig{},
 			Policies:           []scheduler.AlertPolicy{},
@@ -205,8 +213,26 @@ func defaultSettings() Settings {
 			},
 			DefaultCooldownSec: 900,
 		},
+		// Fresh installs ship with one default "Internet Speed" service check
+		// so the speed-test feature is discoverable from day one. Blank
+		// contracted-speed thresholds mean the check acts as a heartbeat
+		// (reports up whenever speedtest_history has fresh data) rather than
+		// firing false alerts. Users tune thresholds in Settings → Service
+		// Checks once they know their line's sustained speed. See #210.
+		//
+		// Note: the seed only applies when no settings have been persisted
+		// yet (fresh install). Existing users who have ever saved settings
+		// keep their current service-check list verbatim — the unmarshal in
+		// getSettings() replaces this default with the persisted value.
 		ServiceChecks: SettingsServiceChecks{
-			Checks: []internal.ServiceCheckConfig{},
+			Checks: []internal.ServiceCheckConfig{{
+				Name:        "Internet Speed",
+				Type:        "speed",
+				Target:      "speedtest",
+				Enabled:     true,
+				IntervalSec: 60,
+				MarginPct:   10,
+			}},
 		},
 		LogPush: SettingsLogForward{
 			Enabled:      false,

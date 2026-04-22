@@ -734,6 +734,15 @@ sections.speedtest = function(sn) {
     h += '</div>';
     h += '<canvas id="speedtest-chart" style="width:100%;height:80px"></canvas>';
     h += '</div>';
+  } else if (spd && spd.last_attempt && spd.last_attempt.status === 'pending') {
+    // Fresh-install gap: scheduler has kicked off the first-ever speed
+    // test but Ookla hasn't returned yet (~30-60s window). Render the
+    // running state so the user knows the feature is actually doing
+    // something, rather than silently rendering an empty tile.
+    h += '<div>';
+    h += '<div class="section-title">Speed Test</div>';
+    h += '<div style="font-size:13px;color:var(--text-tertiary);font-style:italic">Running initial speed test&hellip;</div>';
+    h += '</div>';
   }
   h += '</div>';
   return h;
