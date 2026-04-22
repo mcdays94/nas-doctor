@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"sort"
@@ -15,6 +16,13 @@ import (
 type ReportSparklines struct {
 	System []storage.SystemHistoryPoint
 	Disks  []storage.DiskSparklines
+
+	// DriveEventsBySlot maps a resolved slot_key (ArraySlot on Unraid,
+	// Serial elsewhere) to the full event timeline for that slot.
+	// Populated by handleReport so the Drive Health & SMART Analysis
+	// section can render a per-drive Maintenance Log without the
+	// report logic needing a storage.Store reference. Issue #130.
+	DriveEventsBySlot map[string][]storage.DriveEvent
 }
 
 // svgSparkline generates an inline SVG sparkline from float64 values.
@@ -1185,7 +1193,114 @@ func writeSMART(b *strings.Builder, snap *internal.Snapshot, sparks ReportSparkl
 
 	b.WriteString("    </tbody>\n")
 	b.WriteString("  </table></div>\n")
+
+	// ── Maintenance Log (issue #130) ────────────────────────────────
+	// For each drive that has maintenance events, render a compact
+	// chronological list so the exported report captures the full
+	// per-slot history (manual notes + auto-detected replacements).
+	// Skip drives with no events to keep the report tight.
+	writeDriveMaintenanceLogs(b, snap, sparks)
+
 	b.WriteString("</div>\n")
+}
+
+// writeDriveMaintenanceLogs appends a per-drive Maintenance Log
+// sub-section to the SMART page, one block per drive that has events.
+// Keyed by resolveReportSlotKey — matches the UI slot_key policy so
+// what operators see on /disk/{serial} is what they get in the report.
+func writeDriveMaintenanceLogs(b *strings.Builder, snap *internal.Snapshot, sparks ReportSparklines) {
+	if len(sparks.DriveEventsBySlot) == 0 {
+		return
+	}
+	// Collect drives that have at least one event, preserving SMART
+	// ordering so the report reads in the same sequence as the table.
+	type logBlock struct {
+		title  string
+		events []storage.DriveEvent
+	}
+	var blocks []logBlock
+	for _, s := range snap.SMART {
+		slotKey := resolveReportSlotKey(s)
+		if slotKey == "" {
+			continue
+		}
+		events := sparks.DriveEventsBySlot[slotKey]
+		if len(events) == 0 {
+			continue
+		}
+		title := s.Model
+		if s.ArraySlot != "" {
+			title = s.ArraySlot + " — " + s.Model
+		} else if s.Serial != "" {
+			title = s.Model + " (" + s.Serial + ")"
+		}
+		blocks = append(blocks, logBlock{title: title, events: events})
+	}
+	if len(blocks) == 0 {
+		return
+	}
+
+	b.WriteString("  <h3 class=\"sub-heading\" style=\"margin-top:24px\">Maintenance Log</h3>\n")
+	for _, blk := range blocks {
+		b.WriteString("  <div style=\"margin-bottom:12px\">\n")
+		b.WriteString(fmt.Sprintf("    <div style=\"font-weight:600;font-size:13px;margin-bottom:4px\">%s</div>\n", escHTML(blk.title)))
+		b.WriteString("    <ul style=\"margin:0;padding-left:18px;font-size:12px;line-height:1.5\">\n")
+		for _, ev := range blk.events {
+			ts := ev.EventTime.Format("2006-01-02 15:04")
+			var line string
+			if ev.EventType == "replacement" && ev.IsAuto {
+				line = ts + " — " + formatReplacementLine(ev.Content)
+				line += "  [system]"
+			} else {
+				line = ts + " — " + ev.Content
+			}
+			b.WriteString(fmt.Sprintf("      <li>%s</li>\n", escHTML(line)))
+		}
+		b.WriteString("    </ul>\n")
+		b.WriteString("  </div>\n")
+	}
+}
+
+// resolveReportSlotKey mirrors the API/UI slot_key policy so a drive's
+// event timeline is reachable from both surfaces with the same key.
+func resolveReportSlotKey(s internal.SMARTInfo) string {
+	if s.ArraySlot != "" {
+		return s.ArraySlot
+	}
+	return s.Serial
+}
+
+// formatReplacementLine unmarshals a replacement event's JSON content
+// into a human-readable one-liner. Falls back to raw content on parse
+// failure so we never drop a row from the report.
+func formatReplacementLine(raw string) string {
+	if raw == "" {
+		return "Drive replaced"
+	}
+	var p struct {
+		OldSerial string `json:"old_serial"`
+		OldModel  string `json:"old_model"`
+		NewSerial string `json:"new_serial"`
+		NewModel  string `json:"new_model"`
+	}
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		return raw
+	}
+	old := p.OldSerial
+	if p.OldModel != "" {
+		old += " (" + p.OldModel + ")"
+	}
+	if old == "" {
+		old = "?"
+	}
+	fresh := p.NewSerial
+	if p.NewModel != "" {
+		fresh += " (" + p.NewModel + ")"
+	}
+	if fresh == "" {
+		fresh = "?"
+	}
+	return "Drive replaced: " + old + " \u2192 " + fresh
 }
 
 // ─────────────────────────────────────────────────────────────────────
