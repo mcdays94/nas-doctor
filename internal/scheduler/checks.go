@@ -44,9 +44,10 @@ type ServiceChecker struct {
 	speedTestRunFn SpeedTestRunner // nil → speed checks return "no tool"
 	// collectDetails, when true, enriches RunCheck results with the
 	// per-check-type Details map (HTTP status code, resolved IPs, DNS
-	// records, etc.). The scheduled-check path (RunDueChecks) explicitly
-	// strips Details regardless of this flag — only the ad-hoc Test-button
-	// endpoint opts into this richer output. See issue #154.
+	// records, etc.). Both the ad-hoc Test-button endpoint (#154) and
+	// the scheduled path (#182, since v0.9.4) set this to true. The
+	// /service-checks log UI reads the persisted blob via
+	// service_checks_history.details_json.
 	collectDetails bool
 }
 
@@ -66,11 +67,14 @@ func (sc *ServiceChecker) SetSpeedTestRunner(fn SpeedTestRunner) {
 	sc.speedTestRunFn = fn
 }
 
-// SetCollectDetails toggles the opt-in rich-details output. Call with true
-// from the ad-hoc /service-checks/test endpoint to get diagnostic context
-// (HTTP status code, resolved IPs, DNS records, etc.) alongside the usual
-// status/response_ms/error triple. The scheduled-check path never emits
-// details — see RunDueChecks. Issue #154.
+// SetCollectDetails toggles rich-details output. When true, RunCheck
+// populates the per-type Details map (HTTP status code, resolved IPs,
+// DNS records, failure stage, etc.) alongside the usual
+// status/response_ms/error triple. Both the scheduler (issue #182) and
+// the ad-hoc /service-checks/test endpoint (issue #154) call this with
+// true; the scheduled path additionally persists the map into
+// service_checks_history.details_json so the /service-checks log UI
+// can render the rich context on expanded log rows.
 func (sc *ServiceChecker) SetCollectDetails(enabled bool) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
@@ -108,11 +112,13 @@ func (sc *ServiceChecker) RunDueChecks(checks []internal.ServiceCheckConfig, now
 	results := make([]internal.ServiceCheckResult, 0, len(due))
 	for _, check := range due {
 		result := sc.RunCheck(check, now)
-		// Scheduled path never emits Details — those are only for the
-		// ad-hoc Test-button flow. Strip them defensively in case the
-		// checker was flipped into collect-details mode elsewhere. See
-		// #154 (keeps history rows lean and JSON payloads small).
-		result.Details = nil
+		// Relaxation of the #154 invariant: the scheduled path now
+		// carries the per-type Details map through to the store so
+		// the /service-checks log UI can show HTTP status codes, DNS
+		// records, resolved addresses, etc. in expanded log rows.
+		// See issue #182. The map is only populated when the parent
+		// ServiceChecker has SetCollectDetails(true) — otherwise
+		// RunCheck returns Details == nil and this loop is a no-op.
 
 		// Track consecutive failures from store history.
 		state, ok, err := sc.store.GetLatestServiceCheckState(result.Key)

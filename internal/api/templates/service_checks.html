@@ -169,6 +169,71 @@
 
   function esc(s){var d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
   function fetchJSON(url){return fetch(url).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()});}
+
+  // renderServiceCheckDetails turns the per-type Details map (persisted
+  // in service_checks_history.details_json, surfaced by the API as
+  // entry.details) into a set of <div class="log-detail-item"> cells
+  // that drop into the existing log-detail-grid. Same contract as the
+  // settings.html Test-button helper from #154, so a future refactor
+  // can promote this to a shared file. See issue #182.
+  //
+  // Only the keys actually set by the scheduler runners are rendered —
+  // unknown keys are silently ignored so a forward-compat server (adds
+  // a new detail key in a future release) doesn't cause blank cells
+  // here. Numeric keys tolerate int OR float (JSON round-tripping the
+  // map through SQLite turns Go ints into JS numbers but keeps the
+  // exact value).
+  function renderServiceCheckDetails(type, details, entry) {
+    if (!details || typeof details !== "object") return "";
+    var t = (type || "").toLowerCase();
+    var out = "";
+    function cell(label, val, extraStyle) {
+      var s = extraStyle ? ' style="'+extraStyle+'"' : "";
+      return '<div class="log-detail-item"'+s+'><div class="ld-label">'+esc(label)+'</div><div class="ld-val">'+val+'</div></div>';
+    }
+    if (t === "http") {
+      if (typeof details.status_code === "number") {
+        // Colour the code so 2xx pops green, 4xx/5xx red — mirrors the
+        // Test button toast.
+        var codeColor = details.status_code >= 200 && details.status_code < 400 ? "var(--green)"
+                      : details.status_code >= 400 ? "var(--red)" : "var(--text)";
+        out += cell("HTTP Status", '<span style="color:'+codeColor+'">'+details.status_code+'</span>');
+      }
+      if (details.content_type) out += cell("Content-Type", esc(details.content_type));
+      if (typeof details.body_bytes === "number") out += cell("Body Size", details.body_bytes + " bytes");
+      // final_url is only interesting when it differs from the request
+      // (i.e. a redirect happened). Otherwise it's redundant with Target.
+      if (details.final_url && details.final_url !== details.request_url && details.final_url !== (entry && entry.target)) {
+        out += cell("Final URL", '<span style="font-size:11px;font-family:var(--font-mono);word-break:break-all">'+esc(details.final_url)+'</span>', "grid-column:1/-1");
+      }
+    } else if (t === "tcp" || t === "smb" || t === "nfs") {
+      if (details.resolved_address) out += cell("Resolved Address", '<span style="font-family:var(--font-mono)">'+esc(details.resolved_address)+'</span>');
+    } else if (t === "dns") {
+      if (details.query_host) out += cell("Query Host", '<span style="font-family:var(--font-mono)">'+esc(details.query_host)+'</span>');
+      if (details.dns_server) out += cell("DNS Server", '<span style="font-family:var(--font-mono)">'+esc(details.dns_server)+'</span>');
+      if (Array.isArray(details.records) && details.records.length) {
+        // Records listed comma-separated; the grid cell wraps on commas
+        // naturally. Span the row on many records so readability wins
+        // over grid symmetry.
+        var recVal = details.records.map(function(r){return esc(String(r));}).join(", ");
+        var span = details.records.length > 2 ? ' style="grid-column:1/-1"' : "";
+        out += '<div class="log-detail-item"'+span+'><div class="ld-label">Resolved Records</div><div class="ld-val" style="font-family:var(--font-mono);font-size:11px">'+recVal+'</div></div>';
+      }
+    } else if (t === "ping") {
+      if (details.query_host) out += cell("Host", '<span style="font-family:var(--font-mono)">'+esc(details.query_host)+'</span>');
+      if (typeof details.rtt_ms === "number") out += cell("RTT", details.rtt_ms.toFixed(2) + " ms");
+      if (typeof details.packet_loss_pct === "number") {
+        var lossColor = details.packet_loss_pct > 0 ? "var(--red)" : "var(--text)";
+        out += cell("Packet Loss", '<span style="color:'+lossColor+'">'+details.packet_loss_pct+'%</span>');
+      }
+    }
+    // failure_stage is shared across types; only meaningful on non-up
+    // results so we skip on "up" to keep the happy-path grid tight.
+    if (details.failure_stage && entry && entry.status !== "up") {
+      out += cell("Failure Stage", '<span style="color:var(--red)">'+esc(details.failure_stage)+'</span>');
+    }
+    return out;
+  }
   function pillClass(t){t=(t||"").toLowerCase();if(t==="http")return"pill-http";if(t==="tcp")return"pill-tcp";if(t==="dns")return"pill-dns";if(t==="ping")return"pill-ping";if(t==="smb"||t==="nfs")return"pill-smb";if(t==="speed")return"pill-speed";return"pill-http";}
   function fmtInterval(sec){if(sec<60)return sec+"s";if(sec<3600)return Math.floor(sec/60)+"m";return Math.floor(sec/3600)+"h";}
   function faviconHTML(type,target){
@@ -301,16 +366,13 @@
       h+='<div class="log-detail-item"><div class="ld-label">Consecutive Failures</div><div class="ld-val">'+(e.consecutive_failures||0)+' / '+(e.failure_threshold||1)+'</div></div>';
       h+='<div class="log-detail-item"><div class="ld-label">Check Key</div><div class="ld-val" style="font-size:10px;font-family:var(--font-mono);word-break:break-all;color:var(--text3)">'+esc(e.key||"—")+'</div></div>';
       if(e.error)h+='<div class="log-detail-item" style="grid-column:1/-1"><div class="ld-label">Error</div><div class="ld-val" style="font-size:12px;color:var(--red);font-weight:400;word-break:break-all">'+esc(e.error)+'</div></div>';
-      // Type-specific details
-      if((e.type||"").toLowerCase()==="http"){
-        h+='<div class="log-detail-item"><div class="ld-label">Expected Status</div><div class="ld-val">'+(e.expected_status_min||200)+' – '+(e.expected_status_max||399)+'</div></div>';
-      }
-      if((e.type||"").toLowerCase()==="dns"){
-        h+='<div class="log-detail-item"><div class="ld-label">DNS Lookup</div><div class="ld-val">'+esc(e.target||"")+'</div></div>';
-      }
-      if((e.type||"").toLowerCase()==="ping"){
-        h+='<div class="log-detail-item"><div class="ld-label">RTT</div><div class="ld-val">'+(e.response_ms||0)+' ms</div></div>';
-      }
+      // Per-type diagnostic details (HTTP status code, DNS records,
+      // Ping RTT/loss, TCP resolved address, failure_stage) from the
+      // Details map the scheduler now persists — same rich context
+      // the Test button already shows. Issue #182.
+      h+=renderServiceCheckDetails(e.type, e.details, e);
+      // Speed-type fields are top-level on the result (not in Details),
+      // so keep the dedicated block here.
       if((e.type||"").toLowerCase()==="speed"){
         h+='<div class="log-detail-item"><div class="ld-label">Download</div><div class="ld-val">'+(e.download_mbps?e.download_mbps.toFixed(1)+' Mbps':'—')+'</div></div>';
         h+='<div class="log-detail-item"><div class="ld-label">Upload</div><div class="ld-val">'+(e.upload_mbps?e.upload_mbps.toFixed(1)+' Mbps':'—')+'</div></div>';

@@ -69,19 +69,26 @@ func TestRunCheck_Details_PopulatedWhenEnabled(t *testing.T) {
 	}
 }
 
-// TestRunDueChecks_NeverPopulatesDetails — even if SetCollectDetails(true)
-// was called (ad-hoc test button flow), the scheduled-check path must NOT
-// attach Details. The scheduled path uses a fresh checker in production; we
-// still guarantee it here as defensive invariant so accidentally sharing a
-// checker wouldn't blow up history rows or JSON payloads.
-func TestRunDueChecks_NeverPopulatesDetails(t *testing.T) {
+// TestRunDueChecks_OmitsDetailsWhenCollectorOff — with SetCollectDetails
+// left at its default (false), scheduled check rows must NOT carry
+// Details. This preserves the pre-#182 on-the-wire shape for integrations
+// that haven't opted in (e.g. unit tests constructing a bare checker via
+// NewServiceChecker). Production wires details on — see scheduler.go —
+// but the default still round-trips cleanly with no payload bloat.
+//
+// Replaces the old TestRunDueChecks_NeverPopulatesDetails which asserted
+// the stricter invariant that RunDueChecks unconditionally stripped the
+// map. Issue #182 relaxed that: the scheduler now persists details so
+// the /service-checks log UI can render them on expanded log rows.
+func TestRunDueChecks_OmitsDetailsWhenCollectorOff(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
 
 	sc, _ := newTestChecker()
-	sc.SetCollectDetails(true) // simulate an ad-hoc flag being flipped
+	// NB: SetCollectDetails deliberately not called — the default is
+	// false so a bare NewServiceChecker stays details-free.
 
 	checks := []internal.ServiceCheckConfig{{
 		Name:    "scheduled",
@@ -94,7 +101,38 @@ func TestRunDueChecks_NeverPopulatesDetails(t *testing.T) {
 		t.Fatalf("expected 1 scheduled result, got %d", len(results))
 	}
 	if len(results[0].Details) != 0 {
-		t.Fatalf("RunDueChecks must not carry Details, got: %+v", results[0].Details)
+		t.Fatalf("RunDueChecks with collectDetails=false must not carry Details, got: %+v", results[0].Details)
+	}
+}
+
+// TestRunDueChecks_CarriesDetailsWhenCollectorOn — #182: when the parent
+// checker has collectDetails enabled (as the production scheduler does
+// via scheduler.go), RunDueChecks must now propagate the Details map
+// out of RunCheck instead of stripping it as it did under #154.
+func TestRunDueChecks_CarriesDetailsWhenCollectorOn(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	sc, _ := newTestChecker()
+	sc.SetCollectDetails(true) // mirrors scheduler.go's production wiring
+
+	checks := []internal.ServiceCheckConfig{{
+		Name:    "scheduled-with-details",
+		Type:    internal.ServiceCheckHTTP,
+		Target:  ts.URL,
+		Enabled: true,
+	}}
+	results := sc.RunDueChecks(checks, time.Now().UTC())
+	if len(results) != 1 {
+		t.Fatalf("expected 1 scheduled result, got %d", len(results))
+	}
+	if len(results[0].Details) == 0 {
+		t.Fatalf("RunDueChecks with collectDetails=true must propagate Details, got empty map")
+	}
+	if code, _ := results[0].Details["status_code"].(int); code != 200 {
+		t.Fatalf("expected status_code=200 in scheduled Details, got %v", results[0].Details["status_code"])
 	}
 }
 

@@ -246,6 +246,7 @@ func (d *DB) migrate() error {
 			failure_threshold INTEGER NOT NULL DEFAULT 1,
 			failure_severity TEXT NOT NULL DEFAULT 'warning',
 			checked_at DATETIME NOT NULL,
+			details_json TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_service_checks_key_ts ON service_checks_history(check_key, checked_at DESC)`,
@@ -301,6 +302,16 @@ func (d *DB) migrate() error {
 	}
 	if err := d.ensureColumn("alerts", "snoozed_until", "DATETIME"); err != nil {
 		return fmt.Errorf("ensure alerts.snoozed_until: %w", err)
+	}
+	// details_json holds a per-type diagnostic JSON blob (HTTP status_code,
+	// DNS records, Ping rtt_ms, TCP resolved_address, failure_stage, …)
+	// persisted by the scheduler so the /service-checks log UI can render
+	// the same rich context the Test button already shows. Legacy rows
+	// pre-dating this column read back as NULL → Details == nil. A single
+	// TEXT column (vs per-key columns) keeps schema churn zero when new
+	// detail keys get added. See issue #182.
+	if err := d.ensureColumn("service_checks_history", "details_json", "TEXT"); err != nil {
+		return fmt.Errorf("ensure service_checks_history.details_json: %w", err)
 	}
 	if _, err := d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_alerts_fingerprint_open ON alerts(fingerprint, resolved_at)`); err != nil {
 		return fmt.Errorf("create alerts fingerprint index: %w", err)
@@ -1623,6 +1634,13 @@ type ServiceCheckEntry struct {
 	FailureThreshold    int    `json:"failure_threshold"`
 	FailureSeverity     string `json:"failure_severity"`
 	CheckedAt           string `json:"checked_at"`
+
+	// Details carries the per-check-type diagnostic map (HTTP status_code,
+	// DNS records, Ping rtt_ms, TCP resolved_address, failure_stage, …)
+	// deserialised from the details_json column. nil on legacy rows
+	// written before the column existed, or for check types that produce
+	// no extra context. See issue #182.
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // SaveServiceCheckResults appends service check run results to history.
@@ -1644,11 +1662,26 @@ func (d *DB) SaveServiceCheckResults(results []internal.ServiceCheckResult) erro
 		if parsed, err := time.Parse(time.RFC3339, result.CheckedAt); err == nil {
 			checkedAt = parsed.UTC()
 		}
+		// Serialise the per-type Details map. A nil or empty map writes
+		// SQL NULL so legacy readers and the pre-migration world stay
+		// unaffected. We do NOT fail the whole transaction on encoding
+		// errors — the core row still contains status/ms/error so losing
+		// details gracefully is preferable to losing the whole check
+		// history for a run. See issue #182.
+		var detailsPayload any // sql.NullString wrapped via any; nil = SQL NULL
+		if len(result.Details) > 0 {
+			if buf, err := json.Marshal(result.Details); err == nil {
+				detailsPayload = string(buf)
+			} else {
+				d.logger.Warn("service check details_json marshal failed; row saved without details",
+					"check", result.Name, "error", err)
+			}
+		}
 		_, err := tx.Exec(
 			`INSERT INTO service_checks_history (
 				check_key, name, check_type, target, status, response_ms, error_message,
-				consecutive_failures, failure_threshold, failure_severity, checked_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				consecutive_failures, failure_threshold, failure_severity, checked_at, details_json
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			result.Key,
 			result.Name,
 			result.Type,
@@ -1660,6 +1693,7 @@ func (d *DB) SaveServiceCheckResults(results []internal.ServiceCheckResult) erro
 			result.FailureThreshold,
 			result.FailureSeverity,
 			checkedAt,
+			detailsPayload,
 		)
 		if err != nil {
 			return err
@@ -1701,7 +1735,7 @@ func (d *DB) ListLatestServiceChecks(limit int) ([]ServiceCheckEntry, error) {
 		`SELECT check_key, name, check_type, target, status,
 				COALESCE(response_ms, 0), COALESCE(error_message, ''),
 				COALESCE(consecutive_failures, 0), COALESCE(failure_threshold, 1), COALESCE(failure_severity, 'warning'),
-				checked_at
+				checked_at, details_json
 		 FROM service_checks_history
 		 WHERE id IN (
 			SELECT MAX(id) FROM service_checks_history GROUP BY check_key
@@ -1719,6 +1753,7 @@ func (d *DB) ListLatestServiceChecks(limit int) ([]ServiceCheckEntry, error) {
 	for rows.Next() {
 		var e ServiceCheckEntry
 		var checkedAt time.Time
+		var detailsJSON sql.NullString
 		if err := rows.Scan(
 			&e.Key,
 			&e.Name,
@@ -1731,10 +1766,12 @@ func (d *DB) ListLatestServiceChecks(limit int) ([]ServiceCheckEntry, error) {
 			&e.FailureThreshold,
 			&e.FailureSeverity,
 			&checkedAt,
+			&detailsJSON,
 		); err != nil {
 			return nil, err
 		}
 		e.CheckedAt = checkedAt.UTC().Format(time.RFC3339)
+		e.Details = decodeDetailsJSON(d.logger, detailsJSON, e.Key)
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
@@ -1752,7 +1789,7 @@ func (d *DB) GetServiceCheckHistory(checkKey string, limit int) ([]ServiceCheckE
 		`SELECT check_key, name, check_type, target, status,
 				COALESCE(response_ms, 0), COALESCE(error_message, ''),
 				COALESCE(consecutive_failures, 0), COALESCE(failure_threshold, 1), COALESCE(failure_severity, 'warning'),
-				checked_at
+				checked_at, details_json
 		 FROM service_checks_history
 		 WHERE check_key = ?
 		 ORDER BY checked_at DESC
@@ -1769,6 +1806,7 @@ func (d *DB) GetServiceCheckHistory(checkKey string, limit int) ([]ServiceCheckE
 	for rows.Next() {
 		var e ServiceCheckEntry
 		var checkedAt time.Time
+		var detailsJSON sql.NullString
 		if err := rows.Scan(
 			&e.Key,
 			&e.Name,
@@ -1781,13 +1819,42 @@ func (d *DB) GetServiceCheckHistory(checkKey string, limit int) ([]ServiceCheckE
 			&e.FailureThreshold,
 			&e.FailureSeverity,
 			&checkedAt,
+			&detailsJSON,
 		); err != nil {
 			return nil, err
 		}
 		e.CheckedAt = checkedAt.UTC().Format(time.RFC3339)
+		e.Details = decodeDetailsJSON(d.logger, detailsJSON, e.Key)
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+// decodeDetailsJSON deserialises the details_json column from a history
+// row. Returns nil on SQL NULL, empty strings, or malformed JSON — the
+// log UI treats nil as "no extra context to render" rather than an error.
+// Corrupted rows are logged at warn level but never break list/history
+// queries, since the core row is still valuable. See issue #182.
+func decodeDetailsJSON(logger *slog.Logger, raw sql.NullString, checkKey string) map[string]any {
+	if !raw.Valid {
+		return nil
+	}
+	s := strings.TrimSpace(raw.String)
+	if s == "" || s == "null" {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		if logger != nil {
+			logger.Warn("service check details_json unmarshal failed; row returned without details",
+				"check_key", checkKey, "error", err)
+		}
+		return nil
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 // PruneServiceCheckHistory deletes service check history rows older than the given duration.

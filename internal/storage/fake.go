@@ -280,6 +280,7 @@ func (f *FakeStore) ListLatestServiceChecks(limit int) ([]ServiceCheckEntry, err
 			FailureThreshold:    r.FailureThreshold,
 			FailureSeverity:     string(r.FailureSeverity),
 			CheckedAt:           r.CheckedAt,
+			Details:             cloneDetails(r.Details),
 		})
 	}
 	// Sort by CheckedAt descending.
@@ -313,6 +314,7 @@ func (f *FakeStore) GetServiceCheckHistory(checkKey string, limit int) ([]Servic
 			FailureThreshold:    r.FailureThreshold,
 			FailureSeverity:     string(r.FailureSeverity),
 			CheckedAt:           r.CheckedAt,
+			Details:             cloneDetails(r.Details),
 		})
 		if limit > 0 && len(entries) >= limit {
 			break
@@ -861,4 +863,20 @@ func (f *FakeStore) ResetVacuum() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.VacuumCalled = false
+}
+
+// cloneDetails returns a shallow copy of the per-type Details map so
+// successive Reads don't hand out the same underlying map that a later
+// Save mutates (issue #182: persisted log rows round-trip Details).
+// Returns nil for nil/empty input so reads match the DB path where NULL
+// JSON is surfaced as nil.
+func cloneDetails(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
