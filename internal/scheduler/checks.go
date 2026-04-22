@@ -523,28 +523,116 @@ func extractPacketLossPercent(out string) float64 {
 	return -1
 }
 
-func (sc *ServiceChecker) runSpeedCheck(check internal.ServiceCheckConfig, result *internal.ServiceCheckResult, start time.Time) {
-	sc.mu.Lock()
-	runner := sc.speedTestRunFn
-	sc.mu.Unlock()
-
-	if runner == nil {
-		result.Error = "no speedtest tool available (install speedtest or speedtest-cli)"
+// runSpeedCheck evaluates a type=speed service check by reading the
+// shared LastSpeedTestAttempt state + latest speedtest_history row
+// rather than invoking Ookla directly. This is option B from issue
+// #210: one Ookla run per scheduler cadence, many threshold checks
+// reading from it. Before #210 the scheduled path invoked a runner
+// that was never wired up in production (ServiceChecker.
+// SetSpeedTestRunner was only called on the ad-hoc Test-button path),
+// so every scheduled type=speed check reported DOWN forever. See the
+// issue for full design rationale.
+//
+// Status-to-result mapping:
+//   - success → read latest speedtest_history row, apply thresholds.
+//     Zero-throughput rows (dl==0 && ul==0) are treated as failed.
+//   - pending → up ("speed test in progress"). Used by widget first-boot.
+//   - failed → down with the stored error message.
+//   - disabled → down ("speed test disabled in settings").
+//   - missing or stale (>30d) → down.
+//
+// Blank thresholds (ContractedDownMbps == 0 && ContractedUpMbps == 0)
+// short-circuit the success path to status=up without threshold math.
+// This is the shape of the default shipped "Internet Speed" check —
+// a heartbeat that fires only when the speed test itself fails.
+//
+// TODO(#215): fleet-instance targeting reads local speedtest_history only.
+// A fleet-targeted speed check should read the remote peer's history via
+// the fleet API. Tracked separately.
+func (sc *ServiceChecker) runSpeedCheck(check internal.ServiceCheckConfig, result *internal.ServiceCheckResult, _ time.Time) {
+	att, err := sc.store.GetLastSpeedTestAttempt()
+	if err != nil {
+		result.Error = "failed to read speed test state: " + err.Error()
+		return
+	}
+	if att == nil {
+		result.Error = "no speed test has run yet"
 		return
 	}
 
-	stResult := runner()
-	if stResult == nil {
-		result.Error = "no speedtest tool available (install speedtest or speedtest-cli)"
+	// Defense-in-depth: any attempt older than 30 days indicates the
+	// scheduler has wedged or the speed-test loop hasn't run in a month.
+	// Don't trust the stored status; report down with a clear reason.
+	// Not user-tunable — the cap is generous enough to cover weekly
+	// cadences and the longest "Disabled" gaps that still update the
+	// row on startup.
+	const staleThreshold = 30 * 24 * time.Hour
+	if !att.Timestamp.IsZero() && time.Since(att.Timestamp) > staleThreshold {
+		result.Error = "speed test state is stale (no run in over 30 days)"
 		return
 	}
 
-	result.DownloadMbps = stResult.DownloadMbps
-	result.UploadMbps = stResult.UploadMbps
-	result.LatencyMs = stResult.LatencyMs
-	result.ResponseMS = int64(stResult.LatencyMs)
+	switch att.Status {
+	case "disabled":
+		result.Error = "speed test disabled in settings"
+		return
+	case "failed":
+		if att.ErrorMsg != "" {
+			result.Error = att.ErrorMsg
+		} else {
+			result.Error = "speed test failed"
+		}
+		return
+	case "pending":
+		// First run in progress. Widget shows "Running initial speed
+		// test…"; the check reports up so users don't see a big red
+		// down marker flicker while waiting for the first result.
+		result.Status = "up"
+		return
+	case "success":
+		// Fall through below.
+	default:
+		// Unknown/empty status — treat as missing.
+		result.Error = "unknown speed test state: " + att.Status
+		return
+	}
 
-	// Apply margin of error (default 10%).
+	// Success path — read the latest history row and apply thresholds.
+	points, histErr := sc.store.GetSpeedTestHistory(48)
+	if histErr != nil {
+		result.Error = "failed to read speed test history: " + histErr.Error()
+		return
+	}
+	if len(points) == 0 {
+		// Attempt says success but no history row — inconsistent state;
+		// treat as stale/missing so notifications don't fire.
+		result.Error = "speed test success recorded but no history row found"
+		return
+	}
+	// GetSpeedTestHistory returns ascending order (see fake.go + db.go
+	// query); take the last element for the newest row.
+	latest := points[len(points)-1]
+
+	// Zero-throughput rows indicate a corrupt or pre-#170 bug. Ookla
+	// sometimes returned all-zeros on parse failure before the collector
+	// fix landed; ancient DBs may still have such rows. Treat them as
+	// failed so contracted-speed alerts aren't silently suppressed.
+	if latest.DownloadMbps == 0 && latest.UploadMbps == 0 {
+		result.Error = "latest speed test result is zero (possibly corrupt)"
+		return
+	}
+
+	result.DownloadMbps = latest.DownloadMbps
+	result.UploadMbps = latest.UploadMbps
+	result.LatencyMs = latest.LatencyMs
+	result.ResponseMS = int64(latest.LatencyMs)
+
+	// Blank thresholds → heartbeat mode: success = up, no threshold math.
+	if check.ContractedDownMbps <= 0 && check.ContractedUpMbps <= 0 {
+		result.Status = "up"
+		return
+	}
+
 	margin := check.MarginPct
 	if margin <= 0 {
 		margin = 10
@@ -554,8 +642,8 @@ func (sc *ServiceChecker) runSpeedCheck(check internal.ServiceCheckConfig, resul
 	dlThreshold := check.ContractedDownMbps * marginFactor
 	ulThreshold := check.ContractedUpMbps * marginFactor
 
-	dlOK := check.ContractedDownMbps <= 0 || stResult.DownloadMbps >= dlThreshold
-	ulOK := check.ContractedUpMbps <= 0 || stResult.UploadMbps >= ulThreshold
+	dlOK := check.ContractedDownMbps <= 0 || latest.DownloadMbps >= dlThreshold
+	ulOK := check.ContractedUpMbps <= 0 || latest.UploadMbps >= ulThreshold
 	result.DownloadOK = &dlOK
 	result.UploadOK = &ulOK
 
@@ -569,11 +657,11 @@ func (sc *ServiceChecker) runSpeedCheck(check internal.ServiceCheckConfig, resul
 			which = "download"
 		}
 		result.Error = fmt.Sprintf("%s below contracted speed (%.0f/%.0f Mbps, threshold %.0f with %.0f%% margin)",
-			which, stResult.DownloadMbps, stResult.UploadMbps,
+			which, latest.DownloadMbps, latest.UploadMbps,
 			check.ContractedDownMbps, margin)
 	default:
 		result.Error = fmt.Sprintf("both download and upload below contracted speed (%.0f/%.0f Mbps, contracted %.0f/%.0f with %.0f%% margin)",
-			stResult.DownloadMbps, stResult.UploadMbps,
+			latest.DownloadMbps, latest.UploadMbps,
 			check.ContractedDownMbps, check.ContractedUpMbps, margin)
 	}
 }
