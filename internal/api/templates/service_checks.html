@@ -207,7 +207,19 @@
         out += cell("Final URL", '<span style="font-size:11px;font-family:var(--font-mono);word-break:break-all">'+esc(details.final_url)+'</span>', "grid-column:1/-1");
       }
     } else if (t === "tcp" || t === "smb" || t === "nfs") {
-      if (details.resolved_address) out += cell("Resolved Address", '<span style="font-family:var(--font-mono)">'+esc(details.resolved_address)+'</span>');
+      if (details.resolved_address) {
+        // Pin the protocol badge (SSH, HTTPS, MySQL, …) to the
+        // Resolved Address cell so users see at-a-glance what they
+        // actually dialed. Populated by the Go ProtocolHint helper
+        // when the port is in the well-known table (issue #188).
+        // Keep the badge tight and muted so it reads as metadata,
+        // not as a status pill.
+        var addrHTML = '<span style="font-family:var(--font-mono)">'+esc(details.resolved_address)+'</span>';
+        if (details.protocol_hint) {
+          addrHTML += ' <span class="protocol-hint-badge" style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:var(--surface-2,#1a1a1a);border:1px solid var(--border);color:var(--text2);font-size:10px;font-family:var(--font-mono);font-weight:600;letter-spacing:0.3px;vertical-align:middle">'+esc(details.protocol_hint)+'</span>';
+        }
+        out += cell("Resolved Address", addrHTML);
+      }
     } else if (t === "dns") {
       if (details.query_host) out += cell("Query Host", '<span style="font-family:var(--font-mono)">'+esc(details.query_host)+'</span>');
       if (details.dns_server) out += cell("DNS Server", '<span style="font-family:var(--font-mono)">'+esc(details.dns_server)+'</span>');
