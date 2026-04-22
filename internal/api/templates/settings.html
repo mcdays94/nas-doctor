@@ -895,6 +895,15 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           At the default 30-min scan interval, that's roughly 48 extra spin-ups per drive per day.
           Only enable if your drives never spin down, or if you deliberately need every-cycle SMART monitoring and accept the wear cost.
         </p>
+        <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+          <label for="docker-hidden-containers" style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Hide Docker containers from dashboard</label>
+          <input type="text" id="docker-hidden-containers" placeholder="watchtower, portainer-agent, cloudflared" style="width:100%" onchange="saveSettings()" />
+          <p style="font-size:12px;color:var(--text2);margin-top:8px;line-height:1.5">
+            Comma-separated container names (exact match). These will be excluded from the <strong>Docker Containers section</strong> only.
+            Stats history is still collected and alerts still fire — the containers are hidden from the tile, not suppressed.
+            Top Processes container attribution is not affected: if a hidden container is chewing CPU you'll still see its name there.
+          </p>
+        </div>
       </div>
     </details>
   </div>
@@ -1201,6 +1210,12 @@ function loadSettings() {
       if (wakeEl) {
         if (data.wake_drives_for_smart) wakeEl.classList.add("on"); else wakeEl.classList.remove("on");
       }
+      /* Advanced: hide Docker containers from dashboard (#204) */
+      var hideEl = document.getElementById("docker-hidden-containers");
+      if (hideEl) {
+        var hidden = data.docker_hidden_containers;
+        hideEl.value = Array.isArray(hidden) ? hidden.join(", ") : "";
+      }
       /* Proxmox VE */
       var pve = data.proxmox || {};
       if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
@@ -1313,8 +1328,25 @@ function buildSettingsPayload() {
     fleet: fleetServers || base.fleet || [],
     dismissed_findings: base.dismissed_findings || [],
     cost_per_tb: parseFloat(document.getElementById("cost-per-tb") && document.getElementById("cost-per-tb").value) || 0,
-    wake_drives_for_smart: !!(document.getElementById("wake-drives-for-smart") && document.getElementById("wake-drives-for-smart").classList.contains("on"))
+    wake_drives_for_smart: !!(document.getElementById("wake-drives-for-smart") && document.getElementById("wake-drives-for-smart").classList.contains("on")),
+    docker_hidden_containers: parseHiddenContainerList(document.getElementById("docker-hidden-containers") && document.getElementById("docker-hidden-containers").value)
   };
+}
+
+/* ---------- Helpers: hidden Docker containers (#204) ---------- */
+/* Parse a user-entered comma-separated list into a clean string array.
+   Trims whitespace, drops empty entries so "plex, , watchtower, " becomes
+   ["plex","watchtower"]. Returns [] rather than null so the JSON payload
+   stays consistent with a non-omitempty array on the server. */
+function parseHiddenContainerList(s) {
+  if (!s || typeof s !== "string") return [];
+  var parts = s.split(",");
+  var out = [];
+  for (var i = 0; i < parts.length; i++) {
+    var t = parts[i].trim();
+    if (t) out.push(t);
+  }
+  return out;
 }
 
 function saveSettings() {
