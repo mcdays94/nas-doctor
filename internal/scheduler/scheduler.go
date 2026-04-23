@@ -105,6 +105,12 @@ type Scheduler struct {
 	// Matches the existing ServiceChecker.speedTestRunFn naming for
 	// consistency across the scheduler package.
 	speedTestRunFn SpeedTestRunner
+	// dockerStatsFn is the injectable seam for the 5-minute container
+	// stats loop. Production wires collector.CollectDockerStats via
+	// New(); tests swap it for a deterministic stub to exercise the
+	// three logging branches (error / unavailable / success) added in
+	// issue #226. Read under s.mu.
+	dockerStatsFn  func() (*internal.DockerInfo, error)
 	retention      RetentionConfig
 	alerting       AlertingConfig
 	serviceChecks  []internal.ServiceCheckConfig
@@ -145,6 +151,7 @@ func New(
 		interval:          interval,
 		speedTestInterval: 4 * time.Hour,
 		speedTestRunFn:    collector.RunSpeedTest,
+		dockerStatsFn:     col.CollectDockerStats,
 		retention: RetentionConfig{
 			SnapshotDays:  90,
 			MaxDBSizeMB:   500,
@@ -328,6 +335,17 @@ func (s *Scheduler) SetSpeedTestRunner(fn SpeedTestRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.speedTestRunFn = fn
+}
+
+// SetDockerStatsFn injects the function used by collectContainerStats
+// to collect the 5-minute Docker stats snapshot. Production wires the
+// default to collector.CollectDockerStats via the constructor; tests
+// swap it for a stub so they can exercise the error / unavailable /
+// success logging branches without a live Docker daemon (issue #226).
+func (s *Scheduler) SetDockerStatsFn(fn func() (*internal.DockerInfo, error)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dockerStatsFn = fn
 }
 
 // SetSMARTMaxAgeDays updates the max-age threshold driving the
@@ -922,15 +940,43 @@ func (s *Scheduler) runServiceChecks(now time.Time) ([]internal.ServiceCheckResu
 // collectContainerStats runs a lightweight Docker stats collection and saves to DB.
 // This runs every 5 minutes independently of the main scan (which runs every 6h)
 // to provide enough data points for the container metrics charts.
+//
+// Logging semantics (issue #226): every cycle emits exactly one log line so
+// operators can tell from grep alone whether the loop is still firing and
+// why it degraded when container_stats_history stops advancing.
+//
+//   - Collector error          -> WARN  "container stats: collector returned error"
+//   - Docker unavailable / nil -> WARN  "container stats: docker unavailable"
+//   - Save error               -> WARN  "container stats: failed to save"
+//   - Success                  -> INFO  "container stats: saved" with containers=N
+//
+// Previously all three failure modes collapsed into a silent return which
+// masked 36+ hours of real-world data loss on a UAT host.
 func (s *Scheduler) collectContainerStats() {
-	docker, err := s.collector.CollectDockerStats()
-	if err != nil || docker == nil || !docker.Available {
+	s.mu.RLock()
+	fn := s.dockerStatsFn
+	s.mu.RUnlock()
+	if fn == nil {
+		fn = s.collector.CollectDockerStats
+	}
+	docker, err := fn()
+	if err != nil {
+		s.logger.Warn("container stats: collector returned error", "error", err)
+		return
+	}
+	if docker == nil {
+		s.logger.Warn("container stats: collector returned nil docker info")
+		return
+	}
+	if !docker.Available {
+		s.logger.Warn("container stats: docker unavailable")
 		return
 	}
 	if err := s.store.SaveContainerStats(docker); err != nil {
-		s.logger.Warn("failed to save container stats", "error", err)
+		s.logger.Warn("container stats: failed to save", "error", err)
 		return
 	}
+	s.logger.Info("container stats: saved", "containers", len(docker.Containers))
 	// Update the cached snapshot's Docker data so the dashboard shows fresh values
 	s.mu.Lock()
 	if s.latest != nil {
