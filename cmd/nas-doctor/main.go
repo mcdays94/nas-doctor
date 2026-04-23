@@ -366,9 +366,10 @@ func main() {
 		}
 		// Apply SMART standby-awareness preference on startup (#198). Default
 		// (false) uses `-n standby` so spun-down drives aren't woken by scans.
+		// Since schema v2 (#237) this lives under Settings.SMART.WakeDrives.
 		if persistedSettings != nil {
 			coll.SetSMARTConfig(collector.SMARTConfig{
-				WakeDrives: persistedSettings.WakeDrivesForSMART,
+				WakeDrives: persistedSettings.SMART.WakeDrives,
 			})
 		}
 		sched.Start()

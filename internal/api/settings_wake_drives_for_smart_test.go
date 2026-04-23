@@ -13,8 +13,9 @@ import (
 )
 
 // TestSettingsHTMLIncludesWakeDrivesForSMARTToggle verifies the settings
-// template ships the Advanced section with the wake-drives toggle +
-// disclaimer required by issue #198.
+// template ships the wake-drives toggle + disclaimer required by issue #198.
+// Since #237 the toggle lives inside the new "Advanced Scan Settings"
+// card (id="card-advanced-scans"), not the legacy generic Advanced card.
 //
 // This is a cross-reference test: it confirms the HTML mentions every
 // symbol the JS load/save wiring expects, so a future refactor that
@@ -31,20 +32,20 @@ func TestSettingsHTMLIncludesWakeDrivesForSMARTToggle(t *testing.T) {
 		name   string
 		substr string
 	}{
-		// Advanced card anchor so the sticky section nav can link to it.
-		{"advanced card anchor", `id="card-advanced"`},
-		// Section nav link to the advanced card.
-		{"advanced nav link", `href="#card-advanced"`},
+		// New Advanced Scan Settings card anchor (#237).
+		{"advanced scans card anchor", `id="card-advanced-scans"`},
+		// Section nav link to the new card.
+		{"advanced scans nav link", `href="#card-advanced-scans"`},
 		// Disclosure element — using <details>/<summary> per the issue's
 		// guidance (no extra JS needed).
 		{"details element", `<details`},
 		{"summary element", `<summary`},
 		// The toggle control + its stable id for load/save wiring.
 		{"wake-drives toggle id", `id="wake-drives-for-smart"`},
-		// Load path reads the JSON field name.
-		{"load binds field", `data.wake_drives_for_smart`},
-		// Save payload writes the JSON field name.
-		{"save sends field", `wake_drives_for_smart:`},
+		// Load path reads the nested JSON field.
+		{"load binds nested field", `data.smart`},
+		// Save payload writes the nested JSON field.
+		{"save sends nested field", `smart:`},
 		// Disclaimer text must communicate the wear trade-off. We keep
 		// the assertion loose so copy can be edited, but pin the key
 		// concepts: spin-ups and opt-in intent.
@@ -61,30 +62,32 @@ func TestSettingsHTMLIncludesWakeDrivesForSMARTToggle(t *testing.T) {
 }
 
 // TestSettingsRoundTrip_WakeDrivesForSMART exercises the GET/PUT cycle for
-// the new setting to make sure it persists and is returned by handleGetSettings.
+// the wake-drives flag using the new nested schema (Settings.SMART.WakeDrives,
+// `smart.wake_drives` on the wire) introduced in #237.
 func TestSettingsRoundTrip_WakeDrivesForSMART(t *testing.T) {
-	s := newSettingsTestServer()
+	srv := newSettingsTestServer()
 
-	// PUT enabling the flag.
-	put := Settings{
-		ScanInterval:       "30m",
-		Theme:              ThemeMidnight,
-		WakeDrivesForSMART: true,
+	put := map[string]interface{}{
+		"scan_interval": "30m",
+		"theme":         "midnight",
+		"smart": map[string]interface{}{
+			"wake_drives":  true,
+			"max_age_days": 7,
+		},
 	}
 	body, _ := json.Marshal(put)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
-	s.handleUpdateSettings(rr, req)
+	srv.handleUpdateSettings(rr, req)
 	if rr.Code != http.StatusOK {
 		b, _ := io.ReadAll(rr.Body)
 		t.Fatalf("PUT returned %d: %s", rr.Code, b)
 	}
 
-	// GET and verify the flag survived the round-trip.
 	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
 	rr2 := httptest.NewRecorder()
-	s.handleGetSettings(rr2, req2)
+	srv.handleGetSettings(rr2, req2)
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("GET returned %d", rr2.Code)
 	}
@@ -92,8 +95,8 @@ func TestSettingsRoundTrip_WakeDrivesForSMART(t *testing.T) {
 	if err := json.Unmarshal(rr2.Body.Bytes(), &got); err != nil {
 		t.Fatalf("parse GET response: %v", err)
 	}
-	if !got.WakeDrivesForSMART {
-		t.Errorf("WakeDrivesForSMART did not round-trip; got false, wanted true")
+	if !got.SMART.WakeDrives {
+		t.Errorf("smart.wake_drives did not round-trip; got false, wanted true")
 	}
 }
 
@@ -102,7 +105,7 @@ func TestSettingsRoundTrip_WakeDrivesForSMART(t *testing.T) {
 // means drives in standby are NOT woken by SMART scans.
 func TestSettingsDefault_WakeDrivesForSMARTIsFalse(t *testing.T) {
 	d := defaultSettings()
-	if d.WakeDrivesForSMART {
-		t.Errorf("defaultSettings().WakeDrivesForSMART must be false (standby-aware by default, issue #198)")
+	if d.SMART.WakeDrives {
+		t.Errorf("defaultSettings().SMART.WakeDrives must be false (standby-aware by default, issue #198)")
 	}
 }
