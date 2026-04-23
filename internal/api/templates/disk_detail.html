@@ -124,6 +124,31 @@ a:hover{color:var(--accent-hover)}
 .info-table .label-cell{color:var(--text-tertiary);font-weight:500;width:200px}
 .info-table .value-cell{color:var(--text-primary);font-variant-numeric:tabular-nums}
 
+/* ── Maintenance Log (issue #130) ────────── */
+.maintenance-log-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:20px;margin-bottom:calc(var(--sp)*4)}
+.maintenance-log-entry{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.maintenance-log-entry:last-child{border-bottom:none}
+.maintenance-log-entry .ml-time{flex-shrink:0;color:var(--text-tertiary);font-size:12px;font-variant-numeric:tabular-nums;width:140px;white-space:nowrap}
+.maintenance-log-entry .ml-body{flex:1;min-width:0;word-break:break-word;font-size:13px;color:var(--text-primary);line-height:1.5}
+.maintenance-log-entry .ml-badge{display:inline-block;margin-left:8px;padding:1px 7px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;border-radius:4px;color:var(--text-tertiary);background:var(--bg-elevated);vertical-align:middle}
+.maintenance-log-entry .ml-actions{flex-shrink:0;display:flex;gap:6px;opacity:0;transition:opacity 150ms ease}
+.maintenance-log-entry:hover .ml-actions{opacity:1}
+.maintenance-log-entry .ml-actions button{background:transparent;border:1px solid var(--border);color:var(--text-tertiary);font-size:11px;padding:3px 8px;border-radius:4px;cursor:pointer;transition:all 150ms ease}
+.maintenance-log-entry .ml-actions button:hover{color:var(--text-primary);border-color:var(--accent)}
+.maintenance-log-entry .ml-updated{display:inline-block;margin-left:6px;color:var(--text-tertiary);font-size:11px;font-style:italic}
+.maintenance-log-empty{text-align:center;color:var(--text-tertiary);padding:24px 0;font-size:13px}
+.maintenance-log-form{margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.maintenance-log-form label{font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px}
+.maintenance-log-form input[type="datetime-local"],
+.maintenance-log-form textarea{background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:inherit;font-size:13px;width:100%}
+.maintenance-log-form textarea{min-height:60px;resize:vertical}
+.maintenance-log-form-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.maintenance-log-form-row > div{flex:1;min-width:200px}
+.maintenance-log-form button{align-self:flex-end;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);padding:8px 16px;font-size:13px;font-weight:500;cursor:pointer;transition:background 150ms ease}
+.maintenance-log-form button:hover{background:var(--accent-hover)}
+.maintenance-log-form button:disabled{opacity:0.5;cursor:not-allowed}
+.maintenance-log-error{color:var(--red);font-size:12px;padding:6px 0}
+
 /* ── Empty states ────────────────────────── */
 .no-data{text-align:center;color:var(--text-tertiary);padding:40px;font-size:13px}
 
@@ -516,6 +541,24 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
       html += "</div>";
     }
 
+    /* ── Maintenance Log (issue #130) ──────────────────────────── */
+    html += "<div class=\"section-heading\">Maintenance Log</div>";
+    html += "<div class=\"maintenance-log-card\">";
+    html += "  <div id=\"maintenanceLogList\"><div class=\"maintenance-log-empty\">Loading\u2026</div></div>";
+    html += "  <form class=\"maintenance-log-form\" id=\"maintenanceLogForm\" autocomplete=\"off\" onsubmit=\"return false\">";
+    html += "    <div class=\"maintenance-log-form-row\">";
+    html += "      <div><label for=\"maintenanceLogTime\">When</label>";
+    html += "        <input type=\"datetime-local\" id=\"maintenanceLogTime\">";
+    html += "      </div>";
+    html += "      <div><label for=\"maintenanceLogContent\">What happened</label>";
+    html += "        <textarea id=\"maintenanceLogContent\" placeholder=\"e.g. SATA cable replaced, drive moved to new bay\u2026\"></textarea>";
+    html += "      </div>";
+    html += "    </div>";
+    html += "    <div class=\"maintenance-log-error\" id=\"maintenanceLogError\" style=\"display:none\"></div>";
+    html += "    <button type=\"submit\" id=\"maintenanceLogSave\">Add Entry</button>";
+    html += "  </form>";
+    html += "</div>";
+
     /* ── Drive Identification ──────────────────────────────────── */
     html += "<div class=\"section-heading\">Drive Identification</div>";
     html += "<div class=\"info-table-wrap\"><table class=\"info-table\">";
@@ -544,7 +587,197 @@ fetch("/api/v1/status").then(function(r){return r.json()}).then(function(d){if(d
 
     /* ── Render charts after DOM update ────────────────────────── */
     setTimeout(function() { renderCharts(disk, history); }, 50);
+
+    /* ── Wire up Maintenance Log (issue #130) ──────────────────── */
+    setTimeout(function() { initMaintenanceLog(disk); }, 50);
   }
+
+  /* ── Maintenance Log ───────────────────────────────────────────
+     Per-slot chronological timeline. Manual notes (is_auto=false)
+     render with edit/delete controls; auto "replacement" events
+     (is_auto=true) render read-only with a "System" badge and
+     parsed JSON content. slot_key prefers disk.array_slot (stable
+     across replacements on Unraid) and falls back to serial. */
+  var _currentSlotKey = "";
+
+  function resolveSlotKey(disk) {
+    if (disk && disk.array_slot) return disk.array_slot;
+    return (disk && disk.serial) || serial;
+  }
+
+  function initMaintenanceLog(disk) {
+    _currentSlotKey = resolveSlotKey(disk);
+    // Prefill the "When" field with now-local so submitting without
+    // touching it produces a sensible timestamp.
+    var inp = document.getElementById("maintenanceLogTime");
+    if (inp) {
+      var d = new Date();
+      // datetime-local expects YYYY-MM-DDTHH:MM with no timezone suffix.
+      var pad = function(n){return (n<10?"0":"")+n};
+      inp.value = d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+"T"+pad(d.getHours())+":"+pad(d.getMinutes());
+    }
+    var form = document.getElementById("maintenanceLogForm");
+    if (form && !form._mlBound) {
+      form._mlBound = true;
+      form.addEventListener("submit", function(e){ e.preventDefault(); createMaintenanceEntry(); });
+    }
+    renderMaintenanceLog();
+  }
+
+  function renderMaintenanceLog() {
+    var listEl = document.getElementById("maintenanceLogList");
+    if (!listEl || !_currentSlotKey) return;
+    fetch("/api/v1/drives/" + encodeURIComponent(_currentSlotKey) + "/events")
+      .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function(events){
+        if (!events || events.length === 0) {
+          listEl.innerHTML = "<div class=\"maintenance-log-empty\">No entries yet. Add one below to start the log.</div>";
+          return;
+        }
+        var html = "";
+        for (var i = 0; i < events.length; i++) {
+          html += renderMaintenanceEntryRow(events[i]);
+        }
+        listEl.innerHTML = html;
+      })
+      .catch(function(err){
+        listEl.innerHTML = "<div class=\"maintenance-log-empty\">Failed to load entries: " + escHtml(err.message) + "</div>";
+      });
+  }
+
+  function renderMaintenanceEntryRow(ev) {
+    var when = formatEntryTime(ev.event_time);
+    var body;
+    if (ev.event_type === "replacement" && ev.is_auto) {
+      body = formatReplacementContent(ev.content);
+    } else {
+      body = escHtml(ev.content);
+    }
+    var out = "<div class=\"maintenance-log-entry\" data-id=\"" + ev.id + "\">";
+    out += "<div class=\"ml-time\">" + escHtml(when) + "</div>";
+    out += "<div class=\"ml-body\">" + body;
+    if (ev.is_auto) {
+      out += "<span class=\"ml-badge\">System</span>";
+    }
+    if (ev.updated_at) {
+      out += "<span class=\"ml-updated\">(edited)</span>";
+    }
+    out += "</div>";
+    if (!ev.is_auto) {
+      out += "<div class=\"ml-actions\">";
+      out += "<button type=\"button\" onclick=\"editMaintenanceEntry(" + ev.id + ")\">Edit</button>";
+      out += "<button type=\"button\" onclick=\"deleteMaintenanceEntry(" + ev.id + ")\">Delete</button>";
+      out += "</div>";
+    }
+    out += "</div>";
+    return out;
+  }
+
+  function formatEntryTime(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    // Mirror the rest of the page's timestamp style but include year
+    // (users will often scan across releases over multiple years).
+    var y = d.getFullYear();
+    var mo = d.getMonth() + 1;
+    var dy = d.getDate();
+    var hr = d.getHours();
+    var mn = d.getMinutes();
+    return y + "-" + (mo<10?"0":"") + mo + "-" + (dy<10?"0":"") + dy + " " +
+      (hr<10?"0":"") + hr + ":" + (mn<10?"0":"") + mn;
+  }
+
+  function formatReplacementContent(raw) {
+    if (!raw) return escHtml("Drive replaced");
+    try {
+      var p = JSON.parse(raw);
+      var oldSide = escHtml((p.old_serial || "?")) + (p.old_model ? " (" + escHtml(p.old_model) + ")" : "");
+      var newSide = escHtml((p.new_serial || "?")) + (p.new_model ? " (" + escHtml(p.new_model) + ")" : "");
+      return "Drive replaced: " + oldSide + " \u2192 " + newSide;
+    } catch (e) {
+      return escHtml(raw);
+    }
+  }
+
+  function createMaintenanceEntry() {
+    var contentEl = document.getElementById("maintenanceLogContent");
+    var timeEl = document.getElementById("maintenanceLogTime");
+    var errEl = document.getElementById("maintenanceLogError");
+    var btn = document.getElementById("maintenanceLogSave");
+    if (!contentEl) return;
+    var content = (contentEl.value || "").trim();
+    if (!content) {
+      if (errEl) { errEl.textContent = "Please enter what happened."; errEl.style.display = "block"; }
+      return;
+    }
+    var body = { content: content };
+    if (timeEl && timeEl.value) {
+      // datetime-local is local time; convert to RFC3339 in UTC.
+      var parsed = new Date(timeEl.value);
+      if (!isNaN(parsed.getTime())) {
+        body.event_time = parsed.toISOString();
+      }
+    }
+    if (btn) btn.disabled = true;
+    if (errEl) { errEl.style.display = "none"; errEl.textContent = ""; }
+    fetch("/api/v1/drives/" + encodeURIComponent(_currentSlotKey) + "/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function(r){
+      if (!r.ok) return r.text().then(function(t){ throw new Error("HTTP " + r.status + ": " + t); });
+      return r.json();
+    }).then(function(){
+      contentEl.value = "";
+      renderMaintenanceLog();
+    }).catch(function(err){
+      if (errEl) { errEl.textContent = err.message; errEl.style.display = "block"; }
+    }).finally(function(){
+      if (btn) btn.disabled = false;
+    });
+  }
+
+  function editMaintenanceEntry(id) {
+    // Minimal inline edit via prompt() to avoid a second modal layer.
+    // Users who want richer editing can delete and re-add.
+    var row = document.querySelector('.maintenance-log-entry[data-id="'+id+'"]');
+    var current = "";
+    if (row) {
+      var bodyEl = row.querySelector(".ml-body");
+      if (bodyEl) current = (bodyEl.textContent || "").replace(/\s*System\s*$/, "").replace(/\s*\(edited\)\s*$/, "").trim();
+    }
+    var next = window.prompt("Edit maintenance note:", current);
+    if (next === null) return; // cancelled
+    next = next.trim();
+    if (!next) return;
+    fetch("/api/v1/drives/" + encodeURIComponent(_currentSlotKey) + "/events/" + id, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: next })
+    }).then(function(r){
+      if (!r.ok) return r.text().then(function(t){ throw new Error("HTTP " + r.status + ": " + t); });
+      renderMaintenanceLog();
+    }).catch(function(err){
+      window.alert("Update failed: " + err.message);
+    });
+  }
+
+  function deleteMaintenanceEntry(id) {
+    if (!window.confirm("Delete this maintenance log entry?")) return;
+    fetch("/api/v1/drives/" + encodeURIComponent(_currentSlotKey) + "/events/" + id, {
+      method: "DELETE"
+    }).then(function(r){
+      if (!r.ok && r.status !== 204) return r.text().then(function(t){ throw new Error("HTTP " + r.status + ": " + t); });
+      renderMaintenanceLog();
+    }).catch(function(err){
+      window.alert("Delete failed: " + err.message);
+    });
+  }
+
+  // Expose edit/delete onto window so inline onclick handlers resolve.
+  window.editMaintenanceEntry = editMaintenanceEntry;
+  window.deleteMaintenanceEntry = deleteMaintenanceEntry;
 
   /* ── Render all charts ────────────────────────────────────────── */
   function renderCharts(disk, history) {

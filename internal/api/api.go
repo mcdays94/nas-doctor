@@ -436,6 +436,25 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		if diskH, err := s.store.GetAllDiskSparklines(60); err == nil {
 			sparks.Disks = diskH
 		}
+		// Pre-load per-drive maintenance events keyed by slot_key
+		// (issue #130). Resolves the same way the API and UI do:
+		// ArraySlot on Unraid, Serial otherwise. One query per drive
+		// is acceptable here — reports are generated on-demand and
+		// bounded by the drive count (typically < 30).
+		if len(snap.SMART) > 0 {
+			sparks.DriveEventsBySlot = make(map[string][]storage.DriveEvent, len(snap.SMART))
+			seen := make(map[string]bool, len(snap.SMART))
+			for _, sm := range snap.SMART {
+				slotKey := resolveReportSlotKey(sm)
+				if slotKey == "" || seen[slotKey] {
+					continue
+				}
+				seen[slotKey] = true
+				if events, err := s.store.ListDriveEvents(slotKey); err == nil && len(events) > 0 {
+					sparks.DriveEventsBySlot[slotKey] = events
+				}
+			}
+		}
 	}
 	html := GenerateReport(snap, sparks)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

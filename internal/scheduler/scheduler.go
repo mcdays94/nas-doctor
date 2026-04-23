@@ -370,6 +370,13 @@ func (s *Scheduler) RunOnce() {
 		return
 	}
 
+	// Drive replacement detection (issue #130). Runs on every scan but
+	// only actually does work on Unraid, where ArraySlot gives us a
+	// stable per-bay identifier that outlives individual drives.
+	if err := detectDriveReplacements(s.store, snap.System.Platform, snap.SMART, snap.Timestamp); err != nil {
+		s.logger.Warn("drive replacement detection failed", "error", err)
+	}
+
 	serviceResults, err := s.runServiceChecks(snap.Timestamp)
 	if err != nil {
 		s.logger.Warn("service checks partial failure", "error", err)

@@ -358,6 +358,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/capacity-forecast", s.handleCapacityForecast)
 	r.Get("/api/v1/disk-usage-history", s.handleDiskUsageHistory)
 
+	// Drive maintenance log endpoints (issue #130)
+	s.registerDriveEventRoutes(r)
+
 	// Pages
 	r.Get("/settings", s.handleSettingsPage)
 	r.Get("/disk/{serial}", s.handleDiskPage)
