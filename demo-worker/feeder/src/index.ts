@@ -396,6 +396,14 @@ export function transformSnapshot(d: Record<string, unknown>, p: PlatformProfile
     docker: { available: true, version: "24.0.7", containers },
     ups, zfs, gpu, parity, tunnels, proxmox, kubernetes,
     speed_test, backup,
+    // Keep the snapshot's service_checks in sync with what the feeder
+    // writes to /api/v1/service-checks. Without this the dashboard
+    // Service Checks widget (which reads snapshot.service_checks)
+    // diverges from the /service-checks page — notably, the v0.9.7
+    // traceroute entries added in #267 would only render on the page
+    // and stay hidden on the widget. Both surfaces now show identical
+    // data because both flow through the same buildServiceChecks().
+    service_checks: buildServiceChecks(),
     findings,
   };
 }
