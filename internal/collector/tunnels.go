@@ -12,6 +12,10 @@ import (
 // Package-level indirections so tests can stub out exec / filesystem access.
 // They default to the real implementations; tests swap them with t.Cleanup.
 var (
+	cloudflaredLookPath   = exec.LookPath
+	cloudflaredRunCommand = func(name string, args ...string) ([]byte, error) {
+		return exec.Command(name, args...).CombinedOutput()
+	}
 	tailscaleLookPath   = exec.LookPath
 	tailscaleRunCommand = func(name string, args ...string) ([]byte, error) {
 		return exec.Command(name, args...).CombinedOutput()
@@ -76,25 +80,35 @@ func collectTunnels(docker internal.DockerInfo) *internal.TunnelInfo {
 func collectCloudflared(docker internal.DockerInfo) *internal.CloudflaredInfo {
 	info := &internal.CloudflaredInfo{}
 
-	// 1. Check host binary
-	if path, err := exec.LookPath("cloudflared"); err == nil && path != "" {
+	// 1. Check host binary. Note: the default NAS Doctor Docker image does
+	// NOT bundle the `cloudflared` CLI (Dockerfile bundles `tailscale` but
+	// not cloudflared) — see issue #251. So this LookPath fails for almost
+	// every default install; the Docker-container detection below is the
+	// path that actually works. If we end up populating Installed=true via
+	// Docker fallback only, we add a Hint explaining why so API consumers
+	// understand the situation.
+	binaryFound := false
+	if path, err := cloudflaredLookPath("cloudflared"); err == nil && path != "" {
+		binaryFound = true
 		info.Installed = true
-		if out, err := exec.Command("cloudflared", "--version").CombinedOutput(); err == nil {
+		if out, err := cloudflaredRunCommand("cloudflared", "--version"); err == nil {
 			info.Version = parseCloudflaredVersion(string(out))
 		}
 		// Try to list tunnels via CLI (requires login)
-		if out, err := exec.Command("cloudflared", "tunnel", "list", "--output", "json").CombinedOutput(); err == nil {
+		if out, err := cloudflaredRunCommand("cloudflared", "tunnel", "list", "--output", "json"); err == nil {
 			info.Tunnels = parseCloudflaredTunnelList(out)
 		}
 	}
 
 	// 2. Check Docker containers (image contains "cloudflare" or "cloudflared")
+	dockerMatched := false
 	for _, c := range docker.Containers {
 		img := strings.ToLower(c.Image)
 		name := strings.ToLower(c.Name)
 		if !strings.Contains(img, "cloudflare") && !strings.Contains(name, "cloudflare") {
 			continue
 		}
+		dockerMatched = true
 		info.Installed = true
 		if info.Version == "" {
 			info.Version = "(docker: " + c.Image + ")"
@@ -123,6 +137,15 @@ func collectCloudflared(docker internal.DockerInfo) *internal.CloudflaredInfo {
 
 	if !info.Installed {
 		return nil
+	}
+	// Docker fallback fired but the host binary didn't — explain why so the
+	// "I thought my host cloudflared install was monitored" question never
+	// reaches the issue tracker. Quiet hint, only set when relevant.
+	if dockerMatched && !binaryFound {
+		info.Hint = "cloudflared CLI not bundled in the default NAS Doctor image; " +
+			"detection is operating from Docker containers only. To monitor a " +
+			"host-installed cloudflared, build a custom image that bundles the " +
+			"`cloudflared` binary (or bind-mount it into the container)."
 	}
 	return info
 }

@@ -125,6 +125,112 @@ func TestParseTailscaleStatusJSON(t *testing.T) {
 	}
 }
 
+// ── collectCloudflared (binary detection + Docker fallback hint) ──
+
+// withCloudflaredStubs swaps the package-level lookPath/run vars used by
+// collectCloudflared so tests stay hermetic (no real `cloudflared` invocation).
+func withCloudflaredStubs(
+	t *testing.T,
+	lookPath func(string) (string, error),
+	run func(name string, args ...string) ([]byte, error),
+) {
+	t.Helper()
+	origLook := cloudflaredLookPath
+	origRun := cloudflaredRunCommand
+	cloudflaredLookPath = lookPath
+	cloudflaredRunCommand = run
+	t.Cleanup(func() {
+		cloudflaredLookPath = origLook
+		cloudflaredRunCommand = origRun
+	})
+}
+
+// TestCollectCloudflared_EmitsHintWhenBinaryNotFound (issue #251):
+// the default Docker image does NOT bundle the cloudflared CLI, so
+// `exec.LookPath("cloudflared")` fails for almost every install. When
+// Docker-container detection still surfaces a tunnel (the common case),
+// CloudflaredInfo.Hint should explain the situation so API consumers
+// understand why host-binary detection didn't fire — instead of silent
+// fallback that looks like missing functionality.
+func TestCollectCloudflared_EmitsHintWhenBinaryNotFound(t *testing.T) {
+	withCloudflaredStubs(t,
+		func(string) (string, error) { return "", errors.New("not found") },
+		func(string, ...string) ([]byte, error) { return nil, errors.New("unused") },
+	)
+
+	docker := internal.DockerInfo{
+		Containers: []internal.ContainerInfo{
+			{ID: "abc", Name: "cloudflared", Image: "cloudflare/cloudflared:latest", State: "running"},
+		},
+	}
+	got := collectCloudflared(docker)
+	if got == nil {
+		t.Fatal("expected non-nil CloudflaredInfo from docker fallback")
+	}
+	if !got.Installed {
+		t.Error("expected Installed=true via docker fallback")
+	}
+	if got.Hint == "" {
+		t.Fatal("expected non-empty Hint explaining binary not bundled in default image")
+	}
+	if !containsCI(got.Hint, "cloudflared") {
+		t.Errorf("hint should mention cloudflared by name, got %q", got.Hint)
+	}
+	if !containsCI(got.Hint, "bundled") && !containsCI(got.Hint, "custom image") {
+		t.Errorf("hint should explain the binary is not bundled / requires a custom image, got %q", got.Hint)
+	}
+}
+
+// TestCollectCloudflared_NoHintWhenBinaryFound: if the host binary IS
+// available (custom image, or someone bind-mounted it), don't add the hint
+// — it would just be noise.
+func TestCollectCloudflared_NoHintWhenBinaryFound(t *testing.T) {
+	withCloudflaredStubs(t,
+		func(bin string) (string, error) {
+			if bin == "cloudflared" {
+				return "/usr/local/bin/cloudflared", nil
+			}
+			return "", errors.New("not found")
+		},
+		func(name string, args ...string) ([]byte, error) {
+			if len(args) >= 1 && args[0] == "--version" {
+				return []byte("cloudflared version 2024.6.1 (built 2024-06-15-...)"), nil
+			}
+			// `tunnel list` requires login; return error so .Tunnels stays empty.
+			return nil, errors.New("not logged in")
+		},
+	)
+
+	got := collectCloudflared(internal.DockerInfo{})
+	if got == nil {
+		t.Fatal("expected non-nil CloudflaredInfo when host binary exists")
+	}
+	if !got.Installed {
+		t.Error("expected Installed=true")
+	}
+	if got.Hint != "" {
+		t.Errorf("expected empty Hint when binary is found, got %q", got.Hint)
+	}
+	if got.Version != "2024.6.1" {
+		t.Errorf("expected parsed version 2024.6.1, got %q", got.Version)
+	}
+}
+
+// TestCollectCloudflared_ReturnsNilWhenNothingDetected: no host binary, no
+// matching Docker container — collectCloudflared must return nil so the
+// dashboard hides the section entirely (rather than rendering a hint with
+// no tunnels).
+func TestCollectCloudflared_ReturnsNilWhenNothingDetected(t *testing.T) {
+	withCloudflaredStubs(t,
+		func(string) (string, error) { return "", errors.New("not found") },
+		func(string, ...string) ([]byte, error) { return nil, errors.New("unused") },
+	)
+	got := collectCloudflared(internal.DockerInfo{})
+	if got != nil {
+		t.Fatalf("expected nil, got %+v", got)
+	}
+}
+
 // ── collectTailscale orchestration (binary + socket + docker) ──
 
 // withTailscaleStubs swaps the package-level runner vars for the duration of
