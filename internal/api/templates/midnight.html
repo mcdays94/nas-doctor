@@ -72,6 +72,15 @@ a:hover{color:var(--hover)}
 .pill-ping  { background:rgba(139, 92,246,0.14); color:#a78bfa }
 .pill-speed { background:rgba( 34,211,238,0.14); color:#22d3ee }
 .pill-trace { background:rgba( 45,212,191,0.14); color:#2dd4bf }
+/* Ephemeral /data warning banner (#227). Rendered by util.ephemeralDataBanner
+   when /api/v1/status reports data_ephemeral=true. MUST be inlined here
+   because dashboard theme templates do not link /css/shared.css — see
+   AGENTS.md and TestThemeTemplates_StyleEphemeralBanner. */
+.ephemeral-data-banner{display:block;padding:14px 18px;margin:16px 0 8px;background:var(--red-bg);border:1px solid rgba(220,38,38,0.3);border-left:4px solid var(--red);border-radius:var(--radius);color:var(--text-primary);font-size:13px;line-height:1.6}
+.ephemeral-data-banner strong{color:var(--red);display:inline-block;margin-right:4px}
+.ephemeral-data-banner code{background:rgba(255,255,255,0.05);padding:1px 6px;border-radius:4px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:var(--text-primary)}
+.ephemeral-data-banner a{color:var(--accent);text-decoration:underline;font-weight:600;margin-left:4px}
+.ephemeral-data-banner a:hover{color:var(--hover)}
 .top-bar-stats{display:flex;align-items:center;gap:calc(var(--sp)*3)}
 .stat-item{display:flex;align-items:baseline;gap:6px;font-size:13px;white-space:nowrap}
 .stat-item-label{color:var(--text-quaternary);font-weight:500;font-size:12px}
@@ -312,6 +321,12 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '<div class="stat-item"><span class="stat-item-label">Up</span><span class="stat-item-value" style="color:var(--text-primary)">' + esc(uptime) + '</span></div>';
     }
     h += '</div></div>';
+
+    // Ephemeral /data banner (#227) — renders only when the server
+    // reports data_ephemeral=true on /api/v1/status. Placed above the
+    // OS version banner so it's the first thing users see when /data
+    // is not bind-mounted and the DB is about to be wiped.
+    h += NasDashboard.util.ephemeralDataBanner(st);
 
     // OS version banner
     var upd = sn ? sn.update : null;
