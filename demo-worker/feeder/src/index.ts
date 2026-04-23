@@ -608,9 +608,24 @@ function buildServiceChecks(): unknown[] {
   const now = new Date().toISOString();
   const checks: unknown[] = [];
 
-  // Helper to create a check entry
-  const sc = (key: string, name: string, type: string, target: string, up: boolean, baseLat: number, severity: string, failures = 0) => {
-    checks.push({
+  // Helper to create a check entry. Accepts an optional `details` object
+  // that maps to the per-type diagnostic blob the Go app persists in
+  // service_checks_history.details (v0.9.4 #182) and returns on the Test
+  // button flow (v0.9.4 #154/#167). The /service-checks log row expander
+  // and the dashboard Test button both read from this field, so shaping
+  // it correctly here is what makes the demo feel like a real instance.
+  const sc = (
+    key: string,
+    name: string,
+    type: string,
+    target: string,
+    up: boolean,
+    baseLat: number,
+    severity: string,
+    failures = 0,
+    details?: Record<string, unknown>,
+  ) => {
+    const entry: Record<string, unknown> = {
       key, name, type, target,
       status: up ? "up" : "down",
       response_ms: up ? Math.round(clamp(jitter(baseLat, 30, hashStr(key)), 1, baseLat * 3)) : 0,
@@ -618,53 +633,91 @@ function buildServiceChecks(): unknown[] {
       failure_threshold: 5,
       failure_severity: severity,
       checked_at: up ? now : new Date(Date.now() - 300000).toISOString(),
-    });
+    };
+    if (details) entry.details = details;
+    checks.push(entry);
   };
 
-  // ── Ping checks ──
+  // ── Curated one-of-each demo lineup (issue tracking: demo clutter). ──
+  //
+  // Eight service-check types exist in production: ping, http, tcp, dns,
+  // smb, nfs, traceroute, speed. We showcase one of each so visitors can
+  // see every check type rendered with its correct pill and log-row
+  // expander without scrolling past 20+ entries. One HTTP check is DOWN
+  // (Pi-hole Admin) to drive the alerting/findings pitch; the rest are
+  // UP with a realistic range of latencies + severities.
+
+  // Ping — upstream reachability.
   sc("sc-gateway", "Gateway", "ping", "10.0.1.1", true, 1, "critical");
-  sc("sc-dns-cf", "Cloudflare DNS", "ping", "1.1.1.1", true, 12, "critical");
-  sc("sc-dns-google", "Google DNS", "ping", "8.8.8.8", true, 18, "info");
-  sc("sc-switch", "Core Switch", "ping", "10.0.1.2", true, 1, "warning");
 
-  // ── HTTP checks ──
-  sc("sc-nas-doctor", "NAS Doctor", "http", "http://localhost:8060/api/v1/health", true, 8, "critical");
-  sc("sc-plex", "Plex Media Server", "http", "http://localhost:32400/web", true, 42, "warning");
-  sc("sc-nextcloud", "Nextcloud", "http", "https://cloud.example.com/status.php", true, 185, "warning");
-  sc("sc-grafana", "Grafana", "http", "http://localhost:3000/api/health", true, 18, "warning");
-  sc("sc-router", "Router Admin", "http", "http://10.0.1.1", true, 5, "warning");
-  sc("sc-home-assistant", "Home Assistant", "http", "http://10.0.1.55:8123", true, 35, "warning");
-  sc("sc-pihole", "Pi-hole Admin", "http", "http://10.0.1.53/admin", false, 0, "critical", 12);
+  // HTTP — one DOWN for the "alerting works" pitch.
+  sc("sc-pihole", "Pi-hole Admin", "http", "http://10.0.1.53/admin", false, 0, "critical", 12, {
+    status_code: 0,
+    error: "connection refused after 12 consecutive failures",
+  });
 
-  // ── TCP checks ──
-  sc("sc-ssh", "SSH Server", "tcp", "10.0.1.50:22", true, 3, "critical");
-  sc("sc-mariadb", "MariaDB", "tcp", "10.0.1.50:3306", true, 2, "warning");
-  sc("sc-redis", "Redis Cache", "tcp", "10.0.1.50:6379", true, 1, "info");
-  sc("sc-mqtt", "MQTT Broker", "tcp", "10.0.1.55:1883", true, 2, "warning");
+  // TCP — port-level check.
+  sc("sc-ssh", "SSH Server", "tcp", "10.0.1.50:22", true, 3, "critical", 0, {
+    port: 22,
+    banner: "SSH-2.0-OpenSSH_9.6p1",
+  });
 
-  // ── DNS checks ──
-  sc("sc-dns-local", "Local DNS (Pi-hole)", "dns", "10.0.1.53", false, 0, "critical", 8);
-  sc("sc-dns-resolve", "Public DNS Resolution", "dns", "1.1.1.1", true, 15, "critical");
+  // DNS — resolver health with a record-type probe.
+  sc("sc-dns-cf", "Cloudflare DNS", "dns", "1.1.1.1", true, 15, "critical", 0, {
+    record_type: "A",
+    query: "example.com",
+    resolved_ip: "93.184.216.34",
+    ttl_secs: 86400,
+  });
 
-  // ── Traceroute checks (v0.9.7 #189) ──
-  // Per-hop reachability + loss monitoring for upstream paths. Showcases the
-  // traceroute service-check type + the teal pill-trace pill styling. Real
-  // targets so the demo reflects what a NAS owner might actually monitor:
-  // one short hop to Google DNS (ISP path health) and one longer cloud-edge
-  // path (multi-hop CDN/cloud reachability).
-  sc("sc-trace-google", "Upstream to Google DNS", "traceroute", "8.8.8.8", true, 12, "warning");
-  sc("sc-trace-aws-eu", "AWS eu-west-1 path", "traceroute", "52.28.0.1", true, 45, "info");
+  // SMB — storage share check.
+  sc("sc-smb-media", "SMB: Media Share", "smb", "//10.0.1.50/media", true, 8, "warning", 0, {
+    share_accessible: true,
+    read_test_ok: true,
+  });
 
-  // ── SMB / NFS checks ──
-  sc("sc-smb-media", "SMB: Media Share", "smb", "//10.0.1.50/media", true, 8, "warning");
-  sc("sc-smb-backup", "SMB: Backup Share", "smb", "//10.0.1.50/backups", true, 12, "warning");
-  sc("sc-nfs-docker", "NFS: Docker Volumes", "nfs", "10.0.1.50:/mnt/cache/appdata", true, 5, "critical");
+  // NFS — storage mount check.
+  sc("sc-nfs-docker", "NFS: Docker Volumes", "nfs", "10.0.1.50:/mnt/cache/appdata", true, 5, "critical", 0, {
+    export_reachable: true,
+    stat_ok: true,
+  });
 
-  // ── Fleet-auto-created checks ──
-  sc("fleet-http-192.168.1.50:8060", "Fleet: Backup NAS", "http", "http://192.168.1.50:8060/api/v1/health", true, 22, "critical");
-  sc("fleet-http-192.168.1.51:8060", "Fleet: Media Server", "http", "http://192.168.1.51:8060/api/v1/health", true, 18, "critical");
-  sc("fleet-http-10.0.0.10:8060", "Fleet: Proxmox Node 1", "http", "http://10.0.0.10:8060/api/v1/health", true, 28, "critical");
-  sc("fleet-http-192.168.50.10:8060", "Fleet: Remote Backup", "http", "http://192.168.50.10:8060/api/v1/health", false, 0, "critical", 576);
+  // Traceroute (v0.9.7 #189) — per-hop path monitoring. This is the
+  // showpiece of the demo's service-check lineup because the log-row
+  // expander renders per-hop {host, avg, loss} rows from details.hops
+  // (see internal/api/templates/settings.html renderServiceCheckDetails
+  // + internal/scheduler/checks.go). Shape mirrors collector.MTRHop /
+  // collector.MTRResult exactly — same JSON tag literals including the
+  // "Loss%" key with the literal percent sign (mtr emits it that way
+  // and Go unmarshals by exact tag match).
+  sc("sc-trace-google", "Upstream to Google DNS", "traceroute", "8.8.8.8", true, 12, "warning", 0, {
+    target: "8.8.8.8",
+    hops_count: 6,
+    final_rtt_ms: 12.3,
+    end_to_end_loss_pct: 0,
+    hops: [
+      { count: 1, host: "10.0.1.1",                    "Loss%": 0,   Snt: 10, Last: 0.8,  Avg: 1.1,  Best: 0.6,  Wrst: 2.1,  StDev: 0.4 },
+      { count: 2, host: "isp-gw.example.net",          "Loss%": 0,   Snt: 10, Last: 3.2,  Avg: 3.5,  Best: 2.9,  Wrst: 4.8,  StDev: 0.6 },
+      { count: 3, host: "???",                          "Loss%": 100, Snt: 10, Last: 0,    Avg: 0,    Best: 0,    Wrst: 0,    StDev: 0   },
+      { count: 4, host: "core1-peer.cloudflare.net",   "Loss%": 0,   Snt: 10, Last: 8.4,  Avg: 8.9,  Best: 7.8,  Wrst: 10.1, StDev: 0.7 },
+      { count: 5, host: "dns.google",                   "Loss%": 0,   Snt: 10, Last: 12.3, Avg: 12.1, Best: 11.7, Wrst: 12.8, StDev: 0.4 },
+      { count: 6, host: "dns.google",                   "Loss%": 0,   Snt: 10, Last: 12.1, Avg: 12.0, Best: 11.6, Wrst: 12.7, StDev: 0.4 },
+    ],
+  });
+
+  // Speed (v0.8.0/#142 plus v0.9.6 #170 state model) — up if last
+  // speedtest_history row is recent and throughput meets the contracted
+  // floors. Demo picks a healthy profile: ~900 Mbps fibre meeting a
+  // 500/40 Mbps floor with plenty of headroom.
+  sc("sc-internet-speed", "Internet Speed", "speed", "speedtest", true, 12, "warning", 0, {
+    download_mbps: 920.5,
+    upload_mbps: 88.3,
+    latency_ms: 7.8,
+    jitter_ms: 1.6,
+    contracted_download_mbps: 500,
+    contracted_upload_mbps: 40,
+    margin_pct: 10,
+  });
 
   return checks;
 }
