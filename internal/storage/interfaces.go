@@ -119,6 +119,24 @@ type LifecycleStore interface {
 	DataDir() string
 }
 
+// DriveEventStore handles per-drive maintenance log events (issue #130).
+// Events come in two flavours:
+//   - manual "note" (user-entered; mutable)
+//   - auto   "replacement" (system-detected on serial change; immutable)
+//
+// The SlotKey is the Unraid ArraySlot when available, else the drive serial.
+type DriveEventStore interface {
+	SaveDriveEvent(ev DriveEvent) (int64, error)
+	ListDriveEvents(slotKey string) ([]DriveEvent, error)
+	UpdateDriveEvent(slotKey string, id int64, eventTime *time.Time, content *string) error
+	DeleteDriveEvent(slotKey string, id int64) error
+	GetDriveEvent(id int64) (*DriveEvent, error)
+
+	// Slot state tracking for replacement detection (issue #130).
+	GetDriveSlotState(slotKey string) (*DriveSlotState, error)
+	SaveDriveSlotState(state DriveSlotState) error
+}
+
 // Store composes all domain-specific interfaces into a single aggregate.
 // Use the narrower interfaces when possible; use Store when a consumer
 // genuinely needs access to multiple domains.
@@ -131,6 +149,7 @@ type Store interface {
 	NotificationStore
 	FindingStore
 	LifecycleStore
+	DriveEventStore
 }
 
 // Compile-time checks: *DB must satisfy Store.

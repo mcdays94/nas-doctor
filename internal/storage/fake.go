@@ -66,6 +66,11 @@ type FakeStore struct {
 	// LastSpeedTestAttempt state (single-row, issue #210). nil until
 	// the scheduler writes the first attempt outcome.
 	speedTestAttempt *LastSpeedTestAttempt
+
+	// Drive maintenance events (issue #130).
+	driveEvents     []DriveEvent
+	driveEventSeq   int64
+	driveSlotStates map[string]DriveSlotState
 }
 
 // diskUsageRow is the minimal fake representation of a disk_usage_history row.
@@ -851,6 +856,139 @@ func (f *FakeStore) Close() error {
 
 func (f *FakeStore) DataDir() string {
 	return "/tmp/fake-store"
+}
+
+// ── DriveEventStore ──
+
+// SaveDriveEvent stores a new drive event and returns its assigned id.
+func (f *FakeStore) SaveDriveEvent(ev DriveEvent) (int64, error) {
+	if ev.SlotKey == "" {
+		return 0, fmt.Errorf("slot_key is required")
+	}
+	if ev.EventType == "" {
+		return 0, fmt.Errorf("event_type is required")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.driveEventSeq++
+	ev.ID = f.driveEventSeq
+	if ev.EventTime.IsZero() {
+		ev.EventTime = time.Now().UTC()
+	}
+	ev.CreatedAt = time.Now().UTC()
+	ev.UpdatedAt = nil
+	f.driveEvents = append(f.driveEvents, ev)
+	return ev.ID, nil
+}
+
+// ListDriveEvents returns events for slotKey, newest first.
+func (f *FakeStore) ListDriveEvents(slotKey string) ([]DriveEvent, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var out []DriveEvent
+	for _, ev := range f.driveEvents {
+		if ev.SlotKey == slotKey {
+			out = append(out, ev)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].EventTime.Equal(out[j].EventTime) {
+			return out[i].ID > out[j].ID
+		}
+		return out[i].EventTime.After(out[j].EventTime)
+	})
+	return out, nil
+}
+
+// UpdateDriveEvent mutates a manual event's time and/or content.
+func (f *FakeStore) UpdateDriveEvent(slotKey string, id int64, eventTime *time.Time, content *string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.driveEvents {
+		if f.driveEvents[i].ID != id {
+			continue
+		}
+		if f.driveEvents[i].SlotKey != slotKey {
+			return &DriveEventNotFoundError{SlotKey: slotKey, ID: id}
+		}
+		if f.driveEvents[i].IsAuto {
+			return &DriveEventImmutableError{ID: id}
+		}
+		if eventTime != nil {
+			f.driveEvents[i].EventTime = *eventTime
+		}
+		if content != nil {
+			f.driveEvents[i].Content = *content
+		}
+		if eventTime != nil || content != nil {
+			now := time.Now().UTC()
+			f.driveEvents[i].UpdatedAt = &now
+		}
+		return nil
+	}
+	return &DriveEventNotFoundError{SlotKey: slotKey, ID: id}
+}
+
+// DeleteDriveEvent removes a manual event.
+func (f *FakeStore) DeleteDriveEvent(slotKey string, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.driveEvents {
+		if f.driveEvents[i].ID != id {
+			continue
+		}
+		if f.driveEvents[i].SlotKey != slotKey {
+			return &DriveEventNotFoundError{SlotKey: slotKey, ID: id}
+		}
+		if f.driveEvents[i].IsAuto {
+			return &DriveEventImmutableError{ID: id}
+		}
+		f.driveEvents = append(f.driveEvents[:i], f.driveEvents[i+1:]...)
+		return nil
+	}
+	return &DriveEventNotFoundError{SlotKey: slotKey, ID: id}
+}
+
+// GetDriveEvent returns a single event or nil if not found.
+func (f *FakeStore) GetDriveEvent(id int64) (*DriveEvent, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	for i := range f.driveEvents {
+		if f.driveEvents[i].ID == id {
+			cp := f.driveEvents[i]
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+// GetDriveSlotState returns the last-observed state for slotKey, or
+// (nil, nil) if no state has been recorded.
+func (f *FakeStore) GetDriveSlotState(slotKey string) (*DriveSlotState, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if state, ok := f.driveSlotStates[slotKey]; ok {
+		cp := state
+		return &cp, nil
+	}
+	return nil, nil
+}
+
+// SaveDriveSlotState UPSERTs the last-observed state for a slot.
+func (f *FakeStore) SaveDriveSlotState(state DriveSlotState) error {
+	if state.SlotKey == "" {
+		return fmt.Errorf("slot_key is required")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.driveSlotStates == nil {
+		f.driveSlotStates = make(map[string]DriveSlotState)
+	}
+	if state.ObservedAt.IsZero() {
+		state.ObservedAt = time.Now().UTC()
+	}
+	f.driveSlotStates[state.SlotKey] = state
+	return nil
 }
 
 // ── Test helpers (not part of Store interface) ──

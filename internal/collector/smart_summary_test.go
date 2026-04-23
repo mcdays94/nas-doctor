@@ -10,10 +10,12 @@ import (
 )
 
 // TestCollectSMART_EmitsSummaryLogFormat is a grep-based cross-reference
-// that pins the summary log line's field names. The v0.9.5 UAT feedback
-// (issue #203) asked for a single per-cycle line with total/active/standby/
-// failed/duration, and operators' log pipelines depend on that format not
-// drifting. If someone renames a field, this test fails loudly.
+// that pins the summary log line's field names. v0.9.5 (#203) introduced
+// total/active/standby/failed/duration; v0.9.7 (#206) added `unsupported`
+// to separate SMART-incapable devices (USB bridges, boot flashes) from
+// real collection failures. Operators' log pipelines depend on this
+// format not drifting — if someone renames or drops a field, this test
+// fails loudly.
 func TestCollectSMART_EmitsSummaryLogFormat(t *testing.T) {
 	data, err := os.ReadFile("smart.go")
 	if err != nil {
@@ -24,7 +26,7 @@ func TestCollectSMART_EmitsSummaryLogFormat(t *testing.T) {
 	if !strings.Contains(src, `"SMART collection complete"`) {
 		t.Errorf("smart.go missing summary log message %q — if you renamed it, update the log pipeline docs too", "SMART collection complete")
 	}
-	for _, field := range []string{`"total"`, `"active"`, `"standby"`, `"failed"`, `"duration"`} {
+	for _, field := range []string{`"total"`, `"active"`, `"standby"`, `"unsupported"`, `"failed"`, `"duration"`} {
 		if !strings.Contains(src, field) {
 			t.Errorf("smart.go summary log missing required field %s", field)
 		}

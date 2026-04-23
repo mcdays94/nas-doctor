@@ -238,12 +238,18 @@ body.theme-clean .badge-generic { background:rgba(0,0,0,0.06) }
   text-transform:uppercase; letter-spacing:0.5px;
   padding:2px 8px; border-radius:999px;
 }
-.pill-http { background:rgba(59,130,246,0.14); color:#60a5fa }
-.pill-tcp  { background:rgba(16,185,129,0.14); color:#34d399 }
-.pill-dns  { background:rgba(236,72,153,0.14); color:#f472b6 }
-.pill-smb,.pill-nfs { background:rgba(245,158,11,0.14); color:#fbbf24 }
-.pill-ping { background:rgba(139,92,246,0.14); color:#a78bfa }
-.pill-speed { background:rgba(14,165,233,0.14); color:#38bdf8 }
+/* Each service-check type gets a perceptually-distinct hue so users
+   can tell them apart at a glance in the list. Red is reserved for
+   .pill-critical. Palette locked by TestStyles_ServiceCheckPillPalette
+   — update the test AND this rule together. */
+.pill-http  { background:rgba( 59,130,246,0.14); color:#60a5fa } /* blue-400    */
+.pill-tcp   { background:rgba( 16,185,129,0.14); color:#34d399 } /* emerald-400 */
+.pill-dns   { background:rgba(236, 72,153,0.14); color:#f472b6 } /* pink-400    */
+.pill-smb   { background:rgba(245,158, 11,0.14); color:#fbbf24 } /* amber-400   */
+.pill-nfs   { background:rgba(251,146, 60,0.14); color:#fb923c } /* orange-400  */
+.pill-ping  { background:rgba(139, 92,246,0.14); color:#a78bfa } /* violet-400  */
+.pill-speed { background:rgba( 34,211,238,0.14); color:#22d3ee } /* cyan-400    */
+.pill-trace { background:rgba( 45,212,191,0.14); color:#2dd4bf } /* teal-400    */
 
 /* ── Status Dots ────────────────────────────────────────────── */
 .status-dot.degraded { background:#f59e0b }

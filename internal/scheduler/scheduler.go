@@ -162,6 +162,10 @@ func New(
 	// (the runners already compute these values; we just stop
 	// discarding them). See issue #182.
 	s.checker.SetCollectDetails(true)
+	// Wire the default mtr-based traceroute runner so scheduled
+	// type=traceroute checks produce real results. cycles comes from
+	// runTraceCheck's hardcoded scheduledCycles (5). See issue #189.
+	s.checker.SetTraceRunner(collector.RunMTR)
 	s.retentionMgr = NewRetentionManager(store, store, logger)
 	return s
 }
@@ -368,6 +372,13 @@ func (s *Scheduler) RunOnce() {
 	if err != nil {
 		s.logger.Error("collection failed", "error", err)
 		return
+	}
+
+	// Drive replacement detection (issue #130). Runs on every scan but
+	// only actually does work on Unraid, where ArraySlot gives us a
+	// stable per-bay identifier that outlives individual drives.
+	if err := detectDriveReplacements(s.store, snap.System.Platform, snap.SMART, snap.Timestamp); err != nil {
+		s.logger.Warn("drive replacement detection failed", "error", err)
 	}
 
 	serviceResults, err := s.runServiceChecks(snap.Timestamp)

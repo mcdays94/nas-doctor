@@ -120,7 +120,10 @@ func TestSettingsHTML_SpeedCheckInterval_DefaultsToDaily(t *testing.T) {
 	if loc == nil {
 		t.Fatal("onServiceTypeChange() function not found")
 	}
-	end := loc[1] + 2000
+	// Window widened from 2000 → 2500 to accommodate additional
+	// type-specific branches (traceroute, #189). The function body is
+	// still comfortably <3000 chars.
+	end := loc[1] + 2500
 	if end > len(html) {
 		end = len(html)
 	}
