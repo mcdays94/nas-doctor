@@ -32,8 +32,7 @@ func (s *Server) handleReplacementPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReplacementPlannerPage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(replacementPlannerHTML))
+	s.servePage(w, replacementPlannerHTML)
 }
 
 func (s *Server) handleCapacityForecast(w http.ResponseWriter, r *http.Request) {

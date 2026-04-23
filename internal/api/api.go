@@ -498,6 +498,17 @@ func (s *Server) serveDashboard(w http.ResponseWriter, theme string) {
 	w.Write([]byte(html))
 }
 
+// servePage writes a template body with __VERSION__ substituted to the
+// current server version. Page templates use this placeholder to
+// cache-bust /css/shared.css (and /js/*.js) on every release, so the
+// URL in the rendered HTML changes whenever the binary version changes.
+// See issue #229 for the v0.9.7-rc3 UAT incident that motivated this.
+func (s *Server) servePage(w http.ResponseWriter, body string) {
+	body = strings.Replace(body, "__VERSION__", s.version, -1)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(body))
+}
+
 // ---------- Helpers ----------
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
