@@ -67,6 +67,17 @@ jobs:
           curl -sf http://localhost:8060/js/dashboard.js -o demo-worker/captured/dashboard.js
           curl -sf http://localhost:8060/css/shared.css -o demo-worker/captured/shared.css
 
+          # Capture the NAS Doctor logo + icon variants (see #262). Before
+          # these lines the demo worker hard-returned a 1x1 transparent
+          # PNG for any icon path, which rendered as an invisible gap
+          # next to the site title. Worker now reads these files via
+          # env.ASSETS.fetch, so they must exist at these paths.
+          curl -sf http://localhost:8060/icon.png -o demo-worker/captured/icon.png
+          mkdir -p demo-worker/captured/icons
+          for n in icon1 icon2 icon3; do
+            curl -sf "http://localhost:8060/icons/$n.png" -o "demo-worker/captured/icons/$n.png" || echo "warn: icon $n.png not present on this build"
+          done
+
           # Capture ALL API responses (these seed the KV namespace)
           curl -sf http://localhost:8060/api/v1/status -o demo-worker/captured/api/status.json
           curl -sf http://localhost:8060/api/v1/snapshot/latest -o demo-worker/captured/api/snapshot.json
@@ -86,6 +97,10 @@ jobs:
           curl -sf http://localhost:8060/api/v1/replacement-plan -o demo-worker/captured/api/replacement_plan.json
           curl -sf http://localhost:8060/api/v1/capacity-forecast -o demo-worker/captured/api/capacity_forecast.json
           curl -sf http://localhost:8060/api/v1/smart/trends -o demo-worker/captured/api/smart_trends.json
+          # Speed Test history — drives the mini-chart in the Speed Test
+          # widget. The existing seed loop picks this up automatically
+          # via demo-worker/captured/api/*.json. See #262.
+          curl -sf 'http://localhost:8060/api/v1/history/speedtest?hours=24' -o demo-worker/captured/api/speedtest_history.json || echo "warn: speedtest history endpoint not available on this build"
 
           # Capture version before killing the server
           VERSION=$(curl -sf http://localhost:8060/api/v1/health | python3 -c "import sys,json; print(json.load(sys.stdin).get('version','unknown'))" 2>/dev/null || echo "unknown")
