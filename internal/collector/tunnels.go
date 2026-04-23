@@ -27,6 +27,36 @@ var (
 	}()
 )
 
+// tailscaleCustomContainerPatterns parses the opt-in env var
+// NAS_DOCTOR_TAILSCALE_CONTAINER_NAMES into a lowercase substring
+// list used to widen container-name detection. Semantics:
+//
+//   - comma-separated
+//   - case-insensitive (stored lowercase for fast matching)
+//   - whitespace trimmed around each token
+//   - empty tokens dropped
+//   - returns nil (not an empty slice) when the env var is unset or
+//     contains only separators/whitespace
+//
+// Parsed on every call because scheduler-driven collection is already
+// cheap and this avoids a package-init-time env read that would miss
+// late-set env vars in tests.
+func tailscaleCustomContainerPatterns() []string {
+	raw := os.Getenv("NAS_DOCTOR_TAILSCALE_CONTAINER_NAMES")
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		tok := strings.ToLower(strings.TrimSpace(part))
+		if tok == "" {
+			continue
+		}
+		out = append(out, tok)
+	}
+	return out
+}
+
 // collectTunnels detects cloudflared and tailscale tunnel services.
 // It checks both host-installed binaries and Docker containers.
 func collectTunnels(docker internal.DockerInfo) *internal.TunnelInfo {
@@ -200,11 +230,27 @@ func collectTailscale(docker internal.DockerInfo) *internal.TailscaleInfo {
 		}
 	}
 
-	// 2. Check Docker containers (image contains "tailscale")
+	// 2. Check Docker containers. Default heuristic: image or container
+	// name contains "tailscale". Users running a sidecar with a
+	// non-obvious name (ts-sidecar, mullvad-tailscale-alt, vpn) can
+	// opt-in additional substring patterns via the env var
+	// NAS_DOCTOR_TAILSCALE_CONTAINER_NAMES (comma-separated,
+	// case-insensitive, matches BOTH name and image). See
+	// docs/tailscale-install-methods.md.
+	customPatterns := tailscaleCustomContainerPatterns()
 	for _, c := range docker.Containers {
 		img := strings.ToLower(c.Image)
 		name := strings.ToLower(c.Name)
-		if !strings.Contains(img, "tailscale") && !strings.Contains(name, "tailscale") {
+		matched := strings.Contains(img, "tailscale") || strings.Contains(name, "tailscale")
+		if !matched {
+			for _, pat := range customPatterns {
+				if strings.Contains(img, pat) || strings.Contains(name, pat) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
 			continue
 		}
 		info.Installed = true
