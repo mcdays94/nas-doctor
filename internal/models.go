@@ -160,6 +160,7 @@ type CloudflaredInfo struct {
 	Installed bool                `json:"installed"`
 	Version   string              `json:"version,omitempty"`
 	Tunnels   []CloudflaredTunnel `json:"tunnels,omitempty"`
+	Hint      string              `json:"hint,omitempty"` // Operator hint when detection is partial (e.g. cloudflared CLI not bundled in default image)
 }
 
 type CloudflaredTunnel struct {
