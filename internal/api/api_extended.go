@@ -814,6 +814,18 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
 	}
+	// SMART scan policy validation (#237). The UI clamps client-side
+	// but a direct API caller could still submit out-of-range values;
+	// reject rather than silently clamping so the caller knows their
+	// input was ignored. 0 is valid (safety net disabled, PRD #236
+	// user story 5); 1-30 inclusive is the active range.
+	if settings.SMART.MaxAgeDays < 0 || settings.SMART.MaxAgeDays > SMARTMaxAgeDaysMax {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("smart.max_age_days must be between 0 and %d (0 disables the safety net)", SMARTMaxAgeDaysMax),
+		})
+		return
+	}
+
 	// Retention defaults and bounds
 	if settings.Retention.SnapshotDays < 7 {
 		settings.Retention.SnapshotDays = 90
