@@ -63,7 +63,6 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <a href="#card-replacement-cost" class="btn btn-secondary btn-sm" style="text-decoration:none">Replacement Cost</a>
     <a href="#card-speedtest" class="btn btn-secondary btn-sm" style="text-decoration:none">Speed Test</a>
     <a href="#card-backup" class="btn btn-secondary btn-sm" style="text-decoration:none">Backup</a>
-    <a href="#card-advanced-scans" class="btn btn-secondary btn-sm" style="text-decoration:none">Advanced Scans</a>
     <a href="#card-advanced" class="btn btn-secondary btn-sm" style="text-decoration:none">Advanced</a>
   </div>
 
@@ -888,15 +887,25 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     </div>
   </div>
 
-  <!-- 9. Advanced Scan Settings (#237) -->
-  <div class="card" id="card-advanced-scans">
-    <div class="card-title">Advanced Scan Settings</div>
-    <div class="card-desc">Fine-grained control over how NAS Doctor schedules SMART reads and related scans. Defaults are safe — change only if you understand the trade-offs.</div>
-    <details style="margin-top:8px" open>
-      <summary style="cursor:pointer;padding:6px 0;font-weight:600;font-size:13px;color:var(--text)">Show scan-policy options</summary>
+  <!-- 9. Advanced -->
+  <!--
+    History: #237 split scan-policy knobs into a dedicated "Advanced Scan
+    Settings" card. v0.9.8-rc1 UAT (issue #256) flagged the two-card layout
+    as noise — merged back into this single Advanced card with a descriptor
+    cue so users can see what's inside before expanding.
+  -->
+  <div class="card" id="card-advanced">
+    <div class="card-title">Advanced</div>
+    <div class="card-desc">Expert-only knobs for SMART scan controls (wake drives, max-age safety net), Docker container visibility, and more. Defaults are safe — only change these if you understand the trade-offs.</div>
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;padding:6px 0;font-weight:600;font-size:13px;color:var(--text)">Show advanced options</summary>
       <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
 
-        <!-- Wake drives for SMART check (moved from legacy Advanced card, #198) -->
+        <!-- SMART scan controls (wake-drives + max-age) — merged from the
+             retired "Advanced Scan Settings" card per #256. Wake-drives
+             came from #198; max-age from #237 (schema) + #238 (wiring). -->
+        <div style="font-weight:600;font-size:13px;color:var(--text);margin-bottom:10px">SMART scan controls</div>
+
         <div class="toggle-wrap">
           <div class="toggle" id="wake-drives-for-smart" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
           <span class="toggle-label">Wake drives for SMART check</span>
@@ -908,8 +917,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           Only enable if your drives never spin down, or if you deliberately need every-cycle SMART monitoring and accept the wear cost.
         </p>
 
-        <!-- Max days without SMART read (#237 schema; #238 wires into the scheduler) -->
-        <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="margin-top:18px">
           <label for="smart-max-age-days" style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Max days without SMART read</label>
           <div style="display:flex;align-items:center;gap:10px">
             <input type="number" id="smart-max-age-days" min="0" max="30" step="1" value="7" onchange="saveSettings()" style="width:80px;text-align:center">
@@ -922,18 +930,9 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             Valid range 0&ndash;30.
           </p>
         </div>
-      </div>
-    </details>
-  </div>
 
-  <!-- 10. Advanced -->
-  <div class="card" id="card-advanced">
-    <div class="card-title">Advanced</div>
-    <div class="card-desc">Expert-only knobs. Defaults are safe — only change these if you understand the trade-offs.</div>
-    <details style="margin-top:8px">
-      <summary style="cursor:pointer;padding:6px 0;font-weight:600;font-size:13px;color:var(--text)">Show advanced options</summary>
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-        <div>
+        <!-- Docker container visibility — unchanged from pre-#237. -->
+        <div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Hide Docker containers from dashboard</div>
           <p style="font-size:12px;color:var(--text2);margin-top:4px;margin-bottom:10px;line-height:1.5">
             Tick the containers you want hidden from the <strong>Docker Containers section</strong>.
