@@ -86,6 +86,24 @@ util.severityClass = function(sev) {
   return "td-healthy";
 };
 
+/* Maps a service-check type string (http / tcp / dns / ping / smb /
+   nfs / speed / traceroute) to its CSS pill class. Must stay in sync
+   with serviceTypePillClass in settings.html and pillClass in
+   service_checks.html. The cross-file agreement is enforced by
+   TestServiceCheckPillHelpers_AgreeAcrossTemplates. */
+util.pillClass = function(t) {
+  var type = (t || "").toLowerCase();
+  if (type === "http") return "pill-http";
+  if (type === "tcp") return "pill-tcp";
+  if (type === "dns") return "pill-dns";
+  if (type === "ping") return "pill-ping";
+  if (type === "smb") return "pill-smb";
+  if (type === "nfs") return "pill-nfs";
+  if (type === "speed") return "pill-speed";
+  if (type === "traceroute") return "pill-trace";
+  return "pill-http";
+};
+
 /* ── Polling ───────────────────────────────────────────────────── */
 var polling = {};
 var _pollTimer = null;
@@ -782,7 +800,7 @@ sections.serviceChecks = function(sn) {
       h += '<tr style="cursor:pointer" data-sc-filter="' + esc(sc.name || '') + '">';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><div style="font-weight:500">' + esc(sc.name || 'Service') + '</div><div style="font-size:11px;color:var(--text-quaternary)">' + esc(sc.target || '') + '</div></td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);text-align:center"><div style="display:inline-flex;align-items:center;gap:0">' + dots + '</div></td>';
-      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + esc((sc.type || '').toUpperCase()) + '</td>';
+      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><span class="pill ' + util.pillClass(sc.type) + '">' + esc((sc.type || '').toUpperCase()) + '</span></td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)" class="' + scClass + '">' + esc(sc.status || 'unknown') + '</td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + ((sc.response_ms != null) ? (sc.response_ms + ' ms') : '\u2014') + '</td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + (sc.consecutive_failures || 0) + ' / ' + (sc.failure_threshold || 1) + '</td>';
