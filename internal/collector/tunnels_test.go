@@ -4,10 +4,54 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mcdays94/nas-doctor/internal"
 )
+
+// ── README claim audit (#251 / parent #244) ──
+
+// TestReadme_CloudflaredClaimQualified guards against the historical README
+// overstatement that NAS Doctor "detects both host binary and Docker
+// containers" for cloudflared. The default Docker image (Dockerfile line
+// ~34) bundles `tailscale` but NOT `cloudflared`, so host-binary detection
+// only fires on custom images. The README must reflect that reality.
+//
+// If a future edit reintroduces the misleading phrase, this test fails so
+// the docs and the shipped image stay in sync.
+func TestReadme_CloudflaredClaimQualified(t *testing.T) {
+	// README is at the repo root; this test file lives at
+	// internal/collector/tunnels_test.go — go up two levels.
+	data, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	readme := string(data)
+
+	// Specific phrasing that the audit found misleading. The exact strings
+	// originally appeared on README lines 68 and 142. Both must be gone.
+	bannedPhrases := []string{
+		"detects both host binary and Docker containers",
+		"detects host binaries and Docker containers",
+	}
+	for _, phrase := range bannedPhrases {
+		if strings.Contains(readme, phrase) {
+			t.Errorf("README still contains misleading phrase %q — cloudflared binary is NOT bundled in the default image; only Docker-container detection works out of the box. See issue #251.", phrase)
+		}
+	}
+
+	// Positive assertion: the README should explain that host-binary
+	// detection for cloudflared requires a custom image. This keeps a
+	// future edit from removing the qualifier without re-adding the
+	// banned phrase.
+	if !strings.Contains(strings.ToLower(readme), "cloudflared") {
+		t.Fatal("README missing any cloudflared mention; sanity check failed")
+	}
+	if !strings.Contains(readme, "custom image") {
+		t.Errorf("README cloudflared section should explain that host-binary detection requires a custom image bundling the cloudflared CLI; see issue #251")
+	}
+}
 
 // ── Tailscale status --json parser ──
 
