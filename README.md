@@ -202,7 +202,7 @@ Monitor all your NAS Doctor instances from a visual topology view at `/fleet`:
 
 | Integration | How |
 |---|---|
-| **Prometheus** | Scrape `/metrics` — 90+ gauges for system, disk, SMART, Docker, UPS, ZFS, services, tunnels, Proxmox, Kubernetes, findings |
+| **Prometheus** | Scrape `/metrics` — 110+ gauges for system, disk, SMART, Docker, network, UPS, ZFS, GPU, services, parity, tunnels, Proxmox, Kubernetes, backup, speed test, findings |
 | **Grafana** | Connect via Prometheus data source |
 | **Discord** | Webhook with rich embeds, severity colors, finding details |
 | **Slack** | Webhook with blocks, severity counts, top findings |
@@ -569,7 +569,7 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 All metrics prefixed with `nasdoctor_`. Full list:
 
 <details>
-<summary>Expand metric list (80+ metrics)</summary>
+<summary>Expand metric list (110+ metrics)</summary>
 
 ```
 # System (12 gauges)
@@ -619,6 +619,27 @@ nasdoctor_parity_speed_mb_per_sec / _duration_seconds / _errors / _running
 # Tunnels
 nasdoctor_tunnel_cloudflared_up / _connections (labels: name)
 nasdoctor_tunnel_tailscale_node_online / _tx_bytes / _rx_bytes (labels: name, ip)
+
+# Proxmox (labels: node / vmid+name+type+node / storage+node+type)
+nasdoctor_proxmox_node_cpu_usage / _memory_used_bytes / _memory_total_bytes / _node_online
+nasdoctor_proxmox_guest_cpu_usage / _memory_used_bytes / _memory_max_bytes / _guest_running
+nasdoctor_proxmox_storage_used_bytes / _storage_total_bytes
+
+# Kubernetes (labels: node / pod+namespace / deployment+namespace)
+nasdoctor_k8s_node_ready / _node_pod_count
+nasdoctor_k8s_pod_running / _pod_restarts
+nasdoctor_k8s_deployment_ready_replicas / _deployment_desired_replicas
+
+# GPU (labels: index, name, vendor) — 10 gauges per GPU
+nasdoctor_gpu_usage_percent / _mem_used_mb / _mem_total_mb / _mem_percent
+nasdoctor_gpu_temperature_celsius / _power_watts / _power_max_watts / _fan_percent
+nasdoctor_gpu_encoder_percent / _decoder_percent
+
+# Backup (labels: provider, name)
+nasdoctor_backup_last_success_timestamp / _size_bytes / _status
+
+# Speed Test
+nasdoctor_speedtest_download_mbps / _upload_mbps / _latency_ms
 
 # Findings
 nasdoctor_findings_critical_count / _warning_count
