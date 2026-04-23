@@ -41,7 +41,7 @@ var errDriveInStandby = errors.New("drive in standby; skipped SMART read")
 // as failed drives (issue #206).
 var errDriveUnsupported = errors.New("device does not support SMART")
 
-func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, error) {
+func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, []string, error) {
 	startedAt := time.Now()
 	devices := discoverDrives()
 	if len(devices) == 0 {
@@ -68,10 +68,11 @@ func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, e
 				"duration", time.Since(startedAt).Round(time.Millisecond).String(),
 			)
 		}
-		return nil, fmt.Errorf("no drives discovered")
+		return nil, nil, fmt.Errorf("no drives discovered")
 	}
 
 	var results []internal.SMARTInfo
+	var standbyDevices []string
 	var lastErr error
 	var skipped, standby, unsupported int
 	for _, dev := range devices {
@@ -86,6 +87,10 @@ func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, e
 					logger.Info("skipped SMART read: drive in standby", "device", dev)
 				}
 				standby++
+				// Issue #238: surface the standby device to the caller
+				// so the scheduler's StaleSMARTChecker can evaluate its
+				// age against Settings.SMART.MaxAgeDays.
+				standbyDevices = append(standbyDevices, dev)
 				continue
 			}
 			if errors.Is(err, errDriveUnsupported) {
@@ -143,9 +148,50 @@ func collectSMART(cfg SMARTConfig, logger *slog.Logger) ([]internal.SMARTInfo, e
 	// and an empty slice so the caller can persist an empty SMART
 	// snapshot rather than treating it as a collection failure.
 	if len(results) == 0 && lastErr != nil {
-		return nil, fmt.Errorf("all %d drives failed SMART read (%d failed, %d standby, %d unsupported), last error: %w", len(devices), skipped, standby, unsupported, lastErr)
+		return nil, standbyDevices, fmt.Errorf("all %d drives failed SMART read (%d failed, %d standby, %d unsupported), last error: %w", len(devices), skipped, standby, unsupported, lastErr)
 	}
-	return results, nil
+	return results, standbyDevices, nil
+}
+
+// CollectSMARTForced reads SMART for exactly the supplied devices,
+// WITHOUT the `-n standby` guard. Returns results in the same shape
+// as collectSMART's normal path. Used by the scheduler's
+// StaleSMARTChecker (issue #238) to force-wake drives whose last
+// SMART read is older than Settings.SMART.MaxAgeDays.
+//
+// A per-device INFO log ("force-read SMART") fires on each invocation
+// so operators can distinguish these reads from normal scan-cycle
+// reads and from standby skips.
+//
+// Errors from individual devices are logged at WARN and collected into
+// the returned error chain via errors.Join. Successful devices are
+// always returned in the results slice regardless of peer failures —
+// this is the "one-drive failure doesn't block others" requirement.
+func CollectSMARTForced(devices []string, logger *slog.Logger) ([]internal.SMARTInfo, error) {
+	if len(devices) == 0 {
+		return nil, nil
+	}
+	var results []internal.SMARTInfo
+	var errs []error
+	for _, dev := range devices {
+		if logger != nil {
+			logger.Info("force-read SMART", "device", dev)
+		}
+		info, err := readSMARTDevice(dev, true /* wakeDrives: force read */)
+		if err != nil {
+			if logger != nil {
+				logger.Warn("force-read SMART failed", "device", dev, "error", err)
+			}
+			errs = append(errs, fmt.Errorf("%s: %w", dev, err))
+			continue
+		}
+		// Guard against empty reads the same way collectSMART does.
+		if info.Model == "" && info.Serial == "" {
+			continue
+		}
+		results = append(results, info)
+	}
+	return results, errors.Join(errs...)
 }
 
 func discoverDrives() []string {

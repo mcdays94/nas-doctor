@@ -82,7 +82,7 @@ func TestCollectSMART_SummaryLogCounters(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	_, _ = collectSMART(SMARTConfig{WakeDrives: false}, logger)
+	_, _, _ = collectSMART(SMARTConfig{WakeDrives: false}, logger)
 
 	// Scan log lines for the summary.
 	var summary map[string]any
@@ -150,7 +150,7 @@ func TestCollectSMART_SummaryLogEmittedOnNoDrives(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	_, err := collectSMART(SMARTConfig{}, logger)
+	_, _, err := collectSMART(SMARTConfig{}, logger)
 	if err == nil {
 		t.Fatal("expected 'no drives discovered' error")
 	}
@@ -170,5 +170,5 @@ func TestCollectSMART_NilLoggerTolerated(t *testing.T) {
 	})()
 
 	// Should not panic despite logger=nil.
-	_, _ = collectSMART(SMARTConfig{}, nil)
+	_, _, _ = collectSMART(SMARTConfig{}, nil)
 }
