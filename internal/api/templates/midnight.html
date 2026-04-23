@@ -61,6 +61,17 @@ a:hover{color:var(--hover)}
 .health-badge.badge-red{color:var(--red);background:var(--red-bg)}
 .health-badge.badge-amber{color:var(--amber);background:var(--amber-bg)}
 .health-badge.badge-brand{color:var(--accent);background:rgba(94,106,210,0.1)}
+/* Service-check type pills — palette mirrored from SharedCSS. Locked
+   by TestStyles_ServiceCheckPillPalette/theme_templates_have_same_palette. */
+.pill{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:2px 8px;border-radius:999px}
+.pill-http  { background:rgba( 59,130,246,0.14); color:#60a5fa }
+.pill-tcp   { background:rgba( 16,185,129,0.14); color:#34d399 }
+.pill-dns   { background:rgba(236, 72,153,0.14); color:#f472b6 }
+.pill-smb   { background:rgba(245,158, 11,0.14); color:#fbbf24 }
+.pill-nfs   { background:rgba(251,146, 60,0.14); color:#fb923c }
+.pill-ping  { background:rgba(139, 92,246,0.14); color:#a78bfa }
+.pill-speed { background:rgba( 34,211,238,0.14); color:#22d3ee }
+.pill-trace { background:rgba( 45,212,191,0.14); color:#2dd4bf }
 .top-bar-stats{display:flex;align-items:center;gap:calc(var(--sp)*3)}
 .stat-item{display:flex;align-items:baseline;gap:6px;font-size:13px;white-space:nowrap}
 .stat-item-label{color:var(--text-quaternary);font-weight:500;font-size:12px}
