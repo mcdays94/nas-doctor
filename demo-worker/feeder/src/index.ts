@@ -638,6 +638,15 @@ function buildServiceChecks(): unknown[] {
   sc("sc-dns-local", "Local DNS (Pi-hole)", "dns", "10.0.1.53", false, 0, "critical", 8);
   sc("sc-dns-resolve", "Public DNS Resolution", "dns", "1.1.1.1", true, 15, "critical");
 
+  // ── Traceroute checks (v0.9.7 #189) ──
+  // Per-hop reachability + loss monitoring for upstream paths. Showcases the
+  // traceroute service-check type + the teal pill-trace pill styling. Real
+  // targets so the demo reflects what a NAS owner might actually monitor:
+  // one short hop to Google DNS (ISP path health) and one longer cloud-edge
+  // path (multi-hop CDN/cloud reachability).
+  sc("sc-trace-google", "Upstream to Google DNS", "traceroute", "8.8.8.8", true, 12, "warning");
+  sc("sc-trace-aws-eu", "AWS eu-west-1 path", "traceroute", "52.28.0.1", true, 45, "info");
+
   // ── SMB / NFS checks ──
   sc("sc-smb-media", "SMB: Media Share", "smb", "//10.0.1.50/media", true, 8, "warning");
   sc("sc-smb-backup", "SMB: Backup Share", "smb", "//10.0.1.50/backups", true, 12, "warning");
