@@ -22,6 +22,7 @@ const ENDPOINTS = [
   "alerts", "incidents", "notifications_log", "gpu_history",
   "container_history", "system_history", "process_history", "settings", "db_stats",
   "disks", "smart_trends", "replacement_plan", "capacity_forecast",
+  "speedtest_history",
 ];
 
 // ── Platform profiles: define what makes each platform unique ──
@@ -41,6 +42,28 @@ export interface PlatformProfile {
   hasGPU: boolean;
   drives: { device: string; model: string; serial: string; sizeGB: number; type: string; mount: string; label: string; usedPct: number; temp: number; poh: number }[];
   containers: { name: string; image: string; state: string; cpu: number; mem: number }[];
+  // Speed-test profile: realistic per-platform throughput. Feeds
+  // buildSpeedTest + buildSpeedTestHistory. See #262.
+  speedTest: {
+    downloadMbps: number;
+    uploadMbps: number;
+    latencyMs: number;
+    jitterMs: number;
+    serverName: string;
+    isp: string;
+  };
+  // Optional GPU device profile, populated when hasGPU === true. See
+  // buildGPU / #262.
+  gpuDevice?: {
+    name: string;
+    vendor: string;
+    driver: string;
+    memTotalMB: number;
+    memUsedPct: number;
+    powerMaxW: number;
+    usagePct: number;
+    tempC: number;
+  };
 }
 
 export const PROFILES: Record<Platform, PlatformProfile> = {
@@ -68,6 +91,8 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
       { name: "sabnzbd", image: "linuxserver/sabnzbd:latest", state: "running", cpu: 0.1, mem: 95 },
       { name: "pihole", image: "pihole/pihole:latest", state: "exited", cpu: 0, mem: 0 },
     ],
+    speedTest: { downloadMbps: 920, uploadMbps: 880, latencyMs: 7.8, jitterMs: 1.6, serverName: "Virgin Media London", isp: "Virgin Media" },
+    gpuDevice: { name: "NVIDIA RTX A2000", vendor: "nvidia", driver: "555.58", memTotalMB: 6144, memUsedPct: 42, powerMaxW: 70, usagePct: 28, tempC: 52 },
   },
   synology: {
     hostname: "synology-nas", platformName: "Synology DSM 7.2.2", cpuModel: "Intel Celeron J4125", cpuCores: 4, ramGB: 8, uptimeDays: 90,
@@ -85,6 +110,7 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
       { name: "homebridge", image: "homebridge/homebridge:latest", state: "running", cpu: 0.8, mem: 128 },
       { name: "watchtower", image: "containrrr/watchtower:latest", state: "running", cpu: 0.1, mem: 32 },
     ],
+    speedTest: { downloadMbps: 450, uploadMbps: 42, latencyMs: 14.2, jitterMs: 2.8, serverName: "BT Wholesale Manchester", isp: "BT Broadband" },
   },
   truenas: {
     hostname: "truenas-scale", platformName: "TrueNAS SCALE 24.10", cpuModel: "Intel Xeon E-2278G", cpuCores: 8, ramGB: 64, uptimeDays: 120,
@@ -108,6 +134,7 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
       { name: "grafana", image: "grafana/grafana:latest", state: "running", cpu: 0.3, mem: 192 },
       { name: "nas-doctor", image: "ghcr.io/mcdays94/nas-doctor:latest", state: "running", cpu: 0.2, mem: 48 },
     ],
+    speedTest: { downloadMbps: 980, uploadMbps: 960, latencyMs: 4.5, jitterMs: 0.9, serverName: "OVH Roubaix", isp: "OVH" },
   },
   proxmox: {
     hostname: "pve-node01", platformName: "Proxmox VE 8.3.2", cpuModel: "Intel Xeon E-2388G", cpuCores: 8, ramGB: 128, uptimeDays: 45,
@@ -123,6 +150,8 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
       { name: "traefik", image: "traefik:v3.0", state: "running", cpu: 0.3, mem: 48 },
       { name: "portainer", image: "portainer/portainer-ce:latest", state: "running", cpu: 0.2, mem: 96 },
     ],
+    speedTest: { downloadMbps: 1850, uploadMbps: 1820, latencyMs: 2.1, jitterMs: 0.4, serverName: "Cogent Amsterdam", isp: "Cogent" },
+    gpuDevice: { name: "NVIDIA Tesla P4", vendor: "nvidia", driver: "535.216", memTotalMB: 8192, memUsedPct: 58, powerMaxW: 75, usagePct: 62, tempC: 48 },
   },
   kubernetes: {
     hostname: "k3s-master-01", platformName: "K3s v1.31.3+k3s1", cpuModel: "AMD EPYC 7543P", cpuCores: 32, ramGB: 256, uptimeDays: 60,
@@ -137,6 +166,7 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
       { name: "longhorn-manager", image: "longhornio/longhorn-manager:v1.7.0", state: "running", cpu: 1.2, mem: 256 },
       { name: "nas-doctor", image: "ghcr.io/mcdays94/nas-doctor:latest", state: "running", cpu: 0.3, mem: 48 },
     ],
+    speedTest: { downloadMbps: 2450, uploadMbps: 2410, latencyMs: 1.8, jitterMs: 0.3, serverName: "Google Cloud us-central1", isp: "Google Cloud" },
   },
 };
 
@@ -199,6 +229,7 @@ function transformForPlatform(endpoint: string, data: unknown, platform: Platfor
   if (endpoint === "capacity_forecast") return buildCapacityForecast(PROFILES[platform]);
   if (endpoint === "sparklines") return transformSparklines(data as Record<string, unknown>, PROFILES[platform]);
   if (endpoint === "snapshot") return transformSnapshot(data as Record<string, unknown>, PROFILES[platform], platform);
+  if (endpoint === "speedtest_history") return buildSpeedTestHistory(PROFILES[platform], 24);
 
   return data; // everything else passed through from seed
 }
@@ -332,11 +363,27 @@ export function transformSnapshot(d: Record<string, unknown>, p: PlatformProfile
   // Sections that differ per platform
   const ups = p.hasUPS ? d.ups : { available: false };
   const zfs = p.hasZFS ? buildZFS(p) : { available: false, pools: [] };
-  const gpu = p.hasGPU ? d.gpu : { available: false, devices: [] };
+  // GPU is synthesised from the profile's gpuDevice spec rather than
+  // passed through from the seed: the captured unraid snapshot may
+  // not have rich GPU data, and we want per-platform variety
+  // (RTX A2000 for Unraid transcoding, Tesla P4 for Proxmox VM
+  // passthrough). See #262 and dashboard.go L613 for the fields the
+  // widget consumes (gpus[].{name, vendor, usage_percent, …}).
+  const gpu = p.hasGPU ? buildGPU(p, platform) : { available: false, gpus: [] };
   const parity = p.hasParity ? d.parity : { available: false, history: [] };
   const tunnels = p.hasTunnels ? d.tunnels : { available: false, cloudflared: [] };
   const proxmox = p.hasProxmox ? d.proxmox : { available: false };
   const kubernetes = p.hasKubernetes ? d.kubernetes : { available: false };
+
+  // Widgets added in #262 — feeder generates data for these even
+  // though the captured live-binary snapshot doesn't include them.
+  const speed_test = buildSpeedTest(p);
+  const backup = buildBackup(p, platform);
+  const top_processes = buildTopProcesses(p, platform);
+
+  // system.top_processes is how the Processes widget reads its data
+  // (sections.processes in dashboard.go L1144 reads sn.system.top_processes).
+  sys.top_processes = top_processes;
 
   // Rebuild findings for this platform's data
   const findings = buildFindings(p, disks, smart, containers);
@@ -348,6 +395,7 @@ export function transformSnapshot(d: Record<string, unknown>, p: PlatformProfile
     smart,
     docker: { available: true, version: "24.0.7", containers },
     ups, zfs, gpu, parity, tunnels, proxmox, kubernetes,
+    speed_test, backup,
     findings,
   };
 }
@@ -678,6 +726,246 @@ function buildZFS(p: PlatformProfile): unknown {
         bytes_total: Math.round(ssdDrives.reduce((s, d) => s + d.sizeGB * 1e9 * d.usedPct / 100, 0)),
         percent: 100,
       },
+    }],
+  };
+}
+
+// ── Widget builders added for #262 ─────────────────────────────
+//
+// These produce JSON in the exact shape `internal/api/dashboard.go`
+// consumes. Field names are pinned by `widget-coverage.test.ts` —
+// renaming any of them in the Go binary without updating the feeder
+// (or vice-versa) will turn that test RED.
+
+// buildSpeedTest — produces snapshot.speed_test matching
+// internal.SpeedTestInfo: {available, latest: SpeedTestResult,
+// last_attempt: SpeedTestAttempt}.
+// dashboard.go L782 (sections.speedtest) reads
+// spd.latest.{download_mbps, upload_mbps, latency_ms, jitter_ms,
+// server_name, isp, timestamp} and spd.last_attempt.{status,
+// timestamp}. See #210 for the state model.
+function buildSpeedTest(p: PlatformProfile): Record<string, unknown> {
+  const t = p.speedTest;
+  // Jitter the throughput a bit so multiple cron ticks in the same
+  // day produce visibly different bars in the chart. Use a stable
+  // seed per platform + current 5min slot so the 24h history series
+  // can mirror it.
+  const seed = hashStr(p.hostname + "-speed");
+  const downJ = jitter(t.downloadMbps, 6, seed);
+  const upJ = jitter(t.uploadMbps, 8, seed + 1);
+  const latJ = jitter(t.latencyMs, 20, seed + 2);
+  const jitJ = jitter(t.jitterMs, 40, seed + 3);
+  const now = new Date().toISOString();
+  return {
+    available: true,
+    latest: {
+      timestamp: now,
+      download_mbps: round2(clamp(downJ, t.downloadMbps * 0.7, t.downloadMbps * 1.15)),
+      upload_mbps: round2(clamp(upJ, t.uploadMbps * 0.7, t.uploadMbps * 1.15)),
+      latency_ms: round2(clamp(latJ, Math.max(0.5, t.latencyMs * 0.5), t.latencyMs * 2)),
+      jitter_ms: round2(clamp(jitJ, 0.1, t.jitterMs * 3)),
+      server_name: t.serverName,
+      server_id: Math.abs(seed) % 100000,
+      isp: t.isp,
+      external_ip: "203.0.113." + (Math.abs(seed) % 200 + 10),
+      result_url: "",
+    },
+    last_attempt: {
+      timestamp: now,
+      status: "success",
+      error_msg: "",
+    },
+  };
+}
+
+// buildSpeedTestHistory — produces /api/v1/history/speedtest payload.
+// The Go endpoint returns an array of {timestamp, download_mbps,
+// upload_mbps, latency_ms, jitter_ms, server_name, isp}; the widget's
+// mini-chart consumes download_mbps for each point. See
+// internal/api/handlers_history.go and dashboard.go L784 ("Speed Test"
+// range buttons which call loadSpeedTestChart).
+function buildSpeedTestHistory(p: PlatformProfile, hours: number): unknown[] {
+  const t = p.speedTest;
+  const seed = hashStr(p.hostname + "-speedhist");
+  const now = Date.now();
+  const points: unknown[] = [];
+  // One sample per hour going back `hours`.
+  for (let h = hours - 1; h >= 0; h--) {
+    const ts = new Date(now - h * 3600000).toISOString();
+    // Time-of-day modulation: residential ISPs slow down in the
+    // evening, datacentre links are flat.
+    const tod = new Date(now - h * 3600000).getUTCHours();
+    const eveningDip = (tod >= 18 && tod <= 23) ? 0.85 : 1.0;
+    const s = seed + h;
+    points.push({
+      timestamp: ts,
+      download_mbps: round2(clamp(jitter(t.downloadMbps * eveningDip, 10, s), t.downloadMbps * 0.5, t.downloadMbps * 1.15)),
+      upload_mbps: round2(clamp(jitter(t.uploadMbps * eveningDip, 12, s + 1), t.uploadMbps * 0.5, t.uploadMbps * 1.15)),
+      latency_ms: round2(clamp(jitter(t.latencyMs, 25, s + 2), Math.max(0.5, t.latencyMs * 0.5), t.latencyMs * 2.5)),
+      jitter_ms: round2(clamp(jitter(t.jitterMs, 50, s + 3), 0.1, t.jitterMs * 4)),
+      server_name: t.serverName,
+      isp: t.isp,
+    });
+  }
+  return points;
+}
+
+// buildBackup — produces snapshot.backup matching internal.BackupInfo:
+// {available, jobs: BackupJob[]}.
+// dashboard.go L705 (sections.backup) reads bj.{provider, name, status,
+// snapshot_count, size_bytes, last_success, encrypted}.
+function buildBackup(p: PlatformProfile, platform: Platform): Record<string, unknown> {
+  const nowMs = Date.now();
+  const hoursAgoIso = (h: number) => new Date(nowMs - h * 3600000).toISOString();
+  // Platform-appropriate repos. Every platform gets ≥2 repos so
+  // visual variety works: one healthy + one stale/warning.
+  const repos: Record<string, unknown>[] = [];
+  if (platform === "unraid") {
+    repos.push(
+      { provider: "borg", name: "appdata-nightly", repository: "/mnt/user/backups/borg/appdata", status: "ok", snapshot_count: 127, size_bytes: 184_000_000_000, files_count: 215000, last_run: hoursAgoIso(6.2), last_success: hoursAgoIso(6.2), duration_secs: 428, schedule: "0 3 * * *", compression: "zstd", encrypted: true, error_message: "" },
+      { provider: "restic", name: "media-weekly", repository: "rclone:b2:tower-media", status: "ok", snapshot_count: 42, size_bytes: 3_400_000_000_000, files_count: 1_820_000, last_run: hoursAgoIso(18.5), last_success: hoursAgoIso(18.5), duration_secs: 7842, schedule: "0 2 * * 0", compression: "auto", encrypted: true, error_message: "" },
+      { provider: "duplicati", name: "documents-offsite", repository: "s3://offsite-docs-2026", status: "warning", snapshot_count: 89, size_bytes: 42_000_000_000, files_count: 11500, last_run: hoursAgoIso(56), last_success: hoursAgoIso(56), duration_secs: 610, schedule: "0 4 * * *", compression: "zstd", encrypted: true, error_message: "Last attempt completed with warnings (3 files skipped)" },
+    );
+  } else if (platform === "synology") {
+    repos.push(
+      { provider: "restic", name: "home-docs", repository: "/volume1/Backup/restic", status: "ok", snapshot_count: 58, size_bytes: 92_000_000_000, files_count: 87000, last_run: hoursAgoIso(4.8), last_success: hoursAgoIso(4.8), duration_secs: 312, schedule: "0 2 * * *", compression: "auto", encrypted: true, error_message: "" },
+      { provider: "borg", name: "photos-archive", repository: "/volume2/borg/photos", status: "stale", snapshot_count: 36, size_bytes: 680_000_000_000, files_count: 220000, last_run: hoursAgoIso(96), last_success: hoursAgoIso(96), duration_secs: 1850, schedule: "0 3 * * 0", compression: "zstd", encrypted: true, error_message: "Last run was 4 days ago — expected weekly" },
+    );
+  } else if (platform === "truenas") {
+    repos.push(
+      { provider: "pbs", name: "vm-backups", repository: "pbs-01:datastore1", status: "ok", snapshot_count: 184, size_bytes: 2_100_000_000_000, files_count: 0, last_run: hoursAgoIso(2.1), last_success: hoursAgoIso(2.1), duration_secs: 1240, schedule: "0 */6 * * *", compression: "zstd", encrypted: true, error_message: "" },
+      { provider: "restic", name: "jail-configs", repository: "/mnt/tank/backups/restic-jails", status: "ok", snapshot_count: 67, size_bytes: 8_400_000_000, files_count: 9200, last_run: hoursAgoIso(8.3), last_success: hoursAgoIso(8.3), duration_secs: 42, schedule: "0 1 * * *", compression: "auto", encrypted: true, error_message: "" },
+      { provider: "rclone", name: "nextcloud-offsite", repository: "rclone:wasabi:truenas-offsite", status: "failed", snapshot_count: 45, size_bytes: 540_000_000_000, files_count: 180000, last_run: hoursAgoIso(12.4), last_success: hoursAgoIso(36), duration_secs: 0, schedule: "0 4 * * *", compression: "none", encrypted: true, error_message: "wasabi: auth token expired — refresh credentials" },
+    );
+  } else if (platform === "proxmox") {
+    repos.push(
+      { provider: "pbs", name: "datacenter-vms", repository: "pbs-primary:main", status: "ok", snapshot_count: 412, size_bytes: 5_800_000_000_000, files_count: 0, last_run: hoursAgoIso(1.2), last_success: hoursAgoIso(1.2), duration_secs: 2180, schedule: "0 */4 * * *", compression: "zstd", encrypted: true, error_message: "" },
+      { provider: "pbs", name: "offsite-replica", repository: "pbs-remote:datastore2", status: "warning", snapshot_count: 320, size_bytes: 5_700_000_000_000, files_count: 0, last_run: hoursAgoIso(9.1), last_success: hoursAgoIso(9.1), duration_secs: 3600, schedule: "0 5 * * *", compression: "zstd", encrypted: true, error_message: "Replication lag: 8h behind primary" },
+    );
+  } else {
+    // Kubernetes: Velero is the norm, but the demo keeps this
+    // widget hidden. Returning available: false here means the
+    // dashboard renders the "no backup provider detected" empty
+    // state, which is what a Velero-managed cluster would show
+    // to NAS Doctor.
+    return { available: false, jobs: [] };
+  }
+  return { available: true, jobs: repos };
+}
+
+// buildTopProcesses — produces snapshot.system.top_processes matching
+// internal.ProcessInfo: {pid, user, cpu_percent, mem_percent, command,
+// container_name, container_id}.
+// dashboard.go L1144 (sections.processes) reads p.{command, cpu_percent,
+// mem_percent, user, container_name}. Returns 8-10 realistic processes
+// matching the platform's container list.
+function buildTopProcesses(p: PlatformProfile, platform: Platform): Record<string, unknown>[] {
+  const seed = hashStr(platform + "-procs");
+  const j = (base: number, pct: number, s: number) => round2(clamp(jitter(base, pct, seed + s), 0.1, 99));
+  // Start with host processes common across all platforms, then splice
+  // in container-owned processes matching the profile's containers.
+  const procs: Record<string, unknown>[] = [];
+  let pid = 1000;
+  // Host kernel / init
+  procs.push({ pid: 1, user: "root", cpu_percent: j(0.3, 50, 1), mem_percent: j(0.1, 30, 2), command: "/sbin/init", container_name: "", container_id: "" });
+  // The NAS Doctor binary itself.
+  procs.push({ pid: pid++, user: platform === "synology" ? "admin" : "root", cpu_percent: j(1.2, 40, 3), mem_percent: j(0.6, 20, 4), command: "/usr/bin/nas-doctor --http :8060", container_name: "", container_id: "" });
+  // dockerd / containerd (not on k8s)
+  if (platform !== "kubernetes") {
+    procs.push({ pid: pid++, user: "root", cpu_percent: j(1.8, 50, 5), mem_percent: j(2.1, 25, 6), command: "/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock", container_name: "", container_id: "" });
+  } else {
+    procs.push({ pid: pid++, user: "root", cpu_percent: j(3.4, 40, 5), mem_percent: j(2.8, 20, 6), command: "/usr/local/bin/k3s server", container_name: "", container_id: "" });
+  }
+  // Pick the heaviest running containers from the profile (max 6).
+  const running = p.containers.filter((c) => c.state === "running").sort((a, b) => b.cpu + b.mem / 100 - (a.cpu + a.mem / 100)).slice(0, 6);
+  for (let i = 0; i < running.length; i++) {
+    const c = running[i];
+    const cmd = commandFor(c.name, c.image);
+    procs.push({
+      pid: pid++,
+      user: platform === "kubernetes" ? "nonroot" : "root",
+      cpu_percent: round2(clamp(jitter(c.cpu, 15, seed + 100 + i), 0.1, 100)),
+      mem_percent: round2(clamp(jitter(c.mem / (p.ramGB * 10.24), 12, seed + 200 + i), 0.1, 50)),
+      command: cmd,
+      container_name: c.name,
+      container_id: `${platform.slice(0, 3)}-${i}`,
+    });
+  }
+  // Round out to ~9 entries with a couple of small always-on host
+  // processes.
+  procs.push({ pid: pid++, user: "root", cpu_percent: j(0.1, 30, 20), mem_percent: j(0.2, 25, 21), command: "/usr/sbin/sshd -D", container_name: "", container_id: "" });
+  procs.push({ pid: pid++, user: "root", cpu_percent: j(0.2, 50, 22), mem_percent: j(0.05, 40, 23), command: "/usr/sbin/cron -f", container_name: "", container_id: "" });
+  // Sort by cpu_percent descending so the widget's default order is
+  // "heaviest at the top".
+  procs.sort((a, b) => (b.cpu_percent as number) - (a.cpu_percent as number));
+  return procs;
+}
+
+function commandFor(name: string, image: string): string {
+  // Best-effort realistic command line for a running container.
+  // Used by buildTopProcesses to give the Processes widget a
+  // recognisable command string.
+  if (name === "plex") return "/usr/lib/plexmediaserver/Plex Media Server";
+  if (name === "emby") return "/system/EmbyServer -programdata /config";
+  if (name.startsWith("nginx")) return "nginx: master process";
+  if (name === "home-assistant") return "python3 -m homeassistant --config /config";
+  if (name === "grafana") return "/usr/share/grafana/bin/grafana-server";
+  if (name === "prometheus") return "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml";
+  if (name === "nextcloud") return "apache2 -DFOREGROUND";
+  if (name === "minio") return "/usr/bin/minio server /data";
+  if (name === "coredns") return "/coredns -conf /etc/coredns/Corefile";
+  if (name === "traefik") return "/traefik --providers.kubernetesingress";
+  if (name === "longhorn-manager") return "longhorn-manager daemon --engine-image=longhornio/longhorn-engine:v1.7.0";
+  if (name === "tdarr") return "node /app/Tdarr_Server/index.js";
+  if (name === "wireguard") return "wg-quick up wg0";
+  if (name === "radarr") return "/app/bin/Radarr -nobrowser -data=/config";
+  if (name === "sonarr") return "/app/bin/Sonarr -nobrowser -data=/config";
+  if (name === "sabnzbd") return "python3 /app/SABnzbd.py -s 0.0.0.0:8080";
+  if (name === "syncthing") return "/bin/syncthing --no-browser --home=/var/syncthing";
+  if (name === "nas-doctor") return "/usr/bin/nas-doctor --http :8060";
+  if (name === "portainer") return "/portainer --host=unix:///var/run/docker.sock";
+  if (name === "homebridge") return "/usr/local/bin/homebridge -U /homebridge";
+  return `${image.split(":")[0].split("/").pop()}`;
+}
+
+// buildGPU — produces snapshot.gpu matching internal.GPUInfo:
+// {available, gpus: GPUDevice[]}. dashboard.go L613 (sections.gpu)
+// consumes gpus[].{name, vendor, driver, usage_percent, temperature_c,
+// mem_used_mb, mem_total_mb, power_watts, power_max_watts, fan_percent,
+// encoder_percent, decoder_percent}.
+function buildGPU(p: PlatformProfile, platform: Platform): Record<string, unknown> {
+  const g = p.gpuDevice;
+  if (!g) return { available: false, gpus: [] };
+  const seed = hashStr(platform + "-gpu");
+  const usage = clamp(jitter(g.usagePct, 30, seed), 1, 100);
+  const temp = Math.round(clamp(jitter(g.tempC, 15, seed + 1), 35, 88));
+  const memUsedMB = Math.round(g.memTotalMB * clamp(jitter(g.memUsedPct / 100, 15, seed + 2), 0.1, 0.95));
+  const memPct = round2((memUsedMB / g.memTotalMB) * 100);
+  const powerW = round2(clamp(jitter(g.powerMaxW * (usage / 100) * 0.9, 20, seed + 3), 5, g.powerMaxW));
+  // Unraid's RTX A2000 is used for Plex transcoding → encoder
+  // activity. Proxmox's Tesla P4 is used for compute → no encoder.
+  const encoderPct = platform === "unraid" ? round2(clamp(jitter(45, 40, seed + 4), 0, 100)) : 0;
+  const decoderPct = platform === "unraid" ? round2(clamp(jitter(28, 40, seed + 5), 0, 100)) : 0;
+  return {
+    available: true,
+    gpus: [{
+      index: 0,
+      name: g.name,
+      vendor: g.vendor,
+      driver: g.driver,
+      usage_percent: round2(usage),
+      mem_used_mb: memUsedMB,
+      mem_total_mb: g.memTotalMB,
+      mem_percent: memPct,
+      temperature_c: temp,
+      fan_percent: g.vendor === "nvidia" && g.powerMaxW > 70 ? round2(clamp(jitter(55, 20, seed + 6), 20, 100)) : 0,
+      power_watts: powerW,
+      power_max_watts: g.powerMaxW,
+      clock_mhz: Math.round(clamp(jitter(1800, 10, seed + 7), 1400, 2100)),
+      mem_clock_mhz: Math.round(clamp(jitter(7000, 5, seed + 8), 6500, 7500)),
+      pcie_bus: "0a:00.0",
+      encoder_percent: encoderPct,
+      decoder_percent: decoderPct,
     }],
   };
 }
