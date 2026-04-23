@@ -280,6 +280,18 @@ func looksLikeStandbyOutput(out string) bool {
 }
 
 type smartctlJSON struct {
+	// Smartctl envelope carries invocation metadata and error messages.
+	// Present on every smartctl 7.x JSON response, even on error outputs
+	// (smartctl --json=c emits the envelope before any device-specific
+	// data, so we can reliably check it to distinguish a "valid JSON but
+	// the drive doesn't expose SMART" case from a genuine read).
+	Smartctl struct {
+		ExitStatus int `json:"exit_status"`
+		Messages   []struct {
+			String   string `json:"string"`
+			Severity string `json:"severity"`
+		} `json:"messages"`
+	} `json:"smartctl"`
 	ModelName    string `json:"model_name"`
 	SerialNumber string `json:"serial_number"`
 	FirmwareVer  string `json:"firmware_version"`
@@ -344,6 +356,23 @@ func parseSMARTJSON(device, out string) (internal.SMARTInfo, error) {
 	var data smartctlJSON
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 		return info, fmt.Errorf("JSON parse error for %s: %w", device, err)
+	}
+
+	// Classic cause (issue #206): on Unraid, /dev/sda is the boot flash
+	// and smartctl --json=c returns a JSON envelope whose smartctl.messages
+	// array carries the "Unknown USB bridge" error — NOT a text-mode error
+	// we'd catch in readSMARTDevice's fallback paths. Without this check,
+	// we'd parse the JSON successfully but get an empty info{} struct
+	// (ModelName=="" && SerialNumber==""), which collectSMART then
+	// categorises as `failed` via the empty-model short-circuit. The rc1
+	// of v0.9.7 added the collector-layer errDriveUnsupported branch but
+	// missed THIS path, so /dev/sda still landed in `failed`. Return
+	// errDriveUnsupported here so the caller routes this through the
+	// unsupported counter and emits the per-drive INFO log.
+	for _, msg := range data.Smartctl.Messages {
+		if strings.Contains(msg.String, "Unknown USB bridge") || strings.Contains(msg.String, "Please specify device type") {
+			return info, fmt.Errorf("%w: %s (smartctl.messages: %s)", errDriveUnsupported, device, msg.String)
+		}
 	}
 
 	info.Model = data.ModelName
