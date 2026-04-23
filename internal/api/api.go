@@ -528,6 +528,13 @@ func (s *Server) serveDashboard(w http.ResponseWriter, theme string) {
 		html = DashboardMidnight
 	}
 	html = strings.Replace(html, "__VERSION__", s.version, -1)
+	// Force the browser to revalidate the dashboard HTML on every load.
+	// The HTML embeds `<script src="/js/dashboard.js?v=<VERSION>">` with
+	// VERSION baked at render time; if the HTML itself is cached, the
+	// `?v=` cache-bust points at a stale URL after an upgrade and the
+	// browser keeps serving the old bundle. Matches the pattern already
+	// used for /js/dashboard.js and /js/charts.js (see #234).
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
 }
