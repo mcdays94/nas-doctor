@@ -244,6 +244,7 @@ body.theme-clean .badge-generic { background:rgba(0,0,0,0.06) }
 .pill-smb,.pill-nfs { background:rgba(245,158,11,0.14); color:#fbbf24 }
 .pill-ping { background:rgba(139,92,246,0.14); color:#a78bfa }
 .pill-speed { background:rgba(14,165,233,0.14); color:#38bdf8 }
+.pill-trace { background:rgba(99,102,241,0.14); color:#818cf8 }
 
 /* ── Status Dots ────────────────────────────────────────────── */
 .status-dot.degraded { background:#f59e0b }
