@@ -94,11 +94,22 @@ export default {
       const t = await fetchAsset(env, url, request, "_pages/report.html");
       if (t !== null) return new Response(t, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
-    if (path === "/icon.png" || path === "/favicon.png" || path.startsWith("/icons/")) {
-      return new Response(
-        Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="), c => c.charCodeAt(0)),
-        { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" } }
-      );
+    // Serve the NAS Doctor logo from the captured assets (see #262).
+    // demo-deploy.yml curls /icon.png + /icons/icon{1,2,3}.png from
+    // the live binary during capture; this path delivers those bytes.
+    // Before #262 this branch returned a 1×1 transparent PNG which
+    // rendered as an invisible gap next to the \"NAS Doctor\" title.
+    // /favicon.png is aliased to /icon.png for browser tab icons.
+    if (path === "/icon.png" || path === "/favicon.png") {
+      const resp = await fetchAssetResponse(env, url, request, "icon.png");
+      if (resp) return resp;
+    }
+    if (path.startsWith("/icons/") && path.endsWith(".png")) {
+      // path is /icons/iconN.png → strip leading slash so fetchAssetResponse
+      // can resolve it against the captured/ asset root.
+      const assetPath = path.slice(1);
+      const resp = await fetchAssetResponse(env, url, request, assetPath);
+      if (resp) return resp;
     }
 
     // ── Fallback ──
@@ -129,6 +140,7 @@ async function handleAPI(path: string, url: URL, platform: Platform, env: Env): 
     "/api/v1/history/containers": "container_history",
     "/api/v1/history/system": "system_history",
     "/api/v1/history/processes": "process_history",
+    "/api/v1/history/speedtest": "speedtest_history",
     "/api/v1/alerts": "alerts",
     "/api/v1/service-checks": "service_checks",
     "/api/v1/service-checks/history": "service_checks", // reuse full list as history
@@ -207,6 +219,28 @@ async function fetchAsset(env: Env, baseUrl: URL, request: Request, filename: st
     try {
       const resp = await env.ASSETS.fetch(new Request(u, { method: "GET", headers: request.headers }));
       if (resp.ok) return await resp.text();
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+// fetchAssetResponse — binary-safe variant of fetchAsset. Returns the
+// raw Response (preserving Content-Type + binary body) rather than
+// decoding as text. Used for PNG icons and anything else that isn't
+// guaranteed to be UTF-8. Added for #262.
+async function fetchAssetResponse(env: Env, baseUrl: URL, request: Request, filename: string): Promise<Response | null> {
+  const attempts = [`${baseUrl.origin}/${filename}`, `https://fake-host/${filename}`];
+  for (const u of attempts) {
+    try {
+      const resp = await env.ASSETS.fetch(new Request(u, { method: "GET", headers: request.headers }));
+      if (resp.ok) {
+        // Re-emit so we can add Cache-Control + CORS. Cloudflare's
+        // ASSETS binding already sets Content-Type from the file
+        // extension; we preserve it by copying headers.
+        const headers = new Headers(resp.headers);
+        headers.set("Cache-Control", "public, max-age=86400");
+        return new Response(resp.body, { status: resp.status, headers });
+      }
     } catch { /* try next */ }
   }
   return null;
