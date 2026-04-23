@@ -111,6 +111,12 @@ type Scheduler struct {
 	checker        *ServiceChecker
 	retentionMgr   *RetentionManager
 
+	// smartMaxAgeDays is the Settings.SMART.MaxAgeDays value driving
+	// the StaleSMARTChecker (issue #238). 0 disables the feature
+	// entirely. Mutated by SetSMARTMaxAgeDays from the API handler
+	// when the user changes the setting. Read under s.mu.
+	smartMaxAgeDays int
+
 	logForwarder *logfwd.Forwarder
 
 	mu      sync.RWMutex
@@ -152,6 +158,10 @@ func New(
 		serviceChecks: []internal.ServiceCheckConfig{},
 		stop:          make(chan struct{}),
 		restart:       make(chan time.Duration, 1),
+		// Default matches defaultSettings().SMART.MaxAgeDays (#237).
+		// Callers that want a different value (or zero to disable)
+		// should call SetSMARTMaxAgeDays after construction.
+		smartMaxAgeDays: 7,
 	}
 	s.checker = NewServiceChecker(store, logger)
 	// Opt into the per-type Details map on the scheduled path too —
@@ -320,6 +330,20 @@ func (s *Scheduler) SetSpeedTestRunner(fn SpeedTestRunner) {
 	s.speedTestRunFn = fn
 }
 
+// SetSMARTMaxAgeDays updates the max-age threshold driving the
+// StaleSMARTChecker (issue #238). 0 disables the feature entirely —
+// in which case RunOnce skips the Check+Apply pass completely and
+// the scheduler behaves exactly like v0.9.5 (user story 5).
+//
+// Called by the API handler when the user edits
+// Settings.SMART.MaxAgeDays; also by main.go on startup to apply the
+// persisted preference.
+func (s *Scheduler) SetSMARTMaxAgeDays(days int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.smartMaxAgeDays = days
+}
+
 // SetSpeedTestSchedule sets specific times of day to run speed tests.
 func (s *Scheduler) SetSpeedTestSchedule(times []string, day string, freq string) {
 	s.mu.Lock()
@@ -372,6 +396,26 @@ func (s *Scheduler) RunOnce() {
 	if err != nil {
 		s.logger.Error("collection failed", "error", err)
 		return
+	}
+
+	// Stale-SMART force-wake (issue #238). After the normal SMART
+	// collect pass, any drive reported as "standby" via `-n standby`
+	// whose last recorded read exceeds Settings.SMART.MaxAgeDays is
+	// force-woken for a single SMART read and merged back into the
+	// snapshot. MaxAgeDays=0 disables the feature entirely.
+	//
+	// Runs BEFORE detectDriveReplacements so the replacement logic
+	// sees fresh SMART for force-woken drives (avoids a spurious
+	// "drive missing" interpretation if a standby drive's last
+	// snapshot reported different ArraySlot metadata).
+	s.mu.RLock()
+	maxAgeDays := s.smartMaxAgeDays
+	s.mu.RUnlock()
+	if maxAgeDays > 0 {
+		staleChecker := NewStaleSMARTChecker(s.store, maxAgeDays, s.logger)
+		if stale := staleChecker.Check(snap); len(stale) > 0 {
+			staleChecker.Apply(snap, stale, s.collector.CollectSMARTForced)
+		}
 	}
 
 	// Drive replacement detection (issue #130). Runs on every scan but
