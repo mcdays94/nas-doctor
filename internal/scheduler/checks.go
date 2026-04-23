@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
+	"github.com/mcdays94/nas-doctor/internal/collector"
 	"github.com/mcdays94/nas-doctor/internal/storage"
 )
 
@@ -34,6 +35,12 @@ const defaultInterval = 300 // 5 minutes
 // inject a stub.
 type SpeedTestRunner func() *internal.SpeedTestResult
 
+// TracerouteRunner is a function that executes a traceroute (mtr) run
+// against the given target with the given probe count per hop, and
+// returns the parsed report. The default implementation delegates to
+// collector.RunMTR; tests inject a stub to avoid shelling out.
+type TracerouteRunner func(target string, cycles int) (*collector.MTRResult, error)
+
 // ServiceChecker owns execution of the 7 service check types, consecutive
 // failure tracking, and per-check interval management.
 type ServiceChecker struct {
@@ -41,7 +48,8 @@ type ServiceChecker struct {
 	logger         *slog.Logger
 	lastRun        map[string]time.Time
 	mu             sync.Mutex
-	speedTestRunFn SpeedTestRunner // nil → speed checks return "no tool"
+	speedTestRunFn SpeedTestRunner  // nil → speed checks return "no tool"
+	traceRunFn     TracerouteRunner // nil → traceroute checks report down
 	// collectDetails, when true, enriches RunCheck results with the
 	// per-check-type Details map (HTTP status code, resolved IPs, DNS
 	// records, etc.). Both the ad-hoc Test-button endpoint (#154) and
@@ -65,6 +73,18 @@ func (sc *ServiceChecker) SetSpeedTestRunner(fn SpeedTestRunner) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	sc.speedTestRunFn = fn
+}
+
+// SetTraceRunner injects a traceroute-runner function. Same pattern as
+// SetSpeedTestRunner: the scheduler's persistent ServiceChecker and the
+// ad-hoc Test-button endpoint inject collector.RunMTR (wrapped with the
+// appropriate cycle count); tests inject a stub. Nil runner causes
+// traceroute checks to report down with a descriptive error rather
+// than panicking or blocking.
+func (sc *ServiceChecker) SetTraceRunner(fn TracerouteRunner) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.traceRunFn = fn
 }
 
 // SetCollectDetails toggles rich-details output. When true, RunCheck
@@ -199,6 +219,8 @@ func (sc *ServiceChecker) RunCheck(check internal.ServiceCheckConfig, now time.T
 		sc.runPingCheck(ctx, check, &result, start, timeoutSec)
 	case internal.ServiceCheckSpeed:
 		sc.runSpeedCheck(check, &result, start)
+	case internal.ServiceCheckTraceroute:
+		sc.runTraceCheck(check, &result, start)
 	default:
 		result.Error = "unsupported service check type"
 	}
@@ -764,6 +786,98 @@ func (sc *ServiceChecker) runSpeedCheckViaRunner(runner SpeedTestRunner, check i
 	}
 }
 
+// runTraceCheck executes a type=traceroute service check via the
+// injected TracerouteRunner (typically a wrapper around
+// collector.RunMTR). Status semantics:
+//
+//   - down = final hop never responded (destination unreachable), OR
+//     the runner itself failed / was not wired up
+//   - degraded = destination reached AND end-to-end loss% exceeds the
+//     optional MaxLossPct threshold
+//   - up = destination reached AND (threshold unset OR loss ≤ threshold)
+//
+// When SetCollectDetails(true) is active the Details map is populated
+// with {hops_count, final_rtt_ms, end_to_end_loss_pct, target, hops}
+// so both the Test-button toast and the expanded log row can render
+// a hop-by-hop table. The full hops slice is stored under "hops" so
+// the UI can render a richer table on demand; scheduled runs persist
+// this via details_json (issue #182).
+func (sc *ServiceChecker) runTraceCheck(check internal.ServiceCheckConfig, result *internal.ServiceCheckResult, start time.Time) {
+	target := strings.TrimSpace(check.Target)
+	if target == "" {
+		result.Error = "empty traceroute target"
+		if result.Details != nil {
+			result.Details["failure_stage"] = "empty_target"
+		}
+		return
+	}
+
+	sc.mu.Lock()
+	runner := sc.traceRunFn
+	sc.mu.Unlock()
+	if runner == nil {
+		result.Error = "traceroute runner not available (mtr not installed)"
+		if result.Details != nil {
+			result.Details["failure_stage"] = "no_runner"
+		}
+		return
+	}
+
+	// Scheduled runs use 5 cycles (~5-10s); the Test-button carve-out
+	// in handleTestServiceCheck wraps a runner with cycles=10 for a
+	// richer sample. This path is always 5 — the injected runner's
+	// closure already captured the cycle count.
+	const scheduledCycles = 5
+	mtrResult, err := runner(target, scheduledCycles)
+	result.ResponseMS = time.Since(start).Milliseconds()
+	if err != nil {
+		result.Error = err.Error()
+		if result.Details != nil {
+			result.Details["failure_stage"] = "mtr_exec"
+		}
+		return
+	}
+	if mtrResult == nil {
+		result.Error = "traceroute produced no result"
+		if result.Details != nil {
+			result.Details["failure_stage"] = "nil_result"
+		}
+		return
+	}
+
+	if result.Details != nil {
+		result.Details["target"] = mtrResult.Target
+		if result.Details["target"] == "" {
+			result.Details["target"] = target
+		}
+		result.Details["hops_count"] = len(mtrResult.Hops)
+		result.Details["final_rtt_ms"] = mtrResult.FinalRTTMs
+		result.Details["end_to_end_loss_pct"] = mtrResult.EndToEndLossPct
+		// Full hop list for the expandable hop-by-hop table. Each
+		// entry serialises as an object with host/Avg/Loss%/etc.;
+		// the JS renderer reads them directly. Keep the slice type
+		// so Go tests can assert on it without map fiddling.
+		result.Details["hops"] = mtrResult.Hops
+	}
+
+	if !mtrResult.Reached() {
+		result.Error = fmt.Sprintf("destination unreachable (%d hops, final hop did not respond)", len(mtrResult.Hops))
+		if result.Details != nil {
+			result.Details["failure_stage"] = "unreachable"
+		}
+		return
+	}
+
+	// Reached. Apply the optional loss threshold for degraded state.
+	if check.MaxLossPct != nil && mtrResult.EndToEndLossPct > *check.MaxLossPct {
+		result.Status = "degraded"
+		result.Error = fmt.Sprintf("end-to-end loss %.1f%% exceeds threshold %.1f%%",
+			mtrResult.EndToEndLossPct, *check.MaxLossPct)
+		return
+	}
+	result.Status = "up"
+}
+
 // ── Helpers (exported so tests and future consumers can use them) ───────
 
 // IsSupportedCheckType returns true if the given check type string is a
@@ -776,7 +890,8 @@ func IsSupportedCheckType(checkType string) bool {
 		internal.ServiceCheckSMB,
 		internal.ServiceCheckNFS,
 		internal.ServiceCheckPing,
-		internal.ServiceCheckSpeed:
+		internal.ServiceCheckSpeed,
+		internal.ServiceCheckTraceroute:
 		return true
 	default:
 		return false

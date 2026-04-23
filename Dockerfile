@@ -29,7 +29,9 @@ LABEL org.opencontainers.image.title="NAS Doctor" \
 COPY --from=builder /nas-doctor /app/nas-doctor
 
 # Critical packages
-RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata curl apcupsd nut tailscale
+# Note: Alpine 3.21 ships mtr only as "mtr" (not "mtr-tiny" like Debian) — in
+# the community repo. See https://pkgs.alpinelinux.org/packages?name=mtr&branch=v3.21
+RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata curl apcupsd nut tailscale mtr
 # Optional packages (may not be available on all architectures)
 RUN apk add --no-cache hdparm iproute2 || true
 RUN apk add --no-cache dmidecode ethtool || true

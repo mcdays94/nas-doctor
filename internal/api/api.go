@@ -46,6 +46,11 @@ type Server struct {
 	// collector.RunSpeedTest (the default). Tests override this to inject
 	// deterministic results without needing the Ookla CLI.
 	speedTestRunner scheduler.SpeedTestRunner
+	// tracerouteRunner is the function invoked by handleTestServiceCheck
+	// for traceroute-type checks. Nil means the handler will fall back
+	// to collector.RunMTR. Tests override this to inject deterministic
+	// results without needing mtr installed. See issue #189.
+	tracerouteRunner scheduler.TracerouteRunner
 }
 
 // New creates a new API server.
