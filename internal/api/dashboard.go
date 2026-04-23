@@ -624,6 +624,31 @@ sections.gpu = function(sn) {
 /* ── Section: UPS ────────────────────────────────────────────── */
 sections.ups = function(sn) {
   var esc = util.esc;
+  /* Smartphone-style SVG battery glyph. Outline rect + terminal nub
+     on the right + proportional fill rect. Colour-coded per issue
+     #235: >50% green, 20-50% amber, <20% red. When charging (on AC,
+     i.e. on_battery === false) an amber lightning-bolt is overlaid
+     on top of the fill. All styles inline — theme templates
+     midnight.html and clean.html do NOT link shared.css, so any
+     class-based rule would silently not apply on the dashboard. */
+  var batteryIcon = function(pct, charging) {
+    var p = Math.max(0, Math.min(100, Number(pct) || 0));
+    var fillColor = (p > 50) ? 'var(--green)' : (p >= 20 ? 'var(--amber)' : 'var(--red)');
+    // Outline is 21 wide (x=0.5..21.5); inner fill region is 18 wide
+    // (x=2..20). 100% pct maps to 18px -- scale factor is 0.18.
+    var fillW = (p * 0.18).toFixed(2);
+    var svg = '';
+    svg += '<svg width="24" height="12" viewBox="0 0 24 12" style="vertical-align:middle;margin-right:4px" aria-hidden="true">';
+    svg += '<rect x="0.5" y="0.5" width="21" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1"/>';
+    svg += '<rect x="22" y="3.5" width="2" height="5" rx="0.5" fill="currentColor"/>';
+    svg += '<rect x="2" y="2" width="' + fillW + '" height="8" fill="' + fillColor + '"/>';
+    if (charging) {
+      // Simple lightning-bolt glyph centred inside the outline.
+      svg += '<path d="M12 2 L8 7 L11 7 L10 10 L14 5 L11 5 Z" fill="rgba(251,191,36,0.95)" stroke="rgba(0,0,0,0.4)" stroke-width="0.3"/>';
+    }
+    svg += '</svg>';
+    return svg;
+  };
   var h = '';
   h += '<div class="section-block" data-section="ups">';
   var ups = sn ? sn.ups : null;
@@ -637,7 +662,7 @@ sections.ups = function(sn) {
     h += '<span class="' + upsStateClass + '" style="font-weight:600;font-size:11px;text-transform:uppercase">' + esc(ups.status_human) + '</span>';
     h += '</div>';
     h += '<div style="display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);flex-wrap:wrap">';
-    h += '<span>Battery: <strong style="color:var(--text-primary)">' + (ups.battery_percent || 0).toFixed(0) + '%</strong></span>';
+    h += '<span style="display:inline-flex;align-items:center">' + batteryIcon(ups.battery_percent || 0, !ups.on_battery) + 'Battery: <strong style="color:var(--text-primary);margin-left:3px">' + (ups.battery_percent || 0).toFixed(0) + '%</strong></span>';
     h += '<span>Load: <strong style="color:var(--text-primary)">' + (ups.load_percent || 0).toFixed(0) + '%</strong></span>';
     h += '<span>Runtime: <strong style="color:var(--text-primary)">' + (ups.runtime_minutes || 0).toFixed(0) + ' min</strong></span>';
     if (ups.wattage_watts > 0) h += '<span>Power: <strong style="color:var(--text-primary)">' + (ups.wattage_watts || 0).toFixed(0) + 'W / ' + (ups.nominal_watts || 0).toFixed(0) + 'W</strong></span>';
