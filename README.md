@@ -67,7 +67,7 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 - **Parity** (Unraid): Historical parity check speed trend analysis, error tracking
 - **Tunnels**: Cloudflared tunnel status (connections, routes) and Tailscale peer graph (IPs, online/offline, relay, exit nodes) — detects host binaries and Docker containers
 - **Proxmox VE**: Cluster status, nodes (CPU/mem/uptime), VMs + LXCs (status, resources), storage pools, HA services, recent tasks/backups — via PVE REST API with test connection
-- **Kubernetes**: Cluster monitoring for k8s, k3s, EKS, GKE, AKS — nodes (status, disk usage, pod capacity), pods grouped by node with namespace breakdown, deployments, services, PVCs, warning events. In-cluster auto-detection + external token auth
+- **Kubernetes**: Cluster monitoring for k8s, k3s, EKS, GKE, AKS — nodes (status, disk usage, pod capacity), pods grouped by node with namespace breakdown, deployments, services, PVCs, warning events. In-cluster auto-detection + external token auth. *Tailscale detection in Kubernetes requires a sidecar pod sharing `/var/run/tailscale` via emptyDir — see [docs/tailscale-install-methods.md](docs/tailscale-install-methods.md).*
 - **OS Update Check**: Compares installed version against latest GitHub release for Unraid and TrueNAS
 
 ### Analysis Engine
@@ -140,8 +140,10 @@ is reachable from the NAS Doctor container:
 
 Automatic detection and monitoring of remote access tunnels:
 - **Cloudflared**: Tunnel status, connection count, ingress routes — detects both host binary and Docker containers
-- **Tailscale**: Full peer graph with online status, IPs, OS, relay regions, TX/RX bytes, exit node status
+- **Tailscale**: Full peer graph (online status, IPs, OS, relay regions, TX/RX bytes, exit node status) **when the host daemon socket `/var/run/tailscale` is accessible via bind-mount**. A plain-text `tailscale status` fallback captures a reduced subset (IPs, hostnames, OS, online state) when JSON output is unavailable due to CLI-daemon version skew. When the daemon is unreachable the dashboard surfaces an actionable hint explaining what to mount.
+- Docker-container detection matches `tailscale` by default; opt-in env var `NAS_DOCTOR_TAILSCALE_CONTAINER_NAMES=ts-sidecar,mullvad-ts,vpn` (comma-separated, case-insensitive substring match) extends detection to custom-named sidecars.
 - Dashboard section in all themes with status dots per tunnel/peer
+- Full coverage matrix across install methods (host binary, Docker, Kubernetes sidecar) in [docs/tailscale-install-methods.md](docs/tailscale-install-methods.md)
 
 ### Top Processes
 
@@ -236,8 +238,8 @@ services:
       - /boot:/host/boot:ro
       - /etc/unraid-version:/etc/unraid-version:ro
       - /var/local/emhttp:/var/local/emhttp:ro  # Drive slot mapping (merged drive view)
-      # Optional — only if you run Tailscale on the host (any platform):
-      - /var/run/tailscale:/var/run/tailscale:ro  # Tailscale peer detection
+      # Required IF you run Tailscale (any platform) and want the peer graph:
+      - /var/run/tailscale:/var/run/tailscale:ro  # Tailscale peer detection via host daemon socket
     devices:
       - /dev/dri:/dev/dri                  # GPU monitoring (Intel/AMD)
     environment:
@@ -283,7 +285,7 @@ Then open `http://your-nas:8060`. See platform-specific sections below for Unrai
 | Disk Slots | `/var/local/emhttp` | `/var/local/emhttp` | RO | Drive slot mapping for merged drive view |
 | Device Nodes | `/dev` | `/dev` | RO | SMART and GPU device access |
 | Sysfs | `/sys` | `/sys` | RO | GPU telemetry and drive mapping |
-| Tailscale Socket (optional) | `/var/run/tailscale` | `/var/run/tailscale` | RO | Tailscale peer detection via the `tailscale-nas-util` plugin. Leave blank if you don't use Tailscale. |
+| Tailscale Socket | `/var/run/tailscale` | `/var/run/tailscale` | RO | **Required if you use Tailscale** for peer graph detection (`tailscale-nas-util` plugin OR `network_mode: host` Tailscale container). Leave blank if you don't use Tailscale. Without this mount the dashboard surfaces an "Unreachable" hint instead of peer data. |
 
 4. Add these **variables**:
 

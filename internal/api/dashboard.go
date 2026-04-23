@@ -820,7 +820,14 @@ sections.tunnels = function(sn) {
   var h = '';
   h += '<div class="section-block" data-section="tunnels">';
   var tunnels = sn ? sn.tunnels : null;
-  if (tunnels && (tunnels.cloudflared || tunnels.tailscale)) {
+  var hasCloudflared = tunnels && tunnels.cloudflared;
+  // Issue #243: Tailscale block must render whenever the collector
+  // reported Installed=true, even if Self is nil (Unreachable /
+  // NeedsLogin / Stopped). Gating on tailscale.self silently dropped
+  // the helpful hint field the collector already emits for the
+  // common Unraid-without-socket-mount case.
+  var hasTailscale = tunnels && tunnels.tailscale && tunnels.tailscale.installed;
+  if (hasCloudflared || hasTailscale) {
     h += '<div>';
     h += '<div class="section-title">Tunnels</div>';
     h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px">';
@@ -837,20 +844,46 @@ sections.tunnels = function(sn) {
         h += '</div>';
       }
     }
-    if (tunnels.tailscale && tunnels.tailscale.self) {
+    if (hasTailscale) {
       var ts = tunnels.tailscale;
-      h += '<div style="font-size:11px;color:var(--text-quaternary);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.5px">Tailscale ' + esc(ts.version || '') + (ts.tailnet_name ? ' &middot; ' + esc(ts.tailnet_name) : '') + '</div>';
-      var allNodes = [ts.self].concat(ts.peers || []);
-      for (var ni = 0; ni < allNodes.length; ni++) {
-        var nd = allNodes[ni];
-        var ndColor = nd.online ? 'var(--green)' : 'var(--text-quaternary)';
-        h += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">';
-        h += '<span style="width:8px;height:8px;border-radius:50%;background:' + ndColor + ';flex-shrink:0"></span>';
-        h += '<span style="font-weight:600;min-width:80px">' + esc(nd.name) + '</span>';
-        h += '<span style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);min-width:90px">' + esc(nd.ip || '') + '</span>';
-        h += '<span style="font-size:11px;color:var(--text-quaternary)">' + esc(nd.os || '') + '</span>';
-        if (ni === 0) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.15);color:var(--accent)">self</span>';
-        if (nd.exit_node) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(217,119,6,0.15);color:var(--amber)">exit node</span>';
+      // Backend-state chip: only shown when != Running. Covers
+      // Unreachable, NeedsLogin, Stopped — anything the operator
+      // should see at a glance.
+      var stateChip = '';
+      if (ts.backend_state && ts.backend_state !== 'Running') {
+        var chipColor = ts.backend_state === 'Unreachable' || ts.backend_state === 'Stopped' ? 'var(--red)' : 'var(--amber)';
+        stateChip = ' <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(217,119,6,0.15);color:' + chipColor + ';text-transform:none;letter-spacing:0">' + esc(ts.backend_state) + '</span>';
+      }
+      h += '<div style="font-size:11px;color:var(--text-quaternary);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.5px">Tailscale ' + esc(ts.version || '') + (ts.tailnet_name ? ' &middot; ' + esc(ts.tailnet_name) : '') + stateChip + '</div>';
+      if (ts.self) {
+        // Happy path — unchanged peer graph render.
+        var allNodes = [ts.self].concat(ts.peers || []);
+        for (var ni = 0; ni < allNodes.length; ni++) {
+          var nd = allNodes[ni];
+          var ndColor = nd.online ? 'var(--green)' : 'var(--text-quaternary)';
+          h += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">';
+          h += '<span style="width:8px;height:8px;border-radius:50%;background:' + ndColor + ';flex-shrink:0"></span>';
+          h += '<span style="font-weight:600;min-width:80px">' + esc(nd.name) + '</span>';
+          h += '<span style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);min-width:90px">' + esc(nd.ip || '') + '</span>';
+          h += '<span style="font-size:11px;color:var(--text-quaternary)">' + esc(nd.os || '') + '</span>';
+          if (ni === 0) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.15);color:var(--accent)">self</span>';
+          if (nd.exit_node) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(217,119,6,0.15);color:var(--amber)">exit node</span>';
+          h += '</div>';
+        }
+      } else if (ts.hint) {
+        // Hint path — daemon unreachable or detection partial.
+        // Render the collector-supplied hint so the operator gets
+        // actionable guidance instead of an empty card.
+        h += '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;font-size:12px;color:var(--text-tertiary);line-height:1.45">';
+        h += '<span style="width:8px;height:8px;border-radius:50%;background:var(--amber);flex-shrink:0;margin-top:5px"></span>';
+        h += '<span>' + esc(ts.hint) + '</span>';
+        h += '</div>';
+      } else {
+        // Empty path — installed but nothing to show and no hint.
+        // Minimal row so the operator sees detection ran.
+        h += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;color:var(--text-tertiary)">';
+        h += '<span style="width:8px;height:8px;border-radius:50%;background:var(--text-quaternary);flex-shrink:0"></span>';
+        h += '<span>Tailscale installed, no peers reported.</span>';
         h += '</div>';
       }
     }
