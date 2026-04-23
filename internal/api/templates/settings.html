@@ -63,6 +63,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <a href="#card-replacement-cost" class="btn btn-secondary btn-sm" style="text-decoration:none">Replacement Cost</a>
     <a href="#card-speedtest" class="btn btn-secondary btn-sm" style="text-decoration:none">Speed Test</a>
     <a href="#card-backup" class="btn btn-secondary btn-sm" style="text-decoration:none">Backup</a>
+    <a href="#card-advanced-scans" class="btn btn-secondary btn-sm" style="text-decoration:none">Advanced Scans</a>
     <a href="#card-advanced" class="btn btn-secondary btn-sm" style="text-decoration:none">Advanced</a>
   </div>
 
@@ -887,13 +888,15 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     </div>
   </div>
 
-  <!-- 9. Advanced -->
-  <div class="card" id="card-advanced">
-    <div class="card-title">Advanced</div>
-    <div class="card-desc">Expert-only knobs. Defaults are safe — only change these if you understand the trade-offs.</div>
-    <details style="margin-top:8px">
-      <summary style="cursor:pointer;padding:6px 0;font-weight:600;font-size:13px;color:var(--text)">Show advanced options</summary>
+  <!-- 9. Advanced Scan Settings (#237) -->
+  <div class="card" id="card-advanced-scans">
+    <div class="card-title">Advanced Scan Settings</div>
+    <div class="card-desc">Fine-grained control over how NAS Doctor schedules SMART reads and related scans. Defaults are safe — change only if you understand the trade-offs.</div>
+    <details style="margin-top:8px" open>
+      <summary style="cursor:pointer;padding:6px 0;font-weight:600;font-size:13px;color:var(--text)">Show scan-policy options</summary>
       <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+
+        <!-- Wake drives for SMART check (moved from legacy Advanced card, #198) -->
         <div class="toggle-wrap">
           <div class="toggle" id="wake-drives-for-smart" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
           <span class="toggle-label">Wake drives for SMART check</span>
@@ -904,7 +907,33 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           At the default 30-min scan interval, that's roughly 48 extra spin-ups per drive per day.
           Only enable if your drives never spin down, or if you deliberately need every-cycle SMART monitoring and accept the wear cost.
         </p>
+
+        <!-- Max days without SMART read (#237 schema; #238 wires into the scheduler) -->
         <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+          <label for="smart-max-age-days" style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Max days without SMART read</label>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="number" id="smart-max-age-days" min="0" max="30" step="1" value="7" onchange="saveSettings()" style="width:80px;text-align:center">
+            <span style="font-size:12px;color:var(--text2)">days (0 = never force wake)</span>
+          </div>
+          <p style="font-size:12px;color:var(--text2);margin-top:8px;line-height:1.5">
+            If a drive stays in standby longer than this many days without a successful SMART read, NAS Doctor will force one wake-up to refresh SMART data.
+            Lower values keep SMART data fresher at the cost of more spin-ups; higher values reduce wear but let drives go longer unobserved.
+            Set to <strong>0</strong> to <strong>disable</strong> the safety net entirely — SMART will never force a wake-up (v0.9.5 behaviour).
+            Valid range 0&ndash;30.
+          </p>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <!-- 10. Advanced -->
+  <div class="card" id="card-advanced">
+    <div class="card-title">Advanced</div>
+    <div class="card-desc">Expert-only knobs. Defaults are safe — only change these if you understand the trade-offs.</div>
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;padding:6px 0;font-weight:600;font-size:13px;color:var(--text)">Show advanced options</summary>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+        <div>
           <div style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Hide Docker containers from dashboard</div>
           <p style="font-size:12px;color:var(--text2);margin-top:4px;margin-bottom:10px;line-height:1.5">
             Tick the containers you want hidden from the <strong>Docker Containers section</strong>.
@@ -1217,10 +1246,22 @@ function loadSettings() {
       /* Drive replacement cost per TB */
       var costEl = document.getElementById("cost-per-tb");
       if (costEl) costEl.value = (data.cost_per_tb && data.cost_per_tb > 0) ? data.cost_per_tb : "";
-      /* Advanced: wake drives for SMART (#198) */
+      /* Advanced Scan Settings (#237): SMART sub-struct. Reads
+         smart.wake_drives and smart.max_age_days from the server's
+         nested schema. Falls back to the legacy flat
+         wake_drives_for_smart field if the server hasn't migrated yet
+         (defensive — getSettings migrates on first read). */
+      var smartCfg = (data && data.smart) || {};
       var wakeEl = document.getElementById("wake-drives-for-smart");
       if (wakeEl) {
-        if (data.wake_drives_for_smart) wakeEl.classList.add("on"); else wakeEl.classList.remove("on");
+        var wakeVal = (smartCfg.wake_drives !== undefined) ? !!smartCfg.wake_drives : !!data.wake_drives_for_smart;
+        if (wakeVal) wakeEl.classList.add("on"); else wakeEl.classList.remove("on");
+      }
+      var maxAgeEl = document.getElementById("smart-max-age-days");
+      if (maxAgeEl) {
+        var maxAgeVal = (smartCfg.max_age_days !== undefined) ? parseInt(smartCfg.max_age_days, 10) : 7;
+        if (isNaN(maxAgeVal)) maxAgeVal = 7;
+        maxAgeEl.value = maxAgeVal;
       }
       /* Advanced: hide Docker containers from dashboard (#204) */
       var hidden = Array.isArray(data.docker_hidden_containers) ? data.docker_hidden_containers : [];
@@ -1337,7 +1378,17 @@ function buildSettingsPayload() {
     fleet: fleetServers || base.fleet || [],
     dismissed_findings: base.dismissed_findings || [],
     cost_per_tb: parseFloat(document.getElementById("cost-per-tb") && document.getElementById("cost-per-tb").value) || 0,
-    wake_drives_for_smart: !!(document.getElementById("wake-drives-for-smart") && document.getElementById("wake-drives-for-smart").classList.contains("on")),
+    smart: {
+      wake_drives: !!(document.getElementById("wake-drives-for-smart") && document.getElementById("wake-drives-for-smart").classList.contains("on")),
+      max_age_days: (function() {
+        var el = document.getElementById("smart-max-age-days");
+        if (!el) return 7;
+        var v = parseInt(el.value, 10);
+        if (isNaN(v) || v < 0) return 0;
+        if (v > 30) return 30;
+        return v;
+      })()
+    },
     docker_hidden_containers: collectCheckedHiddenContainers()
   };
 }
