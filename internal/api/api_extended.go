@@ -837,6 +837,18 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		settings.Retention.NotifyLogDays = 30
 	}
 
+	// Preserve settings_version. A client payload that omits the field
+	// unmarshals to SettingsVersion==0 and the unfiltered Marshal below
+	// would persist it verbatim, permanently downgrading the record
+	// and re-triggering the v1->v2 migration on every subsequent
+	// getSettings() — which silently reset smart.max_age_days back to
+	// 7 and smart.wake_drives to false. Clamp to currentSettingsVersion
+	// so both "no field sent" and "explicit downgrade attempt" cannot
+	// corrupt the stored version.
+	if settings.SettingsVersion < currentSettingsVersion {
+		settings.SettingsVersion = currentSettingsVersion
+	}
+
 	// Persist
 	data, err := json.Marshal(settings)
 	if err != nil {
