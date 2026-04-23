@@ -14,8 +14,8 @@ interface Env {
   DEMO_DATA: KVNamespace;
 }
 
-const PLATFORMS = ["unraid", "synology", "truenas", "proxmox", "kubernetes"] as const;
-type Platform = (typeof PLATFORMS)[number];
+export const PLATFORMS = ["unraid", "synology", "truenas", "proxmox", "kubernetes"] as const;
+export type Platform = (typeof PLATFORMS)[number];
 
 const ENDPOINTS = [
   "status", "snapshot", "sparklines", "fleet", "service_checks",
@@ -25,7 +25,7 @@ const ENDPOINTS = [
 ];
 
 // ── Platform profiles: define what makes each platform unique ──
-interface PlatformProfile {
+export interface PlatformProfile {
   hostname: string;
   platformName: string;
   cpuModel: string;
@@ -43,7 +43,7 @@ interface PlatformProfile {
   containers: { name: string; image: string; state: string; cpu: number; mem: number }[];
 }
 
-const PROFILES: Record<Platform, PlatformProfile> = {
+export const PROFILES: Record<Platform, PlatformProfile> = {
   unraid: {
     hostname: "unraid-tower", platformName: "Unraid 7.0.1", cpuModel: "AMD Ryzen 9 5950X", cpuCores: 16, ramGB: 64, uptimeDays: 30,
     hasZFS: false, hasUPS: true, hasParity: true, hasProxmox: false, hasKubernetes: false, hasTunnels: true, hasGPU: true,
@@ -262,7 +262,7 @@ function transformSettings(d: Record<string, unknown>, p: PlatformProfile): Reco
   };
 }
 
-function transformSnapshot(d: Record<string, unknown>, p: PlatformProfile, platform: Platform): Record<string, unknown> {
+export function transformSnapshot(d: Record<string, unknown>, p: PlatformProfile, platform: Platform): Record<string, unknown> {
   const df = dayFactor();
 
   // System
