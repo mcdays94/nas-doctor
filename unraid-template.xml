@@ -32,7 +32,7 @@ Features:
 - Data lifecycle management (retention policies, DB size cap)
 - Dashboard section visibility toggles and multi-column layout
   </Overview>
-  <Category>Tools: Monitoring Status:Stable</Category>
+  <Category>Tools: Status:Stable</Category>
   <WebUI>http://[IP]:[PORT:8060]</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/mcdays94/nas-doctor/main/unraid-template.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/mcdays94/nas-doctor/main/icons/icon3.png</Icon>
