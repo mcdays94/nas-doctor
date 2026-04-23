@@ -104,6 +104,31 @@ util.pillClass = function(t) {
   return "pill-http";
 };
 
+/* Issue #227 — render a prominent warning banner when the server
+   reports that /data is not a real bind-mount. The server sets
+   data_ephemeral=true on /api/v1/status when /data shares a device
+   id with /, which means the SQLite DB lives on the container's
+   overlay fs and is silently wiped on every container recreation.
+
+   The banner's CSS hook (class=ephemeral-data-banner plus the
+   data-ephemeral-banner data-attribute) is referenced by a paired
+   test (TestThemeTemplates_StyleEphemeralBanner) that enforces both
+   dashboard theme templates inline matching CSS rules. Dashboard
+   theme templates do NOT link /css/shared.css, so the rule MUST be
+   inlined in each theme — AGENTS.md calls this the two-axis test
+   pattern. */
+util.ephemeralDataBanner = function(st) {
+  if (!st || !st.data_ephemeral) return "";
+  var h = "";
+  h += '<div class="ephemeral-data-banner fade-in" data-ephemeral-banner role="alert">';
+  h += '<strong>&#9888; /data is not a persistent bind-mount.</strong> ';
+  h += 'History, settings, and the SQLite database will be lost on every container recreation. ';
+  h += 'Map a host path (e.g. <code>/mnt/user/appdata/nas-doctor</code>) to <code>/data</code> in your container configuration. ';
+  h += '<a href="https://github.com/mcdays94/nas-doctor#quick-start" target="_blank" rel="noopener">See the README for bind-mount setup &rarr;</a>';
+  h += '</div>';
+  return h;
+};
+
 /* ── Polling ───────────────────────────────────────────────────── */
 var polling = {};
 var _pollTimer = null;

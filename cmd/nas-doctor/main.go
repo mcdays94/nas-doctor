@@ -91,6 +91,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Issue #227 — detect the "/data is not bind-mounted" footgun at startup.
+	// Runs only in production (demo mode writes to a tmpfs path by default
+	// and we don't want to scold users previewing the dashboard).
+	dataPersistent := true
+	if !*demoMode {
+		dataPersistent = warnIfDataEphemeral(logger, cfg.DataDir)
+	}
+
 	// Open database
 	dbPath := filepath.Join(cfg.DataDir, "nas-doctor.db")
 	store, err := storage.Open(dbPath, logger)
@@ -397,6 +405,7 @@ func main() {
 
 	// Create API server
 	apiServer := api.New(store, sched, coll, metrics, fleetMgr, logger, version)
+	apiServer.SetDataPersistent(dataPersistent)
 
 	// HTTP server
 	srv := &http.Server{

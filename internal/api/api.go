@@ -51,6 +51,25 @@ type Server struct {
 	// to collector.RunMTR. Tests override this to inject deterministic
 	// results without needing mtr installed. See issue #189.
 	tracerouteRunner scheduler.TracerouteRunner
+	// dataEphemeral is set at startup from cmd/nas-doctor/main.go via
+	// SetDataPersistent. When true, the /api/v1/status response carries
+	// data_ephemeral=true so the dashboard renders a loud banner telling
+	// the user their /data mount is actually on the container's overlay
+	// filesystem and will be wiped on every recreation. The field is
+	// stored in its user-visible polarity (ephemeral=bad) so the zero
+	// value is the safe default — bare Servers in tests and demo mode
+	// don't scare users with a false-positive banner. See #227.
+	dataEphemeral bool
+}
+
+// SetDataPersistent records whether /data resolved to a real bind-mount
+// at startup. main.go runs the check via cmd/nas-doctor.warnIfDataEphemeral
+// and calls this before wiring the router. When persistent=false,
+// /api/v1/status exposes data_ephemeral=true and the dashboard shows a
+// red banner pointing the user at the container bind-mount they need to
+// fix. #227.
+func (s *Server) SetDataPersistent(persistent bool) {
+	s.dataEphemeral = !persistent
 }
 
 // New creates a new API server.
@@ -64,6 +83,9 @@ func New(store storage.Store, sched *scheduler.Scheduler, coll *collector.Collec
 		logger:    logger,
 		version:   version,
 		startTime: time.Now(),
+		// dataEphemeral defaults to the zero value (false = persistent).
+		// main.go overrides via SetDataPersistent once the startup check
+		// has run. Safe default: no false-positive banner. #227
 	}
 }
 
@@ -231,10 +253,22 @@ type statusResponse struct {
 	SectionHeights    map[string]int      `json:"section_heights,omitempty"`
 	SectionOrder      map[string][]string `json:"section_order,omitempty"`
 	DismissedFindings []string            `json:"dismissed_findings,omitempty"`
+	// DataEphemeral is true when /data resolved to the same device as /
+	// at startup, meaning the SQLite DB lives on the container's overlay
+	// filesystem and will be wiped on every container recreation. The
+	// dashboard renders a warning banner when this is true. Absent
+	// (omitempty) on the happy path so unrelated consumers of the status
+	// endpoint don't need to care. Issue #227.
+	DataEphemeral bool `json:"data_ephemeral,omitempty"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp := statusResponse{Version: s.version}
+	// Surface the startup persistence check to the dashboard (#227).
+	// dataEphemeral defaults to the zero value (false = persistent)
+	// so bare Servers in tests/demo mode don't render a false-positive
+	// banner. main.go sets it via SetDataPersistent at startup.
+	resp.DataEphemeral = s.dataEphemeral
 	settings := s.getSettings()
 	dismissed := make(map[string]struct{}, len(settings.DismissedFindings))
 	for _, title := range settings.DismissedFindings {
