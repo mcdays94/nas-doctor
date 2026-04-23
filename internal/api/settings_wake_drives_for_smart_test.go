@@ -14,8 +14,10 @@ import (
 
 // TestSettingsHTMLIncludesWakeDrivesForSMARTToggle verifies the settings
 // template ships the wake-drives toggle + disclaimer required by issue #198.
-// Since #237 the toggle lives inside the new "Advanced Scan Settings"
-// card (id="card-advanced-scans"), not the legacy generic Advanced card.
+// Originally (pre-#237) the toggle lived directly inside the generic
+// Advanced card. #237 moved it out to a dedicated "Advanced Scan Settings"
+// card; #256 merged it back into the generic Advanced card (id="card-advanced")
+// after UAT flagged the two-card split as clutter.
 //
 // This is a cross-reference test: it confirms the HTML mentions every
 // symbol the JS load/save wiring expects, so a future refactor that
@@ -32,10 +34,10 @@ func TestSettingsHTMLIncludesWakeDrivesForSMARTToggle(t *testing.T) {
 		name   string
 		substr string
 	}{
-		// New Advanced Scan Settings card anchor (#237).
-		{"advanced scans card anchor", `id="card-advanced-scans"`},
-		// Section nav link to the new card.
-		{"advanced scans nav link", `href="#card-advanced-scans"`},
+		// Generic Advanced card anchor (post-#256 home).
+		{"advanced card anchor", `id="card-advanced"`},
+		// Section nav link to the Advanced card.
+		{"advanced nav link", `href="#card-advanced"`},
 		// Disclosure element — using <details>/<summary> per the issue's
 		// guidance (no extra JS needed).
 		{"details element", `<details`},
