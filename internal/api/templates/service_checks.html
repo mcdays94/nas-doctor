@@ -304,7 +304,7 @@
     }
     return out;
   }
-  function pillClass(t){t=(t||"").toLowerCase();if(t==="http")return"pill-http";if(t==="tcp")return"pill-tcp";if(t==="dns")return"pill-dns";if(t==="ping")return"pill-ping";if(t==="smb"||t==="nfs")return"pill-smb";if(t==="speed")return"pill-speed";if(t==="traceroute")return"pill-trace";return"pill-http";}
+  function pillClass(t){t=(t||"").toLowerCase();if(t==="http")return"pill-http";if(t==="tcp")return"pill-tcp";if(t==="dns")return"pill-dns";if(t==="ping")return"pill-ping";if(t==="smb")return"pill-smb";if(t==="nfs")return"pill-nfs";if(t==="speed")return"pill-speed";if(t==="traceroute")return"pill-trace";return"pill-http";}
   function fmtInterval(sec){if(sec<60)return sec+"s";if(sec<3600)return Math.floor(sec/60)+"m";return Math.floor(sec/3600)+"h";}
   function faviconHTML(type,target){
     if((type||"").toLowerCase()!=="http")return"";
