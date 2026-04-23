@@ -202,11 +202,28 @@ const (
 )
 
 type ServiceCheckConfig struct {
-	Name             string            `json:"name"`
-	Type             string            `json:"type"`
-	Target           string            `json:"target"`
-	Enabled          bool              `json:"enabled"`
-	Instance         string            `json:"instance,omitempty"`     // fleet server ID; empty = local
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Target  string `json:"target"`
+	Enabled bool   `json:"enabled"`
+	// Instance is the fleet server ID this check is "associated with"
+	// (empty = local instance). Currently decorative UI metadata ONLY —
+	// the scheduler's RunDueChecks / RunCheck dispatch does not filter
+	// on Instance, so every check runs on whichever NAS Doctor instance
+	// owns the configuration (the one whose scheduler picked it up).
+	//
+	// Fleet aggregation works by each peer independently running its
+	// own checks and the hub reading pre-computed results from peer
+	// snapshots (see internal/fleet/fleet.go) — NOT by remote
+	// dispatch. A check marked Instance=X running on the local
+	// instance therefore still reads local state (speedtest_history,
+	// DNS resolvers, TCP routes, etc.) rather than exercising X.
+	//
+	// This is a known limitation tracked in #215. Proper fleet-aware
+	// dispatch would require a real fleet-target API call on the
+	// owning scheduler and is worth doing alongside #205 (Uptime
+	// Kuma federation) — both need the same primitive.
+	Instance         string            `json:"instance,omitempty"`
 	IntervalSec      int               `json:"interval_sec,omitempty"` // Per-check interval in seconds (default 300 = 5min)
 	TimeoutSec       int               `json:"timeout_sec,omitempty"`
 	Port             int               `json:"port,omitempty"`

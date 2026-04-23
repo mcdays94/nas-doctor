@@ -546,9 +546,14 @@ func extractPacketLossPercent(out string) float64 {
 // This is the shape of the default shipped "Internet Speed" check —
 // a heartbeat that fires only when the speed test itself fails.
 //
-// TODO(#215): fleet-instance targeting reads local speedtest_history only.
-// A fleet-targeted speed check should read the remote peer's history via
-// the fleet API. Tracked separately.
+// Fleet-instance targeting (check.Instance) is not honoured by any
+// service-check type — the field is currently decorative UI metadata
+// only. The "read local history" behaviour here is therefore
+// consistent with every other check type, not unique to speed. See
+// ServiceCheckConfig.Instance docs in internal/models.go and #215
+// for the broader story (proper fleet-aware dispatch is worth doing
+// alongside #205 — Uptime Kuma federation — which needs the same
+// primitives).
 //
 // Test-button carve-out: the /api/v1/service-checks/test endpoint
 // (handleTestServiceCheck) builds a fresh ServiceChecker and injects
