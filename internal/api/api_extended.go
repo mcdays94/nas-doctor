@@ -50,11 +50,13 @@ type Settings struct {
 	SectionHeights    map[string]int          `json:"section_heights,omitempty"` // Persisted section resize heights (section name → px)
 	SectionOrder      map[string][]string     `json:"section_order,omitempty"`   // Persisted drag-and-drop column order ({"cols": [["findings","docker"], ...]})
 
-	// WakeDrivesForSMART, when true, opts back into pre-v0.9.5 behaviour of
-	// reading SMART from spun-down drives each scan cycle (waking them).
-	// Default (false) is standby-aware: smartctl runs with `-n standby` and
-	// skips sleeping drives. See issue #198.
-	WakeDrivesForSMART bool `json:"wake_drives_for_smart,omitempty"`
+	// SMART holds the SMART-scan policy knobs surfaced under
+	// "Advanced Scan Settings" in the settings UI. Prior to schema
+	// v2 the only knob here (WakeDrives) lived at the top level of
+	// Settings as `wake_drives_for_smart`; the v1→v2 migration in
+	// getSettings() lifts that value into SMART.WakeDrives. See
+	// issues #236 (PRD) and #237 (this slice).
+	SMART SMARTSettings `json:"smart"`
 
 	// DockerHiddenContainers is a list of container names that should be
 	// omitted from the Docker Containers dashboard section. Exact-match
@@ -65,7 +67,29 @@ type Settings struct {
 	DockerHiddenContainers []string `json:"docker_hidden_containers,omitempty"`
 }
 
-const currentSettingsVersion = 1
+// SMARTSettings groups SMART-scan policy. Added in schema v2 (#237).
+type SMARTSettings struct {
+	// WakeDrives, when true, opts back into pre-v0.9.5 behaviour of
+	// reading SMART from spun-down drives each scan cycle (waking
+	// them). Default (false) is standby-aware: smartctl runs with
+	// `-n standby` and skips sleeping drives. See issue #198.
+	WakeDrives bool `json:"wake_drives"`
+
+	// MaxAgeDays bounds how long a drive may remain unread by SMART
+	// before the scheduler forces one wake-up to refresh SMART data.
+	// Default 7. Valid range 0-30. A value of 0 disables the
+	// safety-net entirely (preserves exact v0.9.5 behaviour). The
+	// scheduler does NOT yet consume this value — slice 1a (#237)
+	// only persists it; slice 1b (#238) wires it into the scan loop.
+	MaxAgeDays int `json:"max_age_days"`
+}
+
+// SMARTMaxAgeDaysMax is the upper bound on Settings.SMART.MaxAgeDays.
+// A value of 0 disables the safety-net; values 1-30 are valid.
+// Enforced in handleUpdateSettings and in the UI input element.
+const SMARTMaxAgeDaysMax = 30
+
+const currentSettingsVersion = 2
 
 // DashboardSections controls which sections appear on the dashboard.
 // All default to true (visible). Users can hide sections they don't use.
@@ -279,6 +303,10 @@ func defaultSettings() Settings {
 			DashColumns: 3,
 		},
 		ChartRangeHours: 1,
+		SMART: SMARTSettings{
+			WakeDrives: false,
+			MaxAgeDays: 7,
+		},
 	}
 }
 
@@ -884,9 +912,10 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			InCluster: settings.Kubernetes.InCluster,
 		})
 
-		// Update SMART config on the collector (#198)
+		// Update SMART config on the collector (#198, nested under
+		// Settings.SMART since schema v2 — see #237).
 		s.collector.SetSMARTConfig(collector.SMARTConfig{
-			WakeDrives: settings.WakeDrivesForSMART,
+			WakeDrives: settings.SMART.WakeDrives,
 		})
 
 		// Update log forwarding
@@ -1100,19 +1129,63 @@ func (s *Server) handleListBackups(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getSettings() Settings {
 	settings := defaultSettings()
 	if raw, err := s.store.GetConfig(settingsConfigKey); err == nil && raw != "" {
-		json.Unmarshal([]byte(raw), &settings)
+		settings = migrateSettings([]byte(raw), settings)
 		if settings.SettingsVersion < currentSettingsVersion {
-			// v0 → v1: merged_drives defaults to true
-			if settings.SettingsVersion < 1 {
-				settings.Sections.MergedDrives = true
-			}
 			settings.SettingsVersion = currentSettingsVersion
-			if data, err := json.Marshal(settings); err == nil {
-				s.store.SetConfig(settingsConfigKey, string(data))
-			}
+		}
+		// Persist the migrated blob so downstream reads skip the
+		// migration path. Only write if we actually had to migrate
+		// (cheap no-op when raw was already v2-shaped).
+		if data, err := json.Marshal(settings); err == nil {
+			s.store.SetConfig(settingsConfigKey, string(data))
 		}
 	}
 	return settings
+}
+
+// migrateSettings unmarshals a stored settings blob on top of the given
+// defaults struct and applies any one-time migrations required to reach
+// currentSettingsVersion. It does NOT persist — the caller owns that.
+//
+// Migration ladder:
+//
+//   - v0 → v1: sections.merged_drives defaults to true (historical)
+//   - v1 → v2: lift legacy top-level wake_drives_for_smart into
+//     Settings.SMART.WakeDrives; seed Settings.SMART.MaxAgeDays = 7
+//     for upgraders that never had the field (#236/#237).
+//
+// The function is idempotent: running it against an already-v2 blob
+// preserves the persisted smart.wake_drives / smart.max_age_days
+// values verbatim (the legacy field shim is only consulted when the
+// stored schema version is below 2).
+func migrateSettings(raw []byte, base Settings) Settings {
+	// Note: json.Unmarshal onto base preserves default field values
+	// when the incoming JSON omits them — critical for SMART.MaxAgeDays
+	// since old blobs will not contain smart.max_age_days at all.
+	_ = json.Unmarshal(raw, &base)
+
+	if base.SettingsVersion < 1 {
+		base.Sections.MergedDrives = true
+	}
+
+	if base.SettingsVersion < 2 {
+		// Legacy shim: v1 stored WakeDrives at the top level. Unmarshal
+		// a second time into a shadow struct to recover that field.
+		var legacy struct {
+			WakeDrivesForSMART bool `json:"wake_drives_for_smart"`
+		}
+		_ = json.Unmarshal(raw, &legacy)
+		base.SMART.WakeDrives = legacy.WakeDrivesForSMART
+		// Every upgrader lands on the default 7-day ceiling regardless
+		// of whether the raw blob carries a smart.max_age_days value
+		// (it can't — the field didn't exist before v2). PRD #236 user
+		// story 2: the safety net opts in by default on upgrade.
+		if base.SMART.MaxAgeDays == 0 {
+			base.SMART.MaxAgeDays = 7
+		}
+	}
+
+	return base
 }
 
 func (s *Server) buildNotifier(webhooks []internal.WebhookConfig) *notifier.Notifier {
