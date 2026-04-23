@@ -59,6 +59,14 @@ type Snapshot struct {
 	SpeedTest  *SpeedTestInfo       `json:"speed_test,omitempty"`
 	Services   []ServiceCheckResult `json:"service_checks,omitempty"`
 	Findings   []Finding            `json:"findings"`
+
+	// SMARTStandbyDevices lists devices that were in standby during this
+	// scan's SMART collect pass (i.e. `-n standby` skipped them). The
+	// scheduler's StaleSMARTChecker (issue #238) uses this list to
+	// decide which drives to force-wake when Settings.SMART.MaxAgeDays
+	// has been exceeded. Persisted so historical snapshots retain an
+	// accurate "which drives were asleep at this point" audit trail.
+	SMARTStandbyDevices []string `json:"smart_standby_devices,omitempty"`
 }
 
 // ---------- Proxmox VE ----------

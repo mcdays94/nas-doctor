@@ -70,10 +70,13 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 
 	// SMART data
 	c.logger.Info("collecting SMART data", "wake_drives", c.smartConfig.WakeDrives)
-	smart, err := collectSMART(c.smartConfig, c.logger)
+	smart, standbyDevices, err := collectSMART(c.smartConfig, c.logger)
 	if err != nil {
 		c.logger.Warn("SMART collection partial failure", "error", err)
 	}
+	// Issue #238: surface standby device list to the scheduler so the
+	// StaleSMARTChecker can evaluate max-age and force-wake if overdue.
+	snap.SMARTStandbyDevices = standbyDevices
 	// Enrich SMART data with Unraid array slot mapping (md -> physical device)
 	if smart != nil && sys.Platform == "unraid" {
 		mdMap := buildMDToPhysicalMap() // "sdb" -> "1" (for /mnt/disk1)
@@ -213,6 +216,15 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 	snap.Duration = time.Since(start).Seconds()
 	c.logger.Info("collection complete", "duration", fmt.Sprintf("%.1fs", snap.Duration))
 	return snap, nil
+}
+
+// CollectSMARTForced reads SMART for the given devices without the
+// `-n standby` guard. Used by the scheduler's StaleSMARTChecker (issue
+// #238) as the seam for the force-wake path. Thin wrapper around the
+// package-level function so the scheduler doesn't need to import
+// collector internals directly.
+func (c *Collector) CollectSMARTForced(devices []string) ([]internal.SMARTInfo, error) {
+	return CollectSMARTForced(devices, c.logger)
 }
 
 // CollectDockerStats runs a lightweight Docker stats collection (no full scan).

@@ -63,6 +63,11 @@ type ServiceCheckStore interface {
 type HistoryStore interface {
 	GetDiskHistory(serial string, limit int) ([]DiskHistoryPoint, error)
 	GetDiskHistoryInRange(serial string, window time.Duration) ([]DiskHistoryPoint, error)
+	// GetLastSMARTCollectedAt returns the latest smart_history.timestamp
+	// for the given device and a found flag. Used by the scheduler's
+	// StaleSMARTChecker (issue #238) to decide whether to force-wake a
+	// drive that has been in standby longer than Settings.SMART.MaxAgeDays.
+	GetLastSMARTCollectedAt(device string) (time.Time, bool, error)
 	GetAvgTempDuringRange(start, end time.Time) (float64, float64, error)
 	ListDisks() ([]DiskSummary, error)
 	GetAllDiskSparklines(pointsPerDisk int) ([]DiskSparklines, error)

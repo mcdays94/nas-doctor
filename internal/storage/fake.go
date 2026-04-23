@@ -418,6 +418,14 @@ func (f *FakeStore) GetDiskHistoryInRange(_ string, _ time.Duration) ([]DiskHist
 	return nil, nil
 }
 
+// GetLastSMARTCollectedAt satisfies HistoryStore so *FakeStore keeps
+// satisfying the Store composite. The real scheduler tests construct
+// dedicated mocks rather than poking at this FakeStore (see
+// internal/scheduler/stale_smart_test.go).
+func (f *FakeStore) GetLastSMARTCollectedAt(_ string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
 func (f *FakeStore) GetAvgTempDuringRange(_, _ time.Time) (float64, float64, error) {
 	// TODO: implement for testing
 	return 0, 0, nil

@@ -2193,6 +2193,39 @@ func (d *DB) GetDiskHistoryInRange(serial string, window time.Duration) ([]DiskH
 	return points, rows.Err()
 }
 
+// GetLastSMARTCollectedAt returns the most recent smart_history.timestamp
+// for the given device and a found flag. Used by the scheduler's
+// StaleSMARTChecker (issue #238) to decide whether a drive in standby is
+// overdue for a SMART read.
+//
+// Returns:
+//   - (ts, true, nil)          — device has at least one smart_history row
+//   - (time.Time{}, false, nil) — device has no smart_history rows (new drive)
+//   - (time.Time{}, false, err) — query failed
+//
+// Uses idx_smart_history_device (device, timestamp DESC) so the
+// ORDER BY ... LIMIT 1 form is an index seek, not a table scan. We
+// prefer that over MAX() because the modernc.org/sqlite driver only
+// applies timestamp affinity to bare column scans — MAX() returns a
+// string that would fail to scan into a time.Time.
+func (d *DB) GetLastSMARTCollectedAt(device string) (time.Time, bool, error) {
+	var ts time.Time
+	err := d.db.QueryRow(
+		`SELECT timestamp FROM smart_history
+		 WHERE device = ?
+		 ORDER BY timestamp DESC
+		 LIMIT 1`,
+		device,
+	).Scan(&ts)
+	if err == sql.ErrNoRows {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return ts, true, nil
+}
+
 // ---------- System history ----------
 
 // SystemHistoryPoint represents a single system metrics data point.

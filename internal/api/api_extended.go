@@ -929,6 +929,10 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		s.collector.SetSMARTConfig(collector.SMARTConfig{
 			WakeDrives: settings.SMART.WakeDrives,
 		})
+		// Update the max-age safety-net threshold on the scheduler
+		// (#238). The scheduler owns this policy (the collector stays
+		// DB-unaware) and applies it after each scan's Collect().
+		s.scheduler.SetSMARTMaxAgeDays(settings.SMART.MaxAgeDays)
 
 		// Update log forwarding
 		if settings.LogPush.Enabled && len(settings.LogPush.Destinations) > 0 {

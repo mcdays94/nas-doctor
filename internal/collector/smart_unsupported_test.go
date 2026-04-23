@@ -99,7 +99,7 @@ Use smartctl -h to get a usage summary
 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	_, _ = collectSMART(SMARTConfig{WakeDrives: false}, logger)
+	_, _, _ = collectSMART(SMARTConfig{WakeDrives: false}, logger)
 
 	summary := scanSMARTSummary(t, buf.String())
 
@@ -140,7 +140,7 @@ func TestCollectSMART_UnsupportedDrive_EmitsPerDriveLog(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	_, _ = collectSMART(SMARTConfig{WakeDrives: false}, logger)
+	_, _, _ = collectSMART(SMARTConfig{WakeDrives: false}, logger)
 
 	// Find the per-drive INFO log. Carries the exact device name so
 	// a user with multiple unsupported devices can tell them apart.
@@ -239,7 +239,7 @@ func TestCollectSMART_USBBridge_JSONWrapped_AlsoCountedAsUnsupported(t *testing.
 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	_, _ = collectSMART(SMARTConfig{WakeDrives: false}, logger)
+	_, _, _ = collectSMART(SMARTConfig{WakeDrives: false}, logger)
 
 	summary := scanSMARTSummary(t, buf.String())
 

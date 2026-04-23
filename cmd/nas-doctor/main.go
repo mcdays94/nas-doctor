@@ -371,6 +371,9 @@ func main() {
 			coll.SetSMARTConfig(collector.SMARTConfig{
 				WakeDrives: persistedSettings.SMART.WakeDrives,
 			})
+			// Apply the max-age force-wake threshold on startup (#238).
+			// Scheduler owns this policy; 0 disables the safety net.
+			sched.SetSMARTMaxAgeDays(persistedSettings.SMART.MaxAgeDays)
 		}
 		sched.Start()
 		defer sched.Stop()
