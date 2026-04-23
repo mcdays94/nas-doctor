@@ -2483,15 +2483,13 @@ func (s *Server) handleUnsnoozeAlert(w http.ResponseWriter, r *http.Request) {
 // handleSettingsPage serves the settings HTML page.
 // GET /settings
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(SettingsPage))
+	s.servePage(w, SettingsPage)
 }
 
 // handleAlertsPage serves the alerts HTML page.
 // GET /alerts
 func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(alertsPageHTML))
+	s.servePage(w, alertsPageHTML)
 }
 
 // handleTestFleetServer tests connectivity to a remote NAS Doctor instance.
@@ -2664,22 +2662,19 @@ func (s *Server) handleTestProxmox(w http.ResponseWriter, r *http.Request) {
 // handleServiceChecksPage serves the service checks HTML page.
 // GET /service-checks
 func (s *Server) handleServiceChecksPage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(serviceChecksPageHTML))
+	s.servePage(w, serviceChecksPageHTML)
 }
 
 // handleParityPage serves the parity history HTML page.
 // GET /parity
 func (s *Server) handleParityPage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(parityPageHTML))
+	s.servePage(w, parityPageHTML)
 }
 
 // handleDiskPage serves the disk detail HTML page.
 // GET /disk/{serial}
 func (s *Server) handleDiskPage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(DiskDetailPage))
+	s.servePage(w, DiskDetailPage)
 }
 
 // ---------- Internal helpers ----------
