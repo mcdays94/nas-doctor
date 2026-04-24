@@ -142,6 +142,7 @@ func TestBorgRunner_Contract_EachErrorReasonSurfaces(t *testing.T) {
 		{"passphrase rejected", BorgErrPassphraseRejected},
 		{"ssh timeout", BorgErrSSHTimeout},
 		{"corrupt repo", BorgErrCorruptRepo},
+		{"repo readonly", BorgErrRepoReadOnly},
 		{"unknown", BorgErrUnknown},
 	}
 	for _, tc := range cases {
@@ -357,4 +358,142 @@ func TestParseBorgInfoLast_EmptyArchivesReturnsNilLatest(t *testing.T) {
 	if latest != nil {
 		t.Errorf("latest = %+v; want nil for empty archives array", latest)
 	}
+}
+
+// ---------- rc2: --bypass-lock argv + unconditional env vars (#279) ----------
+
+// TestBorgArgs_ListInvocationIncludesBypassLock pins that the pure
+// argv builder puts --bypass-lock on the `borg list --json` call.
+// Without this, even read-only operations fail on a Read-Only-mounted
+// repo because borg acquires a lock file in the repo dir — see issue
+// #279 rc1 UAT finding 1.
+func TestBorgArgs_ListInvocationIncludesBypassLock(t *testing.T) {
+	args := buildBorgListArgs("/mnt/backups/offsite")
+	if !containsArg(args, "list") {
+		t.Fatalf("buildBorgListArgs = %v; want list subcommand", args)
+	}
+	if !containsArg(args, "--bypass-lock") {
+		t.Errorf("buildBorgListArgs = %v; want --bypass-lock flag", args)
+	}
+	if !containsArg(args, "--json") {
+		t.Errorf("buildBorgListArgs = %v; want --json flag", args)
+	}
+	if !containsArg(args, "/mnt/backups/offsite") {
+		t.Errorf("buildBorgListArgs = %v; want repo path as last arg", args)
+	}
+}
+
+// TestBorgArgs_InfoLast1InvocationIncludesBypassLock pins that
+// --bypass-lock is also present on the `borg info --last 1 --json`
+// call. Same rationale as the list call — lock acquisition fails
+// on RO mounts.
+func TestBorgArgs_InfoLast1InvocationIncludesBypassLock(t *testing.T) {
+	args := buildBorgInfoLastArgs("/mnt/backups/offsite")
+	if !containsArg(args, "info") {
+		t.Fatalf("buildBorgInfoLastArgs = %v; want info subcommand", args)
+	}
+	if !containsArg(args, "--bypass-lock") {
+		t.Errorf("buildBorgInfoLastArgs = %v; want --bypass-lock flag", args)
+	}
+	if !containsArg(args, "--last") {
+		t.Errorf("buildBorgInfoLastArgs = %v; want --last flag", args)
+	}
+	if !containsArg(args, "--json") {
+		t.Errorf("buildBorgInfoLastArgs = %v; want --json flag", args)
+	}
+}
+
+// TestBorgArgs_InfoMetadataInvocationIncludesBypassLock pins that the
+// empty-repo fallback `borg info --json` call also sets
+// --bypass-lock. This is the path used when `list` returns zero
+// archives and we still need repo metadata for the dashboard.
+func TestBorgArgs_InfoMetadataInvocationIncludesBypassLock(t *testing.T) {
+	args := buildBorgInfoMetadataArgs("/mnt/backups/offsite")
+	if !containsArg(args, "info") {
+		t.Fatalf("buildBorgInfoMetadataArgs = %v; want info subcommand", args)
+	}
+	if !containsArg(args, "--bypass-lock") {
+		t.Errorf("buildBorgInfoMetadataArgs = %v; want --bypass-lock flag", args)
+	}
+	if !containsArg(args, "--json") {
+		t.Errorf("buildBorgInfoMetadataArgs = %v; want --json flag", args)
+	}
+}
+
+// TestBuildRunnerEnv_AlwaysIncludesNonInteractiveOverrides pins the
+// rc2 Finding-2 guarantee: the two env vars that suppress borg's
+// interactive prompts on unknown-unencrypted + relocated repos are
+// set unconditionally by the runner, even when the caller passes a
+// nil env map (the auto-detect path).
+func TestBuildRunnerEnv_AlwaysIncludesNonInteractiveOverrides(t *testing.T) {
+	cases := []struct {
+		name string
+		in   map[string]string
+	}{
+		{"nil env", nil},
+		{"empty env", map[string]string{}},
+		{"caller-supplied env is preserved", map[string]string{"BORG_PASSPHRASE": "sekret"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildRunnerEnv(tc.in)
+			assertEnvPairPresent(t, got, "BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes")
+			assertEnvPairPresent(t, got, "BORG_RELOCATED_REPO_ACCESS_IS_OK=yes")
+			if tc.in["BORG_PASSPHRASE"] == "sekret" {
+				assertEnvPairPresent(t, got, "BORG_PASSPHRASE=sekret")
+			}
+		})
+	}
+}
+
+// TestBuildRunnerEnv_CallerSuppliedValueWinsOverDefault confirms that
+// if the caller somehow sets BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK
+// themselves (unusual, but legal), the caller's value wins. This is
+// defensive: a hypothetical future caller-side override should not be
+// silently clobbered by the runner defaults.
+func TestBuildRunnerEnv_CallerSuppliedValueWinsOverDefault(t *testing.T) {
+	got := buildRunnerEnv(map[string]string{
+		"BORG_RELOCATED_REPO_ACCESS_IS_OK": "no",
+	})
+	assertEnvPairPresent(t, got, "BORG_RELOCATED_REPO_ACCESS_IS_OK=no")
+	// Other default still kicks in when not overridden.
+	assertEnvPairPresent(t, got, "BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes")
+}
+
+// TestClassifyBorgError_ReadOnlyFilesystemMapsToRepoReadonly pins the
+// Finding-2 defense-in-depth classifier. With --bypass-lock in place
+// this path should never fire, but we guarantee a specific reason
+// category for the edge case so users see a targeted message.
+func TestClassifyBorgError_ReadOnlyFilesystemMapsToRepoReadonly(t *testing.T) {
+	stderr := "Failed to create/acquire the lock /mnt/borg/lock.exclusive ([Errno 30] Read-only file system: '/mnt/borg/lock.exclusive.tmp')."
+	got := classifyBorgError("borg", errors.New("exit 2"), stderr)
+	var bre *BorgRunError
+	if !errors.As(got, &bre) {
+		t.Fatalf("classifyBorgError not *BorgRunError: %v", got)
+	}
+	if bre.Reason != BorgErrRepoReadOnly {
+		t.Errorf("Reason = %q; want %q", bre.Reason, BorgErrRepoReadOnly)
+	}
+}
+
+// containsArg is true when needle appears anywhere in args.
+func containsArg(args []string, needle string) bool {
+	for _, a := range args {
+		if a == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// assertEnvPairPresent fails the test if needle is not exactly one of
+// the KEY=VALUE entries in env.
+func assertEnvPairPresent(t *testing.T, env []string, needle string) {
+	t.Helper()
+	for _, e := range env {
+		if e == needle {
+			return
+		}
+	}
+	t.Errorf("env missing %q; full env = %v", needle, env)
 }

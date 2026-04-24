@@ -92,6 +92,42 @@ func TestSettingsHTML_BorgMonitor_LoadHookFires(t *testing.T) {
 	}
 }
 
+// TestSettingsHTML_BorgMonitor_HintTextInPlaceholderNotValue pins the
+// rc2 Finding-4 fix: the optional per-repo inputs render hint text via
+// the HTML `placeholder` attribute, NOT as a pre-populated `value`.
+// Previously a rendered page could show "BORG_PASSPHRASE" and
+// "/mnt/keys/id_ed25519" as the actual input values — users who left
+// the field untouched would silently save those strings as real config.
+func TestSettingsHTML_BorgMonitor_HintTextInPlaceholderNotValue(t *testing.T) {
+	html := mustReadSettingsHTML(t)
+
+	placeholders := []string{
+		`placeholder="borg"`,
+		`placeholder="BORG_PASSPHRASE"`,
+		`placeholder="/mnt/keys/id_ed25519"`,
+	}
+	for _, p := range placeholders {
+		if !strings.Contains(html, p) {
+			t.Errorf("settings.html missing expected placeholder %q — hint text must be rendered via placeholder attribute", p)
+		}
+	}
+
+	// These exact patterns would mean the hint text was inlined as a
+	// hard-coded `value` string — i.e. rendered as a real input value
+	// on every page load, which would silently submit the hint as
+	// real config data. They must NOT appear.
+	bad := []string{
+		`value="borg"`,
+		`value="BORG_PASSPHRASE"`,
+		`value="/mnt/keys/id_ed25519"`,
+	}
+	for _, b := range bad {
+		if strings.Contains(html, b) {
+			t.Errorf("settings.html contains pre-populated input value %q — hint text must move to placeholder attribute (Finding 4)", b)
+		}
+	}
+}
+
 // mustReadSettingsHTML reads the template from disk for source-level
 // assertions. Used across the backup-monitor UI tests.
 func mustReadSettingsHTML(t *testing.T) string {

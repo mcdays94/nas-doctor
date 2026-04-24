@@ -74,6 +74,7 @@ const (
 	BorgErrPassphraseRejected = "passphrase_rejected"
 	BorgErrSSHTimeout         = "ssh_timeout"
 	BorgErrCorruptRepo        = "corrupt_repo"
+	BorgErrRepoReadOnly       = "repo_readonly"
 	BorgErrUnknown            = "unknown"
 )
 
@@ -128,8 +129,12 @@ func (r *execBorgRunner) Info(ctx context.Context, repoPath, binaryPath string, 
 		ctx = context.Background()
 	}
 
-	// borg list --json
-	listOut, listErr := r.run(ctx, binary, []string{"list", "--json", repoPath}, env)
+	// borg list --bypass-lock --json <repo>. --bypass-lock is required
+	// to support Read-Only-mounted repos, since borg's default lock
+	// file creation would otherwise fail with ENOFILE (issue #279 rc2
+	// Finding 1). The theoretical race with a concurrent host-side
+	// `borg create` is benign for a read-only monitoring tool.
+	listOut, listErr := r.run(ctx, binary, buildBorgListArgs(repoPath), env)
 	if listErr != nil {
 		return BorgInfoJSON{}, classifyBorgError(binary, listErr, listOut)
 	}
@@ -150,8 +155,9 @@ func (r *execBorgRunner) Info(ctx context.Context, repoPath, binaryPath string, 
 	if result.ArchiveCount == 0 {
 		// Still need repo metadata (location + encryption mode) for
 		// the dashboard card. Fall back to `borg info --json` which
-		// returns repository metadata even with no archives.
-		infoOut, infoErr := r.run(ctx, binary, []string{"info", "--json", repoPath}, env)
+		// returns repository metadata even with no archives. Same
+		// --bypass-lock treatment as the list + info-last calls.
+		infoOut, infoErr := r.run(ctx, binary, buildBorgInfoMetadataArgs(repoPath), env)
 		if infoErr == nil {
 			if meta, err := parseBorgInfoMetadata(infoOut); err == nil {
 				result.RepoLocation = meta.Location
@@ -162,7 +168,7 @@ func (r *execBorgRunner) Info(ctx context.Context, repoPath, binaryPath string, 
 		return result, nil
 	}
 
-	infoOut, infoErr := r.run(ctx, binary, []string{"info", "--last", "1", "--json", repoPath}, env)
+	infoOut, infoErr := r.run(ctx, binary, buildBorgInfoLastArgs(repoPath), env)
 	if infoErr != nil {
 		return BorgInfoJSON{}, classifyBorgError(binary, infoErr, infoOut)
 	}
@@ -197,21 +203,60 @@ func (r *execBorgRunner) run(parent context.Context, binary string, args []strin
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binary, args...)
-	cmd.Env = append(os.Environ(), flattenEnv(env)...)
+	cmd.Env = append(os.Environ(), buildRunnerEnv(env)...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
-// flattenEnv converts an env map into the KEY=VALUE form exec.Cmd
-// expects. Keys with empty values are still emitted (borg treats
-// empty BORG_PASSPHRASE as "no passphrase provided" — distinct from
-// unset).
-func flattenEnv(env map[string]string) []string {
-	if len(env) == 0 {
-		return nil
+// buildBorgListArgs returns the argv for `borg list --bypass-lock --json
+// <repoPath>`. Extracted as a pure function so tests can pin the flag
+// set (issue #279 rc2 Finding 1).
+func buildBorgListArgs(repoPath string) []string {
+	return []string{"list", "--bypass-lock", "--json", repoPath}
+}
+
+// buildBorgInfoLastArgs returns the argv for `borg info --last 1
+// --bypass-lock --json <repoPath>`. Used to fetch the latest archive's
+// detailed stats when list has reported a non-zero count.
+func buildBorgInfoLastArgs(repoPath string) []string {
+	return []string{"info", "--last", "1", "--bypass-lock", "--json", repoPath}
+}
+
+// buildBorgInfoMetadataArgs returns the argv for the empty-repo
+// fallback path: `borg info --bypass-lock --json <repoPath>` gives
+// repository + encryption metadata even when no archives exist.
+func buildBorgInfoMetadataArgs(repoPath string) []string {
+	return []string{"info", "--bypass-lock", "--json", repoPath}
+}
+
+// buildRunnerEnv composes the final subprocess env for a Borg
+// invocation. Two env vars are ALWAYS set regardless of whether the
+// caller supplied an env map (issue #279 rc2 Finding 2):
+//
+//   - BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes suppresses the
+//     interactive fingerprint-first-access prompt on unencrypted repos
+//   - BORG_RELOCATED_REPO_ACCESS_IS_OK=yes suppresses the prompt on
+//     repos accessed via a new bind-mount path
+//
+// Both prompts otherwise hang a non-TTY subprocess. Caller-supplied
+// values for these same keys WIN — the runner defaults only fill in
+// when the caller hasn't set a value. Keys with empty values are
+// still emitted (borg treats empty BORG_PASSPHRASE as "no passphrase
+// provided" — distinct from unset).
+func buildRunnerEnv(env map[string]string) []string {
+	defaults := map[string]string{
+		"BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK": "yes",
+		"BORG_RELOCATED_REPO_ACCESS_IS_OK":           "yes",
 	}
-	out := make([]string, 0, len(env))
+	merged := make(map[string]string, len(defaults)+len(env))
+	for k, v := range defaults {
+		merged[k] = v
+	}
 	for k, v := range env {
+		merged[k] = v
+	}
+	out := make([]string, 0, len(merged))
+	for k, v := range merged {
 		out = append(out, k+"="+v)
 	}
 	return out
@@ -240,6 +285,12 @@ func classifyBorgError(binary string, runErr error, out string) error {
 		return &BorgRunError{Reason: BorgErrSSHTimeout, Err: runErr}
 	}
 	switch {
+	// Defense-in-depth: with --bypass-lock this path should never fire,
+	// but older borg versions (pre-1.2) lack the flag. A specific
+	// category lets the UI surface a targeted fix hint (issue #279 rc2
+	// Finding 2 classifier addition).
+	case strings.Contains(low, "read-only file system"):
+		return &BorgRunError{Reason: BorgErrRepoReadOnly, Err: runErr}
 	case strings.Contains(low, "passphrase supplied"),
 		strings.Contains(low, "passphrase is incorrect"),
 		strings.Contains(low, "passphrase required"),

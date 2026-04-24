@@ -764,7 +764,7 @@ sections.backup = function(sn) {
     h += '<div>';
     h += '<div class="section-title">Backup Monitoring</div>';
     h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:14px;font-size:12px;color:var(--text-tertiary);line-height:1.5">';
-    h += 'No backup provider detected. NAS Doctor auto-monitors <strong>Borg</strong>, <strong>Restic</strong>, <strong>Proxmox Backup Server</strong>, or <strong>Duplicati</strong> when their CLI is reachable from this container. Install one of these (custom Dockerfile or sibling container sharing volumes/network) to enable monitoring.';
+    h += 'No backup provider detected or configured. NAS Doctor <strong>bundles the Borg CLI</strong> and auto-detects local Borg repos. For externally-managed Borg setups (e.g. Unraid User Scripts), configure the repo path in <a href="/settings#backup-monitors" style="color:var(--brand)">Settings &rarr; Backup Monitors &rarr; Borg</a>. For <strong>Restic</strong>, <strong>Proxmox Backup Server</strong>, or <strong>Duplicati</strong> monitoring, install those CLIs via a custom Dockerfile or sibling container.';
     h += '<br><br><span style="font-size:11px;color:var(--text-quaternary)">You can hide this section in <a href="/settings#card-sections" style="color:var(--brand)">Settings → Dashboard Sections</a> if it does not apply to you.</span>';
     h += '</div></div>';
   }

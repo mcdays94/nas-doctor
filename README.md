@@ -124,24 +124,32 @@ is reachable from the NAS Doctor container:
 
 > **Note**: Restic, PBS, and Duplicati binaries don't ship in the
 > NAS Doctor Docker image. Borg **is** bundled (since v0.10.0; see
-> External Borg Monitoring below). For Restic/PBS/Duplicati the Backup
-> dashboard section stays empty unless you install the provider CLI
-> inside the container (custom Dockerfile) or run the provider in a
-> sibling container that shares volumes/network with NAS Doctor.
+> External Borg Monitoring below) and can be pointed at host-managed
+> repos via a Read Only bind-mount — no custom image needed. For
+> Restic/PBS/Duplicati the Backup dashboard section stays empty unless
+> you install the provider CLI inside the container (custom Dockerfile)
+> or run the provider in a sibling container that shares volumes/network
+> with NAS Doctor.
 
 #### External Borg Monitoring (host-managed repos)
 
 If your Borg setup runs on the **host** (e.g. Unraid User Scripts,
 Synology Task Scheduler) rather than inside the NAS Doctor container,
 you can still monitor it. Borg is bundled in the image so the **binary
-requires no host mount** — just bind-mount the repo path.
+requires no host mount** — just bind-mount the repo path **Read Only**.
+
+> NAS Doctor uses `borg --bypass-lock` to avoid writing to the repo, so
+> a Read Only mount is safe. The only theoretical race (read during a
+> concurrent `borg create` by the host) produces a momentarily-stale
+> archive count until the next scan — no corruption.
 
 Configure in **Settings → Advanced → Backup Monitors → Borg**:
 
 1. **Repo Path** — path to the Borg repo visible inside the container.
-   Bind-mount your host's repo location into the container first.
+   Bind-mount your host's repo location into the container first, as
+   **Read Only** (`:ro` or `Mode="ro"`).
    Example: host `/mnt/user/appdata/borg/repo` → container
-   `/mnt/user/appdata/borg/repo`.
+   `/mnt/user/appdata/borg/repo` (RO).
 2. **Label** — optional display name for the dashboard (e.g. `Offsite`).
 3. **Passphrase Env Var** — optional, defaults to `BORG_PASSPHRASE`.
    The name of a Docker env var containing the repo's passphrase.

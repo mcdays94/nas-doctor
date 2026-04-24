@@ -131,6 +131,8 @@ func humanReasonMessage(reason string) string {
 		return "SSH connection failed or timed out — check ssh_key_path and the remote host"
 	case collector.BorgErrCorruptRepo:
 		return "repository integrity check failed — run `borg check` on the host"
+	case collector.BorgErrRepoReadOnly:
+		return "Borg requires write access to the repo directory for its lock file. Mount the repo as Read/Write, or upgrade to a borg version that supports --bypass-lock (1.2+)."
 	default:
 		return "unknown error — see container logs for the full borg output"
 	}
