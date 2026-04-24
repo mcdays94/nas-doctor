@@ -1,0 +1,74 @@
+# NAS Doctor — Prometheus + Grafana smoke-test harness.
+#
+# See README.md. In brief:
+#   1. cp .env.example .env  (and fill in real credentials)
+#   2. docker compose up -d
+#   3. http://localhost:9090 (Prometheus), http://localhost:3000 (Grafana, admin/admin)
+#
+# All credentials come from .env (gitignored). No secrets live in any tracked
+# file in this directory.
+
+services:
+  # envsubst renders prometheus.yml.tmpl -> prometheus.yml inside a shared
+  # volume before Prometheus starts. We use a tiny Alpine image with envsubst
+  # (ships as part of gettext) so we don't add a hand-rolled Dockerfile.
+  prometheus-config-init:
+    image: alpine:3.20
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache gettext >/dev/null 2>&1
+        envsubst < /tmpl/prometheus.yml.tmpl > /out/prometheus.yml
+        echo "rendered /out/prometheus.yml from template"
+    environment:
+      SCRAPE_TARGET: ${SCRAPE_TARGET:-nasdoctoruat.mdias.info}
+      SCRAPE_SCHEME: ${SCRAPE_SCHEME:-https}
+      ND_API_KEY: ${ND_API_KEY:-}
+      CF_ACCESS_CLIENT_ID: ${CF_ACCESS_CLIENT_ID:-}
+      CF_ACCESS_CLIENT_SECRET: ${CF_ACCESS_CLIENT_SECRET:-}
+    volumes:
+      - ./prometheus.yml.tmpl:/tmpl/prometheus.yml.tmpl:ro
+      - prom-config:/out
+    restart: "no"
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    depends_on:
+      prometheus-config-init:
+        condition: service_completed_successfully
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --web.enable-lifecycle
+      - --log.level=info
+    ports:
+      - "9090:9090"
+    volumes:
+      - prom-config:/etc/prometheus:ro
+      - prom-data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - ./dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
+volumes:
+  prom-config:
+  prom-data:
+  grafana-data:
