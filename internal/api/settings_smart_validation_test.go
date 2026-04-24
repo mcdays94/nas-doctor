@@ -35,11 +35,16 @@ func TestHandleUpdateSettings_SMART_MaxAgeDays_RangeRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newSettingsTestServer()
 			body, _ := json.Marshal(map[string]interface{}{
-				"scan_interval": "30m",
-				"theme":         "midnight",
-				"smart": map[string]interface{}{
-					"wake_drives":  false,
-					"max_age_days": tc.maxAgeDays,
+				"settings_version": 3,
+				"scan_interval":    "30m",
+				"theme":            "midnight",
+				"advanced_scans": map[string]interface{}{
+					"smart":      map[string]interface{}{"wake_drives": false, "max_age_days": tc.maxAgeDays, "interval_sec": 0},
+					"docker":     map[string]interface{}{"interval_sec": 0},
+					"proxmox":    map[string]interface{}{"interval_sec": 0},
+					"kubernetes": map[string]interface{}{"interval_sec": 0},
+					"zfs":        map[string]interface{}{"interval_sec": 0},
+					"gpu":        map[string]interface{}{"interval_sec": 0},
 				},
 			})
 			req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
@@ -70,11 +75,16 @@ func TestHandleUpdateSettings_SMART_MaxAgeDays_InvalidDoesNotPersist(t *testing.
 
 	// First, persist a known-good state.
 	good, _ := json.Marshal(map[string]interface{}{
-		"scan_interval": "30m",
-		"theme":         "midnight",
-		"smart": map[string]interface{}{
-			"wake_drives":  true,
-			"max_age_days": 14,
+		"settings_version": 3,
+		"scan_interval":    "30m",
+		"theme":            "midnight",
+		"advanced_scans": map[string]interface{}{
+			"smart":      map[string]interface{}{"wake_drives": true, "max_age_days": 14, "interval_sec": 0},
+			"docker":     map[string]interface{}{"interval_sec": 0},
+			"proxmox":    map[string]interface{}{"interval_sec": 0},
+			"kubernetes": map[string]interface{}{"interval_sec": 0},
+			"zfs":        map[string]interface{}{"interval_sec": 0},
+			"gpu":        map[string]interface{}{"interval_sec": 0},
 		},
 	})
 	rec := httptest.NewRecorder()
@@ -85,11 +95,16 @@ func TestHandleUpdateSettings_SMART_MaxAgeDays_InvalidDoesNotPersist(t *testing.
 
 	// Submit invalid max_age_days=99.
 	bad, _ := json.Marshal(map[string]interface{}{
-		"scan_interval": "30m",
-		"theme":         "midnight",
-		"smart": map[string]interface{}{
-			"wake_drives":  false,
-			"max_age_days": 99,
+		"settings_version": 3,
+		"scan_interval":    "30m",
+		"theme":            "midnight",
+		"advanced_scans": map[string]interface{}{
+			"smart":      map[string]interface{}{"wake_drives": false, "max_age_days": 99, "interval_sec": 0},
+			"docker":     map[string]interface{}{"interval_sec": 0},
+			"proxmox":    map[string]interface{}{"interval_sec": 0},
+			"kubernetes": map[string]interface{}{"interval_sec": 0},
+			"zfs":        map[string]interface{}{"interval_sec": 0},
+			"gpu":        map[string]interface{}{"interval_sec": 0},
 		},
 	})
 	rec2 := httptest.NewRecorder()
@@ -109,10 +124,10 @@ func TestHandleUpdateSettings_SMART_MaxAgeDays_InvalidDoesNotPersist(t *testing.
 	if err := json.Unmarshal(rec3.Body.Bytes(), &got); err != nil {
 		t.Fatalf("parse GET: %v", err)
 	}
-	if got.SMART.MaxAgeDays != 14 {
-		t.Errorf("max_age_days leaked from rejected PUT: got %d, want 14 (seeded value)", got.SMART.MaxAgeDays)
+	if got.AdvancedScans.SMART.MaxAgeDays != 14 {
+		t.Errorf("max_age_days leaked from rejected PUT: got %d, want 14 (seeded value)", got.AdvancedScans.SMART.MaxAgeDays)
 	}
-	if !got.SMART.WakeDrives {
+	if !got.AdvancedScans.SMART.WakeDrives {
 		t.Errorf("wake_drives leaked from rejected PUT: got false, want true (seeded value)")
 	}
 }

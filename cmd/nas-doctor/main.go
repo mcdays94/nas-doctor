@@ -374,14 +374,15 @@ func main() {
 		}
 		// Apply SMART standby-awareness preference on startup (#198). Default
 		// (false) uses `-n standby` so spun-down drives aren't woken by scans.
-		// Since schema v2 (#237) this lives under Settings.SMART.WakeDrives.
+		// Moved from Settings.SMART → Settings.AdvancedScans.SMART in
+		// schema v3 (#259).
 		if persistedSettings != nil {
 			coll.SetSMARTConfig(collector.SMARTConfig{
-				WakeDrives: persistedSettings.SMART.WakeDrives,
+				WakeDrives: persistedSettings.AdvancedScans.SMART.WakeDrives,
 			})
 			// Apply the max-age force-wake threshold on startup (#238).
 			// Scheduler owns this policy; 0 disables the safety net.
-			sched.SetSMARTMaxAgeDays(persistedSettings.SMART.MaxAgeDays)
+			sched.SetSMARTMaxAgeDays(persistedSettings.AdvancedScans.SMART.MaxAgeDays)
 		}
 		sched.Start()
 		defer sched.Stop()

@@ -30,12 +30,39 @@ import (
 // drives asleep (max_age_days=0, wake_drives=true — a real
 // combination: "never wake to scan, but do wake when something else
 // wakes them").
+//
+// Writes the authentic v2 wire shape (flat "smart": {...}) rather
+// than a marshalled current-schema struct, so the v2→v3 migration
+// path gets exercised end-to-end on the first getSettings() call.
 func seedV2Settings(t *testing.T, srv *Server, maxAgeDays int, wakeDrives bool) {
 	t.Helper()
+	blob := map[string]interface{}{
+		"settings_version": 2,
+		"scan_interval":    "30m",
+		"theme":            "midnight",
+		"smart": map[string]interface{}{
+			"wake_drives":  wakeDrives,
+			"max_age_days": maxAgeDays,
+		},
+	}
+	data, err := json.Marshal(blob)
+	if err != nil {
+		t.Fatalf("marshal seed: %v", err)
+	}
+	if err := srv.store.SetConfig(settingsConfigKey, string(data)); err != nil {
+		t.Fatalf("seed settings: %v", err)
+	}
+}
+
+// seedV3Settings writes a v3-shaped settings blob (the current
+// schema) into the store. Used by tests that want to exercise the
+// post-migration steady state directly.
+func seedV3Settings(t *testing.T, srv *Server, maxAgeDays int, wakeDrives bool) {
+	t.Helper()
 	s := defaultSettings()
-	s.SettingsVersion = 2
-	s.SMART.MaxAgeDays = maxAgeDays
-	s.SMART.WakeDrives = wakeDrives
+	s.SettingsVersion = 3
+	s.AdvancedScans.SMART.MaxAgeDays = maxAgeDays
+	s.AdvancedScans.SMART.WakeDrives = wakeDrives
 	data, err := json.Marshal(s)
 	if err != nil {
 		t.Fatalf("marshal seed: %v", err)
@@ -61,25 +88,36 @@ func readStoredSettings(t *testing.T, srv *Server) map[string]interface{} {
 	return out
 }
 
+// v3AdvancedScansPayload returns a fresh map that carries an
+// advanced_scans tree with all six subsystems seeded at IntervalSec=0
+// plus the given SMART knobs. Centralises the boilerplate so the #268
+// regression tests stay focused on version-preservation behaviour.
+func v3AdvancedScansPayload(wakeDrives bool, maxAgeDays int) map[string]any {
+	return map[string]any{
+		"smart":      map[string]any{"wake_drives": wakeDrives, "max_age_days": maxAgeDays, "interval_sec": 0},
+		"docker":     map[string]any{"interval_sec": 0},
+		"proxmox":    map[string]any{"interval_sec": 0},
+		"kubernetes": map[string]any{"interval_sec": 0},
+		"zfs":        map[string]any{"interval_sec": 0},
+		"gpu":        map[string]any{"interval_sec": 0},
+	}
+}
+
 // TestHandleUpdateSettings_PreservesStoredSettingsVersion — core
-// backend regression for #268. A v2-shaped blob is in storage. The
-// client PUTs a payload that OMITS settings_version (mimicking the
-// real v0.9.8 frontend). The server must preserve the stored version
+// backend regression for #268, re-pinned for the v3 schema. A v3-
+// shaped blob is in storage. The client PUTs a payload that OMITS
+// settings_version. The server must preserve the stored version
 // rather than persisting the zero-value from the unmarshal.
 func TestHandleUpdateSettings_PreservesStoredSettingsVersion(t *testing.T) {
 	srv := newSettingsTestServer()
-	seedV2Settings(t, srv, 0, true)
+	seedV3Settings(t, srv, 0, true)
 
-	// Client payload WITHOUT settings_version — exactly what the
-	// v0.9.8 frontend sends. Valid scan_interval + theme so the
-	// handler accepts it.
+	// Client payload WITHOUT settings_version. Valid scan_interval +
+	// theme so the handler accepts it.
 	rec := putSettings(t, srv, map[string]any{
-		"scan_interval": "30m",
-		"theme":         "midnight",
-		"smart": map[string]any{
-			"wake_drives":  true,
-			"max_age_days": 0,
-		},
+		"scan_interval":  "30m",
+		"theme":          "midnight",
+		"advanced_scans": v3AdvancedScansPayload(true, 0),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -87,27 +125,24 @@ func TestHandleUpdateSettings_PreservesStoredSettingsVersion(t *testing.T) {
 
 	stored := readStoredSettings(t, srv)
 	gotVersion, _ := stored["settings_version"].(float64)
-	if int(gotVersion) != 2 {
-		t.Errorf("stored settings_version after PUT: got %v, want 2 (server must preserve, not accept client omission as 0)", stored["settings_version"])
+	if int(gotVersion) != 3 {
+		t.Errorf("stored settings_version after PUT: got %v, want 3 (server must preserve, not accept client omission as 0)", stored["settings_version"])
 	}
 }
 
 // TestHandleUpdateSettings_ClientCannotDowngradeSettingsVersion —
 // defence-in-depth. Even an explicit client-side settings_version=0
-// in the PUT body must not overwrite the stored v2. settings_version
+// in the PUT body must not overwrite the stored v3. settings_version
 // is server-authoritative.
 func TestHandleUpdateSettings_ClientCannotDowngradeSettingsVersion(t *testing.T) {
 	srv := newSettingsTestServer()
-	seedV2Settings(t, srv, 14, false)
+	seedV3Settings(t, srv, 14, false)
 
 	rec := putSettings(t, srv, map[string]any{
 		"settings_version": 0, // malicious/buggy client tries to downgrade
 		"scan_interval":    "30m",
 		"theme":            "midnight",
-		"smart": map[string]any{
-			"wake_drives":  false,
-			"max_age_days": 14,
-		},
+		"advanced_scans":   v3AdvancedScansPayload(false, 14),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -115,8 +150,8 @@ func TestHandleUpdateSettings_ClientCannotDowngradeSettingsVersion(t *testing.T)
 
 	stored := readStoredSettings(t, srv)
 	gotVersion, _ := stored["settings_version"].(float64)
-	if int(gotVersion) != 2 {
-		t.Errorf("client-sent settings_version=0 must be ignored; stored version = %v, want 2", stored["settings_version"])
+	if int(gotVersion) != 3 {
+		t.Errorf("client-sent settings_version=0 must be ignored; stored version = %v, want 3", stored["settings_version"])
 	}
 }
 
@@ -125,27 +160,17 @@ func TestHandleUpdateSettings_ClientCannotDowngradeSettingsVersion(t *testing.T)
 // something (dashboard load, backup API, anything) triggers
 // getSettings() internally which runs migration + persist. The 0 must
 // survive that round trip.
-//
-// With only the frontend fix, settings_version=2 is included in the
-// PUT payload and reaches the store intact, so getSettings() sees an
-// already-v2 blob and the migration is skipped. With only the backend
-// fix, the server preserves settings_version from the stored blob
-// and achieves the same outcome. Either fix in isolation should make
-// this test pass.
 func TestHandleUpdateSettings_MaxAgeDaysZero_SurvivesInternalGetSettings(t *testing.T) {
 	srv := newSettingsTestServer()
-	seedV2Settings(t, srv, 7, false)
+	seedV3Settings(t, srv, 7, false)
 
-	// User edits: set max_age_days=0, payload includes settings_version=2
-	// (the state the fixed frontend will produce).
+	// User edits: set max_age_days=0, payload includes
+	// settings_version=3 (the state the fixed frontend produces).
 	rec := putSettings(t, srv, map[string]any{
-		"settings_version": 2,
+		"settings_version": 3,
 		"scan_interval":    "30m",
 		"theme":            "midnight",
-		"smart": map[string]any{
-			"wake_drives":  false,
-			"max_age_days": 0,
-		},
+		"advanced_scans":   v3AdvancedScansPayload(false, 0),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from PUT, got %d: %s", rec.Code, rec.Body.String())
@@ -153,56 +178,61 @@ func TestHandleUpdateSettings_MaxAgeDaysZero_SurvivesInternalGetSettings(t *test
 
 	// Force the getSettings() code path (migrate + persist back).
 	loaded := srv.getSettings()
-	if loaded.SMART.MaxAgeDays != 0 {
-		t.Errorf("after internal getSettings(): smart.max_age_days = %d, want 0 (user-chosen value must not be re-seeded by a stale migration)", loaded.SMART.MaxAgeDays)
+	if loaded.AdvancedScans.SMART.MaxAgeDays != 0 {
+		t.Errorf("after internal getSettings(): advanced_scans.smart.max_age_days = %d, want 0 (user-chosen value must not be re-seeded by a stale migration)", loaded.AdvancedScans.SMART.MaxAgeDays)
 	}
 
 	// And the stored blob too, since getSettings() persists.
 	stored := readStoredSettings(t, srv)
-	smartMap, ok := stored["smart"].(map[string]interface{})
+	advScans, ok := stored["advanced_scans"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("stored settings missing smart object: %v", stored["smart"])
+		t.Fatalf("stored settings missing advanced_scans object: %v", stored["advanced_scans"])
+	}
+	smartMap, ok := advScans["smart"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("stored advanced_scans missing smart object: %v", advScans["smart"])
 	}
 	mad, _ := smartMap["max_age_days"].(float64)
 	if int(mad) != 0 {
-		t.Errorf("persisted smart.max_age_days after getSettings(): got %v, want 0", smartMap["max_age_days"])
+		t.Errorf("persisted advanced_scans.smart.max_age_days after getSettings(): got %v, want 0", smartMap["max_age_days"])
 	}
 }
 
 // TestHandleUpdateSettings_WakeDrivesTrue_SurvivesInternalGetSettings
 // — same scenario as above but for wake_drives=true. The re-migration
 // bug clobbered this field by reading the missing legacy
-// wake_drives_for_smart top-level key (absent in v2 blobs → false).
+// wake_drives_for_smart top-level key (absent in v2+ blobs → false).
 func TestHandleUpdateSettings_WakeDrivesTrue_SurvivesInternalGetSettings(t *testing.T) {
 	srv := newSettingsTestServer()
-	seedV2Settings(t, srv, 7, false)
+	seedV3Settings(t, srv, 7, false)
 
 	rec := putSettings(t, srv, map[string]any{
-		"settings_version": 2,
+		"settings_version": 3,
 		"scan_interval":    "30m",
 		"theme":            "midnight",
-		"smart": map[string]any{
-			"wake_drives":  true,
-			"max_age_days": 7,
-		},
+		"advanced_scans":   v3AdvancedScansPayload(true, 7),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from PUT, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	loaded := srv.getSettings()
-	if !loaded.SMART.WakeDrives {
-		t.Errorf("after internal getSettings(): smart.wake_drives = false, want true (user-chosen value must not be clobbered by a stale migration)")
+	if !loaded.AdvancedScans.SMART.WakeDrives {
+		t.Errorf("after internal getSettings(): advanced_scans.smart.wake_drives = false, want true (user-chosen value must not be clobbered by a stale migration)")
 	}
 
 	stored := readStoredSettings(t, srv)
-	smartMap, ok := stored["smart"].(map[string]interface{})
+	advScans, ok := stored["advanced_scans"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("stored settings missing smart object: %v", stored["smart"])
+		t.Fatalf("stored settings missing advanced_scans object: %v", stored["advanced_scans"])
+	}
+	smartMap, ok := advScans["smart"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("stored advanced_scans missing smart object: %v", advScans["smart"])
 	}
 	wd, _ := smartMap["wake_drives"].(bool)
 	if !wd {
-		t.Errorf("persisted smart.wake_drives after getSettings(): got %v, want true", smartMap["wake_drives"])
+		t.Errorf("persisted advanced_scans.smart.wake_drives after getSettings(): got %v, want true", smartMap["wake_drives"])
 	}
 }
 
