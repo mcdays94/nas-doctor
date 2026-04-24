@@ -17,7 +17,8 @@ import (
 // Originally (pre-#237) the toggle lived directly inside the generic
 // Advanced card. #237 moved it out to a dedicated "Advanced Scan Settings"
 // card; #256 merged it back into the generic Advanced card (id="card-advanced")
-// after UAT flagged the two-card split as clutter.
+// after UAT flagged the two-card split as clutter. #259 relocated the
+// backing field from data.smart to data.advanced_scans.smart.
 //
 // This is a cross-reference test: it confirms the HTML mentions every
 // symbol the JS load/save wiring expects, so a future refactor that
@@ -44,10 +45,10 @@ func TestSettingsHTMLIncludesWakeDrivesForSMARTToggle(t *testing.T) {
 		{"summary element", `<summary`},
 		// The toggle control + its stable id for load/save wiring.
 		{"wake-drives toggle id", `id="wake-drives-for-smart"`},
-		// Load path reads the nested JSON field.
-		{"load binds nested field", `data.smart`},
-		// Save payload writes the nested JSON field.
-		{"save sends nested field", `smart:`},
+		// Load path reads the v3 nested JSON field.
+		{"load binds nested field", `advanced_scans`},
+		// Save payload writes the v3 nested JSON field.
+		{"save sends nested field", `advanced_scans:`},
 		// Disclaimer text must communicate the wear trade-off. We keep
 		// the assertion loose so copy can be edited, but pin the key
 		// concepts: spin-ups and opt-in intent.
@@ -64,17 +65,23 @@ func TestSettingsHTMLIncludesWakeDrivesForSMARTToggle(t *testing.T) {
 }
 
 // TestSettingsRoundTrip_WakeDrivesForSMART exercises the GET/PUT cycle for
-// the wake-drives flag using the new nested schema (Settings.SMART.WakeDrives,
-// `smart.wake_drives` on the wire) introduced in #237.
+// the wake-drives flag using the v3 nested schema
+// (Settings.AdvancedScans.SMART.WakeDrives, advanced_scans.smart.wake_drives
+// on the wire).
 func TestSettingsRoundTrip_WakeDrivesForSMART(t *testing.T) {
 	srv := newSettingsTestServer()
 
 	put := map[string]interface{}{
-		"scan_interval": "30m",
-		"theme":         "midnight",
-		"smart": map[string]interface{}{
-			"wake_drives":  true,
-			"max_age_days": 7,
+		"settings_version": 3,
+		"scan_interval":    "30m",
+		"theme":            "midnight",
+		"advanced_scans": map[string]interface{}{
+			"smart":      map[string]interface{}{"wake_drives": true, "max_age_days": 7, "interval_sec": 0},
+			"docker":     map[string]interface{}{"interval_sec": 0},
+			"proxmox":    map[string]interface{}{"interval_sec": 0},
+			"kubernetes": map[string]interface{}{"interval_sec": 0},
+			"zfs":        map[string]interface{}{"interval_sec": 0},
+			"gpu":        map[string]interface{}{"interval_sec": 0},
 		},
 	}
 	body, _ := json.Marshal(put)
@@ -97,8 +104,8 @@ func TestSettingsRoundTrip_WakeDrivesForSMART(t *testing.T) {
 	if err := json.Unmarshal(rr2.Body.Bytes(), &got); err != nil {
 		t.Fatalf("parse GET response: %v", err)
 	}
-	if !got.SMART.WakeDrives {
-		t.Errorf("smart.wake_drives did not round-trip; got false, wanted true")
+	if !got.AdvancedScans.SMART.WakeDrives {
+		t.Errorf("advanced_scans.smart.wake_drives did not round-trip; got false, wanted true")
 	}
 }
 
@@ -107,7 +114,7 @@ func TestSettingsRoundTrip_WakeDrivesForSMART(t *testing.T) {
 // means drives in standby are NOT woken by SMART scans.
 func TestSettingsDefault_WakeDrivesForSMARTIsFalse(t *testing.T) {
 	d := defaultSettings()
-	if d.SMART.WakeDrives {
-		t.Errorf("defaultSettings().SMART.WakeDrives must be false (standby-aware by default, issue #198)")
+	if d.AdvancedScans.SMART.WakeDrives {
+		t.Errorf("defaultSettings().AdvancedScans.SMART.WakeDrives must be false (standby-aware by default, issue #198)")
 	}
 }
