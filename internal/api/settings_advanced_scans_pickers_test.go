@@ -186,8 +186,10 @@ func TestSettingsHTML_AdvancedScans_ConfirmDialogOnMaxAgeConflict(t *testing.T) 
 }
 
 // TestSettingsHTML_AdvancedScans_PickerPresetOptions pins the preset
-// dropdown's canonical option values per PRD #239: "Use global (30m)"
-// first, then the seven time presets, plus a "Custom…" fallback.
+// dropdown's canonical option values per PRD #239: "Use global" first
+// (with a dynamic "(X)" suffix injected at render time — see
+// TestSettingsHTML_AdvancedScans_UseGlobalLabelIsDynamic), then the
+// seven time presets, plus a "Custom…" fallback.
 //
 // We can't easily match each <option> element because createIntervalPicker
 // may build them via innerHTML or DOM insertion. Instead we match the
@@ -215,6 +217,60 @@ func TestSettingsHTML_AdvancedScans_PickerPresetOptions(t *testing.T) {
 	for _, sub := range mustContain {
 		if !strings.Contains(content, sub) {
 			t.Errorf("settings.html missing preset-option marker %q inside the interval-picker helper (PRD #239 user story 7)", sub)
+		}
+	}
+}
+
+// TestSettingsHTML_AdvancedScans_UseGlobalLabelIsDynamic guards
+// against a regression where the "Use global" option in the picker
+// preset dropdown carried a hardcoded "(30m)" duration suffix.
+// v0.9.9-rc2 shipped with `label: "Use global (30m)"` in the
+// advScanPresets array; a user whose scan_interval was 7 days saw
+// every picker advertise "Use global (30m)" and reasonably thought
+// the fallback cadence was 30 minutes when it was actually 7 days.
+// The fix is twofold: (1) advScanPresets carries the bare label
+// "Use global" with NO parenthesised duration; (2) a new helper
+// globalIntervalDisplay() returns the user's configured
+// scan_interval, and createIntervalPicker appends that value to
+// the label at render time via "Use global (" + X + ")". Both
+// pieces must be present.
+func TestSettingsHTML_AdvancedScans_UseGlobalLabelIsDynamic(t *testing.T) {
+	path := filepath.Join("templates", "settings.html")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings.html: %v", err)
+	}
+	content := string(data)
+
+	// (1) The preset array must NOT hardcode any duration suffix on
+	// the "Use global" label. If this string appears, someone has
+	// reintroduced the rc2 bug.
+	forbidden := []string{
+		`label: "Use global (30m)"`,
+		`label: "Use global (1h)"`,
+		`label: "Use global (7d)"`,
+	}
+	for _, f := range forbidden {
+		if strings.Contains(content, f) {
+			t.Errorf("settings.html advScanPresets must NOT hardcode a duration suffix on 'Use global': found %q (reintroduces the v0.9.9-rc2 UAT regression)", f)
+		}
+	}
+
+	// (2) The dynamic-suffix helper must exist and be called from
+	// createIntervalPicker's option-rendering loop. The three markers
+	// together pin the integration: the helper reads settings.scan_interval,
+	// createIntervalPicker assigns its return to globalLabel, and
+	// the "0" option's label includes " (" + globalLabel + ")"
+	// suffix.
+	mustContain := []string{
+		"function globalIntervalDisplay",
+		"settings.scan_interval",
+		"var globalLabel = globalIntervalDisplay()",
+		`" (" + globalLabel + ")"`,
+	}
+	for _, sub := range mustContain {
+		if !strings.Contains(content, sub) {
+			t.Errorf("settings.html missing dynamic 'Use global (X)' label plumbing: expected %q to appear in the <script> block", sub)
 		}
 	}
 }

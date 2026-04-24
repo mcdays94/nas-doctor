@@ -1227,9 +1227,17 @@ document.getElementById("scan-seconds").addEventListener("input", updateInterval
 
 /* Preset values offered by every per-subsystem interval picker.
    "0" sentinel represents "use global"; matches the AdvancedScans
-   IntervalSec=0 convention on the server side (see PRD #239). */
+   IntervalSec=0 convention on the server side (see PRD #239).
+
+   The "Use global" option's label has NO hardcoded duration suffix
+   here — createIntervalPicker appends the user's actual configured
+   scan_interval (e.g. "Use global (7d)") dynamically at render
+   time. Hardcoding "(30m)" caused a v0.9.9-rc2 UAT confusion: a
+   user with scan_interval=7d saw every picker advertise "Use
+   global (30m)" and reasonably thought the per-subsystem fallback
+   was 30 minutes when it was actually 7 days. */
 var advScanPresets = [
-  { value: "0",   label: "Use global (30m)" },
+  { value: "0",   label: "Use global"       },
   { value: "5m",  label: "Every 5 minutes"  },
   { value: "15m", label: "Every 15 minutes" },
   { value: "30m", label: "Every 30 minutes" },
@@ -1241,6 +1249,17 @@ var advScanPresets = [
   { value: "7d",  label: "Every 7 days"     },
   { value: "custom", label: "Custom..."     }
 ];
+
+/* globalIntervalDisplay returns the user's configured global
+   scan_interval formatted for picker labels. Falls back to "30m"
+   if settings haven't loaded yet (first paint before loadSettings
+   resolves — shouldn't happen in practice because
+   renderAdvancedScanPickers runs inside loadSettings' .then, but
+   defensive). */
+function globalIntervalDisplay() {
+  if (settings && settings.scan_interval) return settings.scan_interval;
+  return "30m";
+}
 
 /* Duration parser shared between the global widget's
    parseDurationToFields and the new per-subsystem helpers. Goes
@@ -1391,9 +1410,14 @@ function createIntervalPicker(subsystemId, label) {
   if (mount.getAttribute("data-inited") === "1") return mount;
 
   var presetOpts = "";
+  var globalLabel = globalIntervalDisplay();
   for (var i = 0; i < advScanPresets.length; i++) {
     var p = advScanPresets[i];
-    presetOpts += '<option value="' + p.value + '">' + p.label + '</option>';
+    // Dynamic suffix on the "Use global" option so the picker
+    // reflects the user's actual scan_interval instead of a
+    // hardcoded "(30m)". See globalIntervalDisplay notes.
+    var optLabel = p.value === "0" ? (p.label + " (" + globalLabel + ")") : p.label;
+    presetOpts += '<option value="' + p.value + '">' + optLabel + '</option>';
   }
 
   mount.innerHTML = '' +

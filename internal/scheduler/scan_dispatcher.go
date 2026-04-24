@@ -144,19 +144,24 @@ func (d *ScanDispatcher) applyIntervalsLocked(cfg DispatcherIntervalsConfig, glo
 // the existing rawCfg against a new global. Used by the scheduler's
 // UpdateInterval path so a user's change to scan_interval propagates
 // to every "use global" subsystem.
+//
+// Note on lastRun: an earlier version of this code deleted lastRun
+// for subsystems whose effective interval changed, under the "user
+// lowers interval, sees it fire immediately" intent. That caused a
+// v0.9.9-rc2 UAT regression: clicking through a picker dropdown
+// (5m → 15m → 30m → … → back to Use global) repeatedly toggled a
+// subsystem's effective interval, each toggle deleted its lastRun,
+// and the NEXT tick after the user settled back on "Use global"
+// fired the subsystem with a zero lastRun — completely ignoring the
+// user's global cadence. The fix: keep lastRun. The natural
+// `now.Sub(lr) >= interval` check in Tick already handles both the
+// "user lowers interval" case (fires ASAP if the new interval is
+// shorter than elapsed) and the "user raises or restores interval"
+// case (waits out the original cycle). Simpler and correct.
 func (d *ScanDispatcher) SetGlobal(global time.Duration) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	prev := make(map[string]time.Duration, len(d.intervals))
-	for k, v := range d.intervals {
-		prev[k] = v
-	}
 	d.applyIntervalsLocked(d.rawCfg, global)
-	for name, newInterval := range d.intervals {
-		if prev[name] != newInterval {
-			delete(d.lastRun, name)
-		}
-	}
 }
 
 // Tick returns the names of subsystems whose effective interval has
@@ -242,27 +247,27 @@ func (d *ScanDispatcher) FastestInterval() time.Duration {
 	return fastest
 }
 
-// UpdateIntervals applies a new settings configuration. Subsystems
-// whose EFFECTIVE interval changed are treated as "never ran" so the
-// new cadence takes effect on the next tick (user-lowers-interval
-// story). Subsystems whose interval is unchanged keep their lastRun
-// state so we don't spuriously re-run them.
+// UpdateIntervals applies a new settings configuration. lastRun
+// state is preserved for every subsystem — the natural
+// `now.Sub(lr) >= interval` check in Tick decides whether a
+// subsystem is due against the NEW interval, which is the behaviour
+// the user expects:
 //
-// Called from the settings-save path in the API handler. Safe to call
-// concurrently with Tick / MarkRan.
+//   - User lowers Docker from 7d to 5m, Docker last ran 20m ago →
+//     20m ≥ 5m, fires on next tick (expected).
+//   - User raises SMART from 5m to 7d, SMART last ran 4m ago →
+//     4m < 7d, waits for next 7d cycle (expected).
+//   - User clicks through SMART picker 5m → 15m → 1h → back to
+//     "Use global" (7d), SMART last ran 20m ago → 20m < 7d, does
+//     NOT fire on next tick (the rc2 UAT regression — fixed by
+//     keeping lastRun instead of resetting on every interval change).
+//
+// Called from the settings-save path in the API handler. Safe to
+// call concurrently with Tick / MarkRan.
 func (d *ScanDispatcher) UpdateIntervals(cfg DispatcherIntervalsConfig, global time.Duration) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	prev := make(map[string]time.Duration, len(d.intervals))
-	for k, v := range d.intervals {
-		prev[k] = v
-	}
 	d.applyIntervalsLocked(cfg, global)
-	for name, newInterval := range d.intervals {
-		if prev[name] != newInterval {
-			delete(d.lastRun, name)
-		}
-	}
 }
 
 // Skipped returns the subsystems in configurableSubsystems that are
