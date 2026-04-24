@@ -1,8 +1,12 @@
 package collector
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -12,12 +16,72 @@ import (
 	internal "github.com/mcdays94/nas-doctor/internal"
 )
 
-// collectBackups detects and queries backup tools: Borg, Restic, PBS, Duplicati, Rclone.
-func collectBackups() *internal.BackupInfo {
-	info := &internal.BackupInfo{Available: false}
+// BorgExternalRepo is one explicitly user-configured external Borg repo.
+// Matches the api.BorgExternalRepo shape but lives in the collector
+// package so callers below api don't need to import the api layer.
+// Issue #279.
+type BorgExternalRepo struct {
+	// Enabled gates the repo from polling — users can disable without
+	// deleting to keep a repo's config around.
+	Enabled bool
+	// Label is a user display name; optional. Falls back to the
+	// canonical repo path basename in the dashboard widget.
+	Label string
+	// RepoPath is the container-visible path to the repo (bind-mount
+	// from host) or an ssh:// URL. Required when Enabled.
+	RepoPath string
+	// BinaryPath overrides the default `borg` PATH lookup. Empty =
+	// bundled Alpine musl borg at /usr/bin/borg. Override must be
+	// musl-compatible; see #279 architecture correction.
+	BinaryPath string
+	// PassphraseEnv names the env var NAS Doctor reads to discover the
+	// repo's passphrase. Empty = default "BORG_PASSPHRASE". NAS Doctor
+	// does NOT store the passphrase itself; users set it via Docker
+	// env vars at container-start time.
+	PassphraseEnv string
+	// SSHKeyPath is an optional container-visible path to an SSH key
+	// file used for ssh:// repos. NAS Doctor sets BORG_RSH to a `ssh
+	// -i <path>` invocation when this is set.
+	SSHKeyPath string
+}
 
-	// Try each provider
-	borgJobs := collectBorg()
+// CollectBackupsOptions carries non-defaults for the backup-collection
+// tick. Passed to CollectBackups by the scheduler / server; the zero
+// value represents "auto-detect only, no external repos" which
+// preserves the pre-#279 behaviour exactly.
+type CollectBackupsOptions struct {
+	// Runner is the BorgRunner to use for any Borg probe (auto-detect
+	// or external). Nil → uses NewExecBorgRunner().
+	Runner BorgRunner
+	// ExternalBorg is the user-configured list of external Borg repos.
+	// Entries with Enabled=false are skipped; entries whose canonical
+	// path collides with an auto-detected entry are deduped (auto-
+	// detect kept as authoritative, but marked Configured).
+	ExternalBorg []BorgExternalRepo
+	// ReadEnv resolves a named env var — injected so tests don't have
+	// to touch os.Getenv. Defaults to os.Getenv when nil.
+	ReadEnv func(string) string
+}
+
+// CollectBackups detects and queries backup tools: Borg, Restic, PBS,
+// Duplicati, Rclone. opts may be zero — all fields have sensible
+// defaults that preserve pre-#279 behaviour. Public so the api /
+// scheduler layers can drive external-repo polling; the lowercase
+// variant remains for the internal Collect() path.
+func CollectBackups(opts CollectBackupsOptions) *internal.BackupInfo {
+	info := &internal.BackupInfo{Available: false}
+	runner := opts.Runner
+	if runner == nil {
+		runner = NewExecBorgRunner()
+	}
+	readEnv := opts.ReadEnv
+	if readEnv == nil {
+		readEnv = os.Getenv
+	}
+
+	borgJobs := collectBorg(runner, readEnv)
+	externalJobs := collectBorgExternal(runner, opts.ExternalBorg, readEnv)
+	borgJobs = mergeBorgJobs(borgJobs, externalJobs)
 	resticJobs := collectRestic()
 	pbsJobs := collectPBS()
 	duplicatiJobs := collectDuplicati()
@@ -33,32 +97,287 @@ func collectBackups() *internal.BackupInfo {
 	return info
 }
 
+// collectBackups is the zero-options shim used by the monolithic
+// Collect() flow. Behaviourally unchanged from pre-#279.
+func collectBackups() *internal.BackupInfo {
+	return CollectBackups(CollectBackupsOptions{})
+}
+
+// logBackupResults emits structured per-repo lines for the backup
+// subsystem. One INFO per healthy Configured=true repo and one ERROR
+// per failed repo, with the specific reason category. Auto-detect
+// entries are intentionally silent (noise reduction). Called from
+// Collect() after each backup tick (issue #279 user story 15).
+//
+// externalConfigured indicates the user has at least one entry in
+// settings; used to decide whether to emit a summary even when the
+// result set is empty (0-of-N success).
+func logBackupResults(logger *slog.Logger, info *internal.BackupInfo, externalConfigured bool) {
+	if logger == nil || info == nil {
+		return
+	}
+	if !externalConfigured {
+		return
+	}
+	for _, j := range info.Jobs {
+		if !j.Configured {
+			continue
+		}
+		if j.Error != "" {
+			logger.Error("borg external: repo probe failed",
+				"repo", j.Repository,
+				"label", j.Label,
+				"reason", j.ErrorReason)
+			continue
+		}
+		logger.Info("borg external: repo probed",
+			"repo", j.Repository,
+			"label", j.Label,
+			"archives", j.SnapshotCount)
+	}
+}
+
 // ---------- Borg ----------
 
-func collectBorg() []internal.BackupJob {
-	// Check if borg is available
+// collectBorg auto-detects Borg repos by probing $BORG_REPO + a fixed
+// set of common NAS-layout locations. Each detected repo is queried
+// via the injected BorgRunner. Refactored from the pre-#279 direct
+// exec path so the modern-Borg two-call fix (issue #279 scope
+// addendum) applies uniformly.
+func collectBorg(runner BorgRunner, readEnv func(string) string) []internal.BackupJob {
+	// Fast-path exit: if borg isn't on PATH we have nothing to probe.
+	// This preserves the pre-#279 behaviour (no noisy logs on
+	// borg-less installs) and keeps the per-repo loop tight.
 	if _, err := exec.LookPath("borg"); err != nil {
 		return nil
 	}
 
-	// Try common repo locations
-	repos := findBorgRepos()
+	repos := findBorgRepos(readEnv)
 	var jobs []internal.BackupJob
-
 	for _, repo := range repos {
-		job := queryBorgRepo(repo)
-		if job != nil {
+		job := queryBorgRepoViaRunner(runner, repo, "", nil)
+		if job != nil && job.Error == "" {
+			// Auto-detect path intentionally drops error cards — a
+			// speculative "common location" probe that fails is just
+			// noise. Explicit configs (collectBorgExternal) render
+			// errors.
 			jobs = append(jobs, *job)
 		}
 	}
 	return jobs
 }
 
-func findBorgRepos() []string {
+// collectBorgExternal polls the user-configured external Borg repos.
+// Each enabled entry is queried via the injected BorgRunner; failures
+// produce a BackupJob with Error + ErrorReason populated so the
+// dashboard widget can render an error card with a specific reason.
+func collectBorgExternal(runner BorgRunner, cfg []BorgExternalRepo, readEnv func(string) string) []internal.BackupJob {
+	if len(cfg) == 0 {
+		return nil
+	}
+	var out []internal.BackupJob
+	for _, repo := range cfg {
+		if !repo.Enabled {
+			continue
+		}
+		repoPath := strings.TrimSpace(repo.RepoPath)
+		if repoPath == "" {
+			continue
+		}
+		binary := strings.TrimSpace(repo.BinaryPath)
+		env := buildBorgEnv(repo, readEnv)
+		job := queryBorgRepoViaRunner(runner, repoPath, binary, env)
+		if job == nil {
+			// Runner may return nil for a totally un-recoverable
+			// state; synthesise an unknown-error card so the user
+			// still sees something on the dashboard.
+			job = &internal.BackupJob{
+				Provider:    "borg",
+				Name:        filepath.Base(repoPath),
+				Repository:  repoPath,
+				Status:      "failed",
+				Error:       "backup probe returned nil",
+				ErrorReason: BorgErrUnknown,
+			}
+		}
+		job.Configured = true
+		if repo.Label != "" {
+			job.Label = repo.Label
+			if job.Name == "" || job.Name == filepath.Base(repoPath) {
+				job.Name = repo.Label
+			}
+		}
+		out = append(out, *job)
+	}
+	return out
+}
+
+// BuildBorgEnvForTest exposes buildBorgEnv to the api package's Test
+// endpoint so the same env-resolution logic drives both scheduled
+// polling and the user-invoked Test button. Signature is the same as
+// buildBorgEnv; the exported name is the only addition. Issue #279.
+func BuildBorgEnvForTest(r BorgExternalRepo, readEnv func(string) string) map[string]string {
+	return buildBorgEnv(r, readEnv)
+}
+
+// buildBorgEnv composes the env map passed to BorgRunner.Info for one
+// configured repo. The passphrase env var name defaults to
+// BORG_PASSPHRASE; a non-empty override is resolved from the NAS
+// Doctor process env and forwarded under the canonical
+// BORG_PASSPHRASE name the borg binary expects. If SSH key path is
+// set, BORG_RSH is wired up so remote repos auth without a system-
+// wide key.
+//
+// Returns nil when no env vars are needed — lets the runner skip the
+// ambient-merge branch.
+func buildBorgEnv(r BorgExternalRepo, readEnv func(string) string) map[string]string {
+	env := map[string]string{}
+	// Passphrase resolution has two modes (issue #279 rc3 Finding B):
+	//
+	//   - Default mode: r.PassphraseEnv == "" means "user accepted
+	//     the default; let the subprocess inherit whatever
+	//     BORG_PASSPHRASE is in the container env". We do NOT set
+	//     env["BORG_PASSPHRASE"] — the runner's os.Environ() merge
+	//     already carries it through. Backwards-compat with rc2.
+	//
+	//   - Explicit-override mode: r.PassphraseEnv == "BORG_X" means
+	//     "user specified their intent; ONLY this var should drive
+	//     decryption". We ALWAYS set env["BORG_PASSPHRASE"] to
+	//     readEnv(r.PassphraseEnv), EVEN when the lookup returns "".
+	//     Setting it to an empty string forces the subprocess to
+	//     ignore any inherited BORG_PASSPHRASE. Borg will then fail
+	//     with a passphrase error, which classifyBorgError maps to
+	//     passphrase_rejected. That's the honest outcome — the user
+	//     declared their intent and we honor it.
+	explicit := strings.TrimSpace(r.PassphraseEnv)
+	if explicit != "" {
+		env["BORG_PASSPHRASE"] = readEnv(explicit)
+	} else if v := readEnv("BORG_PASSPHRASE"); v != "" {
+		// No explicit override, but if the process env happens to
+		// carry BORG_PASSPHRASE and the caller's readEnv surfaces
+		// it, forward it through. This keeps the ambient-inherit
+		// backwards-compat path working for callers (like the Test
+		// endpoint) that wire readEnv to os.Getenv. Empty result is
+		// NOT set — subprocess still inherits via os.Environ() in
+		// the runner.
+		env["BORG_PASSPHRASE"] = v
+	}
+
+	// BORG_RELOCATED_REPO_ACCESS_IS_OK / BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK
+	// are also set at the runner layer (buildRunnerEnv, issue #279
+	// rc2) as the canonical guarantee. Kept here for belt-and-suspenders
+	// defense: some call paths (e.g. direct buildBorgEnv consumption
+	// in tests) don't hit buildRunnerEnv. Duplication is harmless
+	// since values agree.
+	env["BORG_RELOCATED_REPO_ACCESS_IS_OK"] = "yes"
+	env["BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK"] = "yes"
+	if keyPath := strings.TrimSpace(r.SSHKeyPath); keyPath != "" {
+		env["BORG_RSH"] = fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=accept-new", keyPath)
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
+}
+
+// mergeBorgJobs merges the auto-detect job list with the external-
+// config job list, deduped by canonical repo path. Auto-detect is
+// authoritative for repo metadata when both sides produced a job for
+// the same path — but the Configured flag flips on (so the user
+// still sees the "Configured" pill) and the Label, if supplied on
+// the external entry, overrides the auto-detect display name.
+func mergeBorgJobs(auto, external []internal.BackupJob) []internal.BackupJob {
+	if len(external) == 0 {
+		return auto
+	}
+	byPath := make(map[string]int, len(auto)+len(external))
+	out := make([]internal.BackupJob, 0, len(auto)+len(external))
+	for _, j := range auto {
+		key := CanonicalRepoPath(j.Repository)
+		out = append(out, j)
+		byPath[key] = len(out) - 1
+	}
+	for _, j := range external {
+		key := CanonicalRepoPath(j.Repository)
+		if idx, ok := byPath[key]; ok {
+			// Dedupe: mark auto-detect entry as configured, carry
+			// label if provided. Preserves auto-detect's known-good
+			// metadata.
+			out[idx].Configured = true
+			if j.Label != "" {
+				out[idx].Label = j.Label
+			}
+			continue
+		}
+		out = append(out, j)
+		byPath[key] = len(out) - 1
+	}
+	return out
+}
+
+// queryBorgRepoViaRunner runs the BorgRunner-backed two-call probe
+// and composes a BackupJob. binary + env are passed through verbatim
+// to the runner; empty binary means "use $PATH/borg". On runner
+// error the returned job carries Error + ErrorReason so the dashboard
+// can render an error card (external-config only; collectBorg drops
+// these).
+func queryBorgRepoViaRunner(runner BorgRunner, repoPath, binary string, env map[string]string) *internal.BackupJob {
+	if strings.TrimSpace(repoPath) == "" {
+		return nil
+	}
+	ctx := context.Background()
+	info, err := runner.Info(ctx, repoPath, binary, env)
+	if err != nil {
+		var bre *BorgRunError
+		reason := BorgErrUnknown
+		errStr := err.Error()
+		if errors.As(err, &bre) {
+			reason = bre.Reason
+			// Drop the underlying exec noise from the user-visible
+			// Error string; keep the reason category as the primary
+			// signal. The full err lands in logs via the caller.
+			errStr = fmt.Sprintf("borg probe failed: %s", reason)
+		}
+		return &internal.BackupJob{
+			Provider:    "borg",
+			Name:        filepath.Base(repoPath),
+			Repository:  repoPath,
+			Status:      "failed",
+			Error:       errStr,
+			ErrorReason: reason,
+		}
+	}
+	job := &internal.BackupJob{
+		Provider:      "borg",
+		Name:          filepath.Base(repoPath),
+		Repository:    repoPath,
+		SnapshotCount: info.ArchiveCount,
+		Encrypted:     info.EncryptionMode != "" && info.EncryptionMode != "none",
+	}
+	if info.LatestArchive != nil {
+		if !info.LatestArchive.Start.IsZero() {
+			job.LastRun = info.LatestArchive.Start
+			job.LastSuccess = info.LatestArchive.Start
+		}
+		if !info.LatestArchive.Start.IsZero() && !info.LatestArchive.End.IsZero() {
+			job.Duration = info.LatestArchive.End.Sub(info.LatestArchive.Start).Seconds()
+		}
+		job.SizeBytes = info.LatestArchive.OriginalSize
+		job.FilesCount = info.LatestArchive.NFiles
+	} else if !info.LastModified.IsZero() {
+		// Empty-repo / no-archive case: fall back to repository
+		// last_modified so the widget has something to show.
+		job.LastRun = info.LastModified
+	}
+	job.Status = backupStatus(job.LastSuccess)
+	return job
+}
+
+func findBorgRepos(readEnv func(string) string) []string {
 	var repos []string
 	// Check BORG_REPO env
-	if out, err := execCmd("sh", "-c", "echo $BORG_REPO"); err == nil && strings.TrimSpace(out) != "" {
-		repos = append(repos, strings.TrimSpace(out))
+	if v := strings.TrimSpace(readEnv("BORG_REPO")); v != "" {
+		repos = append(repos, v)
 	}
 	// Scan common locations
 	for _, pattern := range []string{
@@ -71,63 +390,6 @@ func findBorgRepos() []string {
 		repos = append(repos, matches...)
 	}
 	return repos
-}
-
-func queryBorgRepo(repo string) *internal.BackupJob {
-	// borg info --json <repo>
-	out, err := execCmd("borg", "info", "--json", repo)
-	if err != nil {
-		return nil
-	}
-
-	var borgInfo struct {
-		Repository struct {
-			Location string `json:"location"`
-		} `json:"repository"`
-		Archives []struct {
-			Name  string `json:"name"`
-			Start string `json:"start"`
-			End   string `json:"end"`
-			Stats struct {
-				OriginalSize int64 `json:"original_size"`
-				NFiles       int   `json:"nfiles"`
-			} `json:"stats"`
-		} `json:"archives"`
-		Encryption struct {
-			Mode string `json:"mode"`
-		} `json:"encryption"`
-	}
-
-	if err := json.Unmarshal([]byte(out), &borgInfo); err != nil {
-		return nil
-	}
-
-	job := &internal.BackupJob{
-		Provider:      "borg",
-		Name:          filepath.Base(repo),
-		Repository:    repo,
-		SnapshotCount: len(borgInfo.Archives),
-		Encrypted:     borgInfo.Encryption.Mode != "none" && borgInfo.Encryption.Mode != "",
-	}
-
-	if len(borgInfo.Archives) > 0 {
-		latest := borgInfo.Archives[len(borgInfo.Archives)-1]
-		if t, err := time.Parse("2006-01-02T15:04:05.000000", latest.Start); err == nil {
-			job.LastRun = t
-			job.LastSuccess = t
-		}
-		if t1, err1 := time.Parse("2006-01-02T15:04:05.000000", latest.Start); err1 == nil {
-			if t2, err2 := time.Parse("2006-01-02T15:04:05.000000", latest.End); err2 == nil {
-				job.Duration = t2.Sub(t1).Seconds()
-			}
-		}
-		job.SizeBytes = latest.Stats.OriginalSize
-		job.FilesCount = latest.Stats.NFiles
-	}
-
-	// Determine status based on age
-	job.Status = backupStatus(job.LastSuccess)
-	return job
 }
 
 // ---------- Restic ----------

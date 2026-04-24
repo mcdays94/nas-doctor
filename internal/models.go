@@ -619,6 +619,23 @@ type BackupJob struct {
 	Schedule      string    `json:"schedule,omitempty"`    // cron expression or "daily", "hourly"
 	Compression   string    `json:"compression,omitempty"` // "lz4", "zstd", "none"
 	Encrypted     bool      `json:"encrypted"`
+	// Label is the user-supplied display name for explicitly-configured
+	// external backup repos (issue #279). Empty for auto-detected repos;
+	// non-empty entries render as "<label>" on the dashboard card in
+	// place of the repo basename.
+	Label string `json:"label,omitempty"`
+	// Configured distinguishes explicitly user-configured external
+	// repos from auto-detected ones. Controls the "Configured" pill
+	// on the dashboard card. Issue #279.
+	Configured bool `json:"configured,omitempty"`
+	// Error is a non-empty string when a backup probe failed — signals
+	// the dashboard to render the card in error state. Empty on
+	// healthy/stale/warning jobs. Issue #279.
+	Error string `json:"error,omitempty"`
+	// ErrorReason is a short stable category matching one of the
+	// BorgErr* constants in internal/collector. Used by the dashboard
+	// widget for user-visible messaging. Issue #279.
+	ErrorReason string `json:"error_reason,omitempty"`
 }
 
 // ---------- Network Speed Test ----------

@@ -396,6 +396,25 @@ func main() {
 				ZFSSec:        persistedSettings.AdvancedScans.ZFS.IntervalSec,
 				GPUSec:        persistedSettings.AdvancedScans.GPU.IntervalSec,
 			}, interval)
+			// Apply external Borg monitor config on startup (#279).
+			// The collector reads this on every backup tick — without
+			// it, configured repos wouldn't show up until the user
+			// re-saved settings.
+			if len(persistedSettings.BackupMonitor.Borg) > 0 {
+				ext := make([]collector.BorgExternalRepo, 0, len(persistedSettings.BackupMonitor.Borg))
+				for _, r := range persistedSettings.BackupMonitor.Borg {
+					ext = append(ext, collector.BorgExternalRepo{
+						Enabled:       r.Enabled,
+						Label:         r.Label,
+						RepoPath:      r.RepoPath,
+						BinaryPath:    r.BinaryPath,
+						PassphraseEnv: r.PassphraseEnv,
+						SSHKeyPath:    r.SSHKeyPath,
+					})
+				}
+				coll.SetBackupMonitorBorg(ext)
+				logger.Info("external backup monitor loaded", "borg_repos", len(ext))
+			}
 		}
 		sched.Start()
 		defer sched.Stop()

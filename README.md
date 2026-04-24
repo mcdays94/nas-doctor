@@ -122,12 +122,74 @@ is reachable from the NAS Doctor container:
 - Tracks last backup time, size, snapshot count, duration, encryption status
 - **Stale backup alerts**: warning >24h, critical >48h, failed backups
 
-> **Note**: None of these binaries ship in the NAS Doctor Docker image by
-> default. The Backup dashboard section stays empty unless you either
-> install the provider CLI inside the container (custom Dockerfile) or run
-> the provider in a sibling container that shares volumes/network with NAS
-> Doctor. There is no UI to configure this — detection is purely
-> binary-presence-based.
+> **Note**: Restic, PBS, and Duplicati binaries don't ship in the
+> NAS Doctor Docker image. Borg **is** bundled (since v0.9.10; see
+> External Borg Monitoring below) and can be pointed at host-managed
+> repos via a Read Only bind-mount — no custom image needed. For
+> Restic/PBS/Duplicati the Backup dashboard section stays empty unless
+> you install the provider CLI inside the container (custom Dockerfile)
+> or run the provider in a sibling container that shares volumes/network
+> with NAS Doctor.
+
+#### External Borg Monitoring (host-managed repos)
+
+If your Borg setup runs on the **host** (e.g. Unraid User Scripts,
+Synology Task Scheduler) rather than inside the NAS Doctor container,
+you can still monitor it. Borg is bundled in the image so the **binary
+requires no host mount** — just bind-mount the repo path **Read Only**.
+
+> NAS Doctor uses `borg --bypass-lock` to avoid writing to the repo, so
+> a Read Only mount is safe. The only theoretical race (read during a
+> concurrent `borg create` by the host) produces a momentarily-stale
+> archive count until the next scan — no corruption.
+
+Configure in **Settings → Advanced → Backup Monitors → Borg**:
+
+1. **Repo Path** — path to the Borg repo visible inside the container.
+   Bind-mount your host's repo location into the container first, as
+   **Read Only** (`:ro` or `Mode="ro"`).
+   Example: host `/mnt/user/appdata/borg/repo` → container
+   `/mnt/user/appdata/borg/repo` (RO).
+2. **Label** — optional display name for the dashboard (e.g. `Offsite`).
+3. **Passphrase Env Var** — optional, defaults to `BORG_PASSPHRASE`.
+   The name of a Docker env var containing the repo's passphrase.
+   NAS Doctor **never stores the passphrase itself** — it only reads
+   the env var you set on the container.
+4. **SSH Key Path** — optional, for `ssh://` remote repos. Absolute
+   path inside the container (bind-mount your key file read-only).
+5. **Binary Path** — optional override. Leave blank to use the bundled
+   binary. Overrides **must be musl-compatible** (the Alpine base image
+   can't exec glibc-linked binaries).
+
+Each entry has a **Test** button that probes the repo on demand. Failed
+repos render as red error cards on the dashboard with a specific reason
+(`binary_not_found`, `repo_inaccessible`, `passphrase_rejected`,
+`ssh_timeout`, `corrupt_repo`, `unknown`) so you can tell at a glance
+which of your repos needs attention.
+
+**Worked Unraid example** — host runs Borg via User Scripts with repo
+at `/mnt/user/appdata/borg/main`, encrypted:
+
+```
+# In the Unraid Docker config for nas-doctor:
+Path:  /mnt/user/appdata/borg/main  →  /mnt/user/appdata/borg/main (RO)
+Env:   BORG_PASSPHRASE              =  <your-passphrase>
+```
+
+Then in Settings → Advanced → Backup Monitors → Borg → Add Borg repo:
+
+```
+Enabled:           on
+Label:             Main
+Repo Path:         /mnt/user/appdata/borg/main
+Binary Path:       (leave blank — uses bundled borg)
+Passphrase Env:    BORG_PASSPHRASE
+SSH Key Path:      (leave blank — local repo)
+```
+
+Click **Test** to verify; the response shows the archive count on
+success or a specific error reason on failure. No container restart
+needed — the repo appears on the dashboard at the next scan tick.
 
 ### Network Speed Test
 
