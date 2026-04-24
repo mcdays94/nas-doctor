@@ -409,10 +409,30 @@ func (s *Scheduler) SetSMARTMaxAgeDays(days int) {
 // (issue #260 user story 1-6). Also restarts the main scan loop
 // ticker at the new FastestInterval via UpdateInterval, since a
 // newly-faster subsystem may require the ticker to fire more often.
-func (s *Scheduler) SetDispatcherIntervals(cfg DispatcherIntervalsConfig) {
-	s.mu.RLock()
-	global := s.interval
-	s.mu.RUnlock()
+//
+// global is the canonical scan_interval the caller just parsed from
+// settings; passed explicitly (rather than read from s.interval) to
+// avoid a race with a concurrent UpdateInterval that may not have
+// been consumed by the main loop yet. In practice the API handler
+// calls UpdateInterval then SetDispatcherIntervals in sequence on
+// the same goroutine — passing global through makes that ordering
+// irrelevant.
+func (s *Scheduler) SetDispatcherIntervals(cfg DispatcherIntervalsConfig, global time.Duration) {
+	if global <= 0 {
+		// Defensive: if caller didn't know the global (or passed a
+		// sentinel), fall back to whatever the scheduler has cached.
+		s.mu.RLock()
+		global = s.interval
+		s.mu.RUnlock()
+	} else {
+		// Caller supplied a fresh global — also update s.interval so
+		// subsequent reads see it. If a concurrent UpdateInterval is
+		// already propagating the same value, the main loop will
+		// simply re-tick at the same interval (harmless).
+		s.mu.Lock()
+		s.interval = global
+		s.mu.Unlock()
+	}
 	s.dispatcher.UpdateIntervals(cfg, global)
 	// Re-size the main-loop ticker to match the new FastestInterval.
 	// If nothing actually changed, UpdateInterval's select-default

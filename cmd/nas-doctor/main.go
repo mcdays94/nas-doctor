@@ -395,7 +395,7 @@ func main() {
 				KubernetesSec: persistedSettings.AdvancedScans.Kubernetes.IntervalSec,
 				ZFSSec:        persistedSettings.AdvancedScans.ZFS.IntervalSec,
 				GPUSec:        persistedSettings.AdvancedScans.GPU.IntervalSec,
-			})
+			}, interval)
 		}
 		sched.Start()
 		defer sched.Stop()

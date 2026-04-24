@@ -43,6 +43,15 @@ func TestHandleUpdateSettings_AdvancedScans_PushesIntervalsToScheduler(t *testin
 		t.Fatalf("precondition: FastestInterval = %v, want 30m", got)
 	}
 
+	// Seed settings to provide the required default values PUT expects
+	// to find on disk (otherwise the handler's validation path for
+	// nested fields may behave unexpectedly).
+	_ = store.SetConfig(settingsConfigKey, func() string {
+		d := defaultSettings()
+		b, _ := json.Marshal(d)
+		return string(b)
+	}())
+
 	// Save settings with Docker=300 (5 min override) + SMART=86400
 	// (1 day). FastestInterval should drop to 5 min after the save.
 	body, _ := json.Marshal(map[string]interface{}{

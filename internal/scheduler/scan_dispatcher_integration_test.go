@@ -35,7 +35,7 @@ func TestScheduler_Dispatcher_FastestInterval_SizesTickInterval(t *testing.T) {
 
 	s.SetDispatcherIntervals(DispatcherIntervalsConfig{
 		DockerSec: 300,
-	})
+	}, 30*time.Minute)
 
 	if got, want := s.dispatcher.FastestInterval(), 5*time.Minute; got != want {
 		t.Errorf("after SetDispatcherIntervals(Docker=5m), FastestInterval = %v, want %v", got, want)
@@ -305,7 +305,7 @@ func TestScheduler_SetDispatcherIntervals_DispatcherUpdated(t *testing.T) {
 	// Push Docker=5m via settings-save path.
 	s.SetDispatcherIntervals(DispatcherIntervalsConfig{
 		DockerSec: 300,
-	})
+	}, 30*time.Minute)
 
 	// Dispatcher should now report 5m as fastest.
 	if got, want := s.dispatcher.FastestInterval(), 5*time.Minute; got != want {
