@@ -88,6 +88,36 @@ func TestMigrateSettings_V2_Idempotent(t *testing.T) {
 	}
 }
 
+// TestMigrateSettings_V2UserTouchesSettings_DoesNotReMigrateZeroMaxAge
+// pins the combined preservation contract after issue #268: a v2 blob
+// with the full spectrum of edge-case user choices (explicit
+// max_age_days=0 AND wake_drives=true) passes through migrateSettings
+// unchanged. The v1→v2 ladder MUST NOT fire once SettingsVersion is
+// already 2, no matter what SMART values were chosen.
+func TestMigrateSettings_V2UserTouchesSettings_DoesNotReMigrateZeroMaxAge(t *testing.T) {
+	raw := []byte(`{
+		"settings_version": 2,
+		"scan_interval": "30m",
+		"theme": "midnight",
+		"smart": {
+			"wake_drives": true,
+			"max_age_days": 0
+		}
+	}`)
+
+	got := migrateSettings(raw, defaultSettings())
+
+	if got.SettingsVersion != 2 {
+		t.Errorf("settings_version: got %d, want 2 preserved", got.SettingsVersion)
+	}
+	if got.SMART.MaxAgeDays != 0 {
+		t.Errorf("smart.max_age_days: got %d, want 0 (explicit user zero must survive — was the visible half of #268)", got.SMART.MaxAgeDays)
+	}
+	if !got.SMART.WakeDrives {
+		t.Errorf("smart.wake_drives: got false, want true (explicit user true must survive — was the silent half of #268)")
+	}
+}
+
 // TestMigrateSettings_V2_PreservesMaxAgeDaysZero ensures that a user
 // who has deliberately disabled the safety net (set max_age_days=0)
 // does not silently get it re-enabled by the migration. Idempotency
