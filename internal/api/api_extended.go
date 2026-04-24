@@ -684,6 +684,23 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Preserve server-authoritative settings_version. The client must
+	// never be able to downgrade or omit this field. If the stored blob
+	// has a higher version, keep it. Guards against issue #268: a v0.9.8
+	// frontend that omitted settings_version persisted version=0, which
+	// re-triggered the v1→v2 migration on next getSettings() and
+	// silently clobbered smart.max_age_days=0 back to 7 and
+	// smart.wake_drives=true back to false.
+	if raw, err := s.store.GetConfig(settingsConfigKey); err == nil && raw != "" {
+		var existing Settings
+		if json.Unmarshal([]byte(raw), &existing) == nil && existing.SettingsVersion > settings.SettingsVersion {
+			settings.SettingsVersion = existing.SettingsVersion
+		}
+	}
+	if settings.SettingsVersion < currentSettingsVersion {
+		settings.SettingsVersion = currentSettingsVersion
+	}
+
 	// Basic validation
 	if settings.ScanInterval == "" {
 		settings.ScanInterval = "30m"

@@ -1317,6 +1317,13 @@ function buildSettingsPayload() {
   };
 
   return {
+    // Preserve server-authoritative settings_version from the loaded
+    // blob. Without this, the backend saw settings_version=0 on every
+    // save and re-ran the v1→v2 migration on the next internal
+    // getSettings() call, silently resetting smart.max_age_days=0→7
+    // and smart.wake_drives=true→false. See issue #268 + the
+    // companion server-side floor in handleUpdateSettings.
+    settings_version: (base && base.settings_version) || 2,
     scan_interval: getScanInterval(),
     speedtest_interval: document.getElementById("speedtest-interval").value,
     speedtest_schedule: buildSpeedTestSchedule(),
