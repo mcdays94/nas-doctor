@@ -123,6 +123,13 @@ type Scheduler struct {
 	// when the user changes the setting. Read under s.mu.
 	smartMaxAgeDays int
 
+	// dispatcher owns per-subsystem scan scheduling for the 6
+	// configurable subsystems (issue #260 / PRD #239 slice 2b).
+	// Non-nil after New(); safe for concurrent use. Settings saves
+	// push new per-subsystem intervals via dispatcher.UpdateIntervals
+	// from the API handler.
+	dispatcher *ScanDispatcher
+
 	logForwarder *logfwd.Forwarder
 
 	mu      sync.RWMutex
@@ -170,6 +177,11 @@ func New(
 		// should call SetSMARTMaxAgeDays after construction.
 		smartMaxAgeDays: 7,
 	}
+	// Dispatcher starts with all-subsystems-on-global; callers (the
+	// API settings handler on startup) push the user's configured
+	// per-subsystem intervals via SetDispatcherIntervals once
+	// Settings.AdvancedScans is loaded.
+	s.dispatcher = NewScanDispatcher(DispatcherIntervalsConfig{}, interval, nil)
 	s.checker = NewServiceChecker(store, logger)
 	// Opt into the per-type Details map on the scheduled path too —
 	// HTTP status codes, resolved IPs, DNS records, Ping RTT, failure
@@ -188,15 +200,25 @@ func New(
 }
 
 // Start begins the periodic collection loop. It runs the first collection
-// immediately, then repeats at the configured interval.
+// immediately, then repeats at the dispatcher's FastestInterval — which
+// is min(global scan_interval, all non-zero per-subsystem intervals)
+// per issue #260 / PRD #239 slice 2b. Each tick the dispatcher decides
+// which of the 6 configurable subsystems to run; the 9 non-configurable
+// subsystems always run every tick (cheap enough and the dispatcher is
+// not responsible for them).
+//
 // Also starts an independent service check loop (30s tick) that respects
 // per-check intervals.
 func (s *Scheduler) Start() {
-	s.logger.Info("scheduler starting", "interval", s.interval)
+	tickInterval := s.dispatcher.FastestInterval()
+	s.logger.Info("scheduler starting",
+		"global_interval", s.interval,
+		"tick_interval", tickInterval,
+	)
 	// Main diagnostic collection loop
 	go func() {
 		s.RunOnce()
-		ticker := time.NewTicker(s.interval)
+		ticker := time.NewTicker(tickInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -204,11 +226,30 @@ func (s *Scheduler) Start() {
 				s.RunOnce()
 			case newInterval := <-s.restart:
 				ticker.Stop()
+				// The `restart` channel carries a GLOBAL scan_interval
+				// change (from UpdateInterval) OR a dispatcher-driven
+				// FastestInterval refresh (from SetDispatcherIntervals
+				// — in that case the dispatcher has already been
+				// updated and we just need to rebuild the ticker).
+				// We distinguish by comparing against the dispatcher's
+				// current FastestInterval: if it equals newInterval,
+				// it's the dispatcher path (global unchanged); else
+				// it's a user global update and we push the new
+				// global through to the dispatcher.
 				s.mu.Lock()
-				s.interval = newInterval
+				if newInterval != s.dispatcher.FastestInterval() {
+					s.interval = newInterval
+					// Global changed → push through to dispatcher so
+					// "use global" subsystems pick it up.
+					s.dispatcher.SetGlobal(newInterval)
+				}
 				s.mu.Unlock()
-				ticker = time.NewTicker(newInterval)
-				s.logger.Info("scheduler interval updated", "new_interval", newInterval)
+				fresh := s.dispatcher.FastestInterval()
+				ticker = time.NewTicker(fresh)
+				s.logger.Info("scheduler interval updated",
+					"global_interval", s.interval,
+					"tick_interval", fresh,
+				)
 			case <-s.stop:
 				s.logger.Info("scheduler stopped")
 				return
@@ -362,6 +403,55 @@ func (s *Scheduler) SetSMARTMaxAgeDays(days int) {
 	s.smartMaxAgeDays = days
 }
 
+// SetDispatcherIntervals pushes updated per-subsystem intervals into
+// the ScanDispatcher. Called by the API settings handler on save so
+// the new cadences take effect without restarting the scheduler
+// (issue #260 user story 1-6). Also restarts the main scan loop
+// ticker at the new FastestInterval via UpdateInterval, since a
+// newly-faster subsystem may require the ticker to fire more often.
+//
+// global is the canonical scan_interval the caller just parsed from
+// settings; passed explicitly (rather than read from s.interval) to
+// avoid a race with a concurrent UpdateInterval that may not have
+// been consumed by the main loop yet. In practice the API handler
+// calls UpdateInterval then SetDispatcherIntervals in sequence on
+// the same goroutine — passing global through makes that ordering
+// irrelevant.
+func (s *Scheduler) SetDispatcherIntervals(cfg DispatcherIntervalsConfig, global time.Duration) {
+	if global <= 0 {
+		// Defensive: if caller didn't know the global (or passed a
+		// sentinel), fall back to whatever the scheduler has cached.
+		s.mu.RLock()
+		global = s.interval
+		s.mu.RUnlock()
+	} else {
+		// Caller supplied a fresh global — also update s.interval so
+		// subsequent reads see it. If a concurrent UpdateInterval is
+		// already propagating the same value, the main loop will
+		// simply re-tick at the same interval (harmless).
+		s.mu.Lock()
+		s.interval = global
+		s.mu.Unlock()
+	}
+	s.dispatcher.UpdateIntervals(cfg, global)
+	// Re-size the main-loop ticker to match the new FastestInterval.
+	// If nothing actually changed, UpdateInterval's select-default
+	// short-circuits gracefully.
+	s.UpdateInterval(s.dispatcher.FastestInterval())
+	s.logger.Info("scan dispatcher intervals updated",
+		"fastest_interval", s.dispatcher.FastestInterval(),
+	)
+}
+
+// Dispatcher returns the scheduler's ScanDispatcher. Exposed so the
+// API layer can surface per-subsystem lastRun timestamps on
+// /api/v1/snapshot/latest without reaching into scheduler internals.
+// Callers should treat the returned value as read-mostly; mutate only
+// via SetDispatcherIntervals.
+func (s *Scheduler) Dispatcher() *ScanDispatcher {
+	return s.dispatcher
+}
+
 // SetSpeedTestSchedule sets specific times of day to run speed tests.
 func (s *Scheduler) SetSpeedTestSchedule(times []string, day string, freq string) {
 	s.mu.Lock()
@@ -409,30 +499,52 @@ func (s *Scheduler) RunOnce() {
 
 	s.logger.Info("starting diagnostic collection")
 
-	// Collect
+	// Phase 1: collect the 9 non-configurable subsystems (system,
+	// disks, network, logs, parity, UPS, update check, tunnels,
+	// backup). These always run every tick — they're cheap and have
+	// no user-facing cadence knob.
 	snap, err := s.collector.Collect()
 	if err != nil {
 		s.logger.Error("collection failed", "error", err)
 		return
 	}
 
-	// Stale-SMART force-wake (issue #238). After the normal SMART
-	// collect pass, any drive reported as "standby" via `-n standby`
-	// whose last recorded read exceeds Settings.SMART.MaxAgeDays is
-	// force-woken for a single SMART read and merged back into the
-	// snapshot. MaxAgeDays=0 disables the feature entirely.
-	//
-	// Runs BEFORE detectDriveReplacements so the replacement logic
-	// sees fresh SMART for force-woken drives (avoids a spurious
-	// "drive missing" interpretation if a standby drive's last
-	// snapshot reported different ArraySlot metadata).
-	s.mu.RLock()
-	maxAgeDays := s.smartMaxAgeDays
-	s.mu.RUnlock()
-	if maxAgeDays > 0 {
-		staleChecker := NewStaleSMARTChecker(s.store, maxAgeDays, s.logger)
-		if stale := staleChecker.Check(snap); len(stale) > 0 {
-			staleChecker.Apply(snap, stale, s.collector.CollectSMARTForced)
+	// Phase 2: dispatch per-subsystem collectors per their configured
+	// cadence (issue #260 / PRD #239). The dispatcher's Tick decides
+	// which of the 6 configurable subsystems (SMART, Docker, Proxmox,
+	// Kubernetes, ZFS, GPU) are due on this tick. Previously-collected
+	// values from prior ticks are carried forward on snap by merging
+	// from s.latest below.
+	now := snap.Timestamp
+	due := s.dispatcher.Tick(now)
+	skipped := Skipped(due)
+
+	// Carry forward the most recent cached values for subsystems that
+	// are NOT running this tick. A subsystem that skipped should keep
+	// its previous snapshot value rather than showing empty data.
+	s.carryForwardSubsystems(snap, skipped)
+
+	// Emit the canonical per-tick INFO log summarising dispatcher
+	// decisions (user story 15).
+	s.logger.Info("scan tick",
+		"due", due,
+		"skipped", skipped,
+		"tick_interval", s.dispatcher.FastestInterval(),
+	)
+
+	for _, subsystem := range due {
+		s.runSubsystem(subsystem, snap)
+		s.dispatcher.MarkRan(subsystem, now)
+	}
+
+	// Stamp per-subsystem last-run timestamps on the snapshot so API
+	// consumers can surface "last scanned 4m ago" style staleness
+	// indicators (issue #260 user story 17; dashboard UI deferred).
+	lastRun := s.dispatcher.LastRunMap()
+	if len(lastRun) > 0 {
+		snap.SubsystemLastRan = make(map[string]string, len(lastRun))
+		for name, ts := range lastRun {
+			snap.SubsystemLastRan[name] = ts.Format(time.RFC3339)
 		}
 	}
 
@@ -529,6 +641,99 @@ func (s *Scheduler) RunOnce() {
 
 	// Auto backup check
 	s.checkBackup()
+}
+
+// runSubsystem invokes the matching per-subsystem Collector method
+// and merges its result into snap. The stale-SMART force-wake safety
+// net fires immediately after CollectSMART (issue #260 — relocated
+// from the post-Collect() call site that slice 1 used, so max-age is
+// now scoped to SMART's cadence).
+func (s *Scheduler) runSubsystem(name string, snap *internal.Snapshot) {
+	switch name {
+	case "smart":
+		smart, standby, _ := s.collector.CollectSMART(snap.System.Platform)
+		snap.SMART = smart
+		snap.SMARTStandbyDevices = standby
+		// Stale-SMART force-wake (issue #238 / slice 1). Previously
+		// ran unconditionally after Collect(); now runs ONLY when
+		// SMART actually ran on this tick, so max-age honours the
+		// user's SMART cadence. If a user sets SMART to 30d and
+		// max-age to 7d, max-age becomes the governing cadence
+		// (force-wake fires more frequently than stated SMART
+		// interval) — the UI confirm() dialog warned them about
+		// this on save.
+		s.mu.RLock()
+		maxAgeDays := s.smartMaxAgeDays
+		s.mu.RUnlock()
+		if maxAgeDays > 0 {
+			staleChecker := NewStaleSMARTChecker(s.store, maxAgeDays, s.logger)
+			if stale := staleChecker.Check(snap); len(stale) > 0 {
+				staleChecker.Apply(snap, stale, s.collector.CollectSMARTForced)
+			}
+		}
+	case "docker":
+		docker, _ := s.collector.CollectDocker()
+		snap.Docker = docker
+		// Enrich top processes with container attribution (previously
+		// done inline in Collect(); preserved here so the full-scan
+		// snapshot still has enrichment when both Docker + system ran
+		// on the same tick).
+		if docker.Available && len(docker.Containers) > 0 && len(snap.System.TopProcesses) > 0 {
+			collector.EnrichProcessContainers(snap.System.TopProcesses, docker.Containers, "")
+		}
+	case "proxmox":
+		pve, _ := s.collector.CollectProxmox()
+		if pve != nil {
+			snap.Proxmox = pve
+		}
+	case "kubernetes":
+		kube, _ := s.collector.CollectKubernetes()
+		if kube != nil {
+			snap.Kubernetes = kube
+		}
+	case "zfs":
+		zfs, _ := s.collector.CollectZFS()
+		if zfs != nil && zfs.Available {
+			snap.ZFS = zfs
+		}
+	case "gpu":
+		gpu := s.collector.CollectGPU()
+		if gpu != nil && gpu.Available {
+			snap.GPU = gpu
+		}
+	}
+}
+
+// carryForwardSubsystems copies prior-tick values from s.latest into
+// the current snapshot for each skipped subsystem. Without this, a
+// subsystem that didn't run this tick would show empty data — which
+// is technically honest but degrades the dashboard experience
+// dramatically. Snapshot-level timestamps (surfaced via ScanLastRan)
+// tell consumers how stale each subsystem's data actually is.
+func (s *Scheduler) carryForwardSubsystems(snap *internal.Snapshot, skipped []string) {
+	s.mu.RLock()
+	prev := s.latest
+	s.mu.RUnlock()
+	if prev == nil {
+		return
+	}
+	for _, name := range skipped {
+		switch name {
+		case "smart":
+			snap.SMART = prev.SMART
+			snap.SMARTStandbyDevices = prev.SMARTStandbyDevices
+		case "docker":
+			snap.Docker = prev.Docker
+		case "proxmox":
+			snap.Proxmox = prev.Proxmox
+		case "kubernetes":
+			snap.Kubernetes = prev.Kubernetes
+		case "zfs":
+			snap.ZFS = prev.ZFS
+		case "gpu":
+			snap.GPU = prev.GPU
+		}
+	}
 }
 
 // Latest returns the most recent snapshot from the cache.

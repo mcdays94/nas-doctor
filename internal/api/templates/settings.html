@@ -931,6 +931,29 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
           </p>
         </div>
 
+        <!-- SMART scan interval picker — colocated with the other SMART
+             knobs per PRD #239. Markup is injected by createIntervalPicker
+             on page init. Inert in slice 2a (#259) — value persists but
+             scheduler ignores it until slice 2b (#260) wires it up. -->
+        <div id="scan-interval-smart" data-subsystem="smart" data-label="SMART" style="margin-top:18px"></div>
+
+        <!-- Per-subsystem scan intervals sub-section — PRD #239 slice 2a.
+             Five of the six configurable subsystems land here; SMART has
+             its own picker colocated with the wake-drives / max-age group
+             above to keep all SMART knobs together. Each picker is
+             rendered by createIntervalPicker into its div id. -->
+        <div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--border)">
+          <div style="font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Per-subsystem scan intervals</div>
+          <p style="font-size:12px;color:var(--text2);margin-top:4px;margin-bottom:14px;line-height:1.5">
+            Override the global scan cadence per subsystem. Use <strong>Use global</strong> to inherit the Diagnostic Scan Interval (most users want this). Set a positive interval only if you want that subsystem to run faster or slower than the rest of the dashboard. Values persist immediately, but no scheduler behaviour changes until the slice-2b release.
+          </p>
+          <div id="scan-interval-docker" data-subsystem="docker" data-label="Docker" style="margin-bottom:14px"></div>
+          <div id="scan-interval-proxmox" data-subsystem="proxmox" data-label="Proxmox" style="margin-bottom:14px"></div>
+          <div id="scan-interval-kubernetes" data-subsystem="kubernetes" data-label="Kubernetes" style="margin-bottom:14px"></div>
+          <div id="scan-interval-zfs" data-subsystem="zfs" data-label="ZFS" style="margin-bottom:14px"></div>
+          <div id="scan-interval-gpu" data-subsystem="gpu" data-label="GPU" style="margin-bottom:0"></div>
+        </div>
+
         <!-- Docker container visibility — unchanged from pre-#237. -->
         <div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Hide Docker containers from dashboard</div>
@@ -1180,6 +1203,437 @@ document.getElementById("scan-hours").addEventListener("input", updateIntervalPr
 document.getElementById("scan-minutes").addEventListener("input", updateIntervalPreview);
 document.getElementById("scan-seconds").addEventListener("input", updateIntervalPreview);
 
+/* ---------- Advanced Scan Settings: per-subsystem interval pickers ----------
+
+   Introduced in slice 2a (PRD #239 / issue #259). Six subsystems get
+   their own cadence picker:
+
+     - SMART (colocated with wake-drives / max-age inside card-advanced)
+     - Docker / Proxmox / Kubernetes / ZFS / GPU (grouped under the
+       "Per-subsystem scan intervals" sub-section)
+
+   In slice 2a the values are PERSISTED but INERT: the scheduler still
+   runs every subsystem on the global cadence. Slice 2b (#260) activates
+   the new ScanDispatcher that consumes these values.
+
+   The createIntervalPicker(subsystemId, label) helper generates the
+   widget markup and wires all event listeners. Mount points are
+   pre-rendered in the HTML as empty div id="scan-interval-<subsystem>".
+
+   Each picker offers the same UX as the global Diagnostic Scan
+   Interval widget: preset dropdown (Use global, 5m, 15m, 30m, 1h, 2h,
+   6h, 12h, 24h, 7d, Custom...) + custom d/h/m/s panel + live preview
+   + cron visualizer + "edit cron" button with a reverse parser. */
+
+/* Preset values offered by every per-subsystem interval picker.
+   "0" sentinel represents "use global"; matches the AdvancedScans
+   IntervalSec=0 convention on the server side (see PRD #239).
+
+   The "Use global" option's label has NO hardcoded duration suffix
+   here — createIntervalPicker appends the user's actual configured
+   scan_interval (e.g. "Use global (7d)") dynamically at render
+   time. Hardcoding "(30m)" caused a v0.9.9-rc2 UAT confusion: a
+   user with scan_interval=7d saw every picker advertise "Use
+   global (30m)" and reasonably thought the per-subsystem fallback
+   was 30 minutes when it was actually 7 days. */
+var advScanPresets = [
+  { value: "0",   label: "Use global"       },
+  { value: "5m",  label: "Every 5 minutes"  },
+  { value: "15m", label: "Every 15 minutes" },
+  { value: "30m", label: "Every 30 minutes" },
+  { value: "1h",  label: "Every 1 hour"     },
+  { value: "2h",  label: "Every 2 hours"    },
+  { value: "6h",  label: "Every 6 hours"    },
+  { value: "12h", label: "Every 12 hours"   },
+  { value: "24h", label: "Every 24 hours"   },
+  { value: "7d",  label: "Every 7 days"     },
+  { value: "custom", label: "Custom..."     }
+];
+
+/* globalIntervalDisplay returns the user's configured global
+   scan_interval formatted for picker labels. Falls back to "30m"
+   if settings haven't loaded yet (first paint before loadSettings
+   resolves — shouldn't happen in practice because
+   renderAdvancedScanPickers runs inside loadSettings' .then, but
+   defensive).
+
+   Humanizes the raw Go duration string coming from the backend.
+   Go's time.Duration.String() represents 7 days as "168h0m0s";
+   showing "Use global (168h0m0s)" (or even "168h") in the picker
+   was misleading to users who set 7d up top — they recognise "7d"
+   but have to mentally divide 168 by 24 to understand the label.
+   Reuses the existing parseIntervalDurationToFields +
+   fieldsToIntervalDuration pair, which already do the right
+   overflow arithmetic: 168h → {days:7, h:0, m:0, s:0} → "7d".
+   Combined formats like "25h" → "1d1h" are also cleaner than
+   "25h". v0.9.9-rc3 UAT feedback. */
+function globalIntervalDisplay() {
+  if (!settings || !settings.scan_interval) return "30m";
+  var raw = settings.scan_interval;
+  try {
+    var fields = parseIntervalDurationToFields(raw);
+    var out = fieldsToIntervalDuration(fields);
+    if (out && out !== "0") return out;
+  } catch (e) { /* fall through to raw below */ }
+  return raw;
+}
+
+/* Duration parser shared between the global widget's
+   parseDurationToFields and the new per-subsystem helpers. Goes
+   beyond parseDurationToFields because subsystem intervals may
+   include days ("7d"). Returns {days, hours, minutes, seconds}. */
+function parseIntervalDurationToFields(dur) {
+  var days = 0, hours = 0, minutes = 0, seconds = 0;
+  if (!dur || dur === "0") return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+  var m;
+  m = dur.match(/(\d+)d/);
+  if (m) days = parseInt(m[1], 10);
+  m = dur.match(/(\d+)h/);
+  if (m) { var h = parseInt(m[1], 10); days += Math.floor(h / 24); hours = h % 24; }
+  m = dur.match(/(\d+)m(?!s)/);
+  if (m) minutes = parseInt(m[1], 10);
+  m = dur.match(/(\d+)s/);
+  if (m) seconds = parseInt(m[1], 10);
+  return { days: days, hours: hours, minutes: minutes, seconds: seconds };
+}
+
+/* intervalSecToDuration converts an IntervalSec value back to a
+   duration string compatible with parseIntervalDurationToFields.
+   0 → "0" (use global sentinel). */
+function intervalSecToDuration(sec) {
+  sec = parseInt(sec, 10) || 0;
+  if (sec <= 0) return "0";
+  var days = Math.floor(sec / 86400);
+  sec -= days * 86400;
+  var hours = Math.floor(sec / 3600);
+  sec -= hours * 3600;
+  var minutes = Math.floor(sec / 60);
+  var seconds = sec % 60;
+  var out = "";
+  if (days > 0) out += days + "d";
+  if (hours > 0) out += hours + "h";
+  if (minutes > 0) out += minutes + "m";
+  if (seconds > 0) out += seconds + "s";
+  return out || "0";
+}
+
+/* durationToIntervalSec is the inverse of intervalSecToDuration.
+   Unknown/malformed inputs return 0 (= "use global"). */
+function durationToIntervalSec(dur) {
+  if (!dur || dur === "0") return 0;
+  var f = parseIntervalDurationToFields(dur);
+  return f.days * 86400 + f.hours * 3600 + f.minutes * 60 + f.seconds;
+}
+
+// parseCronToFields reverse-parses simple interval cron expressions
+// into {days, hours, minutes, seconds}. Throws on anything more
+// complex than the four supported shapes. PRD #239 user stories
+// 8, 14.
+//
+// Supported:
+//   */N s                — every N seconds (sub-minute; our extension)
+//   */N * * * *          — every N minutes (N in 1..59)
+//   0 */N * * *          — every N hours (N in 1..23)
+//   0 0 */N * *          — every N days (N in 1..31)
+//
+// Anything else (specific weekdays, comma lists, named months,
+// per-minute granularity below */N without seconds suffix, etc.)
+// triggers a clear UI error.
+//
+// NOTE: line comments (not /* */ block) — any `*/` inside a block
+// comment closes it early and breaks the entire <script> parse.
+// See stage-branch UAT of v0.9.9-rc1 where this bug shipped and
+// silently stopped loadSettings, renderAdvancedScanPickers, and
+// loadDockerHiddenContainersCheckboxes from running.
+function parseCronToFields(cronStr) {
+  if (!cronStr) throw new Error("empty cron");
+  var s = String(cronStr).trim();
+  var m;
+  m = s.match(/^\*\/(\d+)\s*s$/i);
+  if (m) {
+    var sec = parseInt(m[1], 10);
+    if (!(sec >= 1 && sec <= 59)) throw new Error("Must be a simple interval cron (seconds out of 1..59)");
+    return { days: 0, hours: 0, minutes: 0, seconds: sec };
+  }
+  var parts = s.split(/\s+/);
+  if (parts.length !== 5) {
+    throw new Error("Must be a simple interval cron (expected 5 fields)");
+  }
+  m = parts[0].match(/^\*\/(\d+)$/);
+  if (m && parts[1] === "*" && parts[2] === "*" && parts[3] === "*" && parts[4] === "*") {
+    var mins = parseInt(m[1], 10);
+    if (!(mins >= 1 && mins <= 59)) throw new Error("Must be a simple interval cron (minutes out of 1..59)");
+    return { days: 0, hours: 0, minutes: mins, seconds: 0 };
+  }
+  if (parts[0] === "0") {
+    m = parts[1].match(/^\*\/(\d+)$/);
+    if (m && parts[2] === "*" && parts[3] === "*" && parts[4] === "*") {
+      var hrs = parseInt(m[1], 10);
+      if (!(hrs >= 1 && hrs <= 23)) throw new Error("Must be a simple interval cron (hours out of 1..23)");
+      return { days: 0, hours: hrs, minutes: 0, seconds: 0 };
+    }
+    if (parts[1] === "0") {
+      m = parts[2].match(/^\*\/(\d+)$/);
+      if (m && parts[3] === "*" && parts[4] === "*") {
+        var dd = parseInt(m[1], 10);
+        if (!(dd >= 1 && dd <= 31)) throw new Error("Must be a simple interval cron (days out of 1..31)");
+        return { days: dd, hours: 0, minutes: 0, seconds: 0 };
+      }
+    }
+  }
+  throw new Error("Must be a simple interval cron (*/Ns, */N * * * *, 0 */N * * *, or 0 0 */N * *)");
+}
+
+/* fieldsToIntervalDuration — fields object to duration string. */
+function fieldsToIntervalDuration(f) {
+  var parts = [];
+  if (f.days > 0) parts.push(f.days + "d");
+  if (f.hours > 0) parts.push(f.hours + "h");
+  if (f.minutes > 0) parts.push(f.minutes + "m");
+  if (f.seconds > 0) parts.push(f.seconds + "s");
+  return parts.length === 0 ? "0" : parts.join("");
+}
+
+/* durationToCronSimple returns a simple interval cron string for a
+   duration — mirrors durationToCron but defensively returns "" for
+   the "use global" sentinel. */
+function durationToCronSimple(dur) {
+  if (!dur || dur === "0") return "";
+  var f = parseIntervalDurationToFields(dur);
+  var totalSecs = f.days * 86400 + f.hours * 3600 + f.minutes * 60 + f.seconds;
+  if (totalSecs <= 0) return "";
+  if (totalSecs < 60) return "*/" + totalSecs + "s";
+  var totalMin = Math.floor(totalSecs / 60);
+  if (totalMin < 60 && totalSecs % 60 === 0) return "*/" + totalMin + " * * * *";
+  var totalHrs = f.days * 24 + f.hours;
+  if (f.minutes === 0 && f.seconds === 0 && totalHrs > 0) {
+    if (totalHrs < 24) return "0 */" + totalHrs + " * * *";
+    if (totalHrs % 24 === 0) return "0 0 */" + (totalHrs / 24) + " * *";
+  }
+  return "*/" + totalMin + " * * * *";
+}
+
+/* createIntervalPicker mounts a picker widget inside the pre-rendered
+   div id="scan-interval-<subsystemId>". Populates DOM children,
+   wires event handlers, returns the container element.
+
+   The same widget shape is used for all six subsystems (SMART,
+   Docker, Proxmox, Kubernetes, ZFS, GPU). Per PRD #239 the existing
+   global Diagnostic Scan Interval widget is NOT refactored to use
+   this helper — that's a v0.10.0+ cleanup candidate. */
+function createIntervalPicker(subsystemId, label) {
+  var mount = document.getElementById("scan-interval-" + subsystemId);
+  if (!mount) return null;
+  if (mount.getAttribute("data-inited") === "1") return mount;
+
+  var presetOpts = "";
+  var globalLabel = globalIntervalDisplay();
+  for (var i = 0; i < advScanPresets.length; i++) {
+    var p = advScanPresets[i];
+    // Dynamic suffix on the "Use global" option so the picker
+    // reflects the user's actual scan_interval instead of a
+    // hardcoded "(30m)". See globalIntervalDisplay notes.
+    var optLabel = p.value === "0" ? (p.label + " (" + globalLabel + ")") : p.label;
+    presetOpts += '<option value="' + p.value + '">' + optLabel + '</option>';
+  }
+
+  mount.innerHTML = '' +
+    '<label for="scan-interval-' + subsystemId + '-preset" style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">' +
+      label + ' scan interval' +
+    '</label>' +
+    '<select id="scan-interval-' + subsystemId + '-preset" style="max-width:260px">' + presetOpts + '</select>' +
+    '<div id="scan-interval-' + subsystemId + '-custom" style="display:none;margin-top:10px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">' +
+      '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">' +
+        '<div style="flex:1;min-width:60px">' +
+          '<label style="font-size:11px;margin-bottom:4px">Days</label>' +
+          '<input type="number" id="scan-interval-' + subsystemId + '-days"    min="0" max="31" value="0" style="text-align:center">' +
+        '</div>' +
+        '<div style="flex:1;min-width:60px">' +
+          '<label style="font-size:11px;margin-bottom:4px">Hours</label>' +
+          '<input type="number" id="scan-interval-' + subsystemId + '-hours"   min="0" max="23" value="0" style="text-align:center">' +
+        '</div>' +
+        '<div style="flex:1;min-width:60px">' +
+          '<label style="font-size:11px;margin-bottom:4px">Minutes</label>' +
+          '<input type="number" id="scan-interval-' + subsystemId + '-minutes" min="0" max="59" value="0" style="text-align:center">' +
+        '</div>' +
+        '<div style="flex:1;min-width:60px">' +
+          '<label style="font-size:11px;margin-bottom:4px">Seconds</label>' +
+          '<input type="number" id="scan-interval-' + subsystemId + '-seconds" min="0" max="59" value="0" style="text-align:center">' +
+        '</div>' +
+      '</div>' +
+      '<div id="scan-interval-' + subsystemId + '-preview" style="font-size:12px;color:var(--text2);margin-bottom:4px"></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+        '<div id="scan-interval-' + subsystemId + '-cron" style="font-size:11px;font-family:monospace;color:var(--accent);background:rgba(94,106,210,0.06);padding:4px 10px;border-radius:4px;display:inline-block"></div>' +
+        '<button type="button" class="btn btn-secondary btn-sm" id="scan-interval-' + subsystemId + '-edit-cron-btn">Edit cron</button>' +
+      '</div>' +
+      '<div id="scan-interval-' + subsystemId + '-cron-edit-wrap" style="display:none;margin-top:10px">' +
+        '<input type="text" id="scan-interval-' + subsystemId + '-cron-input" placeholder="e.g. */15 * * * *" style="width:100%;font-family:monospace">' +
+        '<div style="display:flex;gap:8px;margin-top:6px;align-items:center">' +
+          '<button type="button" class="btn btn-secondary btn-sm" id="scan-interval-' + subsystemId + '-cron-apply-btn">Apply</button>' +
+          '<button type="button" class="btn btn-secondary btn-sm" id="scan-interval-' + subsystemId + '-cron-cancel-btn">Cancel</button>' +
+          '<span id="scan-interval-' + subsystemId + '-cron-error" style="font-size:12px;color:var(--error)"></span>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  var sel    = document.getElementById("scan-interval-" + subsystemId + "-preset");
+  var cust   = document.getElementById("scan-interval-" + subsystemId + "-custom");
+  var inputs = ["days","hours","minutes","seconds"].map(function(f) {
+    return document.getElementById("scan-interval-" + subsystemId + "-" + f);
+  });
+  var preview = document.getElementById("scan-interval-" + subsystemId + "-preview");
+  var cronEl  = document.getElementById("scan-interval-" + subsystemId + "-cron");
+  var editBtn = document.getElementById("scan-interval-" + subsystemId + "-edit-cron-btn");
+  var cronWrap= document.getElementById("scan-interval-" + subsystemId + "-cron-edit-wrap");
+  var cronIn  = document.getElementById("scan-interval-" + subsystemId + "-cron-input");
+  var cronErr = document.getElementById("scan-interval-" + subsystemId + "-cron-error");
+  var cronApply = document.getElementById("scan-interval-" + subsystemId + "-cron-apply-btn");
+  var cronCancel= document.getElementById("scan-interval-" + subsystemId + "-cron-cancel-btn");
+
+  function refreshPreview() {
+    var f = { days: parseInt(inputs[0].value,10)||0, hours: parseInt(inputs[1].value,10)||0,
+              minutes: parseInt(inputs[2].value,10)||0, seconds: parseInt(inputs[3].value,10)||0 };
+    var parts = [];
+    if (f.days    > 0) parts.push(f.days    + (f.days    === 1 ? " day"    : " days"));
+    if (f.hours   > 0) parts.push(f.hours   + (f.hours   === 1 ? " hour"   : " hours"));
+    if (f.minutes > 0) parts.push(f.minutes + (f.minutes === 1 ? " minute" : " minutes"));
+    if (f.seconds > 0) parts.push(f.seconds + (f.seconds === 1 ? " second" : " seconds"));
+    if (parts.length === 0) {
+      preview.textContent = "Invalid: set at least 1 second (or pick 'Use global')";
+      preview.style.color = "var(--error)";
+      cronEl.textContent = "";
+    } else {
+      preview.textContent = label + " scans every " + parts.join(", ");
+      preview.style.color = "var(--text2)";
+      var dur = fieldsToIntervalDuration(f);
+      var cron = durationToCronSimple(dur);
+      cronEl.textContent = cron ? "cron: " + cron : "";
+    }
+  }
+
+  sel.addEventListener("change", function() {
+    if (sel.value === "custom") {
+      cust.style.display = "block";
+      refreshPreview();
+    } else {
+      cust.style.display = "none";
+    }
+    saveSettings();
+  });
+  for (var j = 0; j < inputs.length; j++) {
+    inputs[j].addEventListener("input", refreshPreview);
+    inputs[j].addEventListener("change", saveSettings);
+  }
+  editBtn.addEventListener("click", function() {
+    cronWrap.style.display = (cronWrap.style.display === "none" ? "block" : "none");
+    cronErr.textContent = "";
+  });
+  cronCancel.addEventListener("click", function() {
+    cronWrap.style.display = "none";
+    cronErr.textContent = "";
+  });
+  cronApply.addEventListener("click", function() {
+    try {
+      var f = parseCronToFields(cronIn.value);
+      inputs[0].value = f.days;
+      inputs[1].value = f.hours;
+      inputs[2].value = f.minutes;
+      inputs[3].value = f.seconds;
+      sel.value = "custom";
+      cust.style.display = "block";
+      cronWrap.style.display = "none";
+      cronErr.textContent = "";
+      refreshPreview();
+      saveSettings();
+    } catch (e) {
+      cronErr.textContent = e.message || "Must be a simple interval cron";
+    }
+  });
+
+  mount.setAttribute("data-inited", "1");
+  return mount;
+}
+
+/* setPickerFromIntervalSec — populate a picker from a stored
+   IntervalSec value. Called from renderAdvancedScanPickers during
+   loadSettings. */
+function setPickerFromIntervalSec(subsystemId, intervalSec) {
+  var sel  = document.getElementById("scan-interval-" + subsystemId + "-preset");
+  var cust = document.getElementById("scan-interval-" + subsystemId + "-custom");
+  if (!sel || !cust) return;
+  var dur = intervalSecToDuration(intervalSec);
+  // Match against preset values first.
+  var matched = false;
+  for (var i = 0; i < advScanPresets.length; i++) {
+    if (advScanPresets[i].value === dur) { sel.value = dur; matched = true; break; }
+  }
+  if (matched && dur !== "custom") {
+    cust.style.display = "none";
+    return;
+  }
+  // Fall through: custom duration. Populate fields + show panel.
+  sel.value = "custom";
+  cust.style.display = "block";
+  var f = parseIntervalDurationToFields(dur);
+  var d = document.getElementById("scan-interval-" + subsystemId + "-days");
+  var h = document.getElementById("scan-interval-" + subsystemId + "-hours");
+  var m = document.getElementById("scan-interval-" + subsystemId + "-minutes");
+  var s = document.getElementById("scan-interval-" + subsystemId + "-seconds");
+  if (d) d.value = f.days;
+  if (h) h.value = f.hours;
+  if (m) m.value = f.minutes;
+  if (s) s.value = f.seconds;
+  // Trigger a preview update if the picker was already wired.
+  var sel2 = document.getElementById("scan-interval-" + subsystemId + "-preset");
+  if (sel2) sel2.dispatchEvent(new Event("input"));
+  if (d) d.dispatchEvent(new Event("input"));
+}
+
+/* readPickerIntervalSec — inverse of setPickerFromIntervalSec.
+   Reads the current picker state and returns an IntervalSec int,
+   clamped into {0} union [ScanIntervalSecMin, ScanIntervalSecMax].
+   Out-of-range values collapse to 0 ("use global") so a malformed
+   UI state never triggers a server-side 400 that blocks save of
+   unrelated settings. */
+function readPickerIntervalSec(subsystemId) {
+  var sel = document.getElementById("scan-interval-" + subsystemId + "-preset");
+  if (!sel) return 0;
+  var v = sel.value;
+  if (v === "custom") {
+    var d = parseInt(document.getElementById("scan-interval-" + subsystemId + "-days").value, 10) || 0;
+    var h = parseInt(document.getElementById("scan-interval-" + subsystemId + "-hours").value, 10) || 0;
+    var m = parseInt(document.getElementById("scan-interval-" + subsystemId + "-minutes").value, 10) || 0;
+    var s = parseInt(document.getElementById("scan-interval-" + subsystemId + "-seconds").value, 10) || 0;
+    var total = d * 86400 + h * 3600 + m * 60 + s;
+    if (total === 0) return 0;
+    if (total < 30) return 0;          // below the floor → use global
+    if (total > 2678400) return 2678400; // 31-day cap
+    return total;
+  }
+  return durationToIntervalSec(v);
+}
+
+/* renderAdvancedScanPickers — called from loadSettings. Ensures the
+   six picker widgets exist in the DOM and populates each from the
+   loaded advanced_scans tree. Idempotent: re-calls are safe. */
+function renderAdvancedScanPickers(advScans) {
+  advScans = advScans || {};
+  var subsystems = [
+    { id: "smart",      label: "SMART"      },
+    { id: "docker",     label: "Docker"     },
+    { id: "proxmox",    label: "Proxmox"    },
+    { id: "kubernetes", label: "Kubernetes" },
+    { id: "zfs",        label: "ZFS"        },
+    { id: "gpu",        label: "GPU"        }
+  ];
+  for (var i = 0; i < subsystems.length; i++) {
+    var sub = subsystems[i];
+    createIntervalPicker(sub.id, sub.label);
+    var cfg = advScans[sub.id] || {};
+    setPickerFromIntervalSec(sub.id, cfg.interval_sec || 0);
+  }
+}
+
 /* ---------- Load settings ---------- */
 function loadSettings() {
   fetch("/api/v1/settings")
@@ -1245,12 +1699,16 @@ function loadSettings() {
       /* Drive replacement cost per TB */
       var costEl = document.getElementById("cost-per-tb");
       if (costEl) costEl.value = (data.cost_per_tb && data.cost_per_tb > 0) ? data.cost_per_tb : "";
-      /* Advanced Scan Settings (#237): SMART sub-struct. Reads
-         smart.wake_drives and smart.max_age_days from the server's
-         nested schema. Falls back to the legacy flat
-         wake_drives_for_smart field if the server hasn't migrated yet
-         (defensive — getSettings migrates on first read). */
-      var smartCfg = (data && data.smart) || {};
+      /* Advanced Scan Settings. SMART knobs (WakeDrives, MaxAgeDays)
+         and per-subsystem IntervalSec values all live under
+         advanced_scans (v3 schema, #259). Legacy fallbacks:
+           - data.advanced_scans.smart.{wake_drives,max_age_days} (v3)
+           - data.smart.{wake_drives,max_age_days} (v2, pre-#259)
+           - data.wake_drives_for_smart (v1, pre-#237)
+         getSettings migrates on first read so v1/v2 paths should not
+         fire in production — they're defence-in-depth only. */
+      var advScans = (data && data.advanced_scans) || {};
+      var smartCfg = advScans.smart || (data && data.smart) || {};
       var wakeEl = document.getElementById("wake-drives-for-smart");
       if (wakeEl) {
         var wakeVal = (smartCfg.wake_drives !== undefined) ? !!smartCfg.wake_drives : !!data.wake_drives_for_smart;
@@ -1262,6 +1720,11 @@ function loadSettings() {
         if (isNaN(maxAgeVal)) maxAgeVal = 7;
         maxAgeEl.value = maxAgeVal;
       }
+      /* Per-subsystem interval pickers (slice 2a — values persist but
+         are inert server-side until #260 activates the dispatcher).
+         Picker markup is rendered here rather than at template-render
+         time so load/save round-trips use the current JSON shape. */
+      renderAdvancedScanPickers(advScans);
       /* Advanced: hide Docker containers from dashboard (#204) */
       var hidden = Array.isArray(data.docker_hidden_containers) ? data.docker_hidden_containers : [];
       loadDockerHiddenContainersCheckboxes(hidden);
@@ -1323,7 +1786,12 @@ function buildSettingsPayload() {
     // getSettings() call, silently resetting smart.max_age_days=0→7
     // and smart.wake_drives=true→false. See issue #268 + the
     // companion server-side floor in handleUpdateSettings.
-    settings_version: (base && base.settings_version) || 2,
+    //
+    // Fallback floor tracks currentSettingsVersion on the server
+    // (currently 3 after slice 2a / #259). The backend's max-of-
+    // stored-and-incoming clamp still protects against a client
+    // sending a lower value.
+    settings_version: (base && base.settings_version) || 3,
     scan_interval: getScanInterval(),
     speedtest_interval: document.getElementById("speedtest-interval").value,
     speedtest_schedule: buildSpeedTestSchedule(),
@@ -1384,16 +1852,29 @@ function buildSettingsPayload() {
     fleet: fleetServers || base.fleet || [],
     dismissed_findings: base.dismissed_findings || [],
     cost_per_tb: parseFloat(document.getElementById("cost-per-tb") && document.getElementById("cost-per-tb").value) || 0,
-    smart: {
-      wake_drives: !!(document.getElementById("wake-drives-for-smart") && document.getElementById("wake-drives-for-smart").classList.contains("on")),
-      max_age_days: (function() {
-        var el = document.getElementById("smart-max-age-days");
-        if (!el) return 7;
-        var v = parseInt(el.value, 10);
-        if (isNaN(v) || v < 0) return 0;
-        if (v > 30) return 30;
-        return v;
-      })()
+    /* Advanced Scan Settings v3 (PRD #239 / issue #259). The SMART
+       sub-struct carries the slice-1 wake-drives / max-age knobs
+       alongside the new IntervalSec. The other five configurable
+       subsystems only carry IntervalSec. IntervalSec=0 means
+       "use global" (the scheduler ignores the override). */
+    advanced_scans: {
+      smart: {
+        wake_drives: !!(document.getElementById("wake-drives-for-smart") && document.getElementById("wake-drives-for-smart").classList.contains("on")),
+        max_age_days: (function() {
+          var el = document.getElementById("smart-max-age-days");
+          if (!el) return 7;
+          var v = parseInt(el.value, 10);
+          if (isNaN(v) || v < 0) return 0;
+          if (v > 30) return 30;
+          return v;
+        })(),
+        interval_sec: readPickerIntervalSec("smart")
+      },
+      docker:     { interval_sec: readPickerIntervalSec("docker") },
+      proxmox:    { interval_sec: readPickerIntervalSec("proxmox") },
+      kubernetes: { interval_sec: readPickerIntervalSec("kubernetes") },
+      zfs:        { interval_sec: readPickerIntervalSec("zfs") },
+      gpu:        { interval_sec: readPickerIntervalSec("gpu") }
     },
     docker_hidden_containers: collectCheckedHiddenContainers()
   };
@@ -1512,8 +1993,38 @@ function collectCheckedHiddenContainers() {
   return out;
 }
 
+/* smartMaxAgeConflictConfirm — PRD #239 user story 12.
+
+   When the user configures SMART.IntervalSec > MaxAgeDays * 86400
+   (both non-zero), the slice-1 max-age safety net will force-wake
+   drives more frequently than the user's stated SMART cadence.
+   That's almost certainly not what they want; show a confirm()
+   dialog explaining the consequence and let them cancel the save.
+
+   Returns true if the save may proceed, false if the user aborted.
+   Always returns true when there is no conflict. */
+function smartMaxAgeConflictConfirm(payload) {
+  try {
+    var adv = payload && payload.advanced_scans;
+    if (!adv || !adv.smart) return true;
+    var intervalSec = parseInt(adv.smart.interval_sec, 10) || 0;
+    var maxAgeDays  = parseInt(adv.smart.max_age_days, 10) || 0;
+    if (intervalSec <= 0 || maxAgeDays <= 0) return true;
+    if (intervalSec <= maxAgeDays * 86400)  return true;
+    var msg = "Your SMART scan interval (" + intervalSec + "s) is longer than the " +
+      "max-age-days safety net (" + maxAgeDays + " days = " + (maxAgeDays * 86400) +
+      "s).\n\nThe safety net will force-wake drives on its own cadence, " +
+      "overriding the SMART interval in practice. Save anyway?";
+    return confirm(msg);
+  } catch (e) { return true; }
+}
+
 function saveSettings() {
   var payload = buildSettingsPayload();
+  if (!smartMaxAgeConflictConfirm(payload)) {
+    showToast("Save aborted", "info");
+    return;
+  }
   fetch("/api/v1/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },

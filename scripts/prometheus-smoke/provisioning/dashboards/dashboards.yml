@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: NAS Doctor
+    orgId: 1
+    folder: NAS Doctor
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

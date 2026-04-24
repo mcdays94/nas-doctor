@@ -67,6 +67,17 @@ type Snapshot struct {
 	// has been exceeded. Persisted so historical snapshots retain an
 	// accurate "which drives were asleep at this point" audit trail.
 	SMARTStandbyDevices []string `json:"smart_standby_devices,omitempty"`
+
+	// SubsystemLastRan maps each configurable subsystem name (smart,
+	// docker, proxmox, kubernetes, zfs, gpu) to the RFC3339 timestamp
+	// of its most recent successful collection. Introduced by issue
+	// #260 so dashboard clients can surface "last scanned 4m ago"
+	// per subsystem and distinguish stale vs fresh data. Subsystems
+	// that have never run since scheduler start are omitted rather
+	// than reported as zero-time. Optional field; omitempty so the
+	// key disappears when the dispatcher isn't populated (e.g. demo
+	// mode with a synthetic snapshot).
+	SubsystemLastRan map[string]string `json:"subsystem_last_ran,omitempty"`
 }
 
 // ---------- Proxmox VE ----------

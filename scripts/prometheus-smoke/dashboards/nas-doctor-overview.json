@@ -1,0 +1,274 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "title": "NAS Doctor — Overview (smoke test)",
+  "uid": "nas-doctor-smoke",
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "",
+  "time": {"from": "now-1h", "to": "now"},
+  "refresh": "30s",
+  "tags": ["nas-doctor", "smoke-test"],
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "label": "Instance",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": "label_values(nasdoctor_system_cpu_usage_percent, instance)",
+        "refresh": 2,
+        "multi": false,
+        "includeAll": false,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "System",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1},
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "CPU usage %",
+      "gridPos": {"x": 0, "y": 1, "w": 8, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}},
+      "targets": [
+        {
+          "expr": "nasdoctor_system_cpu_usage_percent{instance=~\"$instance\"}",
+          "legendFormat": "cpu",
+          "refId": "A"
+        },
+        {
+          "expr": "nasdoctor_system_io_wait_percent{instance=~\"$instance\"}",
+          "legendFormat": "iowait",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Memory used (bytes)",
+      "gridPos": {"x": 8, "y": 1, "w": 8, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
+      "targets": [
+        {
+          "expr": "nasdoctor_system_memory_used_bytes{instance=~\"$instance\"}",
+          "legendFormat": "mem used",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Load average",
+      "gridPos": {"x": 16, "y": 1, "w": 8, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "nasdoctor_system_load_avg_1{instance=~\"$instance\"}", "legendFormat": "1m", "refId": "A"},
+        {"expr": "nasdoctor_system_load_avg_5{instance=~\"$instance\"}", "legendFormat": "5m", "refId": "B"},
+        {"expr": "nasdoctor_system_load_avg_15{instance=~\"$instance\"}", "legendFormat": "15m", "refId": "C"}
+      ]
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Drives & SMART",
+      "gridPos": {"x": 0, "y": 8, "w": 24, "h": 1},
+      "collapsed": false
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "SMART temperature °C",
+      "gridPos": {"x": 0, "y": 9, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "celsius"}, "overrides": []},
+      "targets": [
+        {
+          "expr": "nasdoctor_smart_temperature_celsius{instance=~\"$instance\"}",
+          "legendFormat": "{{device}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Disk used %",
+      "gridPos": {"x": 12, "y": 9, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []},
+      "targets": [
+        {
+          "expr": "nasdoctor_disk_used_percent{instance=~\"$instance\"}",
+          "legendFormat": "{{mount}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Docker",
+      "gridPos": {"x": 0, "y": 16, "w": 24, "h": 1},
+      "collapsed": false
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Container CPU %",
+      "gridPos": {"x": 0, "y": 17, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percent"}, "overrides": []},
+      "targets": [
+        {
+          "expr": "topk(10, nasdoctor_docker_container_cpu_percent{instance=~\"$instance\"})",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Total containers",
+      "gridPos": {"x": 12, "y": 17, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "nasdoctor_docker_container_count{instance=~\"$instance\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Network & Service checks",
+      "gridPos": {"x": 0, "y": 24, "w": 24, "h": 1},
+      "collapsed": false
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Network interfaces up",
+      "gridPos": {"x": 0, "y": 25, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "nasdoctor_network_interface_up{instance=~\"$instance\"}",
+          "legendFormat": "{{interface}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Service checks — up & response_ms",
+      "gridPos": {"x": 12, "y": 25, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "expr": "nasdoctor_service_up{instance=~\"$instance\"}",
+          "legendFormat": "up / {{name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "nasdoctor_service_response_ms{instance=~\"$instance\"}",
+          "legendFormat": "ms / {{name}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "Speed test & Parity",
+      "gridPos": {"x": 0, "y": 32, "w": 24, "h": 1},
+      "collapsed": false
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "Speed test (Mbps)",
+      "gridPos": {"x": 0, "y": 33, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "Mbits"}, "overrides": []},
+      "targets": [
+        {"expr": "nasdoctor_speedtest_download_mbps{instance=~\"$instance\"}", "legendFormat": "download", "refId": "A"},
+        {"expr": "nasdoctor_speedtest_upload_mbps{instance=~\"$instance\"}", "legendFormat": "upload", "refId": "B"}
+      ]
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "Parity",
+      "gridPos": {"x": 12, "y": 33, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "nasdoctor_parity_running{instance=~\"$instance\"}", "legendFormat": "running", "refId": "A"},
+        {"expr": "nasdoctor_parity_speed_mb_per_sec{instance=~\"$instance\"}", "legendFormat": "MB/s", "refId": "B"},
+        {"expr": "nasdoctor_parity_errors{instance=~\"$instance\"}", "legendFormat": "errors", "refId": "C"}
+      ]
+    },
+    {
+      "id": 50,
+      "type": "row",
+      "title": "GPU",
+      "gridPos": {"x": 0, "y": 40, "w": 24, "h": 1},
+      "collapsed": false
+    },
+    {
+      "id": 51,
+      "type": "timeseries",
+      "title": "GPU usage & temp",
+      "gridPos": {"x": 0, "y": 41, "w": 24, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "nasdoctor_gpu_usage_percent{instance=~\"$instance\"}", "legendFormat": "usage % / {{device}}", "refId": "A"},
+        {"expr": "nasdoctor_gpu_temperature_celsius{instance=~\"$instance\"}", "legendFormat": "temp °C / {{device}}", "refId": "B"}
+      ]
+    },
+    {
+      "id": 60,
+      "type": "row",
+      "title": "Scrape hygiene",
+      "gridPos": {"x": 0, "y": 48, "w": 24, "h": 1},
+      "collapsed": false
+    },
+    {
+      "id": 61,
+      "type": "timeseries",
+      "title": "Scrape duration (s)",
+      "gridPos": {"x": 0, "y": 49, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "targets": [
+        {"expr": "scrape_duration_seconds{job=\"nas-doctor\"}", "legendFormat": "{{instance}}", "refId": "A"}
+      ]
+    },
+    {
+      "id": 62,
+      "type": "timeseries",
+      "title": "Series scraped per target",
+      "gridPos": {"x": 12, "y": 49, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "scrape_samples_scraped{job=\"nas-doctor\"}", "legendFormat": "{{instance}}", "refId": "A"}
+      ]
+    }
+  ]
+}

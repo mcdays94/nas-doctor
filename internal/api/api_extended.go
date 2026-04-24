@@ -50,13 +50,17 @@ type Settings struct {
 	SectionHeights    map[string]int          `json:"section_heights,omitempty"` // Persisted section resize heights (section name → px)
 	SectionOrder      map[string][]string     `json:"section_order,omitempty"`   // Persisted drag-and-drop column order ({"cols": [["findings","docker"], ...]})
 
-	// SMART holds the SMART-scan policy knobs surfaced under
-	// "Advanced Scan Settings" in the settings UI. Prior to schema
-	// v2 the only knob here (WakeDrives) lived at the top level of
-	// Settings as `wake_drives_for_smart`; the v1→v2 migration in
-	// getSettings() lifts that value into SMART.WakeDrives. See
-	// issues #236 (PRD) and #237 (this slice).
-	SMART SMARTSettings `json:"smart"`
+	// AdvancedScans holds the per-subsystem scan-policy knobs surfaced
+	// under "Advanced" in the settings UI. Introduced by schema v3
+	// (#239 / slice 2). Prior to v3 the SMART sub-struct lived at
+	// Settings.SMART; the v2→v3 migration in getSettings() relocates
+	// it into AdvancedScans.SMART and seeds IntervalSec=0 ("use
+	// global") for every new subsystem.
+	//
+	// Slice 2a (#259) only persists AdvancedScans.*.IntervalSec —
+	// the scheduler does NOT yet consume it. Slice 2b (#260) wires
+	// the values into the scan loop via a new ScanDispatcher.
+	AdvancedScans AdvancedScansSettings `json:"advanced_scans"`
 
 	// DockerHiddenContainers is a list of container names that should be
 	// omitted from the Docker Containers dashboard section. Exact-match
@@ -67,8 +71,38 @@ type Settings struct {
 	DockerHiddenContainers []string `json:"docker_hidden_containers,omitempty"`
 }
 
-// SMARTSettings groups SMART-scan policy. Added in schema v2 (#237).
-type SMARTSettings struct {
+// AdvancedScansSettings groups per-subsystem scan cadence policy.
+// Added in schema v3 (PRD #239 / slice 2a issue #259). Each sub-
+// struct carries at least an IntervalSec field; SMART carries the
+// slice-1 WakeDrives and MaxAgeDays knobs that it inherited from the
+// retired top-level Settings.SMART.
+type AdvancedScansSettings struct {
+	SMART      AdvancedScansSMART      `json:"smart"`
+	Docker     AdvancedScansSubsystem  `json:"docker"`
+	Proxmox    AdvancedScansSubsystem  `json:"proxmox"`
+	Kubernetes AdvancedScansSubsystem  `json:"kubernetes"`
+	ZFS        AdvancedScansSubsystem  `json:"zfs"`
+	GPU        AdvancedScansSubsystem  `json:"gpu"`
+}
+
+// AdvancedScansSubsystem is the minimal shape shared by the five
+// non-SMART configurable subsystems. IntervalSec is validated via
+// validScanIntervalSec(); see handleUpdateSettings.
+type AdvancedScansSubsystem struct {
+	// IntervalSec overrides the global scan_interval for this
+	// subsystem. 0 means "use global" (default, unchanged behaviour).
+	// Positive values must be in [30, 2678400] seconds (30s – 31d).
+	// Slice 2a only persists the value; slice 2b activates it.
+	IntervalSec int `json:"interval_sec"`
+}
+
+// AdvancedScansSMART extends AdvancedScansSubsystem with slice-1's
+// two scan-policy knobs. See SMARTSettings comments on pre-v3
+// Settings.SMART for history.
+type AdvancedScansSMART struct {
+	// IntervalSec — see AdvancedScansSubsystem.IntervalSec.
+	IntervalSec int `json:"interval_sec"`
+
 	// WakeDrives, when true, opts back into pre-v0.9.5 behaviour of
 	// reading SMART from spun-down drives each scan cycle (waking
 	// them). Default (false) is standby-aware: smartctl runs with
@@ -78,18 +112,41 @@ type SMARTSettings struct {
 	// MaxAgeDays bounds how long a drive may remain unread by SMART
 	// before the scheduler forces one wake-up to refresh SMART data.
 	// Default 7. Valid range 0-30. A value of 0 disables the
-	// safety-net entirely (preserves exact v0.9.5 behaviour). The
-	// scheduler does NOT yet consume this value — slice 1a (#237)
-	// only persists it; slice 1b (#238) wires it into the scan loop.
+	// safety-net entirely (preserves exact v0.9.5 behaviour).
+	// Scheduler-side wiring lives in #238.
 	MaxAgeDays int `json:"max_age_days"`
 }
 
-// SMARTMaxAgeDaysMax is the upper bound on Settings.SMART.MaxAgeDays.
+// SMARTMaxAgeDaysMax is the upper bound on AdvancedScans.SMART.MaxAgeDays.
 // A value of 0 disables the safety-net; values 1-30 are valid.
 // Enforced in handleUpdateSettings and in the UI input element.
 const SMARTMaxAgeDaysMax = 30
 
-const currentSettingsVersion = 2
+// ScanIntervalSecMin is the minimum positive value accepted for any
+// AdvancedScans.*.IntervalSec field. Below this, the scheduler's tick
+// rate would be pathologically fast; 30 seconds gives some headroom
+// above the 5-second service-check cadence. 0 is always valid
+// (= "use global"). PRD #239 user story 13.
+const ScanIntervalSecMin = 30
+
+// ScanIntervalSecMax is the 31-day ceiling on any
+// AdvancedScans.*.IntervalSec field. Users who want "effectively
+// disabled" cadence on a subsystem can dial it to this ceiling; a
+// future slice 3 may introduce explicit disable semantics.
+// PRD #239 user story 13.
+const ScanIntervalSecMax = 2678400 // 31 days
+
+// validScanIntervalSec returns true when v is 0 ("use global") or
+// within [ScanIntervalSecMin, ScanIntervalSecMax]. Canonical for
+// both server-side validation and any future client-parity check.
+func validScanIntervalSec(v int) bool {
+	if v == 0 {
+		return true
+	}
+	return v >= ScanIntervalSecMin && v <= ScanIntervalSecMax
+}
+
+const currentSettingsVersion = 3
 
 // DashboardSections controls which sections appear on the dashboard.
 // All default to true (visible). Users can hide sections they don't use.
@@ -303,9 +360,20 @@ func defaultSettings() Settings {
 			DashColumns: 3,
 		},
 		ChartRangeHours: 1,
-		SMART: SMARTSettings{
-			WakeDrives: false,
-			MaxAgeDays: 7,
+		AdvancedScans: AdvancedScansSettings{
+			SMART: AdvancedScansSMART{
+				WakeDrives:  false,
+				MaxAgeDays:  7,
+				IntervalSec: 0, // use global
+			},
+			// All five non-SMART configurable subsystems default to
+			// "use global" (IntervalSec=0). Preserves exact pre-v3
+			// behaviour for fresh installs. PRD #239 user story 10.
+			Docker:     AdvancedScansSubsystem{IntervalSec: 0},
+			Proxmox:    AdvancedScansSubsystem{IntervalSec: 0},
+			Kubernetes: AdvancedScansSubsystem{IntervalSec: 0},
+			ZFS:        AdvancedScansSubsystem{IntervalSec: 0},
+			GPU:        AdvancedScansSubsystem{IntervalSec: 0},
 		},
 	}
 }
@@ -831,16 +899,42 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
 	}
-	// SMART scan policy validation (#237). The UI clamps client-side
-	// but a direct API caller could still submit out-of-range values;
-	// reject rather than silently clamping so the caller knows their
-	// input was ignored. 0 is valid (safety net disabled, PRD #236
-	// user story 5); 1-30 inclusive is the active range.
-	if settings.SMART.MaxAgeDays < 0 || settings.SMART.MaxAgeDays > SMARTMaxAgeDaysMax {
+	// SMART scan policy validation (#237). Since schema v3 (#259) the
+	// SMART knobs live under AdvancedScans.SMART. UI clamps client-
+	// side but a direct API caller could still submit out-of-range
+	// values; reject rather than silently clamping. 0 is valid
+	// (safety net disabled, PRD #236 user story 5); 1-30 is the
+	// active range.
+	if settings.AdvancedScans.SMART.MaxAgeDays < 0 || settings.AdvancedScans.SMART.MaxAgeDays > SMARTMaxAgeDaysMax {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("smart.max_age_days must be between 0 and %d (0 disables the safety net)", SMARTMaxAgeDaysMax),
+			"error": fmt.Sprintf("advanced_scans.smart.max_age_days must be between 0 and %d (0 disables the safety net)", SMARTMaxAgeDaysMax),
 		})
 		return
+	}
+
+	// Per-subsystem IntervalSec validation (#259, PRD #239 user story
+	// 13). Valid set: {0} ∪ [ScanIntervalSecMin, ScanIntervalSecMax].
+	// Check all six subsystems; return the first offender with a
+	// message that names both the field path and the valid range.
+	intervalChecks := []struct {
+		name  string
+		value int
+	}{
+		{"advanced_scans.smart.interval_sec", settings.AdvancedScans.SMART.IntervalSec},
+		{"advanced_scans.docker.interval_sec", settings.AdvancedScans.Docker.IntervalSec},
+		{"advanced_scans.proxmox.interval_sec", settings.AdvancedScans.Proxmox.IntervalSec},
+		{"advanced_scans.kubernetes.interval_sec", settings.AdvancedScans.Kubernetes.IntervalSec},
+		{"advanced_scans.zfs.interval_sec", settings.AdvancedScans.ZFS.IntervalSec},
+		{"advanced_scans.gpu.interval_sec", settings.AdvancedScans.GPU.IntervalSec},
+	}
+	for _, ic := range intervalChecks {
+		if !validScanIntervalSec(ic.value) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("%s=%d is out of range (must be 0 for 'use global', or in [%d, %d] seconds)",
+					ic.name, ic.value, ScanIntervalSecMin, ScanIntervalSecMax),
+			})
+			return
+		}
 	}
 
 	// Retention defaults and bounds
@@ -941,15 +1035,40 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			InCluster: settings.Kubernetes.InCluster,
 		})
 
-		// Update SMART config on the collector (#198, nested under
-		// Settings.SMART since schema v2 — see #237).
+		// Update SMART config on the collector (#198). Moved from
+		// Settings.SMART → Settings.AdvancedScans.SMART in schema v3
+		// (#259); the value meaning is unchanged.
 		s.collector.SetSMARTConfig(collector.SMARTConfig{
-			WakeDrives: settings.SMART.WakeDrives,
+			WakeDrives: settings.AdvancedScans.SMART.WakeDrives,
 		})
 		// Update the max-age safety-net threshold on the scheduler
 		// (#238). The scheduler owns this policy (the collector stays
 		// DB-unaware) and applies it after each scan's Collect().
-		s.scheduler.SetSMARTMaxAgeDays(settings.SMART.MaxAgeDays)
+		s.scheduler.SetSMARTMaxAgeDays(settings.AdvancedScans.SMART.MaxAgeDays)
+
+		// Push per-subsystem scan intervals into the ScanDispatcher
+		// so the new cadences take effect without a scheduler
+		// restart (issue #260 user stories 1-6). Converts the
+		// api-package AdvancedScansSettings shape to the
+		// scheduler-package DispatcherIntervalsConfig — intentional
+		// layering so scheduler doesn't import internal/api.
+		//
+		// global is re-parsed here rather than read from the
+		// scheduler's cache so dispatcher.UpdateIntervals sees the
+		// same value the user just saved; avoids a race with the
+		// scan_interval UpdateInterval restart signal above.
+		var dispatchGlobal time.Duration
+		if d, err := time.ParseDuration(settings.ScanInterval); err == nil {
+			dispatchGlobal = d
+		}
+		s.scheduler.SetDispatcherIntervals(scheduler.DispatcherIntervalsConfig{
+			SMARTSec:      settings.AdvancedScans.SMART.IntervalSec,
+			DockerSec:     settings.AdvancedScans.Docker.IntervalSec,
+			ProxmoxSec:    settings.AdvancedScans.Proxmox.IntervalSec,
+			KubernetesSec: settings.AdvancedScans.Kubernetes.IntervalSec,
+			ZFSSec:        settings.AdvancedScans.ZFS.IntervalSec,
+			GPUSec:        settings.AdvancedScans.GPU.IntervalSec,
+		}, dispatchGlobal)
 
 		// Update log forwarding
 		if settings.LogPush.Enabled && len(settings.LogPush.Destinations) > 0 {
@@ -1184,38 +1303,91 @@ func (s *Server) getSettings() Settings {
 //
 //   - v0 → v1: sections.merged_drives defaults to true (historical)
 //   - v1 → v2: lift legacy top-level wake_drives_for_smart into
-//     Settings.SMART.WakeDrives; seed Settings.SMART.MaxAgeDays = 7
-//     for upgraders that never had the field (#236/#237).
+//     SMART.WakeDrives; seed SMART.MaxAgeDays = 7 for upgraders
+//     that never had the field (#236/#237). Note: in v2 this
+//     target was Settings.SMART; since v3 it is
+//     Settings.AdvancedScans.SMART. The shim target has moved —
+//     the meaning is unchanged.
+//   - v2 → v3: relocate Settings.SMART.{WakeDrives, MaxAgeDays}
+//     into Settings.AdvancedScans.SMART.{WakeDrives, MaxAgeDays};
+//     seed AdvancedScans.*.IntervalSec = 0 ("use global") for all
+//     six configurable subsystems (PRD #239 user stories 10, 11).
 //
-// The function is idempotent: running it against an already-v2 blob
-// preserves the persisted smart.wake_drives / smart.max_age_days
-// values verbatim (the legacy field shim is only consulted when the
-// stored schema version is below 2).
+// Shape-based gating (defence-in-depth against #268 regression class):
+// each rung is guarded by BOTH the settings_version number AND a
+// presence check against the raw JSON. A blob that is structurally
+// already at v3 (has a top-level "advanced_scans" object) skips the
+// v1 and v2 shims regardless of what settings_version says. This
+// ensures a corrupted version=0 blob with intact v3 fields does not
+// silently re-seed user-chosen zeros.
+//
+// The function is idempotent at every version: running it against an
+// already-current blob preserves persisted values verbatim, including
+// explicit zeros (PRD #236 / #268 regression class).
 func migrateSettings(raw []byte, base Settings) Settings {
 	// Note: json.Unmarshal onto base preserves default field values
-	// when the incoming JSON omits them — critical for SMART.MaxAgeDays
-	// since old blobs will not contain smart.max_age_days at all.
+	// when the incoming JSON omits them — critical for
+	// AdvancedScans.SMART.MaxAgeDays since old blobs will not contain
+	// the nested path at all.
 	_ = json.Unmarshal(raw, &base)
+
+	// Shape sentinels. Decode the raw JSON once into a loose map to
+	// check which top-level shape markers are present.
+	var shape map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &shape)
+	_, hasAdvancedScans := shape["advanced_scans"]
+	_, hasFlatSMART := shape["smart"]
 
 	if base.SettingsVersion < 1 {
 		base.Sections.MergedDrives = true
 	}
 
-	if base.SettingsVersion < 2 {
-		// Legacy shim: v1 stored WakeDrives at the top level. Unmarshal
-		// a second time into a shadow struct to recover that field.
+	// v1 → v2 shim fires only if the blob does NOT already carry a
+	// v2-or-later shape marker (flat "smart" object or nested
+	// "advanced_scans" object). This protects explicit user zeros in
+	// v3 blobs whose settings_version was corrupted to 0.
+	if base.SettingsVersion < 2 && !hasFlatSMART && !hasAdvancedScans {
 		var legacy struct {
 			WakeDrivesForSMART bool `json:"wake_drives_for_smart"`
 		}
 		_ = json.Unmarshal(raw, &legacy)
-		base.SMART.WakeDrives = legacy.WakeDrivesForSMART
+		base.AdvancedScans.SMART.WakeDrives = legacy.WakeDrivesForSMART
 		// Every upgrader lands on the default 7-day ceiling regardless
-		// of whether the raw blob carries a smart.max_age_days value
-		// (it can't — the field didn't exist before v2). PRD #236 user
-		// story 2: the safety net opts in by default on upgrade.
-		if base.SMART.MaxAgeDays == 0 {
-			base.SMART.MaxAgeDays = 7
+		// of whether the raw blob carries max_age_days (it can't —
+		// the field didn't exist before v2). PRD #236 user story 2:
+		// the safety net opts in by default on upgrade.
+		if base.AdvancedScans.SMART.MaxAgeDays == 0 {
+			base.AdvancedScans.SMART.MaxAgeDays = 7
 		}
+	}
+
+	// v2 → v3 relocation fires only if the blob does NOT already
+	// carry the v3 shape marker. If "advanced_scans" is present, the
+	// main json.Unmarshal above already populated AdvancedScans from
+	// the input verbatim — nothing more to do.
+	if base.SettingsVersion < 3 && !hasAdvancedScans {
+		// Shadow-unmarshal to recover the v2 "smart" shape, then lift
+		// values onto the v3 target. Pointer-valued shadow lets us
+		// distinguish "field absent" from "field explicitly zero", so
+		// a v2 user's max_age_days=0 survives.
+		var legacyV2 struct {
+			SMART *struct {
+				WakeDrives *bool `json:"wake_drives"`
+				MaxAgeDays *int  `json:"max_age_days"`
+			} `json:"smart"`
+		}
+		_ = json.Unmarshal(raw, &legacyV2)
+		if legacyV2.SMART != nil {
+			if legacyV2.SMART.WakeDrives != nil {
+				base.AdvancedScans.SMART.WakeDrives = *legacyV2.SMART.WakeDrives
+			}
+			if legacyV2.SMART.MaxAgeDays != nil {
+				base.AdvancedScans.SMART.MaxAgeDays = *legacyV2.SMART.MaxAgeDays
+			}
+		}
+		// No IntervalSec in v2 — every subsystem defaults to 0 ("use
+		// global") on the v3 target, already the zero value of
+		// AdvancedScansSubsystem{}. No action needed.
 	}
 
 	return base
