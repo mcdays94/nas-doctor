@@ -88,6 +88,10 @@ type ScanDispatcher struct {
 	// global is the scan_interval fallback for subsystems whose
 	// IntervalSec is 0.
 	global time.Duration
+	// rawCfg is the last DispatcherIntervalsConfig passed in. Kept
+	// so the scheduler's UpdateInterval path can re-resolve against
+	// a new global without losing the per-subsystem overrides.
+	rawCfg DispatcherIntervalsConfig
 }
 
 // NewScanDispatcher builds a dispatcher with the given per-subsystem
@@ -132,6 +136,27 @@ func (d *ScanDispatcher) applyIntervalsLocked(cfg DispatcherIntervalsConfig, glo
 		d.intervals[name] = time.Duration(sec) * time.Second
 	}
 	d.global = global
+	d.rawCfg = cfg
+}
+
+// SetGlobal updates just the global fallback without changing any
+// per-subsystem overrides. Equivalent to calling UpdateIntervals with
+// the existing rawCfg against a new global. Used by the scheduler's
+// UpdateInterval path so a user's change to scan_interval propagates
+// to every "use global" subsystem.
+func (d *ScanDispatcher) SetGlobal(global time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	prev := make(map[string]time.Duration, len(d.intervals))
+	for k, v := range d.intervals {
+		prev[k] = v
+	}
+	d.applyIntervalsLocked(d.rawCfg, global)
+	for name, newInterval := range d.intervals {
+		if prev[name] != newInterval {
+			delete(d.lastRun, name)
+		}
+	}
 }
 
 // Tick returns the names of subsystems whose effective interval has
