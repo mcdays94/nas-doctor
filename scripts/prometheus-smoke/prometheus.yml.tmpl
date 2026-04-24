@@ -1,0 +1,48 @@
+# Prometheus scrape config for NAS Doctor smoke-test harness.
+#
+# Placeholders (${VAR}) are substituted at container start-time by the
+# `prometheus-config-init` service in docker-compose.yml using `envsubst`.
+# Operators DO NOT hand-edit this file with real credentials — credentials
+# live only in a gitignored `.env` next to docker-compose.yml.
+
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  external_labels:
+    harness: nas-doctor-smoke
+
+scrape_configs:
+  - job_name: nas-doctor
+    metrics_path: /metrics
+    scheme: ${SCRAPE_SCHEME}
+    static_configs:
+      - targets:
+          - ${SCRAPE_TARGET}
+        labels:
+          instance: ${SCRAPE_TARGET}
+          source: smoke-harness
+
+    # NAS Doctor API key (Bearer token). Set in .env as ND_API_KEY.
+    authorization:
+      type: Bearer
+      credentials: ${ND_API_KEY}
+
+    # Cloudflare Access service-token headers. Required when scraping through
+    # a cloudflared tunnel behind CF Access (e.g., nasdoctoruat.mdias.info).
+    # For a local NAS Doctor instance not fronted by CF Access, leave the
+    # corresponding env vars empty — empty header values are sent but CF Access
+    # won't be evaluating them.
+    http_headers:
+      CF-Access-Client-Id:
+        values:
+          - ${CF_ACCESS_CLIENT_ID}
+      CF-Access-Client-Secret:
+        values:
+          - ${CF_ACCESS_CLIENT_SECRET}
+
+  # Self-scrape so operators can see Prometheus's own scrape duration stats
+  # alongside NAS Doctor's metrics — useful for comparing scrape cost.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

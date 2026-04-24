@@ -1,0 +1,6 @@
+# Local credentials file — NEVER commit.
+.env
+
+# Rendered Prometheus config (recreated by the init container).
+# Anchored to this directory only — must not match provisioning/datasources/prometheus.yml.
+/prometheus.yml
