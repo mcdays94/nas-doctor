@@ -176,6 +176,58 @@ func TestBuildBorgEnv_CustomPassphraseEnvVarResolved(t *testing.T) {
 	}
 }
 
+// TestBuildBorgEnv_DefaultPassphraseEnv_UnsetDoesNotSetBorgPassphrase
+// pins the rc3 Finding B behavior for the DEFAULT-lookup path: when
+// the user left PassphraseEnv blank (meaning "use whatever the
+// process already has"), and BORG_PASSPHRASE is not in the readEnv
+// lookup, buildBorgEnv must NOT set env["BORG_PASSPHRASE"]. The
+// subprocess then inherits the container's BORG_PASSPHRASE via
+// os.Environ() — which is the backwards-compat path from rc2.
+func TestBuildBorgEnv_DefaultPassphraseEnv_UnsetDoesNotSetBorgPassphrase(t *testing.T) {
+	env := buildBorgEnv(BorgExternalRepo{Enabled: true, RepoPath: "/a"}, noopEnv)
+	if _, ok := env["BORG_PASSPHRASE"]; ok {
+		t.Errorf("BORG_PASSPHRASE set to %q; default-lookup path must leave it unset so subprocess inherits process env",
+			env["BORG_PASSPHRASE"])
+	}
+}
+
+// TestBuildBorgEnv_ExplicitPassphraseEnv_MissingVarOverridesWithEmpty
+// pins the rc3 Finding B fix for the EXPLICIT-override path: when
+// the user specified PassphraseEnv="BORG_WRONG" and that var is
+// unset, buildBorgEnv MUST set env["BORG_PASSPHRASE"]="" explicitly
+// so the subprocess does NOT silently inherit the container's
+// default BORG_PASSPHRASE. User's explicit override wins even when
+// the lookup returns empty — they'll get a passphrase_rejected
+// error from borg, which is the correct, honest outcome.
+func TestBuildBorgEnv_ExplicitPassphraseEnv_MissingVarOverridesWithEmpty(t *testing.T) {
+	// readEnv returns "" for BORG_DOES_NOT_EXIST but a real value
+	// for BORG_PASSPHRASE (simulating the container default). The
+	// explicit override must NOT fall back to the default.
+	read := envFromMap(map[string]string{"BORG_PASSPHRASE": "container-default-should-not-leak"})
+	env := buildBorgEnv(BorgExternalRepo{PassphraseEnv: "BORG_DOES_NOT_EXIST", RepoPath: "/a"}, read)
+	v, ok := env["BORG_PASSPHRASE"]
+	if !ok {
+		t.Fatal("BORG_PASSPHRASE not set; explicit override must set the key so subprocess doesn't inherit default")
+	}
+	if v != "" {
+		t.Errorf("BORG_PASSPHRASE = %q; want empty string (explicit override wins, even when lookup is empty)", v)
+	}
+}
+
+// TestBuildBorgEnv_ExplicitPassphraseEnv_PresentVarResolved pins the
+// happy path for explicit overrides: the named env var resolves to a
+// real value and is piped under the canonical BORG_PASSPHRASE key.
+// This overlaps with TestBuildBorgEnv_CustomPassphraseEnvVarResolved
+// (which predates rc3); kept separate so the rc3 symmetry with the
+// missing-var case is readable.
+func TestBuildBorgEnv_ExplicitPassphraseEnv_PresentVarResolved(t *testing.T) {
+	read := envFromMap(map[string]string{"BORG_X": "custom-val"})
+	env := buildBorgEnv(BorgExternalRepo{PassphraseEnv: "BORG_X", RepoPath: "/a"}, read)
+	if env["BORG_PASSPHRASE"] != "custom-val" {
+		t.Errorf("BORG_PASSPHRASE = %q; want custom-val from explicit BORG_X lookup", env["BORG_PASSPHRASE"])
+	}
+}
+
 // TestBuildBorgEnv_SSHKeyPathWiresBorgRSH pins that setting
 // SSHKeyPath produces a BORG_RSH env var — upstream Borg reads
 // BORG_RSH to decide the ssh invocation.

@@ -232,17 +232,43 @@ func BuildBorgEnvForTest(r BorgExternalRepo, readEnv func(string) string) map[st
 // ambient-merge branch.
 func buildBorgEnv(r BorgExternalRepo, readEnv func(string) string) map[string]string {
 	env := map[string]string{}
-	envName := strings.TrimSpace(r.PassphraseEnv)
-	if envName == "" {
-		envName = "BORG_PASSPHRASE"
-	}
-	if v := readEnv(envName); v != "" {
+	// Passphrase resolution has two modes (issue #279 rc3 Finding B):
+	//
+	//   - Default mode: r.PassphraseEnv == "" means "user accepted
+	//     the default; let the subprocess inherit whatever
+	//     BORG_PASSPHRASE is in the container env". We do NOT set
+	//     env["BORG_PASSPHRASE"] — the runner's os.Environ() merge
+	//     already carries it through. Backwards-compat with rc2.
+	//
+	//   - Explicit-override mode: r.PassphraseEnv == "BORG_X" means
+	//     "user specified their intent; ONLY this var should drive
+	//     decryption". We ALWAYS set env["BORG_PASSPHRASE"] to
+	//     readEnv(r.PassphraseEnv), EVEN when the lookup returns "".
+	//     Setting it to an empty string forces the subprocess to
+	//     ignore any inherited BORG_PASSPHRASE. Borg will then fail
+	//     with a passphrase error, which classifyBorgError maps to
+	//     passphrase_rejected. That's the honest outcome — the user
+	//     declared their intent and we honor it.
+	explicit := strings.TrimSpace(r.PassphraseEnv)
+	if explicit != "" {
+		env["BORG_PASSPHRASE"] = readEnv(explicit)
+	} else if v := readEnv("BORG_PASSPHRASE"); v != "" {
+		// No explicit override, but if the process env happens to
+		// carry BORG_PASSPHRASE and the caller's readEnv surfaces
+		// it, forward it through. This keeps the ambient-inherit
+		// backwards-compat path working for callers (like the Test
+		// endpoint) that wire readEnv to os.Getenv. Empty result is
+		// NOT set — subprocess still inherits via os.Environ() in
+		// the runner.
 		env["BORG_PASSPHRASE"] = v
 	}
-	// BORG_RELOCATED_REPO_ACCESS_IS_OK suppresses an interactive prompt
-	// when the repo is accessed from a different path than the one it
-	// was last seen at (common on bind-mount reorganizations). Always
-	// on for programmatic access.
+
+	// BORG_RELOCATED_REPO_ACCESS_IS_OK / BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK
+	// are also set at the runner layer (buildRunnerEnv, issue #279
+	// rc2) as the canonical guarantee. Kept here for belt-and-suspenders
+	// defense: some call paths (e.g. direct buildBorgEnv consumption
+	// in tests) don't hit buildRunnerEnv. Duplication is harmless
+	// since values agree.
 	env["BORG_RELOCATED_REPO_ACCESS_IS_OK"] = "yes"
 	env["BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK"] = "yes"
 	if keyPath := strings.TrimSpace(r.SSHKeyPath); keyPath != "" {

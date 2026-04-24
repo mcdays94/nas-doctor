@@ -476,6 +476,60 @@ func TestClassifyBorgError_ReadOnlyFilesystemMapsToRepoReadonly(t *testing.T) {
 	}
 }
 
+// ---------- rc3: stdout/stderr separation (#279) ----------
+
+// TestExecBorgRunner_Run_SeparatesStdoutFromStderr guards the rc3
+// Finding A fix: when borg writes an auto-accepted
+// "unknown unencrypted repo" warning to stderr, the runner must not
+// interleave it with the JSON on stdout. Otherwise json.Unmarshal
+// fails on the warning prefix and the runner returns
+// `parse list json: ...` as BorgErrUnknown on every unencrypted
+// probe. rc2 shipped with cmd.CombinedOutput(); rc3 uses cmd.Output()
+// + an explicit bytes.Buffer for stderr.
+//
+// The test drives /bin/sh directly to emit realistic stdout + stderr
+// without needing a real borg binary.
+func TestExecBorgRunner_Run_SeparatesStdoutFromStderr(t *testing.T) {
+	r := &execBorgRunner{}
+	script := `printf 'Warning: Attempting to access a previously unknown unencrypted repository!\n' 1>&2
+printf 'Do you want to continue? [yN] yes (from BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK)\n' 1>&2
+printf '%s' '{"archives":[]}'`
+	out, err := r.run(context.Background(), "/bin/sh", []string{"-c", script}, nil)
+	if err != nil {
+		t.Fatalf("run err = %v; want nil (exit 0)", err)
+	}
+	// stdout only — stderr warning MUST NOT appear in out.
+	if strings.Contains(out, "Warning:") {
+		t.Errorf("run stdout contains stderr warning text; want stdout-only separation. Got: %q", out)
+	}
+	if strings.Contains(out, "unknown unencrypted") {
+		t.Errorf("run stdout contaminated by stderr: %q", out)
+	}
+	if out != `{"archives":[]}` {
+		t.Errorf("run out = %q; want clean JSON", out)
+	}
+}
+
+// TestExecBorgRunner_Run_StderrAvailableOnNonZeroExit ensures that
+// when the subprocess exits non-zero, the returned string carries the
+// stderr content (so classifyBorgError can still match on phrases
+// like "passphrase supplied"). With cmd.Output() + stderr buffer,
+// this is the error path: stdout is returned from Output() (may be
+// partial/empty), but we return stderr.String() so the caller's
+// classifier sees what it expects.
+func TestExecBorgRunner_Run_StderrAvailableOnNonZeroExit(t *testing.T) {
+	r := &execBorgRunner{}
+	script := `printf 'passphrase supplied in BORG_PASSPHRASE is incorrect\n' 1>&2
+exit 2`
+	out, err := r.run(context.Background(), "/bin/sh", []string{"-c", script}, nil)
+	if err == nil {
+		t.Fatal("run err = nil; want non-nil on exit 2")
+	}
+	if !strings.Contains(out, "passphrase supplied") {
+		t.Errorf("run out (stderr on error) = %q; want to contain stderr text for classifier", out)
+	}
+}
+
 // containsArg is true when needle appears anywhere in args.
 func containsArg(args []string, needle string) bool {
 	for _, a := range args {

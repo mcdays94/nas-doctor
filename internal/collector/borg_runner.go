@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -202,10 +203,21 @@ func (r *execBorgRunner) run(parent context.Context, binary string, args []strin
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
+	// Separate stdout from stderr (issue #279 rc3 Finding A). Borg emits
+	// the auto-accepted "unknown unencrypted repo" / "relocated repo"
+	// warnings to stderr even on success, so combining streams
+	// contaminates the JSON payload on stdout and breaks
+	// json.Unmarshal. On success we return stdout (clean JSON); on
+	// error we return stderr (what classifyBorgError matches against).
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Env = append(os.Environ(), buildRunnerEnv(env)...)
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	if err != nil {
+		return stderr.String(), err
+	}
+	return string(stdout), nil
 }
 
 // buildBorgListArgs returns the argv for `borg list --bypass-lock --json
