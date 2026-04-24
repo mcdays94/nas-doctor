@@ -267,6 +267,12 @@ func TestSettingsHTML_AdvancedScans_UseGlobalLabelIsDynamic(t *testing.T) {
 		"settings.scan_interval",
 		"var globalLabel = globalIntervalDisplay()",
 		`" (" + globalLabel + ")"`,
+		// Humanization plumbing — globalIntervalDisplay must pipe
+		// scan_interval through parseIntervalDurationToFields +
+		// fieldsToIntervalDuration so Go's "168h0m0s" becomes "7d",
+		// "25h" becomes "1d1h", etc. (v0.9.9-rc3 UAT feedback).
+		"parseIntervalDurationToFields(raw)",
+		"fieldsToIntervalDuration(fields)",
 	}
 	for _, sub := range mustContain {
 		if !strings.Contains(content, sub) {

@@ -1255,10 +1255,27 @@ var advScanPresets = [
    if settings haven't loaded yet (first paint before loadSettings
    resolves — shouldn't happen in practice because
    renderAdvancedScanPickers runs inside loadSettings' .then, but
-   defensive). */
+   defensive).
+
+   Humanizes the raw Go duration string coming from the backend.
+   Go's time.Duration.String() represents 7 days as "168h0m0s";
+   showing "Use global (168h0m0s)" (or even "168h") in the picker
+   was misleading to users who set 7d up top — they recognise "7d"
+   but have to mentally divide 168 by 24 to understand the label.
+   Reuses the existing parseIntervalDurationToFields +
+   fieldsToIntervalDuration pair, which already do the right
+   overflow arithmetic: 168h → {days:7, h:0, m:0, s:0} → "7d".
+   Combined formats like "25h" → "1d1h" are also cleaner than
+   "25h". v0.9.9-rc3 UAT feedback. */
 function globalIntervalDisplay() {
-  if (settings && settings.scan_interval) return settings.scan_interval;
-  return "30m";
+  if (!settings || !settings.scan_interval) return "30m";
+  var raw = settings.scan_interval;
+  try {
+    var fields = parseIntervalDurationToFields(raw);
+    var out = fieldsToIntervalDuration(fields);
+    if (out && out !== "0") return out;
+  } catch (e) { /* fall through to raw below */ }
+  return raw;
 }
 
 /* Duration parser shared between the global widget's
