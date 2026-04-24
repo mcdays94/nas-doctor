@@ -123,7 +123,7 @@ is reachable from the NAS Doctor container:
 - **Stale backup alerts**: warning >24h, critical >48h, failed backups
 
 > **Note**: Restic, PBS, and Duplicati binaries don't ship in the
-> NAS Doctor Docker image. Borg **is** bundled (since v0.10.0; see
+> NAS Doctor Docker image. Borg **is** bundled (since v0.9.10; see
 > External Borg Monitoring below) and can be pointed at host-managed
 > repos via a Read Only bind-mount — no custom image needed. For
 > Restic/PBS/Duplicati the Backup dashboard section stays empty unless
