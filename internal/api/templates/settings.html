@@ -1289,20 +1289,26 @@ function durationToIntervalSec(dur) {
   return f.days * 86400 + f.hours * 3600 + f.minutes * 60 + f.seconds;
 }
 
-/* parseCronToFields reverse-parses simple interval cron expressions
-   into {days, hours, minutes, seconds}. Throws on anything more
-   complex than the four supported shapes. PRD #239 user stories
-   8, 14.
-
-   Supported:
-     */N s                — every N seconds (sub-minute; our extension)
-     */N * * * *          — every N minutes (N in 1..59)
-     0 */N * * *          — every N hours (N in 1..23)
-     0 0 */N * *          — every N days (N in 1..31)
-
-   Anything else (specific weekdays, comma lists, named months,
-   per-minute granularity below */N without seconds suffix, etc.)
-   triggers a clear UI error. */
+// parseCronToFields reverse-parses simple interval cron expressions
+// into {days, hours, minutes, seconds}. Throws on anything more
+// complex than the four supported shapes. PRD #239 user stories
+// 8, 14.
+//
+// Supported:
+//   */N s                — every N seconds (sub-minute; our extension)
+//   */N * * * *          — every N minutes (N in 1..59)
+//   0 */N * * *          — every N hours (N in 1..23)
+//   0 0 */N * *          — every N days (N in 1..31)
+//
+// Anything else (specific weekdays, comma lists, named months,
+// per-minute granularity below */N without seconds suffix, etc.)
+// triggers a clear UI error.
+//
+// NOTE: line comments (not /* */ block) — any `*/` inside a block
+// comment closes it early and breaks the entire <script> parse.
+// See stage-branch UAT of v0.9.9-rc1 where this bug shipped and
+// silently stopped loadSettings, renderAdvancedScanPickers, and
+// loadDockerHiddenContainersCheckboxes from running.
 function parseCronToFields(cronStr) {
   if (!cronStr) throw new Error("empty cron");
   var s = String(cronStr).trim();
