@@ -18,6 +18,15 @@ type Collector struct {
 	proxmoxConfig ProxmoxConfig
 	kubeConfig    KubeConfig
 	smartConfig   SMARTConfig
+	// externalBorg is the list of explicitly-configured external Borg
+	// repos fed in from Settings. Nil/empty = auto-detect only
+	// (preserves pre-#279 behaviour). Updated live via
+	// SetBackupMonitorBorg on every Settings PUT.
+	externalBorg []BorgExternalRepo
+	// borgRunner is the BorgRunner used for BOTH auto-detect and
+	// explicit-config backup probes. Nil → NewExecBorgRunner. Tests
+	// inject a fake to keep Collect() hermetic.
+	borgRunner BorgRunner
 }
 
 // SetProxmoxConfig updates the Proxmox VE API connection settings.
@@ -34,6 +43,22 @@ func (c *Collector) SetKubeConfig(cfg KubeConfig) {
 // WakeDrives toggle introduced for issue #198.
 func (c *Collector) SetSMARTConfig(cfg SMARTConfig) {
 	c.smartConfig = cfg
+}
+
+// SetBackupMonitorBorg stores the user-configured external Borg repo
+// list. Called from the Settings PUT handler on every save (issue
+// #279). Changes take effect on the next backup-collection tick; no
+// restart required.
+func (c *Collector) SetBackupMonitorBorg(repos []BorgExternalRepo) {
+	c.externalBorg = append([]BorgExternalRepo(nil), repos...)
+}
+
+// SetBorgRunner injects a BorgRunner used for all Borg probes. Nil =
+// reset to default (NewExecBorgRunner). Primarily a test seam — in
+// production main.go doesn't call this and the zero value in
+// collectBackups-path picks up the exec runner on its own.
+func (c *Collector) SetBorgRunner(r BorgRunner) {
+	c.borgRunner = r
 }
 
 // New creates a new Collector with the given host path mappings.
@@ -149,12 +174,21 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 		snap.Tunnels = tunnelInfo
 	}
 
-	// Backup monitoring (Borg, Restic, PBS, Duplicati)
+	// Backup monitoring (Borg, Restic, PBS, Duplicati + external Borg).
+	// External repos come from Settings.BackupMonitor.Borg and are
+	// merged with auto-detect results deduped by canonical path; see
+	// issue #279. Each healthy configured repo emits an INFO line
+	// and each failed one emits an ERROR line with the specific
+	// reason so operators can correlate dashboard state with logs.
 	c.logger.Info("collecting backup info")
-	backupInfo := collectBackups()
+	backupInfo := CollectBackups(CollectBackupsOptions{
+		Runner:       c.borgRunner,
+		ExternalBorg: c.externalBorg,
+	})
 	if backupInfo != nil && backupInfo.Available {
 		snap.Backup = backupInfo
 	}
+	logBackupResults(c.logger, backupInfo, len(c.externalBorg) > 0)
 
 	// Speed test: not collected here (runs on its own schedule via scheduler)
 	// snap.SpeedTest is populated by the scheduler's speed test loop.

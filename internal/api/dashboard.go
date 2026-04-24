@@ -713,22 +713,50 @@ sections.backup = function(sn) {
     h += '<div class="section-title">Backup Jobs (' + backup.jobs.length + ')</div>';
     for (var bi = 0; bi < backup.jobs.length; bi++) {
       var bj = backup.jobs[bi];
-      var statusClass = bj.status === 'ok' ? 'td-healthy' : bj.status === 'warning' ? 'td-warn' : 'td-crit';
+      var isError = !!bj.error;
+      var statusClass = isError ? 'td-crit' : (bj.status === 'ok' ? 'td-healthy' : bj.status === 'warning' ? 'td-warn' : 'td-crit');
       var provLabel = bj.provider.toUpperCase();
-      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px;margin-bottom:6px">';
+      /* Card background: error state gets a subtle red-tinted
+         border so operators can see the at-a-glance distinction
+         between healthy and failed probes without parsing status
+         text. Uses --red fallback so themes without the variable
+         still get a visible cue. Issue #279 user stories 12/13/14. */
+      var cardBorder = isError ? '1px solid var(--red,#dc2626)' : '1px solid var(--border)';
+      var displayName = bj.label || bj.name;
+      h += '<div class="backup-card' + (isError ? ' backup-card-error' : '') + '" style="background:var(--bg-panel);border:' + cardBorder + ';border-radius:calc(var(--radius)*1.5);padding:12px;margin-bottom:6px">';
       h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-      h += '<div style="display:flex;align-items:center;gap:8px">';
-      h += '<span style="font-weight:600;font-size:13px;color:var(--text-primary)">' + esc(bj.name) + '</span>';
+      h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+      h += '<span style="font-weight:600;font-size:13px;color:var(--text-primary)">' + esc(displayName) + '</span>';
       h += '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg-elevated);color:var(--text-tertiary)">' + provLabel + '</span>';
+      /* "Configured" pill distinguishes explicitly-configured
+         external repos from auto-detected ones (issue #279 user
+         story 16/17 + PRD UX decision). Only rendered when
+         bj.configured === true. */
+      if (bj.configured) {
+        h += '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--accent,#3b82f6);color:#fff">CONFIGURED</span>';
+      }
       h += '</div>';
-      h += '<span class="' + statusClass + '" style="font-size:12px;font-weight:600">' + bj.status.toUpperCase() + '</span>';
+      var statusText = isError ? (bj.error_reason ? bj.error_reason.toUpperCase().replace(/_/g, ' ') : 'FAILED') : bj.status.toUpperCase();
+      h += '<span class="' + statusClass + '" style="font-size:12px;font-weight:600">' + esc(statusText) + '</span>';
       h += '</div>';
-      h += '<div style="display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);flex-wrap:wrap">';
-      if (bj.snapshot_count) h += '<span>Snapshots: <strong style="color:var(--text-primary)">' + bj.snapshot_count + '</strong></span>';
-      if (bj.size_bytes > 0) h += '<span>Size: <strong style="color:var(--text-primary)">' + fmtBytes(bj.size_bytes) + '</strong></span>';
-      if (bj.last_success) { var age = Math.round((Date.now() - new Date(bj.last_success).getTime()) / 3600000); h += '<span>Last: <strong style="color:var(--text-primary)">' + (age < 1 ? '<1h ago' : age + 'h ago') + '</strong></span>'; }
-      if (bj.encrypted) h += '<span style="color:var(--text-quaternary)">Encrypted</span>';
-      h += '</div>';
+      if (isError) {
+        /* Error-card body: the specific reason is the primary
+           signal; repo path as secondary metadata so the user
+           can cross-reference against their settings. */
+        h += '<div style="font-size:12px;color:var(--text-tertiary);line-height:1.5">';
+        h += '<div style="color:var(--red,#dc2626);font-weight:500;margin-bottom:4px">' + esc(bj.error || 'Probe failed') + '</div>';
+        if (bj.repository) {
+          h += '<div style="font-family:var(--font-mono,monospace);font-size:11px;color:var(--text-quaternary);word-break:break-all">' + esc(bj.repository) + '</div>';
+        }
+        h += '</div>';
+      } else {
+        h += '<div style="display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);flex-wrap:wrap">';
+        if (bj.snapshot_count) h += '<span>Snapshots: <strong style="color:var(--text-primary)">' + bj.snapshot_count + '</strong></span>';
+        if (bj.size_bytes > 0) h += '<span>Size: <strong style="color:var(--text-primary)">' + fmtBytes(bj.size_bytes) + '</strong></span>';
+        if (bj.last_success) { var age = Math.round((Date.now() - new Date(bj.last_success).getTime()) / 3600000); h += '<span>Last: <strong style="color:var(--text-primary)">' + (age < 1 ? '<1h ago' : age + 'h ago') + '</strong></span>'; }
+        if (bj.encrypted) h += '<span style="color:var(--text-quaternary)">Encrypted</span>';
+        h += '</div>';
+      }
       h += '</div>';
     }
     h += '</div>';

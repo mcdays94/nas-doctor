@@ -31,7 +31,12 @@ COPY --from=builder /nas-doctor /app/nas-doctor
 # Critical packages
 # Note: Alpine 3.21 ships mtr only as "mtr" (not "mtr-tiny" like Debian) — in
 # the community repo. See https://pkgs.alpinelinux.org/packages?name=mtr&branch=v3.21
-RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata curl apcupsd nut tailscale mtr
+# borgbackup: bundled in-image (issue #279) so users only need to mount
+# their repo path. Alpine's community repo ships Borg musl-compiled,
+# which avoids the glibc-vs-musl ABI mismatch that made the previous
+# "mount the host borg binary" approach silently fail (#278 architecture
+# correction on 2026-04-24).
+RUN apk add --no-cache smartmontools docker-cli util-linux procps ca-certificates tzdata curl apcupsd nut tailscale mtr borgbackup
 # Optional packages (may not be available on all architectures)
 RUN apk add --no-cache hdparm iproute2 || true
 RUN apk add --no-cache dmidecode ethtool || true

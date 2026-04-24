@@ -966,6 +966,26 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             <p style="font-size:12px;color:var(--text2);margin:8px 0;font-style:italic">Loading containers&hellip;</p>
           </div>
         </div>
+
+        <!-- External Borg monitoring (PRD #278 / issue #279).
+             Lets users point NAS Doctor at host-managed Borg repos via
+             bind-mounted paths. Borg itself is bundled in the image
+             (Alpine apk borgbackup, musl-compatible); users only mount
+             the REPO path. See the Unraid template documentation and
+             README for a worked example. -->
+        <div id="borg-monitor-section" style="margin-top:22px;padding-top:16px;border-top:1px solid var(--border)">
+          <div style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Backup Monitors &rarr; Borg</div>
+          <p style="font-size:12px;color:var(--text2);margin-top:4px;margin-bottom:10px;line-height:1.5">
+            Monitor externally-managed <strong>BorgBackup</strong> repos (e.g. Unraid User Scripts setups) by bind-mounting the repo path into the NAS Doctor container.
+            The <code style="font-size:11px;background:var(--input-bg);padding:1px 4px;border-radius:3px">borg</code> binary is bundled in the image; you only need to mount the repo.
+            Set <code style="font-size:11px;background:var(--input-bg);padding:1px 4px;border-radius:3px">BORG_PASSPHRASE</code> in Docker env vars for encrypted repos.
+          </p>
+          <div id="borg-monitor-list" style="margin-bottom:10px"></div>
+          <button class="btn btn-secondary btn-sm" onclick="addBorgMonitorRepo()" style="display:inline-flex;align-items:center;gap:4px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Borg repo
+          </button>
+        </div>
       </div>
     </details>
   </div>
@@ -1728,6 +1748,8 @@ function loadSettings() {
       /* Advanced: hide Docker containers from dashboard (#204) */
       var hidden = Array.isArray(data.docker_hidden_containers) ? data.docker_hidden_containers : [];
       loadDockerHiddenContainersCheckboxes(hidden);
+      /* Advanced: external Borg monitor repos (#279) */
+      loadBorgMonitorFromSettings(data.backup_monitor);
       /* Proxmox VE */
       var pve = data.proxmox || {};
       if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
@@ -1876,7 +1898,12 @@ function buildSettingsPayload() {
       zfs:        { interval_sec: readPickerIntervalSec("zfs") },
       gpu:        { interval_sec: readPickerIntervalSec("gpu") }
     },
-    docker_hidden_containers: collectCheckedHiddenContainers()
+    docker_hidden_containers: collectCheckedHiddenContainers(),
+    /* External BorgBackup monitor config (PRD #278 / issue #279).
+       Purely additive — old v3 blobs decode with an empty array. */
+    backup_monitor: {
+      borg: collectBorgMonitorRepos()
+    }
   };
 }
 
@@ -3769,6 +3796,139 @@ document.addEventListener("click", function(e) {
   if (e.target.closest(".toggle")) markChanged();
   if (e.target.closest(".theme-option")) markChanged();
 });
+
+/* ---------- External Borg monitor (#279) ---------- */
+// borgMonitorRepos mirrors the BackupMonitor.Borg array from the
+// loaded settings. Each entry carries UI state for one configured
+// external Borg repo. Persisted as part of saveSettings.
+var borgMonitorRepos = [];
+
+function loadBorgMonitorFromSettings(bm) {
+  borgMonitorRepos = (bm && Array.isArray(bm.borg)) ? bm.borg.slice() : [];
+  renderBorgMonitorList();
+}
+
+function renderBorgMonitorList() {
+  var el = document.getElementById("borg-monitor-list");
+  if (!el) return;
+  if (!borgMonitorRepos || borgMonitorRepos.length === 0) {
+    el.innerHTML = '<p style="font-size:12px;color:var(--text2);margin:0;font-style:italic">No external Borg repos configured.</p>';
+    return;
+  }
+  var h = '';
+  for (var i = 0; i < borgMonitorRepos.length; i++) {
+    var r = borgMonitorRepos[i] || {};
+    h += renderBorgRepoForm(i, r);
+  }
+  el.innerHTML = h;
+}
+
+function renderBorgRepoForm(i, r) {
+  // Each form is a self-contained panel with its own inputs; values
+  // are read out in collectBorgMonitorRepos via DOM lookup by id.
+  var enabledCls = r.enabled ? 'toggle on' : 'toggle';
+  var h = '';
+  h += '<div class="borg-monitor-entry" data-borg-idx="' + i + '" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px">';
+  h += '<div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">';
+  h += '<div class="toggle-wrap"><div class="' + escapeHtml(enabledCls) + '" id="borg-enabled-' + i + '" onclick="this.classList.toggle(\'on\');markChanged()"><div class="toggle-knob"></div></div><span class="toggle-label">Enabled</span></div>';
+  h += '<input type="text" id="borg-label-' + i + '" value="' + escapeHtml(r.label || '') + '" placeholder="Label (e.g. Offsite Backup)" style="flex:1;max-width:260px">';
+  h += '<button class="btn btn-danger btn-sm" onclick="removeBorgMonitorRepo(' + i + ')" style="margin-left:auto">Remove</button>';
+  h += '</div>';
+  h += '<div class="form-row">';
+  h += '<div><label for="borg-repo-path-' + i + '">Repo path</label>';
+  h += '<input type="text" id="borg-repo-path-' + i + '" value="' + escapeHtml(r.repo_path || '') + '" placeholder="/mnt/user/appdata/borg/repo or ssh://user@host/path" style="font-family:var(--font-mono);font-size:12px"></div>';
+  h += '<div><label for="borg-binary-' + i + '">Binary path (optional)</label>';
+  h += '<input type="text" id="borg-binary-' + i + '" value="' + escapeHtml(r.binary_path || '') + '" placeholder="borg" style="font-family:var(--font-mono);font-size:12px"></div>';
+  h += '</div>';
+  h += '<div class="form-row">';
+  h += '<div><label for="borg-passphrase-env-' + i + '">Passphrase env var (optional)</label>';
+  h += '<input type="text" id="borg-passphrase-env-' + i + '" value="' + escapeHtml(r.passphrase_env || '') + '" placeholder="BORG_PASSPHRASE" style="font-family:var(--font-mono);font-size:12px"></div>';
+  h += '<div><label for="borg-ssh-key-' + i + '">SSH key path (optional)</label>';
+  h += '<input type="text" id="borg-ssh-key-' + i + '" value="' + escapeHtml(r.ssh_key_path || '') + '" placeholder="/mnt/keys/id_ed25519" style="font-family:var(--font-mono);font-size:12px"></div>';
+  h += '</div>';
+  h += '<div style="display:flex;align-items:center;gap:10px;margin-top:10px">';
+  h += '<button class="btn btn-secondary btn-sm" onclick="testBorgMonitorRepo(' + i + ')">Test</button>';
+  h += '<span id="borg-test-result-' + i + '" style="font-size:12px"></span>';
+  h += '</div>';
+  h += '</div>';
+  return h;
+}
+
+function addBorgMonitorRepo() {
+  borgMonitorRepos.push({
+    enabled: true,
+    label: "",
+    repo_path: "",
+    binary_path: "",
+    passphrase_env: "",
+    ssh_key_path: ""
+  });
+  renderBorgMonitorList();
+  markChanged();
+}
+
+function removeBorgMonitorRepo(idx) {
+  // Snapshot current form state first so removing entry N doesn't
+  // drop edits the user made on untouched entries.
+  borgMonitorRepos = collectBorgMonitorRepos();
+  borgMonitorRepos.splice(idx, 1);
+  renderBorgMonitorList();
+  markChanged();
+}
+
+function collectBorgMonitorRepos() {
+  var out = [];
+  for (var i = 0; i < borgMonitorRepos.length; i++) {
+    var enabledEl = document.getElementById("borg-enabled-" + i);
+    out.push({
+      enabled: enabledEl ? enabledEl.classList.contains("on") : !!borgMonitorRepos[i].enabled,
+      label: (document.getElementById("borg-label-" + i) || {}).value || "",
+      repo_path: ((document.getElementById("borg-repo-path-" + i) || {}).value || "").trim(),
+      binary_path: ((document.getElementById("borg-binary-" + i) || {}).value || "").trim(),
+      passphrase_env: ((document.getElementById("borg-passphrase-env-" + i) || {}).value || "").trim(),
+      ssh_key_path: ((document.getElementById("borg-ssh-key-" + i) || {}).value || "").trim()
+    });
+  }
+  return out;
+}
+
+function testBorgMonitorRepo(idx) {
+  // Read only the entry the user clicked Test on so the handler
+  // gets the live form state, even if the user hasn't saved yet.
+  var all = collectBorgMonitorRepos();
+  var entry = all[idx];
+  var resultEl = document.getElementById("borg-test-result-" + idx);
+  if (!entry) { return; }
+  if (!entry.repo_path) {
+    if (resultEl) { resultEl.style.color = "var(--red)"; resultEl.textContent = "Repo path required"; }
+    return;
+  }
+  if (resultEl) { resultEl.style.color = "var(--text2)"; resultEl.textContent = "Testing..."; }
+  fetch("/api/v1/backup-monitor/borg/test", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(entry)
+  })
+  .then(function(r) { return r.json().then(function(d) { return { status: r.status, data: d }; }); })
+  .then(function(res) {
+    if (!resultEl) return;
+    if (res.status >= 400) {
+      resultEl.style.color = "var(--red)";
+      resultEl.textContent = "Error: " + (res.data.error || res.status);
+      return;
+    }
+    if (res.data.ok) {
+      resultEl.style.color = "var(--green)";
+      resultEl.textContent = "OK — " + (res.data.archive_count || 0) + " archive(s)" + (res.data.encryption ? " · " + res.data.encryption : "");
+    } else {
+      resultEl.style.color = "var(--red)";
+      resultEl.textContent = "Failed: " + (res.data.message || res.data.reason || "unknown");
+    }
+  })
+  .catch(function(e) {
+    if (resultEl) { resultEl.style.color = "var(--red)"; resultEl.textContent = "Network error: " + e.message; }
+  });
+}
 
 /* ---------- Init ---------- */
 loadSettings();

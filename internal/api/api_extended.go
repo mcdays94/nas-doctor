@@ -69,6 +69,55 @@ type Settings struct {
 	// attribution is NOT affected — this is a rendering preference for
 	// the Docker section tile only. See issue #204.
 	DockerHiddenContainers []string `json:"docker_hidden_containers,omitempty"`
+
+	// BackupMonitor holds per-provider external-backup monitoring
+	// configuration. Currently only Borg is supported; the shape is
+	// namespaced so Restic / PBS / Duplicati can be added in future
+	// slices without migrating users. PRD #278 / issue #279.
+	//
+	// Purely additive — no settings_version bump. Existing v3 blobs
+	// decode with an empty struct; fresh installs get an empty Borg
+	// array. Upgraders see the "Add Borg repo" button, nothing else,
+	// until they explicitly add an entry.
+	BackupMonitor BackupMonitorSettings `json:"backup_monitor"`
+}
+
+// BackupMonitorSettings groups external-backup-monitor configuration
+// by provider. Namespaced so Restic / PBS / Duplicati can be added
+// without migrating users' Borg config. Issue #279.
+type BackupMonitorSettings struct {
+	// Borg is the list of user-configured external Borg repos. Each
+	// entry carries its own enable toggle, display label, repo path,
+	// optional binary override, passphrase env var name, and SSH key
+	// path. Zero-length array = no external monitoring (default).
+	Borg []BorgExternalRepo `json:"borg"`
+}
+
+// BorgExternalRepo is one explicit external-Borg repo entry.
+// Mirrors collector.BorgExternalRepo in shape; lives in the api
+// package with JSON tags for client round-trip. Validated on PUT
+// /api/v1/settings; forwarded to the collector layer at collect
+// time. Issue #279.
+type BorgExternalRepo struct {
+	// Enabled toggles the repo off without deleting its config.
+	Enabled bool `json:"enabled"`
+	// Label is a user-supplied display name. Optional — falls back
+	// to repo basename in the dashboard widget.
+	Label string `json:"label,omitempty"`
+	// RepoPath is the container-visible repo path or ssh:// URL.
+	// Required when Enabled is true.
+	RepoPath string `json:"repo_path"`
+	// BinaryPath overrides the default $PATH "borg" lookup (which
+	// resolves to the Alpine-bundled /usr/bin/borg). Empty = use
+	// default. Must pass stat() when non-empty.
+	BinaryPath string `json:"binary_path,omitempty"`
+	// PassphraseEnv names the env var NAS Doctor reads for the
+	// repo's passphrase. Empty = "BORG_PASSPHRASE". Must match
+	// ^[A-Z_][A-Z0-9_]*$ when non-empty.
+	PassphraseEnv string `json:"passphrase_env,omitempty"`
+	// SSHKeyPath is the container-visible path to an SSH private
+	// key file for ssh:// repos. Must pass stat() when non-empty.
+	SSHKeyPath string `json:"ssh_key_path,omitempty"`
 }
 
 // AdvancedScansSettings groups per-subsystem scan cadence policy.
@@ -417,6 +466,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Post("/api/v1/fleet/test", s.handleFleetTestServer)
 	r.Post("/api/v1/findings/dismiss", s.handleDismissFinding)
 	r.Post("/api/v1/findings/restore", s.handleRestoreFinding)
+
+	// External backup monitor test button — issue #279.
+	r.Post("/api/v1/backup-monitor/borg/test", s.handleTestBorgMonitor)
 
 	// Fleet dashboard page
 	r.Get("/fleet", s.handleFleetPage)
@@ -937,6 +989,20 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// BackupMonitor.Borg validation (#279). The slice is purely
+	// additive to the settings blob; a missing key decodes to the
+	// zero-value struct, so upgraders and fresh installs share the
+	// same "no external repos configured" state. Enabled entries
+	// must carry a RepoPath; optional fields (BinaryPath,
+	// PassphraseEnv, SSHKeyPath) must pass cheap syntactic checks
+	// when non-empty. Server-side filesystem stat() is deliberate
+	// — catches obvious typos / mis-mounts at Save time rather than
+	// the next scan tick.
+	if err := validateBackupMonitorBorg(settings.BackupMonitor.Borg); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	// Retention defaults and bounds
 	if settings.Retention.SnapshotDays < 7 {
 		settings.Retention.SnapshotDays = 90
@@ -1041,6 +1107,10 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		s.collector.SetSMARTConfig(collector.SMARTConfig{
 			WakeDrives: settings.AdvancedScans.SMART.WakeDrives,
 		})
+		// Push external Borg repo config onto the collector so the
+		// next backup tick picks up changes without a restart
+		// (issue #279 user stories 2/4/7).
+		s.collector.SetBackupMonitorBorg(apiBorgReposToCollector(settings.BackupMonitor.Borg))
 		// Update the max-age safety-net threshold on the scheduler
 		// (#238). The scheduler owns this policy (the collector stays
 		// DB-unaware) and applies it after each scan's Collect().

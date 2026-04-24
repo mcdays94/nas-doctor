@@ -51,6 +51,18 @@ type Server struct {
 	// to collector.RunMTR. Tests override this to inject deterministic
 	// results without needing mtr installed. See issue #189.
 	tracerouteRunner scheduler.TracerouteRunner
+	// borgRunner is the BorgRunner used by the external-Borg Test
+	// endpoint (POST /api/v1/backup-monitor/borg/test) and the
+	// scheduler's external-repo polling. Nil means the handler
+	// falls back to collector.NewExecBorgRunner (production
+	// subprocess path). Tests override this to inject canned
+	// responses. Issue #279.
+	borgRunner collector.BorgRunner
+	// borgTestEnvLookup resolves env var names for the Borg Test
+	// endpoint. Nil → os.Getenv. Tests override this so a fake
+	// passphrase value can be resolved without exporting it into
+	// the test process env. Issue #279.
+	borgTestEnvLookup func(string) string
 	// dataEphemeral is set at startup from cmd/nas-doctor/main.go via
 	// SetDataPersistent. When true, the /api/v1/status response carries
 	// data_ephemeral=true so the dashboard renders a loud banner telling
