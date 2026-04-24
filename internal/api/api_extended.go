@@ -1046,6 +1046,21 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		// DB-unaware) and applies it after each scan's Collect().
 		s.scheduler.SetSMARTMaxAgeDays(settings.AdvancedScans.SMART.MaxAgeDays)
 
+		// Push per-subsystem scan intervals into the ScanDispatcher
+		// so the new cadences take effect without a scheduler
+		// restart (issue #260 user stories 1-6). Converts the
+		// api-package AdvancedScansSettings shape to the
+		// scheduler-package DispatcherIntervalsConfig — intentional
+		// layering so scheduler doesn't import internal/api.
+		s.scheduler.SetDispatcherIntervals(scheduler.DispatcherIntervalsConfig{
+			SMARTSec:      settings.AdvancedScans.SMART.IntervalSec,
+			DockerSec:     settings.AdvancedScans.Docker.IntervalSec,
+			ProxmoxSec:    settings.AdvancedScans.Proxmox.IntervalSec,
+			KubernetesSec: settings.AdvancedScans.Kubernetes.IntervalSec,
+			ZFSSec:        settings.AdvancedScans.ZFS.IntervalSec,
+			GPUSec:        settings.AdvancedScans.GPU.IntervalSec,
+		})
+
 		// Update log forwarding
 		if settings.LogPush.Enabled && len(settings.LogPush.Destinations) > 0 {
 			var dests []logfwd.Destination
