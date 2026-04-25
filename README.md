@@ -193,9 +193,9 @@ needed — the repo appears on the dashboard at the next scan tick.
 
 ### Network Speed Test
 
-- Periodic speed test via **Ookla CLI** or **speedtest-cli** (auto-detected)
+- Periodic speed test via **Ookla CLI** (bundled in the Docker image). Falls back to `speedtest-cli` (Python) if you've installed it via a custom image — auto-detected at runtime, Ookla preferred.
 - Download, upload, latency, jitter with historical charts (1H/1D/1W)
-- Independent 4-hour schedule (configurable)
+- Independent 4-hour schedule (configurable, or "Disabled" for metered connections)
 - Server name, ISP, and external IP reported
 
 ### Tunnel Monitoring
@@ -720,14 +720,15 @@ nasdoctor_collection_duration_seconds / _last_collection_timestamp
 
 | Platform | Status | Notes |
 |---|---|---|
-| **Unraid** | ✅ Tested | Parity analysis, array status, disk labels, OS update check |
+| **Unraid** | ✅ Tested | Parity analysis, array status, disk labels, OS update check; dogfooded daily |
 | **Synology DSM** | ⚠️ Community tested | `/volume<#>` detection, `/dev/mapper/cachedev_*` support, SMART health parsing |
 | **TrueNAS SCALE** | ⚠️ Untested | ZFS pool health support built-in, but not yet validated on real hardware |
+| **Proxmox VE** | ⚠️ Community tested | PVE REST API integration with cluster + node + VM/LXC views; dogfooded as a fleet peer |
+| **Kubernetes** (k3s / k8s) | ⚠️ Community tested | In-cluster auto-detection, ServiceAccount + ClusterRole auth; tested on k3s |
 | **QNAP QTS** | ⚠️ Untested | Should work via Container Station |
-| **Proxmox** | ⚠️ Untested | ZFS pool health support built-in |
 | **Generic Linux** | ⚠️ Untested | Any distro with Docker |
 
-> Tested on **Unraid**. Synology DSM has community reports. Other platforms should work but may have issues with disk detection, SMART access, or platform-specific features. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
+> Tested on **Unraid** daily. Synology, Proxmox, and Kubernetes have community reports / fleet-peer dogfooding. Other platforms should work but may have edge cases with disk detection, SMART access, or platform-specific features. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
 ---
 
@@ -747,16 +748,22 @@ All configuration is stored in the SQLite database and managed via the web UI at
 
 ### Host bind mounts (read-only)
 
+All bind mounts in one place — match the per-platform Quick Start tables above. Mount only what applies to your platform; everything is RO except `/data`.
+
 | Container path | Host path | Purpose |
 |---|---|---|
-| `/host/mnt` | `/mnt` | Disk space monitoring (Unraid, TrueNAS) |
-| `/host/volume1` | `/volume1` | Disk space monitoring (Synology) |
+| `/host/mnt` | `/mnt` | Disk space monitoring (Unraid, TrueNAS, Proxmox) |
+| `/host/volume<N>` | `/volume<N>` | Disk space monitoring (Synology — mount each volume) |
 | `/host/log` | `/var/log` | System log analysis (dmesg, syslog) |
-| `/host/boot` | `/boot` | Parity logs, Unraid identification |
-| `/var/local/emhttp` | `/var/local/emhttp` | Unraid drive slot mapping (merged drive view) |
+| `/host/boot` | `/boot` | Parity logs, Unraid identification (Unraid only) |
+| `/etc/unraid-version` | `/etc/unraid-version` | Unraid OS detection + update check (Unraid only) |
+| `/var/local/emhttp` | `/var/local/emhttp` | Unraid drive slot mapping for merged drive view (Unraid only) |
 | `/dev` | `/dev` | SMART and GPU device access |
 | `/sys` | `/sys` | GPU telemetry and drive mapping |
-| `/var/run/docker.sock` | Docker socket | Container monitoring |
+| `/var/run/docker.sock` | `/var/run/docker.sock` | Container monitoring (auto-detect Docker) |
+| `/var/run/tailscale` | `/var/run/tailscale` | Tailscale peer graph (mount only if you use Tailscale on the host) |
+
+> **External Borg repos** add their own bind-mount entries on top of the table — see [External Borg Monitoring (host-managed repos)](#external-borg-monitoring-host-managed-repos) above for repo-path mount conventions and required env vars.
 
 ### Source tree
 
@@ -792,16 +799,24 @@ NAS Doctor is designed to be invisible on your system:
 
 ## Demo
 
-**[Live demo: nasdoctordemo.mdias.info](https://nasdoctordemo.mdias.info)** — switch between Unraid, Synology, Proxmox, and Kubernetes using the toolbar at the top. Read-only; all data is generated automatically. See [demo-worker/README.md](demo-worker/README.md) for how it works.
+**[Live demo: nasdoctordemo.mdias.info](https://nasdoctordemo.mdias.info)** — switch between Unraid, Synology, TrueNAS, Proxmox, and Kubernetes via the toolbar at the top. Read-only, no login. See [demo-worker/README.md](demo-worker/README.md) for how it works.
 
-To run locally with mock data (no NAS needed):
+Each platform renders realistic per-platform telemetry:
+
+- **Drives** — 2–8 SMART drives per platform with Backblaze-informed findings, 30-day temperature sparklines, replacement planner with health scoring, capacity forecast
+- **Compute** — 3–11 Docker containers per platform, Top Processes with container attribution, GPU monitoring (Unraid RTX A2000, Proxmox Tesla P4)
+- **Storage health** — ZFS pools where applicable (TrueNAS raidz2, Proxmox mirror), UPS power monitoring, parity history (Unraid)
+- **Network** — 8 service checks (one per check type: http/tcp/dns/ping/smb/nfs/speed/traceroute) with 7 days of history, 24h speed-test history, Cloudflared + Tailscale tunnels (Unraid + Proxmox)
+- **Backups** — Borg / Restic / PBS / Duplicati / rclone repos with healthy + warning + error states, including v0.9.10's external-Borg "CONFIGURED" pill and error-card reason codes
+- **Alerts & incidents** — Active + resolved + snoozed alerts, 10-event incident timeline with system-metric correlation, webhook delivery history
+- **Fleet** — 4 remote servers with topology view and tunnel-type detection
+
+To run locally with mock data (single-platform Unraid baseline, no NAS needed):
 
 ```bash
 go build -o nas-doctor ./cmd/nas-doctor
 ./nas-doctor -demo -listen :8060
 ```
-
-Demo includes: 7 SMART drives (with Backblaze-informed findings), 14 Docker containers, 2 ZFS pools (one DEGRADED), UPS monitoring, OS update notification, 30 days of historical sparkline data, 6 service checks with 7 days of history, 4 fleet servers, 2 cloudflared tunnels, and a tailscale network with 5 nodes.
 
 ---
 
