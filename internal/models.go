@@ -674,7 +674,24 @@ type SpeedTestResult struct {
 	ISP          string    `json:"isp"`
 	ExternalIP   string    `json:"external_ip"`
 	ResultURL    string    `json:"result_url,omitempty"` // speedtest.net result link
+	// Engine identifies which speed-test engine produced this result.
+	// Closed set: SpeedTestEngineSpeedTestGo ("speedtest_go") for the
+	// showwin/speedtest-go primary path, SpeedTestEngineOoklaCLI
+	// ("ookla_cli") for the bundled Ookla CLI fallback path. See PRD
+	// #283 / issue #284 for the engine-swap rationale and the
+	// historical chart's "engine switchover" annotation. Persisted to
+	// speedtest_history.engine.
+	Engine string `json:"engine,omitempty"`
 }
+
+// Speed-test engine identifier constants. Values are stable strings —
+// they are persisted into speedtest_history.engine and exported as the
+// nasdoctor_speedtest_engine{engine="…"} Prometheus label, so renaming
+// them is a breaking change. See issue #284.
+const (
+	SpeedTestEngineSpeedTestGo = "speedtest_go"
+	SpeedTestEngineOoklaCLI    = "ookla_cli"
+)
 
 // ---------- ZFS ----------
 

@@ -622,6 +622,11 @@ func demoSpeedTest() *internal.SpeedTestInfo {
 			JitterMs:     1.2,
 			ServerName:   "Lisbon",
 			ISP:          "MEO",
+			// PRD #283 / issue #284: stamp the engine so the
+			// captured `--demo` snapshot exposes the new "via …"
+			// caption when the feeder uses it as a fallback before
+			// transformSnapshot's per-platform overlay runs.
+			Engine: internal.SpeedTestEngineSpeedTestGo,
 		},
 	}
 }

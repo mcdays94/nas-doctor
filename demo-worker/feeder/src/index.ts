@@ -909,6 +909,13 @@ function buildSpeedTest(p: PlatformProfile): Record<string, unknown> {
       isp: t.isp,
       external_ip: "203.0.113." + (Math.abs(seed) % 200 + 10),
       result_url: "",
+      // PRD #283 / issue #284: every "fresh" feeder result is
+      // produced by the new speedtest-go engine. Pre-switchover
+      // historical rows are stamped 'ookla_cli' in
+      // buildSpeedTestHistory so the dashboard chart can mark the
+      // engine-switchover point on the demo (user story 22 —
+      // deterministic engine choice).
+      engine: "speedtest_go",
     },
     last_attempt: {
       timestamp: now,
@@ -929,6 +936,12 @@ function buildSpeedTestHistory(p: PlatformProfile, hours: number): unknown[] {
   const seed = hashStr(p.hostname + "-speedhist");
   const now = Date.now();
   const points: unknown[] = [];
+  // PRD #283 / issue #284 user story 15: historical chart marks the
+  // engine-switchover point. Half of the demo's 24h history is
+  // stamped 'ookla_cli' (the engine in use pre-#284), the more-recent
+  // half is stamped 'speedtest_go' (the new engine). Pivot point is
+  // hours/2 — older points are pre-switchover.
+  const pivot = Math.floor(hours / 2);
   // One sample per hour going back `hours`.
   for (let h = hours - 1; h >= 0; h--) {
     const ts = new Date(now - h * 3600000).toISOString();
@@ -937,6 +950,9 @@ function buildSpeedTestHistory(p: PlatformProfile, hours: number): unknown[] {
     const tod = new Date(now - h * 3600000).getUTCHours();
     const eveningDip = (tod >= 18 && tod <= 23) ? 0.85 : 1.0;
     const s = seed + h;
+    // h decreases as we move toward "now"; pre-switchover entries
+    // are the OLDER ones (h > pivot), so they get 'ookla_cli'.
+    const engine = h > pivot ? "ookla_cli" : "speedtest_go";
     points.push({
       timestamp: ts,
       download_mbps: round2(clamp(jitter(t.downloadMbps * eveningDip, 10, s), t.downloadMbps * 0.5, t.downloadMbps * 1.15)),
@@ -945,6 +961,7 @@ function buildSpeedTestHistory(p: PlatformProfile, hours: number): unknown[] {
       jitter_ms: round2(clamp(jitter(t.jitterMs, 50, s + 3), 0.1, t.jitterMs * 4)),
       server_name: t.serverName,
       isp: t.isp,
+      engine,
     });
   }
   return points;
