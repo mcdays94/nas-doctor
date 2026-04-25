@@ -139,6 +139,13 @@ type Metrics struct {
 	speedtestDownload prometheus.Gauge
 	speedtestUpload   prometheus.Gauge
 	speedtestLatency  prometheus.Gauge
+	// nasdoctor_speedtest_engine{engine="speedtest_go|ookla_cli"} — 1
+	// for the engine that produced the most recent successful test, 0
+	// otherwise. PRD #283 / issue #284. Gauge, not counter, because we
+	// only need point-in-time visibility (Prometheus operators use
+	// `nasdoctor_speedtest_engine == 1` to graph engine-in-use over
+	// time). Stays at 0 until at least one test produces a result.
+	speedtestEngine *prometheus.GaugeVec
 
 	// ── GPU ──
 	gpuUsagePct    *prometheus.GaugeVec
@@ -336,6 +343,7 @@ func NewMetrics() *Metrics {
 	m.speedtestDownload = gauge(ns, "speedtest", "download_mbps", "Latest speed test download in Mbps")
 	m.speedtestUpload = gauge(ns, "speedtest", "upload_mbps", "Latest speed test upload in Mbps")
 	m.speedtestLatency = gauge(ns, "speedtest", "latency_ms", "Latest speed test latency in ms")
+	m.speedtestEngine = gaugeVec(ns, "speedtest", "engine", "Engine that produced the most recent successful speed test (1=in use, 0=not in use)", []string{"engine"})
 
 	// ── Findings ──
 	m.findingsTotal = gaugeVec(ns, "findings", "total", "Findings by severity", []string{"severity"})
@@ -382,7 +390,7 @@ func NewMetrics() *Metrics {
 		m.gpuTemperature, m.gpuPowerW, m.gpuPowerMaxW, m.gpuFanPct,
 		m.gpuEncoderPct, m.gpuDecoderPct,
 		m.backupLastSuccess, m.backupSizeBytes, m.backupStatus,
-		m.speedtestDownload, m.speedtestUpload, m.speedtestLatency,
+		m.speedtestDownload, m.speedtestUpload, m.speedtestLatency, m.speedtestEngine,
 		m.findingsTotal, m.findingsCritical, m.findingsWarning,
 		m.collectionDuration, m.lastCollectionTime, m.updateAvailable,
 	}
@@ -711,6 +719,22 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 		m.speedtestDownload.Set(snap.SpeedTest.Latest.DownloadMbps)
 		m.speedtestUpload.Set(snap.SpeedTest.Latest.UploadMbps)
 		m.speedtestLatency.Set(snap.SpeedTest.Latest.LatencyMs)
+		// PRD #283 / issue #284: emit nasdoctor_speedtest_engine{engine="…"}
+		// = 1 for the engine that produced the most-recent successful
+		// test, 0 for the others. The Latest.Engine field is stamped by
+		// the SpeedTestRunner composite. Pre-#284 results carry an empty
+		// Engine string — fall back to ookla_cli (the only engine
+		// before #284) so the gauge is always populated post-test.
+		engine := snap.SpeedTest.Latest.Engine
+		if engine == "" {
+			engine = internal.SpeedTestEngineOoklaCLI
+		}
+		// Reset every known label to 0 first so re-stamps after an
+		// engine switchover correctly drop the old engine to 0. Two
+		// labels, both static.
+		m.speedtestEngine.With(prometheus.Labels{"engine": internal.SpeedTestEngineSpeedTestGo}).Set(0)
+		m.speedtestEngine.With(prometheus.Labels{"engine": internal.SpeedTestEngineOoklaCLI}).Set(0)
+		m.speedtestEngine.With(prometheus.Labels{"engine": engine}).Set(1)
 	}
 
 	// ── Findings ──

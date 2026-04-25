@@ -832,6 +832,16 @@ sections.speedtest = function(sn) {
     h += '<div style="font-size:11px;color:var(--text-quaternary);margin-bottom:8px">';
     if (r.server_name) h += 'Server: ' + esc(r.server_name) + ' &middot; ';
     if (r.isp) h += 'ISP: ' + esc(r.isp);
+    /* PRD #283 / issue #284: small "via {engine}" caption. Informational
+       not promotional — let users see which engine produced the latest
+       sample and contextualise the historical chart's pre/post-switchover
+       split. Closed engine set: "speedtest_go" → "speedtest-go", any
+       other → "Ookla CLI". */
+    if (r.engine) {
+      var engineLabel = r.engine === 'speedtest_go' ? 'speedtest-go' : 'Ookla CLI';
+      h += (r.server_name || r.isp) ? ' &middot; ' : '';
+      h += '<span data-speedtest-engine="' + esc(r.engine) + '">via ' + esc(engineLabel) + '</span>';
+    }
     h += '</div>';
     h += '<canvas id="speedtest-chart" style="width:100%;height:80px"></canvas>';
     h += '</div>'; /* close panel */

@@ -185,6 +185,12 @@ func (d *DB) migrate() error {
 		// See note on container_stats_history: snapshot_id is NOT a FK for
 		// the same reason. SaveSpeedTest gets "speedtest-<ts>" synthetic IDs
 		// from the scheduler when the test runs outside a scan.
+		// engine is the speed-test engine that produced the row. Closed
+		// set: 'speedtest_go' (the showwin/speedtest-go primary path
+		// introduced in PRD #283 / issue #284) or 'ookla_cli' (the
+		// bundled Ookla CLI fallback). Default 'ookla_cli' back-fills
+		// pre-#284 rows so the historical chart can mark the
+		// engine-switchover point on upgrade.
 		`CREATE TABLE IF NOT EXISTS speedtest_history (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			snapshot_id TEXT NOT NULL,
@@ -195,6 +201,7 @@ func (d *DB) migrate() error {
 			server_name TEXT,
 			isp TEXT,
 			timestamp DATETIME NOT NULL,
+			engine TEXT NOT NULL DEFAULT 'ookla_cli',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_speedtest_ts ON speedtest_history(timestamp DESC)`,
@@ -388,6 +395,16 @@ func (d *DB) migrate() error {
 		return fmt.Errorf("drop FK on speedtest_history: %w", err)
 	}
 
+	// PRD #283 / issue #284: speedtest_history.engine is purely
+	// additive. Existing DBs predating #284 get the column added via
+	// ALTER TABLE with the default 'ookla_cli' which back-fills every
+	// pre-switchover row at one stroke. The CREATE TABLE statement
+	// above already declares the column for fresh installs, so this
+	// no-ops on first launch of a brand-new install.
+	if err := d.ensureColumn("speedtest_history", "engine", "TEXT NOT NULL DEFAULT 'ookla_cli'"); err != nil {
+		return fmt.Errorf("ensure speedtest_history.engine: %w", err)
+	}
+
 	return nil
 }
 
@@ -454,6 +471,12 @@ func (d *DB) dropSnapshotFKIfPresent(table string) error {
 			`id, snapshot_id, container_id, name, image, cpu_pct, mem_mb, mem_pct, net_in_bytes, net_out_bytes, block_read_bytes, block_write_bytes, timestamp, created_at`,
 		)
 	case "speedtest_history":
+		// engine column included so the rebuild-old-FK path (issue #155
+		// hangover from before the engine column was added in #284)
+		// preserves the new column. The COALESCE on the SELECT side is
+		// required when the source table predates #284 — old DBs being
+		// rebuilt for the first time AFTER #284 ships will rebuild
+		// straight from a no-engine table.
 		return d.rebuildTable(
 			table,
 			`CREATE TABLE speedtest_history (
@@ -466,6 +489,7 @@ func (d *DB) dropSnapshotFKIfPresent(table string) error {
 				server_name TEXT,
 				isp TEXT,
 				timestamp DATETIME NOT NULL,
+				engine TEXT NOT NULL DEFAULT 'ookla_cli',
 				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 			)`,
 			[]string{
@@ -878,17 +902,28 @@ type SpeedTestHistoryPoint struct {
 	JitterMs     float64   `json:"jitter_ms"`
 	ServerName   string    `json:"server_name"`
 	ISP          string    `json:"isp"`
+	// Engine identifies the speed-test engine that produced the row
+	// ("speedtest_go" or "ookla_cli"). Pre-#284 rows back-fill via
+	// the column default. See PRD #283 user story 15.
+	Engine string `json:"engine,omitempty"`
 }
 
-// SaveSpeedTest inserts a single speed test result row.
+// SaveSpeedTest inserts a single speed test result row. The engine
+// field falls back to "ookla_cli" via the column default when the
+// caller didn't stamp result.Engine — this preserves backwards
+// compatibility for any callsite that pre-dates issue #284.
 func (d *DB) SaveSpeedTest(snapshotID string, result *internal.SpeedTestResult) error {
 	if result == nil {
 		return nil
 	}
+	engine := result.Engine
+	if engine == "" {
+		engine = internal.SpeedTestEngineOoklaCLI
+	}
 	_, err := d.db.Exec(
-		`INSERT INTO speedtest_history (snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		snapshotID, result.DownloadMbps, result.UploadMbps, result.LatencyMs, result.JitterMs, result.ServerName, result.ISP, result.Timestamp,
+		`INSERT INTO speedtest_history (snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp, engine)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		snapshotID, result.DownloadMbps, result.UploadMbps, result.LatencyMs, result.JitterMs, result.ServerName, result.ISP, result.Timestamp, engine,
 	)
 	return err
 }
@@ -897,7 +932,7 @@ func (d *DB) SaveSpeedTest(snapshotID string, result *internal.SpeedTestResult) 
 func (d *DB) GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error) {
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
 	rows, err := d.db.Query(
-		`SELECT timestamp, download_mbps, upload_mbps, latency_ms, jitter_ms, COALESCE(server_name, ''), COALESCE(isp, '')
+		`SELECT timestamp, download_mbps, upload_mbps, latency_ms, jitter_ms, COALESCE(server_name, ''), COALESCE(isp, ''), COALESCE(engine, 'ookla_cli')
 		 FROM speedtest_history
 		 WHERE timestamp >= ?
 		 ORDER BY timestamp ASC`,
@@ -911,7 +946,7 @@ func (d *DB) GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error) {
 	var points []SpeedTestHistoryPoint
 	for rows.Next() {
 		var p SpeedTestHistoryPoint
-		if err := rows.Scan(&p.Timestamp, &p.DownloadMbps, &p.UploadMbps, &p.LatencyMs, &p.JitterMs, &p.ServerName, &p.ISP); err != nil {
+		if err := rows.Scan(&p.Timestamp, &p.DownloadMbps, &p.UploadMbps, &p.LatencyMs, &p.JitterMs, &p.ServerName, &p.ISP, &p.Engine); err != nil {
 			return nil, err
 		}
 		points = append(points, p)

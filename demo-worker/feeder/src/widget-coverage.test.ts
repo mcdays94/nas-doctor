@@ -87,7 +87,9 @@ interface WidgetExpectation {
 
 const EXPECTED_WIDGETS: WidgetExpectation[] = [
   // sections.speedtest in dashboard.go L782 — reads
-  //   snapshot.speed_test.{available, latest.{download_mbps, upload_mbps, latency_ms, server_name, isp}, last_attempt.{status, timestamp}}
+  //   snapshot.speed_test.{available, latest.{download_mbps, upload_mbps, latency_ms, server_name, isp, engine}, last_attempt.{status, timestamp}}
+  // PRD #283 / issue #284: latest.engine added so the dashboard's
+  // "via {engine}" caption renders on every demo platform.
   {
     widget: "speed_test",
     requiredKeys: [
@@ -97,6 +99,7 @@ const EXPECTED_WIDGETS: WidgetExpectation[] = [
       "speed_test.latest.latency_ms",
       "speed_test.latest.server_name",
       "speed_test.latest.isp",
+      "speed_test.latest.engine",
       "speed_test.last_attempt.status",
       "speed_test.last_attempt.timestamp",
     ],
@@ -283,6 +286,23 @@ describe("demo feeder widget coverage", () => {
         validReasons.has(e.error_reason as string),
         `error_reason ${JSON.stringify(e.error_reason)} must be one of the dashboard's recognised categories`,
       ).toBe(true);
+    }
+  });
+
+  // ── Speed Test engine annotation (PRD #283 / issue #284) ──────────
+  // The dashboard's "via {engine}" caption + the historical chart's
+  // engine-switchover annotation both rely on the feeder emitting
+  // engine fields. Without these, the demo never showcases the
+  // engine-aware UX.
+
+  it("emits engine='speedtest_go' on snapshot.speed_test.latest for all platforms", () => {
+    for (const platform of ["unraid", "synology", "truenas", "proxmox", "kubernetes"] as Platform[]) {
+      const snap = transformSnapshot(SEED, PROFILES[platform], platform);
+      const engine = getPath(snap, "speed_test.latest.engine");
+      expect(
+        engine,
+        `${platform} snapshot.speed_test.latest.engine should be 'speedtest_go' to showcase the new primary engine`,
+      ).toBe("speedtest_go");
     }
   });
 });

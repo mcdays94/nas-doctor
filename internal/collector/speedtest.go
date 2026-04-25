@@ -1,28 +1,84 @@
 package collector
 
 import (
+	"context"
 	"encoding/json"
 	"os/exec"
+	"sync"
 	"time"
 
 	internal "github.com/mcdays94/nas-doctor/internal"
 )
 
+// defaultRunner is the lazily-constructed composite runner used by the
+// package-level RunSpeedTest entry point. Tests that want to drive a
+// deterministic engine call SetSpeedTestRunnerForTest before invoking
+// RunSpeedTest, and reset it afterwards. Production wiring (scheduler
+// + Test endpoint) typically calls RunSpeedTest directly which lazy-
+// constructs the production composite the first time.
+var (
+	defaultSpeedTestRunner   SpeedTestRunner
+	defaultSpeedTestRunnerMu sync.Mutex
+)
+
+// runSpeedTestEntry is the shared entry point used by both RunSpeedTest
+// (the legacy public API) and any future caller that wants direct
+// access to the composite runner. Slice 1 keeps the public API
+// unchanged: a nil result still means "no engine produced a usable
+// result". Slice 2 will introduce a richer entrypoint that exposes the
+// sample channel to the LiveTestRegistry.
+func runSpeedTestEntry(ctx context.Context) *internal.SpeedTestResult {
+	defaultSpeedTestRunnerMu.Lock()
+	r := defaultSpeedTestRunner
+	if r == nil {
+		r = NewCompositeSpeedTestRunner(NewSpeedTestGoRunner(), NewOoklaCLIRunner())
+		defaultSpeedTestRunner = r
+	}
+	defaultSpeedTestRunnerMu.Unlock()
+
+	res, samples, err := r.Run(ctx)
+	// Drain-and-discard the sample channel: slice 1 has no consumer
+	// for these. Slice 2 will fan them out to LiveTestRegistry. A nil
+	// channel (error path) is safe to ignore.
+	if samples != nil {
+		go func() {
+			for range samples {
+			}
+		}()
+	}
+	if err != nil || res == nil {
+		return nil
+	}
+	return res
+}
+
+// SetSpeedTestRunnerForTest swaps the package-level default runner.
+// Test-only — not intended for production wiring (which constructs
+// the composite at startup via NewCompositeSpeedTestRunner).
+func SetSpeedTestRunnerForTest(r SpeedTestRunner) func() {
+	defaultSpeedTestRunnerMu.Lock()
+	prev := defaultSpeedTestRunner
+	defaultSpeedTestRunner = r
+	defaultSpeedTestRunnerMu.Unlock()
+	return func() {
+		defaultSpeedTestRunnerMu.Lock()
+		defaultSpeedTestRunner = prev
+		defaultSpeedTestRunnerMu.Unlock()
+	}
+}
+
 // RunSpeedTest executes a network speed test and returns the result.
-// Supports Ookla speedtest-cli (preferred) and speedtest-go as fallback.
-// This should be called on its own schedule (not during every scan).
+// As of issue #284 (PRD #283 slice 1), this delegates to the
+// SpeedTestRunner composite which prefers showwin/speedtest-go and
+// falls back to the bundled Ookla CLI on error. The returned result
+// has its Engine field populated identifying which engine produced
+// it ("speedtest_go" or "ookla_cli").
+//
+// On total failure (both engines unavailable / zero throughput) this
+// still returns nil — preserving the v0.9.6 #210 caller contract that
+// a nil result means "report failed attempt, do not write history".
 func RunSpeedTest() *internal.SpeedTestResult {
-	// Try Ookla speedtest CLI first (speedtest --format=json)
-	if result := runOoklaSpeedtest(); result != nil {
-		return result
-	}
-
-	// Try speedtest-cli (Python-based, --json flag)
-	if result := runSpeedtestCLI(); result != nil {
-		return result
-	}
-
-	return nil
+	return runSpeedTestEntry(context.Background())
 }
 
 // ---------- Ookla speedtest CLI ----------
