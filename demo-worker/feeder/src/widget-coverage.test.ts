@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { transformSnapshot, PROFILES, type Platform } from "./index";
+import { transformSnapshot, transformSettings, PROFILES, type Platform } from "./index";
 
 // A minimal seed that resembles what `seed:unraid:snapshot` looks like
 // after the Go binary's `--demo` capture. The feeder's
@@ -193,5 +193,96 @@ describe("demo feeder widget coverage", () => {
     // Five distinct ISPs — no platform should share with another.
     expect(new Set(isps).size).toBe(5);
     for (const isp of isps) expect(typeof isp).toBe("string");
+  });
+
+  // ── External Borg Monitor demo coverage (v0.9.10 / #279) ─────────
+  // The new "CONFIGURED" pill and red error-card UI shipped in v0.9.10
+  // are useless on the demo unless the feeder produces matching data.
+  // These tests pin the contract so a future refactor can't silently
+  // drop the demo's Borg-monitor showcase.
+
+  it("emits at least one configured: true Borg entry on each non-k8s platform", () => {
+    for (const platform of ["unraid", "synology", "truenas", "proxmox"] as Platform[]) {
+      const snap = transformSnapshot(SEED, PROFILES[platform], platform);
+      const jobs = (getPath(snap, "backup.jobs") as Array<Record<string, unknown>>) || [];
+      const configured = jobs.filter((j) => j.configured === true);
+      expect(
+        configured.length,
+        `${platform} should have at least one configured Borg entry to showcase the CONFIGURED pill`,
+      ).toBeGreaterThan(0);
+      // Each configured entry must be provider=borg with a label and
+      // a repository path — those fields drive the dashboard widget's
+      // displayName + path-mono fields.
+      for (const c of configured) {
+        expect(c.provider, "configured entry must be borg").toBe("borg");
+        expect(typeof c.label, "configured entry must have a label").toBe("string");
+        expect((c.label as string).length, "configured entry label must be non-empty").toBeGreaterThan(0);
+        expect(typeof c.repository, "configured entry must have a repository").toBe("string");
+      }
+    }
+  });
+
+  it("transformSettings populates backup_monitor.borg matching the profile's configured repos", () => {
+    // The Settings page's Backup Monitors → Borg list reads
+    // settings.backup_monitor.borg. Without this, the demo's Settings
+    // page shows an empty form and the user can't see how a
+    // configured entry looks. v0.9.10 / #279.
+    const seedSettings: Record<string, unknown> = { sections: {}, backup_monitor: { borg: [] } };
+    for (const platform of ["unraid", "synology", "truenas", "proxmox"] as Platform[]) {
+      const profile = PROFILES[platform];
+      const settings = transformSettings(seedSettings, profile);
+      const borgList = (getPath(settings, "backup_monitor.borg") as Array<Record<string, unknown>>) || [];
+      const expectedCount = profile.configuredBorgRepos?.length ?? 0;
+      expect(
+        borgList.length,
+        `${platform} settings.backup_monitor.borg length must match profile.configuredBorgRepos`,
+      ).toBe(expectedCount);
+      for (let i = 0; i < borgList.length; i++) {
+        const entry = borgList[i];
+        const expected = profile.configuredBorgRepos![i];
+        expect(entry.enabled, "configured entries should default enabled=true on the demo").toBe(true);
+        expect(entry.label, "label round-trips").toBe(expected.label);
+        expect(entry.repo_path, "repo_path round-trips").toBe(expected.repo_path);
+      }
+    }
+  });
+
+  it("kubernetes does not surface a backup_monitor.borg list (Velero territory)", () => {
+    const seedSettings: Record<string, unknown> = { sections: {}, backup_monitor: { borg: [] } };
+    const settings = transformSettings(seedSettings, PROFILES.kubernetes);
+    const borgList = getPath(settings, "backup_monitor.borg") as Array<unknown>;
+    // Empty array is fine — populated array would be wrong.
+    expect(Array.isArray(borgList)).toBe(true);
+    expect(borgList.length).toBe(0);
+  });
+
+  it("emits at least one error-card Borg entry on Unraid (showcases v0.9.10 error UI)", () => {
+    const snap = transformSnapshot(SEED, PROFILES.unraid, "unraid");
+    const jobs = (getPath(snap, "backup.jobs") as Array<Record<string, unknown>>) || [];
+    const errored = jobs.filter((j) => !!j.error);
+    expect(
+      errored.length,
+      "unraid should have at least one error-state configured Borg entry to showcase the error-card UI",
+    ).toBeGreaterThan(0);
+    // The error_reason must match one of the categories the dashboard
+    // widget knows how to render (uppercased + underscore→space). Pinning
+    // the canonical set so a typo'd reason can't slip through.
+    const validReasons = new Set([
+      "binary_not_found",
+      "repo_inaccessible",
+      "passphrase_rejected",
+      "ssh_timeout",
+      "corrupt_repo",
+      "repo_readonly",
+      "unknown",
+    ]);
+    for (const e of errored) {
+      expect(typeof e.error, "error entry must have a non-empty error message").toBe("string");
+      expect(typeof e.error_reason, "error entry must have an error_reason").toBe("string");
+      expect(
+        validReasons.has(e.error_reason as string),
+        `error_reason ${JSON.stringify(e.error_reason)} must be one of the dashboard's recognised categories`,
+      ).toBe(true);
+    }
   });
 });

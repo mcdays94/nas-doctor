@@ -64,6 +64,41 @@ export interface PlatformProfile {
     usagePct: number;
     tempC: number;
   };
+  // External Borg Monitor entries configured under
+  // Settings → Advanced → Backup Monitors → Borg (PRD #278 / impl
+  // #279, shipped in v0.9.10). Each entry shows up in two places:
+  // (1) snapshot.backup.jobs as a BackupJob with configured=true,
+  //     so the dashboard renders the "CONFIGURED" pill;
+  // (2) settings.backup_monitor.borg as a BorgExternalRepo entry,
+  //     so the Settings page shows a populated list when demo
+  //     visitors click into the Backup Monitors section.
+  // When `error` is set, the dashboard renders the entry as a red
+  // error card with the matching error_reason code (showcases the
+  // failure UI without needing real broken repos).
+  configuredBorgRepos?: ConfiguredBorgRepo[];
+}
+
+// ConfiguredBorgRepo is one external-Borg entry the demo wires into
+// both the snapshot.backup.jobs list AND settings.backup_monitor.borg
+// so visitors see the full v0.9.10 flow: configured-pill on the
+// dashboard widget + populated list in Settings. Optional `error`
+// field injects a red error card (good for showing off the
+// reason-code mapping without having to fake a broken Borg subprocess).
+interface ConfiguredBorgRepo {
+  label: string;
+  repo_path: string;
+  // Optional env-var override (defaults to BORG_PASSPHRASE in the UI).
+  passphrase_env?: string;
+  // When set, the snapshot entry renders as an error card. Reason
+  // MUST be one of the categories the dashboard widget expects:
+  // binary_not_found / repo_inaccessible / passphrase_rejected /
+  // ssh_timeout / corrupt_repo / repo_readonly / unknown.
+  error?: { reason: string; message: string };
+  // Healthy-state metadata for the snapshot. Ignored when `error`
+  // is set. Defaults applied if omitted.
+  snapshotCount?: number;
+  sizeBytes?: number;
+  lastSuccessHoursAgo?: number;
 }
 
 export const PROFILES: Record<Platform, PlatformProfile> = {
@@ -93,6 +128,15 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
     ],
     speedTest: { downloadMbps: 920, uploadMbps: 880, latencyMs: 7.8, jitterMs: 1.6, serverName: "Virgin Media London", isp: "Virgin Media" },
     gpuDevice: { name: "NVIDIA RTX A2000", vendor: "nvidia", driver: "555.58", memTotalMB: 6144, memUsedPct: 42, powerMaxW: 70, usagePct: 28, tempC: 52 },
+    configuredBorgRepos: [
+      // Healthy configured repo — shows the "CONFIGURED" pill alongside
+      // the existing auto-detected appdata-nightly entry.
+      { label: "Offsite", repo_path: "/mnt/user/borg/offsite-2026", passphrase_env: "BORG_PASSPHRASE_OFFSITE", snapshotCount: 84, sizeBytes: 1_240_000_000_000, lastSuccessHoursAgo: 8.4 },
+      // Broken configured repo — shows the red error card with reason
+      // code so visitors can see what a misconfigured passphrase looks
+      // like in the dashboard widget. v0.9.10 #279 user stories 12-14.
+      { label: "Cold Storage", repo_path: "/mnt/user/borg/cold", passphrase_env: "BORG_PASSPHRASE_COLD", error: { reason: "passphrase_rejected", message: "borg list exited 2: passphrase supplied in BORG_PASSPHRASE_COLD does not decrypt the repository" } },
+    ],
   },
   synology: {
     hostname: "synology-nas", platformName: "Synology DSM 7.2.2", cpuModel: "Intel Celeron J4125", cpuCores: 4, ramGB: 8, uptimeDays: 90,
@@ -111,6 +155,9 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
       { name: "watchtower", image: "containrrr/watchtower:latest", state: "running", cpu: 0.1, mem: 32 },
     ],
     speedTest: { downloadMbps: 450, uploadMbps: 42, latencyMs: 14.2, jitterMs: 2.8, serverName: "BT Wholesale Manchester", isp: "BT Broadband" },
+    configuredBorgRepos: [
+      { label: "Photos Nightly", repo_path: "/volume1/borg/photos-nightly", passphrase_env: "BORG_PASSPHRASE", snapshotCount: 152, sizeBytes: 920_000_000_000, lastSuccessHoursAgo: 5.1 },
+    ],
   },
   truenas: {
     hostname: "truenas-scale", platformName: "TrueNAS SCALE 24.10", cpuModel: "Intel Xeon E-2278G", cpuCores: 8, ramGB: 64, uptimeDays: 120,
@@ -135,6 +182,9 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
       { name: "nas-doctor", image: "ghcr.io/mcdays94/nas-doctor:latest", state: "running", cpu: 0.2, mem: 48 },
     ],
     speedTest: { downloadMbps: 980, uploadMbps: 960, latencyMs: 4.5, jitterMs: 0.9, serverName: "OVH Roubaix", isp: "OVH" },
+    configuredBorgRepos: [
+      { label: "Tank Archive", repo_path: "/mnt/tank/backups/borg-archive", passphrase_env: "BORG_PASSPHRASE", snapshotCount: 218, sizeBytes: 2_700_000_000_000, lastSuccessHoursAgo: 14.3 },
+    ],
   },
   proxmox: {
     hostname: "pve-node01", platformName: "Proxmox VE 8.3.2", cpuModel: "Intel Xeon E-2388G", cpuCores: 8, ramGB: 128, uptimeDays: 45,
@@ -152,6 +202,9 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
     ],
     speedTest: { downloadMbps: 1850, uploadMbps: 1820, latencyMs: 2.1, jitterMs: 0.4, serverName: "Cogent Amsterdam", isp: "Cogent" },
     gpuDevice: { name: "NVIDIA Tesla P4", vendor: "nvidia", driver: "535.216", memTotalMB: 8192, memUsedPct: 58, powerMaxW: 75, usagePct: 62, tempC: 48 },
+    configuredBorgRepos: [
+      { label: "VM Config Snapshots", repo_path: "/mnt/vm-storage/borg-vmconf", passphrase_env: "BORG_PASSPHRASE", snapshotCount: 96, sizeBytes: 48_000_000_000, lastSuccessHoursAgo: 3.7 },
+    ],
   },
   kubernetes: {
     hostname: "k3s-master-01", platformName: "K3s v1.31.3+k3s1", cpuModel: "AMD EPYC 7543P", cpuCores: 32, ramGB: 256, uptimeDays: 60,
@@ -261,8 +314,22 @@ function transformStatus(d: Record<string, unknown>, p: PlatformProfile): Record
   };
 }
 
-function transformSettings(d: Record<string, unknown>, p: PlatformProfile): Record<string, unknown> {
+export function transformSettings(d: Record<string, unknown>, p: PlatformProfile): Record<string, unknown> {
   const sec = (d as any).sections || {};
+  // Populate backup_monitor.borg from the profile so visitors who
+  // click into Settings → Advanced → Backup Monitors → Borg see a
+  // populated list matching the dashboard's CONFIGURED entries
+  // (rather than an empty form). Each PlatformProfile.configuredBorgRepos
+  // entry maps to one BorgExternalRepo (api/api_extended.go L101).
+  // Issue #279.
+  const borgMonitorList = (p.configuredBorgRepos || []).map((r) => ({
+    enabled: true,
+    label: r.label,
+    repo_path: r.repo_path,
+    binary_path: "",
+    passphrase_env: r.passphrase_env || "",
+    ssh_key_path: "",
+  }));
   return {
     ...d,
     theme: "midnight",
@@ -274,6 +341,9 @@ function transformSettings(d: Record<string, unknown>, p: PlatformProfile): Reco
       parity: p.hasParity, tunnels: p.hasTunnels,
       proxmox: p.hasProxmox, kubernetes: p.hasKubernetes,
       merged_containers: true, merged_drives: true,
+    },
+    backup_monitor: {
+      borg: borgMonitorList,
     },
     service_checks: {
       checks: [
@@ -880,10 +950,75 @@ function buildSpeedTestHistory(p: PlatformProfile, hours: number): unknown[] {
   return points;
 }
 
+// buildConfiguredBorgEntries — converts the profile's configuredBorgRepos
+// list (mirror of Settings.BackupMonitor.Borg) into BackupJob entries
+// for the snapshot. These show up alongside the platform's auto-detected
+// repos with the "CONFIGURED" pill. Entries with `error` set produce
+// red error cards with the reason-code mapping the dashboard widget
+// expects (see internal/api/dashboard.go L739: bj.error_reason →
+// uppercase status text). Issue #279.
+function buildConfiguredBorgEntries(p: PlatformProfile): Record<string, unknown>[] {
+  const repos = p.configuredBorgRepos;
+  if (!repos || repos.length === 0) return [];
+  const nowMs = Date.now();
+  const hoursAgoIso = (h: number) => new Date(nowMs - h * 3600000).toISOString();
+  return repos.map((r): Record<string, unknown> => {
+    const baseName = (r.repo_path.split("/").pop() || "borg").replace(/[^a-z0-9_-]/gi, "");
+    if (r.error) {
+      return {
+        provider: "borg",
+        name: baseName,
+        label: r.label,
+        repository: r.repo_path,
+        configured: true,
+        // Error case: dashboard widget reads error_reason → status text
+        // (uppercased, _ → space) and error → red message body.
+        status: "failed",
+        error: r.error.message,
+        error_reason: r.error.reason,
+        // Stats are zeroed for failed entries — mirrors what a real
+        // failed `borg list` would emit (the collector returns these
+        // fields as zero-values on the error path).
+        snapshot_count: 0,
+        size_bytes: 0,
+        files_count: 0,
+        last_run: hoursAgoIso(0.5),
+        last_success: hoursAgoIso(72),
+        duration_secs: 0,
+        schedule: "",
+        compression: "",
+        encrypted: true,
+        error_message: r.error.message,
+      };
+    }
+    // Healthy configured entry.
+    const lastH = r.lastSuccessHoursAgo ?? 8;
+    return {
+      provider: "borg",
+      name: baseName,
+      label: r.label,
+      repository: r.repo_path,
+      configured: true,
+      status: "ok",
+      snapshot_count: r.snapshotCount ?? 64,
+      size_bytes: r.sizeBytes ?? 100_000_000_000,
+      files_count: 80000,
+      last_run: hoursAgoIso(lastH),
+      last_success: hoursAgoIso(lastH),
+      duration_secs: 320,
+      schedule: "0 3 * * *",
+      compression: "zstd",
+      encrypted: true,
+      error_message: "",
+    };
+  });
+}
+
 // buildBackup — produces snapshot.backup matching internal.BackupInfo:
 // {available, jobs: BackupJob[]}.
 // dashboard.go L705 (sections.backup) reads bj.{provider, name, status,
-// snapshot_count, size_bytes, last_success, encrypted}.
+// snapshot_count, size_bytes, last_success, encrypted, configured,
+// error, error_reason, label}.
 function buildBackup(p: PlatformProfile, platform: Platform): Record<string, unknown> {
   const nowMs = Date.now();
   const hoursAgoIso = (h: number) => new Date(nowMs - h * 3600000).toISOString();
@@ -920,7 +1055,13 @@ function buildBackup(p: PlatformProfile, platform: Platform): Record<string, unk
     // to NAS Doctor.
     return { available: false, jobs: [] };
   }
-  return { available: true, jobs: repos };
+  // Append the explicit external Borg repos configured under
+  // Settings → Backup Monitors → Borg (v0.9.10 / #279). These
+  // render with the "CONFIGURED" pill on each card; entries with
+  // an injected `error` render as red error cards with the
+  // matching reason code.
+  const configured = buildConfiguredBorgEntries(p);
+  return { available: true, jobs: [...repos, ...configured] };
 }
 
 // buildTopProcesses — produces snapshot.system.top_processes matching
