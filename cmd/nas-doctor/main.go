@@ -31,6 +31,7 @@ import (
 	"github.com/mcdays94/nas-doctor/internal/analyzer"
 	"github.com/mcdays94/nas-doctor/internal/api"
 	"github.com/mcdays94/nas-doctor/internal/collector"
+	"github.com/mcdays94/nas-doctor/internal/livetest"
 	"github.com/mcdays94/nas-doctor/internal/demo"
 	"github.com/mcdays94/nas-doctor/internal/fleet"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
@@ -278,6 +279,12 @@ func main() {
 		// so that Latest() returns it for the report and status endpoints.
 		sched.SetLatest(snap)
 
+		// Wire a synthetic LiveTestRegistry so the live-progress strip
+		// + SSE flow can be demoed against a -demo build without
+		// touching the public internet. PRD #283 / issue #285.
+		demoLiveReg := livetest.NewManager(livetest.NewDemoSpeedTestRunner(), logger, nil)
+		sched.SetLiveTestRegistry(demoLiveReg)
+
 		// Demo service check configs — persist to settings DB so they appear
 		// in the editable list, and push to scheduler for the check loop.
 		demoChecks := demo.DemoServiceCheckConfigs()
@@ -416,6 +423,13 @@ func main() {
 				logger.Info("external backup monitor loaded", "borg_repos", len(ext))
 			}
 		}
+		// Wire the LiveTestRegistry so manual /api/v1/speedtest/run +
+		// the cron-driven 4h cadence share a single in-flight test.
+		// Both paths converge on the same singleton; multi-tab is
+		// transparent. See PRD #283 / issue #285.
+		liveReg := livetest.NewManager(collector.DefaultSpeedTestRunner(), logger, nil)
+		sched.SetLiveTestRegistry(liveReg)
+
 		sched.Start()
 		defer sched.Stop()
 	}

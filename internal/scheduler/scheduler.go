@@ -9,9 +9,12 @@ import (
 	"sync"
 	"time"
 
+	"context"
+
 	"github.com/mcdays94/nas-doctor/internal"
 	"github.com/mcdays94/nas-doctor/internal/analyzer"
 	"github.com/mcdays94/nas-doctor/internal/collector"
+	"github.com/mcdays94/nas-doctor/internal/livetest"
 	"github.com/mcdays94/nas-doctor/internal/logfwd"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/storage"
@@ -129,6 +132,15 @@ type Scheduler struct {
 	// push new per-subsystem intervals via dispatcher.UpdateIntervals
 	// from the API handler.
 	dispatcher *ScanDispatcher
+
+	// liveTestRegistry is the singleton-acquire registry that drives
+	// the speed-test broadcast state machine (PRD #283 slice 2 /
+	// issue #285). When non-nil, runSpeedTest routes through it and
+	// the manual /api/v1/speedtest/run + cron-driven scheduled paths
+	// share a single in-flight test (idempotency). When nil, the
+	// legacy speedTestRunFn path is used (preserves test seams that
+	// don't need the registry — see SetSpeedTestRunner).
+	liveTestRegistry livetest.Registry
 
 	logForwarder *logfwd.Forwarder
 
@@ -376,6 +388,28 @@ func (s *Scheduler) SetSpeedTestRunner(fn SpeedTestRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.speedTestRunFn = fn
+}
+
+// SetLiveTestRegistry wires the registry that drives speed-test
+// broadcast fan-out. Production wiring (cmd/nas-doctor/main.go)
+// constructs a livetest.Manager around collector.DefaultSpeedTestRunner
+// and passes it here. Tests typically leave the registry nil and use
+// SetSpeedTestRunner to inject the legacy result-only stub — that
+// path is preserved so existing scheduler tests (#180, #210) keep
+// working unchanged. PRD #283 slice 2 / issue #285.
+func (s *Scheduler) SetLiveTestRegistry(reg livetest.Registry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.liveTestRegistry = reg
+}
+
+// LiveTestRegistry returns the wired registry. Used by the API layer
+// to route POST /api/v1/speedtest/run + GET /api/v1/speedtest/stream/{id}
+// requests through the same singleton lock that the scheduler uses.
+func (s *Scheduler) LiveTestRegistry() livetest.Registry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.liveTestRegistry
 }
 
 // SetDockerStatsFn injects the function used by collectContainerStats
@@ -1258,6 +1292,7 @@ func (s *Scheduler) runSpeedTest() {
 	s.mu.RLock()
 	interval := s.speedTestInterval
 	runner := s.speedTestRunFn
+	registry := s.liveTestRegistry
 	s.mu.RUnlock()
 
 	now := time.Now().UTC()
@@ -1280,24 +1315,84 @@ func (s *Scheduler) runSpeedTest() {
 	s.recordSpeedTestAttempt(now, "pending", "")
 
 	s.logger.Info("running speed test")
+
+	// Registry path (PRD #283 slice 2 / issue #285): route the test
+	// through LiveTestRegistry so SSE subscribers can attach. This is
+	// the production path. The registry's StartTest is idempotent: a
+	// concurrent manual /api/v1/speedtest/run during this cron tick
+	// will return the in-flight handle, NOT start a parallel test.
+	if registry != nil {
+		s.runSpeedTestViaRegistry(registry)
+		return
+	}
+
+	// Legacy path: tests that haven't wired a registry use the
+	// result-only shim. Preserved for backwards-compat with #180 +
+	// #210 test suites that don't need the registry.
 	var result *internal.SpeedTestResult
 	if runner != nil {
 		result = runner()
 	}
+	s.handleSpeedTestResult(result)
+}
 
+// runSpeedTestViaRegistry drives a speed test through the LiveTest
+// registry, blocking until the test completes, then handles the
+// terminal result the same way the legacy path does (write history
+// row + flip LastSpeedTestAttempt to success/failed).
+//
+// The scheduler's invocation is the broadcast SOURCE; SSE handlers
+// in the API layer are subscribers. If a manual /run request races
+// this cron tick, the registry's idempotency guarantees both paths
+// converge on the same in-flight test (one runner invocation).
+//
+// Sets the nasdoctor_speedtest_in_progress Prometheus gauge to 1
+// while the test runs (PRD #283). The set+unset is wrapped in a
+// defer so a panic in the runner still flips the gauge back to 0
+// — otherwise alerting on stuck tests would emit false positives.
+func (s *Scheduler) runSpeedTestViaRegistry(registry livetest.Registry) {
+	if s.metrics != nil {
+		s.metrics.SetSpeedTestInProgress(true)
+		defer s.metrics.SetSpeedTestInProgress(false)
+	}
+	ctx := context.Background()
+	lt, err := registry.StartTest(ctx)
+	if err != nil {
+		s.logger.Warn("speed test: registry start failed", "error", err)
+		s.recordSpeedTestAttempt(time.Now().UTC(), "failed",
+			fmt.Sprintf("registry start failed: %v", err))
+		return
+	}
+	// Wait for the test to fully complete (samples drained,
+	// subscribers fanned out, registry slot cleared). Don't drain
+	// samples here — that's the SSE handler's job; we only care
+	// about the terminal result.
+	<-lt.Done()
+	if err := lt.Err(); err != nil {
+		s.logger.Info("speed test failed via registry", "error", err)
+		s.recordSpeedTestAttempt(time.Now().UTC(), "failed",
+			fmt.Sprintf("speed test failed: %v", err))
+		return
+	}
+	s.handleSpeedTestResult(lt.Result())
+}
+
+// handleSpeedTestResult applies the post-run side effects shared by
+// both the registry path and the legacy result-only path: log,
+// persist history row, mirror state onto s.latest. Extracted to keep
+// the two paths in sync.
+func (s *Scheduler) handleSpeedTestResult(result *internal.SpeedTestResult) {
 	if result == nil {
 		s.logger.Info("speed test failed: no speedtest tool available or zero-throughput result")
 		s.recordSpeedTestAttempt(time.Now().UTC(), "failed",
 			"no speedtest tool available (install speedtest or speedtest-cli) or test returned zero throughput")
 		return
 	}
-
 	s.logger.Info("speed test complete",
 		"download", fmt.Sprintf("%.1f Mbps", result.DownloadMbps),
 		"upload", fmt.Sprintf("%.1f Mbps", result.UploadMbps),
 		"latency", fmt.Sprintf("%.1f ms", result.LatencyMs),
 	)
-	// Store in DB
 	if err := s.store.SaveSpeedTest("speedtest-"+time.Now().Format("20060102-150405"), result); err != nil {
 		s.logger.Warn("failed to save speed test result", "error", err)
 	}

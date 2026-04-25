@@ -816,12 +816,38 @@ sections.speedtest = function(sn) {
      table-wrap, etc). Without this the speed-test tile has no card
      background and looks visually detached from every other section. */
   var panelStyle = 'background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px';
+  /* Live-progress strip placeholder (PRD #283 / issue #285). Always
+     emitted above the historical chart but starts hidden via
+     max-height:0; the speedtestLive module flips data-state="running"
+     to grow the strip in. CSS rules live on every page that loads
+     dashboard.js (shared.css + the two theme templates). */
+  var stripPlaceholder = ''
+    + '<div id="speedtest-live-strip" class="speedtest-live-strip" data-state="idle">'
+    +   '<div class="speedtest-live-inner">'
+    +     '<span class="speedtest-live-phase-pill" data-phase="idle">IDLE</span>'
+    +     '<canvas id="speedtest-live-gauge" width="120" height="80"></canvas>'
+    +     '<div class="speedtest-live-readout">'
+    +       '<div class="speedtest-live-mbps" data-readout="mbps">0</div>'
+    +       '<div class="speedtest-live-mbps-label">Mbps</div>'
+    +     '</div>'
+    +     '<canvas id="speedtest-live-spark" width="80" height="30"></canvas>'
+    +     '<button type="button" id="speedtest-live-cancel" class="speedtest-live-cancel" disabled>Cancel</button>'
+    +   '</div>'
+    + '</div>';
+  /* Run-now button is part of the section title row. The button is
+     ALWAYS rendered (even on the disabled-empty-state branch) so user
+     story 7 holds — Disabled-cron does not block the manual button. */
+  var runButton = '<button type="button" id="speedtest-run-now" data-action="speedtest-run-now" '
+    + 'style="margin-left:8px;padding:4px 10px;background:var(--bg-elevated);border:1px solid var(--border);'
+    + 'border-radius:6px;color:var(--text-secondary);font-size:11px;cursor:pointer">Run now</button>';
   if (spd && spd.available && spd.latest) {
     var r = spd.latest;
     h += '<div>';
-    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">Speed Test';
-    h += sections._rangeButtons("st", "loadSpeedTestChart", _chartRange);
+    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">';
+    h +=   '<span>Speed Test' + runButton + '</span>';
+    h +=   sections._rangeButtons("st", "loadSpeedTestChart", _chartRange);
     h += '</div>';
+    h += stripPlaceholder;
     h += '<div style="' + panelStyle + '">';
     h += '<div style="display:flex;gap:16px;font-size:13px;color:var(--text-tertiary);flex-wrap:wrap;margin-bottom:12px">';
     h += '<span>Download: <strong style="color:var(--text-primary);font-size:15px">' + r.download_mbps.toFixed(0) + ' Mbps</strong></span>';
@@ -835,8 +861,8 @@ sections.speedtest = function(sn) {
     /* PRD #283 / issue #284: small "via {engine}" caption. Informational
        not promotional — let users see which engine produced the latest
        sample and contextualise the historical chart's pre/post-switchover
-       split. Closed engine set: "speedtest_go" → "speedtest-go", any
-       other → "Ookla CLI". */
+       split. Closed engine set: "speedtest_go" -> "speedtest-go", any
+       other -> "Ookla CLI". */
     if (r.engine) {
       var engineLabel = r.engine === 'speedtest_go' ? 'speedtest-go' : 'Ookla CLI';
       h += (r.server_name || r.isp) ? ' &middot; ' : '';
@@ -846,14 +872,39 @@ sections.speedtest = function(sn) {
     h += '<canvas id="speedtest-chart" style="width:100%;height:80px"></canvas>';
     h += '</div>'; /* close panel */
     h += '</div>';
+  } else if (spd && spd.last_attempt && spd.last_attempt.status === 'disabled') {
+    /* PRD #283 / issue #285 user story 8: Disabled empty-state copy.
+       Make it explicit that the Run-now button still works for one-off
+       tests even though the cron loop is off. */
+    h += '<div>';
+    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">';
+    h +=   '<span>Speed Test' + runButton + '</span>';
+    h += '</div>';
+    h += stripPlaceholder;
+    h += '<div style="' + panelStyle + ';font-size:13px;color:var(--text-tertiary)" data-speedtest-disabled="true">';
+    h +=   'Scheduled speed tests are disabled. Use Run now for a one-off test.';
+    h += '</div>';
+    h += '</div>';
   } else if (spd && spd.last_attempt && spd.last_attempt.status === 'pending') {
     // Fresh-install gap: scheduler has kicked off the first-ever speed
     // test but Ookla hasn't returned yet (~30-60s window). Render the
     // running state so the user knows the feature is actually doing
     // something, rather than silently rendering an empty tile.
     h += '<div>';
-    h += '<div class="section-title">Speed Test</div>';
+    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">';
+    h +=   '<span>Speed Test' + runButton + '</span>';
+    h += '</div>';
+    h += stripPlaceholder;
     h += '<div style="' + panelStyle + ';font-size:13px;color:var(--text-tertiary);font-style:italic">Running initial speed test&hellip;</div>';
+    h += '</div>';
+  } else {
+    /* No latest result + no attempt state. Still render the strip
+       placeholder + Run button so the user can kick off the first test. */
+    h += '<div>';
+    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">';
+    h +=   '<span>Speed Test' + runButton + '</span>';
+    h += '</div>';
+    h += stripPlaceholder;
     h += '</div>';
   }
   h += '</div>';
@@ -1334,6 +1385,198 @@ charts.loadContainers = function(hours, save) {
     .catch(function() {});
 };
 
+/* ── Live speed-test progress (PRD #283 / issue #285) ──────────
+   speedtestLive owns the EventSource lifecycle for live-progress
+   streaming. Wire format matches the Go SSE handler verbatim:
+   start -> phase_change -> sample(s) -> result -> end. The strip
+   uses the placeholder rendered by sections.speedtest above; this
+   module just toggles its data-state attribute and updates the
+   readouts inside.
+
+   Public surface (for tests + external callers):
+     window.speedtestLive.attach(testId)  - attach to existing test
+     window.speedtestLive.runNow()        - POST /run + attach
+     window.speedtestLive.detach()        - close stream + hide strip
+*/
+var speedtestLive = (function() {
+  var state = {
+    es: null,
+    testId: null,
+    samples: [],
+    phase: 'idle',
+    gaugeMax: 100,
+    pendingFrame: null
+  };
+
+  function $(id) { return document.getElementById(id); }
+
+  function setStripState(s) {
+    var strip = $('speedtest-live-strip');
+    if (strip) strip.setAttribute('data-state', s);
+  }
+  function setPhasePill(phase) {
+    var pill = document.querySelector('.speedtest-live-phase-pill');
+    if (!pill) return;
+    pill.setAttribute('data-phase', phase);
+    pill.textContent = (phase || '').toUpperCase();
+  }
+  function setReadout(mbps) {
+    var el = document.querySelector('[data-readout="mbps"]');
+    if (el) el.textContent = mbps.toFixed(1);
+  }
+  function roundUpToNiceNumber(v) {
+    if (v <= 10) return 10;
+    if (v <= 100) return Math.ceil(v / 10) * 10;
+    if (v <= 1000) return Math.ceil(v / 50) * 50;
+    return Math.ceil(v / 100) * 100;
+  }
+  function autoScaleGauge() {
+    if (state.samples.length < 1) return;
+    var max = 0;
+    for (var i = 0; i < state.samples.length; i++) {
+      if (state.samples[i].mbps > max) max = state.samples[i].mbps;
+    }
+    state.gaugeMax = roundUpToNiceNumber(max * 1.2);
+  }
+  function renderGauge(mbps) {
+    if (!window.NasChart || !window.NasChart.gauge) return;
+    try {
+      NasChart.gauge('speedtest-live-gauge', {
+        value: mbps,
+        max: state.gaugeMax,
+        width: 120,
+        height: 80,
+        animate: false,
+        label: ''
+      });
+    } catch (e) {}
+  }
+  function renderSparkline() {
+    if (!window.NasChart || !window.NasChart.sparkline) return;
+    var recent = state.samples.slice(-30).map(function(s) { return s.mbps; });
+    if (recent.length < 2) return;
+    try {
+      NasChart.sparkline('speedtest-live-spark', {
+        data: recent,
+        color: '#3b82f6',
+        width: 80,
+        height: 30
+      });
+    } catch (e) {}
+  }
+  function scheduleRender() {
+    if (state.pendingFrame) return;
+    state.pendingFrame = (window.requestAnimationFrame || function(cb) { return setTimeout(cb, 16); })(function() {
+      state.pendingFrame = null;
+      var last = state.samples[state.samples.length - 1];
+      if (last) {
+        setReadout(last.mbps);
+        renderGauge(last.mbps);
+      }
+      renderSparkline();
+    });
+  }
+
+  function onStart(data) {
+    state.testId = data.test_id;
+    state.samples = [];
+    state.phase = 'idle';
+    state.gaugeMax = 100;
+    setStripState('running');
+    setPhasePill('latency');
+  }
+  function onPhaseChange(data) {
+    state.phase = data.phase;
+    setPhasePill(data.phase);
+    // Re-derive gauge max for upload phase if upload differs from
+    // download — pin to current sample tail so we don't spike on
+    // residual download samples.
+    if (data.phase === 'upload') {
+      state.gaugeMax = 100;
+    }
+  }
+  function onSample(data) {
+    state.samples.push(data);
+    if (state.samples.length <= 3) autoScaleGauge();
+    scheduleRender();
+  }
+  function onResult(data) {
+    setStripState('completing');
+  }
+  function onEnd() {
+    setStripState('idle');
+    state.testId = null;
+    if (state.es) { state.es.close(); state.es = null; }
+    // Refresh the historical chart so the new point lands.
+    if (window.charts && window.charts.loadSpeedTest) {
+      window.charts.loadSpeedTest(_chartRange);
+    } else if (window.loadSpeedTestChart) {
+      window.loadSpeedTestChart(_chartRange);
+    }
+  }
+  function onError(data) {
+    setStripState('idle');
+    if (state.es) { state.es.close(); state.es = null; }
+  }
+
+  function attach(testId) {
+    if (state.es) { try { state.es.close(); } catch (e) {} state.es = null; }
+    state.testId = testId;
+    if (typeof EventSource === 'undefined') return;
+    var es = new EventSource('/api/v1/speedtest/stream/' + testId);
+    state.es = es;
+    es.addEventListener('start', function(e) { try { onStart(JSON.parse(e.data)); } catch (err) {} });
+    es.addEventListener('phase_change', function(e) { try { onPhaseChange(JSON.parse(e.data)); } catch (err) {} });
+    es.addEventListener('sample', function(e) { try { onSample(JSON.parse(e.data)); } catch (err) {} });
+    es.addEventListener('result', function(e) { try { onResult(JSON.parse(e.data)); } catch (err) {} });
+    es.addEventListener('end', function(e) { onEnd(); });
+    es.addEventListener('error', function(e) { try { onError(e.data ? JSON.parse(e.data) : {}); } catch (err) { onError({}); } });
+    setStripState('running');
+  }
+  function runNow() {
+    fetch('/api/v1/speedtest/run', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(body) {
+        if (body && body.test_id) attach(body.test_id);
+      })
+      .catch(function() {});
+  }
+  function detach() {
+    if (state.es) { try { state.es.close(); } catch (e) {} state.es = null; }
+    setStripState('idle');
+    state.testId = null;
+  }
+
+  // Auto-attach on dashboard load: if the latest snapshot indicates a
+  // test is running (LastAttempt.status === "pending"), open the
+  // EventSource using the most recent test_id. We don't know the
+  // test_id from the snapshot — POST /run is idempotent, so we call
+  // it: it returns the in-flight test's id without starting a new
+  // one.
+  function autoAttachIfRunning(snapshot) {
+    var spd = snapshot && snapshot.speed_test;
+    var att = spd && spd.last_attempt;
+    if (att && att.status === 'pending') {
+      runNow();
+    }
+  }
+
+  // Wire up the Run-now button. Uses event delegation on body so a
+  // re-render (which destroys the in-place button) doesn't lose the
+  // listener.
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.addEventListener('click', function(e) {
+      var t = e.target;
+      if (t && t.getAttribute && t.getAttribute('data-action') === 'speedtest-run-now') {
+        runNow();
+      }
+    });
+  }
+
+  return { attach: attach, runNow: runNow, detach: detach, autoAttachIfRunning: autoAttachIfRunning };
+})();
+window.speedtestLive = speedtestLive;
+
 charts.loadSpeedTest = function(hours, save) {
   if (save) { polling.saveChartRange(hours); charts.loadGPU(hours); charts.loadContainers(hours); }
   var btns = document.querySelectorAll(".st-range-btn");
@@ -1390,6 +1633,11 @@ charts.loadSparklines = function(snapshot) {
   charts.loadGPU(_chartRange);
   charts.loadContainers(_chartRange);
   charts.loadSpeedTest(_chartRange);
+  // PRD #283 / issue #285: auto-attach the live-progress strip on
+  // dashboard load if a test is in flight (status === 'pending' on
+  // the cached snapshot). idempotent /run returns the existing
+  // test_id without starting a new run.
+  try { speedtestLive.autoAttachIfRunning(snapshot); } catch(e) {}
 };
 
 /* ── NasScrollFade ───────────────────────────────────────────── */

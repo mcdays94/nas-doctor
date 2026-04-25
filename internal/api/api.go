@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/mcdays94/nas-doctor/internal"
 	"github.com/mcdays94/nas-doctor/internal/fleet"
+	"github.com/mcdays94/nas-doctor/internal/livetest"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/scheduler"
 	"github.com/mcdays94/nas-doctor/internal/storage"
@@ -63,6 +65,16 @@ type Server struct {
 	// passphrase value can be resolved without exporting it into
 	// the test process env. Issue #279.
 	borgTestEnvLookup func(string) string
+	// testLiveTestRegistry is a test-only override for the
+	// LiveTestRegistry resolved from s.scheduler. Production code
+	// always reads through s.liveTestRegistry() which checks this
+	// field first; tests inject a fake registry so they don't have
+	// to construct a full Scheduler. PRD #283 / issue #285.
+	testLiveTestRegistry interface {
+		StartTest(ctx context.Context) (*livetest.LiveTest, error)
+		GetLive(testID int64) (*livetest.LiveTest, bool)
+		InProgress() bool
+	}
 	// dataEphemeral is set at startup from cmd/nas-doctor/main.go via
 	// SetDataPersistent. When true, the /api/v1/status response carries
 	// data_ephemeral=true so the dashboard renders a loud banner telling
@@ -124,6 +136,18 @@ func (s *Server) Router() http.Handler {
 	// 10-60s, so we can't subject them to the 30s router-wide timeout.
 	// RunCheck uses its own per-check context from cfg.TimeoutSec.
 	r.Post("/api/v1/service-checks/test", s.handleTestServiceCheck)
+
+	// SSE live-progress endpoints (PRD #283 / issue #285). Both routes
+	// run OUTSIDE the 30s Timeout group: POST /run kicks off a 30-60s
+	// test and waits for the start handle (idempotent — almost always
+	// returns immediately, but the runner's lazy-init may briefly
+	// delay), GET /stream/{id} keeps the EventSource connection open
+	// for the full test lifetime. The api-key middleware exempts
+	// same-origin requests via the Referer check, which is what makes
+	// browser EventSource (no custom-headers support) work without
+	// extra wiring.
+	r.With(s.apiKeyMiddleware).Post("/api/v1/speedtest/run", s.handleSpeedtestRun)
+	r.With(s.apiKeyMiddleware).Get("/api/v1/speedtest/stream/{test_id}", s.handleSpeedtestStream)
 
 	// Standard-latency routes — 30s soft timeout via a Group so we don't
 	// apply it to the long-running route above.

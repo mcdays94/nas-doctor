@@ -146,6 +146,12 @@ type Metrics struct {
 	// `nasdoctor_speedtest_engine == 1` to graph engine-in-use over
 	// time). Stays at 0 until at least one test produces a result.
 	speedtestEngine *prometheus.GaugeVec
+	// nasdoctor_speedtest_in_progress — 1 when a live speed test is
+	// currently running, 0 otherwise. PRD #283 / issue #285. Useful
+	// for "stuck test" alerts (gauge stays 1 for > expected test
+	// duration). Updated by SetSpeedTestInProgress, called from the
+	// scheduler/registry wiring.
+	speedtestInProgress prometheus.Gauge
 
 	// ── GPU ──
 	gpuUsagePct    *prometheus.GaugeVec
@@ -344,6 +350,7 @@ func NewMetrics() *Metrics {
 	m.speedtestUpload = gauge(ns, "speedtest", "upload_mbps", "Latest speed test upload in Mbps")
 	m.speedtestLatency = gauge(ns, "speedtest", "latency_ms", "Latest speed test latency in ms")
 	m.speedtestEngine = gaugeVec(ns, "speedtest", "engine", "Engine that produced the most recent successful speed test (1=in use, 0=not in use)", []string{"engine"})
+	m.speedtestInProgress = gauge(ns, "speedtest", "in_progress", "1 if a live speed test is currently running, 0 otherwise")
 
 	// ── Findings ──
 	m.findingsTotal = gaugeVec(ns, "findings", "total", "Findings by severity", []string{"severity"})
@@ -390,7 +397,7 @@ func NewMetrics() *Metrics {
 		m.gpuTemperature, m.gpuPowerW, m.gpuPowerMaxW, m.gpuFanPct,
 		m.gpuEncoderPct, m.gpuDecoderPct,
 		m.backupLastSuccess, m.backupSizeBytes, m.backupStatus,
-		m.speedtestDownload, m.speedtestUpload, m.speedtestLatency, m.speedtestEngine,
+		m.speedtestDownload, m.speedtestUpload, m.speedtestLatency, m.speedtestEngine, m.speedtestInProgress,
 		m.findingsTotal, m.findingsCritical, m.findingsWarning,
 		m.collectionDuration, m.lastCollectionTime, m.updateAvailable,
 	}
@@ -753,6 +760,18 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 	// ── Collection ──
 	m.collectionDuration.Set(snap.Duration)
 	m.lastCollectionTime.Set(float64(snap.Timestamp.Unix()))
+}
+
+// SetSpeedTestInProgress updates the nasdoctor_speedtest_in_progress
+// gauge. Called by the scheduler/registry wiring at test start
+// (in_progress=true) and at test end (in_progress=false). PRD #283 /
+// issue #285.
+func (m *Metrics) SetSpeedTestInProgress(running bool) {
+	if running {
+		m.speedtestInProgress.Set(1)
+	} else {
+		m.speedtestInProgress.Set(0)
+	}
 }
 
 func boolToFloat(b bool) float64 {

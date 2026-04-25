@@ -292,6 +292,19 @@ tbody tr:hover{background:rgba(0,0,0,0.03)}
 /* ---- Fade in animation ---- */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .fade-in { animation: fadeIn 0.3s ease both; }
+
+/* Speed Test Live Progress Strip (PRD #283 / issue #285) — duplicated from SharedCSS because dashboard themes don't link /css/shared.css. Clean theme uses light-mode colour palette to match this template's background. */
+.speedtest-live-strip { max-height:0; overflow:hidden; transition:max-height 220ms ease-out, opacity 220ms ease-out; opacity:0; margin-bottom:0 }
+.speedtest-live-strip[data-state="running"], .speedtest-live-strip[data-state="completing"] { max-height:100px; opacity:1; margin-bottom:8px }
+.speedtest-live-inner { display:flex; align-items:center; gap:12px; padding:8px 12px; background:#fafafa; border:1px solid #e5e5e5; border-radius:8px; flex-wrap:wrap }
+.speedtest-live-phase-pill { display:inline-block; padding:3px 8px; border-radius:999px; font-size:10px; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; background:rgba(99,102,241,0.12); color:#4f46e5; flex-shrink:0 }
+.speedtest-live-phase-pill[data-phase="latency"] { background:rgba(34,197,94,0.15); color:#16a34a }
+.speedtest-live-phase-pill[data-phase="download"] { background:rgba(59,130,246,0.15); color:#1d4ed8 }
+.speedtest-live-phase-pill[data-phase="upload"] { background:rgba(139,92,246,0.15); color:#7c3aed }
+.speedtest-live-readout { display:flex; flex-direction:column; line-height:1 }
+.speedtest-live-mbps { font-size:22px; font-weight:700; color:#171717; font-variant-numeric:tabular-nums }
+.speedtest-live-mbps-label { font-size:10px; color:#808080; letter-spacing:0.5px; text-transform:uppercase; margin-top:2px }
+.speedtest-live-cancel { margin-left:auto; padding:4px 10px; background:transparent; border:1px solid #e5e5e5; border-radius:6px; color:#808080; font-size:11px; cursor:not-allowed }
 </style>
 </head>
 <body>

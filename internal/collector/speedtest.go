@@ -52,6 +52,23 @@ func runSpeedTestEntry(ctx context.Context) *internal.SpeedTestResult {
 	return res
 }
 
+// DefaultSpeedTestRunner returns the package-level composite runner
+// used by RunSpeedTest. Lazy-constructs the production composite on
+// first call and reuses it thereafter. Slice 2 (#285) wires this
+// into the LiveTestRegistry so the registry's Run() and the legacy
+// RunSpeedTest() share the same runner instance — important for
+// idempotency: a manual /api/v1/speedtest/run during a cron-driven
+// test must attach to the same in-flight run, which requires both
+// paths to acquire the same singleton lock in the registry.
+func DefaultSpeedTestRunner() SpeedTestRunner {
+	defaultSpeedTestRunnerMu.Lock()
+	defer defaultSpeedTestRunnerMu.Unlock()
+	if defaultSpeedTestRunner == nil {
+		defaultSpeedTestRunner = NewCompositeSpeedTestRunner(NewSpeedTestGoRunner(), NewOoklaCLIRunner())
+	}
+	return defaultSpeedTestRunner
+}
+
 // SetSpeedTestRunnerForTest swaps the package-level default runner.
 // Test-only — not intended for production wiring (which constructs
 // the composite at startup via NewCompositeSpeedTestRunner).
