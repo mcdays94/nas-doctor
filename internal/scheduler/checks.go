@@ -676,6 +676,16 @@ func (sc *ServiceChecker) runSpeedCheck(check internal.ServiceCheckConfig, resul
 	result.LatencyMs = latest.LatencyMs
 	result.ResponseMS = int64(latest.LatencyMs)
 
+	// Stamp the parent speedtest_history.id so the /service-checks
+	// expanded-log mini-chart can fetch /api/v1/speedtest/samples/{id}.
+	// GetSpeedTestHistory now returns ID alongside the throughput
+	// fields (issue #286). Fall through if the row was synthesised by
+	// the FakeStore in a test that doesn't seed a non-zero ID — the
+	// UI's empty-state copy handles that case gracefully.
+	if latest.ID > 0 {
+		result.SpeedTestHistoryID = latest.ID
+	}
+
 	// Blank thresholds → heartbeat mode: success = up, no threshold math.
 	if check.ContractedDownMbps <= 0 && check.ContractedUpMbps <= 0 {
 		result.Status = "up"

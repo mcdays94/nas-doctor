@@ -67,6 +67,15 @@ type FakeStore struct {
 	// the scheduler writes the first attempt outcome.
 	speedTestAttempt *LastSpeedTestAttempt
 
+	// Per-test sample buffer keyed by test_id (PRD #283 slice 3 /
+	// issue #286). Mirrors the FK + cascade-delete shape of the
+	// real DB so deleting a history row drops samples too.
+	speedTestSamples map[int64][]SpeedTestSample
+	// speedTestNextID is the synthetic auto-increment counter for
+	// SaveSpeedTestReturningID. Starts at 1 so a zero ID is always
+	// "no row".
+	speedTestNextID int64
+
 	// Drive maintenance events (issue #130).
 	driveEvents     []DriveEvent
 	driveEventSeq   int64
@@ -546,8 +555,17 @@ func extractProcessName(command string) string {
 }
 
 func (f *FakeStore) SaveSpeedTest(_ string, result *internal.SpeedTestResult) error {
+	_, err := f.SaveSpeedTestReturningID("", result)
+	return err
+}
+
+// SaveSpeedTestReturningID mirrors *DB's same-named method: appends a
+// history row + returns its synthetic ID. The fake assigns IDs from a
+// monotonically-increasing counter so test code can correlate samples
+// against a known parent row. PRD #283 / issue #286.
+func (f *FakeStore) SaveSpeedTestReturningID(_ string, result *internal.SpeedTestResult) (int64, error) {
 	if result == nil {
-		return nil
+		return 0, nil
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -555,7 +573,14 @@ func (f *FakeStore) SaveSpeedTest(_ string, result *internal.SpeedTestResult) er
 	if ts.IsZero() {
 		ts = time.Now()
 	}
+	f.speedTestNextID++
+	id := f.speedTestNextID
+	engine := result.Engine
+	if engine == "" {
+		engine = internal.SpeedTestEngineOoklaCLI
+	}
 	f.speedTestHistory = append(f.speedTestHistory, SpeedTestHistoryPoint{
+		ID:           id,
 		Timestamp:    ts,
 		DownloadMbps: result.DownloadMbps,
 		UploadMbps:   result.UploadMbps,
@@ -563,8 +588,9 @@ func (f *FakeStore) SaveSpeedTest(_ string, result *internal.SpeedTestResult) er
 		JitterMs:     result.JitterMs,
 		ServerName:   result.ServerName,
 		ISP:          result.ISP,
+		Engine:       engine,
 	})
-	return nil
+	return id, nil
 }
 
 func (f *FakeStore) GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error) {
@@ -608,6 +634,75 @@ func (f *FakeStore) GetLastSpeedTestAttempt() (*LastSpeedTestAttempt, error) {
 	}
 	cp := *f.speedTestAttempt
 	return &cp, nil
+}
+
+// GetLatestSpeedTestHistoryID returns the most-recently-saved history
+// row's synthetic ID. Returns (0, false, nil) on an empty store.
+// PRD #283 slice 3 / issue #286.
+func (f *FakeStore) GetLatestSpeedTestHistoryID() (int64, bool, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if len(f.speedTestHistory) == 0 {
+		return 0, false, nil
+	}
+	// Last appended row wins (ascending append order).
+	return f.speedTestHistory[len(f.speedTestHistory)-1].ID, true, nil
+}
+
+// InsertSpeedTestSamples bulk-stores samples for an existing history
+// row. Insert into a non-existent test_id returns an error to mirror
+// the FK-constraint behaviour of the real DB. Re-inserting the same
+// (test_id, sample_index) is rejected (mirrors the PK constraint).
+// PRD #283 slice 3 / issue #286.
+func (f *FakeStore) InsertSpeedTestSamples(testID int64, samples []SpeedTestSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Verify the parent row exists (FK constraint emulation).
+	parentExists := false
+	for _, p := range f.speedTestHistory {
+		if p.ID == testID {
+			parentExists = true
+			break
+		}
+	}
+	if !parentExists {
+		return fmt.Errorf("FOREIGN KEY constraint failed: speedtest_history row %d not found", testID)
+	}
+	if f.speedTestSamples == nil {
+		f.speedTestSamples = make(map[int64][]SpeedTestSample)
+	}
+	existing := f.speedTestSamples[testID]
+	// Build an index set of already-stored sample_index values to
+	// reject duplicates (PK constraint emulation).
+	taken := make(map[int]struct{}, len(existing))
+	for _, e := range existing {
+		taken[e.SampleIndex] = struct{}{}
+	}
+	for _, s := range samples {
+		if _, dup := taken[s.SampleIndex]; dup {
+			return fmt.Errorf("UNIQUE constraint failed: speedtest_samples (test_id=%d, sample_index=%d)", testID, s.SampleIndex)
+		}
+		taken[s.SampleIndex] = struct{}{}
+	}
+	f.speedTestSamples[testID] = append(existing, samples...)
+	return nil
+}
+
+// GetSpeedTestSamples returns samples for the given test_id ordered by
+// sample_index ascending. An unknown test_id returns an empty slice
+// (NOT an error) to match the *DB behaviour. PRD #283 slice 3 /
+// issue #286.
+func (f *FakeStore) GetSpeedTestSamples(testID int64) ([]SpeedTestSample, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	src := f.speedTestSamples[testID]
+	out := make([]SpeedTestSample, len(src))
+	copy(out, src)
+	sort.Slice(out, func(i, j int) bool { return out[i].SampleIndex < out[j].SampleIndex })
+	return out, nil
 }
 
 // ── ConfigStore ──

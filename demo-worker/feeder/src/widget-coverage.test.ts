@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { transformSnapshot, transformSettings, PROFILES, type Platform } from "./index";
+import { transformSnapshot, transformSettings, buildSpeedTestSamples, SAMPLED_TEST_ID, PROFILES, type Platform } from "./index";
 
 // A minimal seed that resembles what `seed:unraid:snapshot` looks like
 // after the Go binary's `--demo` capture. The feeder's
@@ -304,5 +304,68 @@ describe("demo feeder widget coverage", () => {
         `${platform} snapshot.speed_test.latest.engine should be 'speedtest_go' to showcase the new primary engine`,
       ).toBe("speedtest_go");
     }
+  });
+
+  // ── Per-sample telemetry (PRD #283 slice 3 / issue #286) ──────────
+  // The /service-checks expanded-log mini-chart and the demo's
+  // /api/v1/speedtest/samples/{id} endpoint both consume the data
+  // synthesised by buildSpeedTestSamples. These tests pin the
+  // shape the dashboard's NasChart.line consumer expects so a
+  // future refactor can't silently break the chart.
+
+  it("buildSpeedTestSamples produces ~30 ordered samples covering all three phases for every platform", () => {
+    for (const platform of ["unraid", "synology", "truenas", "proxmox", "kubernetes"] as Platform[]) {
+      const result = buildSpeedTestSamples(PROFILES[platform], SAMPLED_TEST_ID) as Record<string, unknown>;
+      expect(result.test_id, `${platform} samples must echo test_id`).toBe(SAMPLED_TEST_ID);
+      const samples = result.samples as Array<Record<string, unknown>>;
+      expect(samples.length, `${platform} samples count`).toBe(30);
+      expect(result.count, `${platform} count field must match samples.length`).toBe(samples.length);
+
+      // sample_index monotonically increasing from 0 — the dashboard
+      // chart renders left-to-right and a non-monotonic index would
+      // produce backwards line segments.
+      for (let i = 0; i < samples.length; i++) {
+        expect(samples[i].sample_index, `${platform} samples[${i}].sample_index`).toBe(i);
+      }
+
+      // All three phases present in their canonical order.
+      const phases = samples.map((s) => s.phase as string);
+      expect(phases.slice(0, 5).every((p) => p === "latency"),
+        `${platform} first 5 samples must be 'latency' phase, got ${phases.slice(0, 5).join(",")}`).toBe(true);
+      expect(phases.includes("download"), `${platform} samples must include a 'download' phase`).toBe(true);
+      expect(phases.includes("upload"), `${platform} samples must include an 'upload' phase`).toBe(true);
+
+      // Every sample has a numeric mbps + latency_ms field (zero is
+      // valid; missing/null would crash the chart consumer).
+      for (const s of samples) {
+        expect(typeof s.mbps, `${platform} samples[].mbps must be a number`).toBe("number");
+        expect(typeof s.latency_ms, `${platform} samples[].latency_ms must be a number`).toBe("number");
+        expect(typeof s.ts, `${platform} samples[].ts must be a string (ISO 8601)`).toBe("string");
+      }
+    }
+  });
+
+  it("buildServiceChecks stamps speedtest_history_id on the type=speed entry so the SC log row links to samples", () => {
+    // The feeder's buildServiceChecks always returns the same set
+    // (it doesn't take a platform), but the speed entry must carry
+    // the speedtest_history_id field so the /service-checks expanded
+    // log row knows which test_id to fetch from /api/v1/speedtest/samples/{id}.
+    // We assert by looking at the snapshot-mirrored service_checks
+    // (transformSnapshot calls buildServiceChecks then writes it
+    // into snapshot.service_checks via a separate path; instead we
+    // rely on the fact that the speed entry exists in service_checks
+    // for any platform via the fleet endpoint shape).
+    //
+    // Simpler: the source-of-truth is the same buildServiceChecks
+    // function, so checking ANY platform's snapshot.service_checks
+    // is enough.
+    const snap = transformSnapshot(SEED, PROFILES.unraid, "unraid");
+    const checks = (getPath(snap, "service_checks") as Array<Record<string, unknown>>) || [];
+    const speedCheck = checks.find((c) => c.type === "speed");
+    expect(speedCheck, "expected a type=speed service-check entry in snapshot.service_checks").toBeDefined();
+    expect(
+      speedCheck!.speedtest_history_id,
+      "speed service-check must carry speedtest_history_id so the SC expanded log row links to samples (#286)",
+    ).toBe(SAMPLED_TEST_ID);
   });
 });

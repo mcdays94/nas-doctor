@@ -206,6 +206,37 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_speedtest_ts ON speedtest_history(timestamp DESC)`,
 
+		// --- Speed test per-sample telemetry (PRD #283 / issue #286) ---
+		// Slice 3 of the live-progress PRD. Captures the per-sample
+		// throughput stream emitted by the runner during a test, bulk-
+		// inserted in one transaction at completion (see scheduler's
+		// handleSpeedTestResult). One row per sample emitted by the
+		// engine, ~30 rows for a typical 30-60s test.
+		//
+		//   test_id      → speedtest_history.id (the parent row)
+		//   sample_index → 0-based monotonic counter assigned by the
+		//                  bulk-insert; preserves emission order on
+		//                  read so the mini-chart renders left-to-right.
+		//   phase        → "latency" / "download" / "upload"
+		//   ts           → wall-clock time the sample was emitted.
+		//   mbps         → throughput Mbps (zero for latency-phase).
+		//   latency_ms   → ping latency ms (zero for throughput-phase).
+		//
+		// FK ON DELETE CASCADE means samples are pruned automatically
+		// whenever the parent speedtest_history row is pruned by the
+		// retention loop — no separate retention knob needed.
+		`CREATE TABLE IF NOT EXISTS speedtest_samples (
+			test_id INTEGER NOT NULL,
+			sample_index INTEGER NOT NULL,
+			phase TEXT NOT NULL,
+			ts TIMESTAMP NOT NULL,
+			mbps REAL,
+			latency_ms REAL,
+			PRIMARY KEY (test_id, sample_index),
+			FOREIGN KEY (test_id) REFERENCES speedtest_history(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS speedtest_samples_test_id ON speedtest_samples(test_id)`,
+
 		// --- Last speed-test attempt (single-row table, see issue #210) ---
 		// Records the outcome of the most recent speed-test run — success,
 		// failure, pending, or disabled. Consumed by the scheduled
@@ -371,6 +402,16 @@ func (d *DB) migrate() error {
 	// detail keys get added. See issue #182.
 	if err := d.ensureColumn("service_checks_history", "details_json", "TEXT"); err != nil {
 		return fmt.Errorf("ensure service_checks_history.details_json: %w", err)
+	}
+	// speedtest_history_id links a type=speed service-check log row to
+	// the speedtest_history row that produced it. Lets the
+	// /service-checks expanded-log-row UI fetch per-sample data via
+	// /api/v1/speedtest/samples/{id} without timestamp-fuzzy matching.
+	// NULL on legacy rows + non-speed types — the UI renders the
+	// "no per-sample data available" empty state in that case. Issue
+	// #286 / PRD #283 slice 3.
+	if err := d.ensureColumn("service_checks_history", "speedtest_history_id", "INTEGER"); err != nil {
+		return fmt.Errorf("ensure service_checks_history.speedtest_history_id: %w", err)
 	}
 	if _, err := d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_alerts_fingerprint_open ON alerts(fingerprint, resolved_at)`); err != nil {
 		return fmt.Errorf("create alerts fingerprint index: %w", err)
@@ -895,6 +936,15 @@ func (d *DB) saveSpeedTestHistory(tx *sql.Tx, snap *internal.Snapshot) error {
 
 // SpeedTestHistoryPoint represents a single speed test history data point.
 type SpeedTestHistoryPoint struct {
+	// ID is the speedtest_history.id primary key. Surfaced for callers
+	// that need to correlate per-sample data (speedtest_samples.test_id)
+	// to the parent history row, notably the type=speed service-check
+	// dispatch which stamps service_checks_history.speedtest_history_id
+	// so the /service-checks expanded-log mini-chart can fetch
+	// /api/v1/speedtest/samples/{id}. Zero for fake/test points where
+	// the row was never persisted via SaveSpeedTestReturningID.
+	// Issue #286.
+	ID           int64     `json:"id,omitempty"`
 	Timestamp    time.Time `json:"timestamp"`
 	DownloadMbps float64   `json:"download_mbps"`
 	UploadMbps   float64   `json:"upload_mbps"`
@@ -908,31 +958,145 @@ type SpeedTestHistoryPoint struct {
 	Engine string `json:"engine,omitempty"`
 }
 
+// SpeedTestSample is a single per-tick datum captured during a speed
+// test, persisted into speedtest_samples after the test completes.
+// Mirrors collector.SpeedTestSample (the in-memory wire shape) plus
+// the parent test_id linkage. PRD #283 / issue #286.
+type SpeedTestSample struct {
+	// SampleIndex is the 0-based emission-order counter. Stored as
+	// the PK alongside test_id so re-inserts are caught by SQLite
+	// rather than producing duplicate rows.
+	SampleIndex int       `json:"sample_index"`
+	Phase       string    `json:"phase"`
+	Timestamp   time.Time `json:"ts"`
+	Mbps        float64   `json:"mbps"`
+	LatencyMs   float64   `json:"latency_ms"`
+}
+
 // SaveSpeedTest inserts a single speed test result row. The engine
 // field falls back to "ookla_cli" via the column default when the
 // caller didn't stamp result.Engine — this preserves backwards
 // compatibility for any callsite that pre-dates issue #284.
 func (d *DB) SaveSpeedTest(snapshotID string, result *internal.SpeedTestResult) error {
+	_, err := d.SaveSpeedTestReturningID(snapshotID, result)
+	return err
+}
+
+// SaveSpeedTestReturningID is the same insert as SaveSpeedTest but
+// returns the new speedtest_history.id so the caller can wire it to
+// the per-sample rows in speedtest_samples (FK target). Returns
+// (0, nil) when result is nil so the empty-result path stays a no-op.
+// Added for PRD #283 slice 3 / issue #286 — the runner-driven path
+// in scheduler.handleSpeedTestResult needs the ID to bulk-insert
+// in-memory samples buffered by the LiveTest.
+func (d *DB) SaveSpeedTestReturningID(snapshotID string, result *internal.SpeedTestResult) (int64, error) {
 	if result == nil {
-		return nil
+		return 0, nil
 	}
 	engine := result.Engine
 	if engine == "" {
 		engine = internal.SpeedTestEngineOoklaCLI
 	}
-	_, err := d.db.Exec(
+	res, err := d.db.Exec(
 		`INSERT INTO speedtest_history (snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp, engine)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		snapshotID, result.DownloadMbps, result.UploadMbps, result.LatencyMs, result.JitterMs, result.ServerName, result.ISP, result.Timestamp, engine,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// InsertSpeedTestSamples bulk-inserts the per-sample buffer for a
+// completed test in a single transaction. The parent speedtest_history
+// row MUST already exist (FK target) — callers should write the
+// history row via SaveSpeedTestReturningID first, then pass that ID
+// here. Re-inserting with the same (test_id, sample_index) violates
+// the PK and surfaces as an error so callers can detect double-insert
+// bugs. Empty samples slice is a no-op (returns nil). Issue #286.
+func (d *DB) InsertSpeedTestSamples(testID int64, samples []SpeedTestSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(
+		`INSERT INTO speedtest_samples (test_id, sample_index, phase, ts, mbps, latency_ms)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+	)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, s := range samples {
+		ts := s.Timestamp
+		if ts.IsZero() {
+			ts = time.Now().UTC()
+		}
+		if _, err := stmt.Exec(testID, s.SampleIndex, s.Phase, ts.UTC(), s.Mbps, s.LatencyMs); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetSpeedTestSamples returns every sample row for the given test_id,
+// ordered by sample_index ascending so the mini-chart renders the
+// throughput evolution left-to-right exactly as it was emitted.
+// Returns an empty slice (NOT an error) for test_ids with no samples
+// row — pre-#286 tests legitimately have no samples and the UI
+// renders an empty-state hint in that case. Issue #286.
+func (d *DB) GetSpeedTestSamples(testID int64) ([]SpeedTestSample, error) {
+	rows, err := d.db.Query(
+		`SELECT sample_index, phase, ts, COALESCE(mbps, 0), COALESCE(latency_ms, 0)
+		 FROM speedtest_samples
+		 WHERE test_id = ?
+		 ORDER BY sample_index ASC`,
+		testID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]SpeedTestSample, 0)
+	for rows.Next() {
+		var s SpeedTestSample
+		if err := rows.Scan(&s.SampleIndex, &s.Phase, &s.Timestamp, &s.Mbps, &s.LatencyMs); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// GetLatestSpeedTestHistoryID returns the speedtest_history.id of the
+// most-recent row, or (0, false, nil) if no history rows exist yet.
+// Used by the type=speed scheduled service check to stamp the new
+// service_checks_history.speedtest_history_id column so the expanded
+// log row can link to the parent test. Issue #286.
+func (d *DB) GetLatestSpeedTestHistoryID() (int64, bool, error) {
+	row := d.db.QueryRow(
+		`SELECT id FROM speedtest_history ORDER BY id DESC LIMIT 1`,
+	)
+	var id int64
+	if err := row.Scan(&id); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return id, true, nil
 }
 
 // GetSpeedTestHistory returns speed test history for the given time range.
 func (d *DB) GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error) {
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
 	rows, err := d.db.Query(
-		`SELECT timestamp, download_mbps, upload_mbps, latency_ms, jitter_ms, COALESCE(server_name, ''), COALESCE(isp, ''), COALESCE(engine, 'ookla_cli')
+		`SELECT id, timestamp, download_mbps, upload_mbps, latency_ms, jitter_ms, COALESCE(server_name, ''), COALESCE(isp, ''), COALESCE(engine, 'ookla_cli')
 		 FROM speedtest_history
 		 WHERE timestamp >= ?
 		 ORDER BY timestamp ASC`,
@@ -946,7 +1110,7 @@ func (d *DB) GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error) {
 	var points []SpeedTestHistoryPoint
 	for rows.Next() {
 		var p SpeedTestHistoryPoint
-		if err := rows.Scan(&p.Timestamp, &p.DownloadMbps, &p.UploadMbps, &p.LatencyMs, &p.JitterMs, &p.ServerName, &p.ISP, &p.Engine); err != nil {
+		if err := rows.Scan(&p.ID, &p.Timestamp, &p.DownloadMbps, &p.UploadMbps, &p.LatencyMs, &p.JitterMs, &p.ServerName, &p.ISP, &p.Engine); err != nil {
 			return nil, err
 		}
 		points = append(points, p)
@@ -1780,6 +1944,14 @@ type ServiceCheckEntry struct {
 	// written before the column existed, or for check types that produce
 	// no extra context. See issue #182.
 	Details map[string]any `json:"details,omitempty"`
+
+	// SpeedTestHistoryID links a type=speed log row to the
+	// speedtest_history row that produced it, so the
+	// /service-checks expanded-log mini-chart can fetch
+	// /api/v1/speedtest/samples/{id}. Zero on legacy rows + non-speed
+	// types — the UI renders the "no per-sample data available" empty
+	// state in that case. PRD #283 slice 3 / issue #286.
+	SpeedTestHistoryID int64 `json:"speedtest_history_id,omitempty"`
 }
 
 // SaveServiceCheckResults appends service check run results to history.
@@ -1816,11 +1988,20 @@ func (d *DB) SaveServiceCheckResults(results []internal.ServiceCheckResult) erro
 					"check", result.Name, "error", err)
 			}
 		}
+		// speedtest_history_id is non-zero only for type=speed rows
+		// where the dispatch managed to resolve the parent test ID
+		// (issue #286). NULL otherwise — UI treats NULL as "legacy
+		// row, no per-sample mini-chart available".
+		var speedHistID any // nil → SQL NULL
+		if result.SpeedTestHistoryID > 0 {
+			speedHistID = result.SpeedTestHistoryID
+		}
 		_, err := tx.Exec(
 			`INSERT INTO service_checks_history (
 				check_key, name, check_type, target, status, response_ms, error_message,
-				consecutive_failures, failure_threshold, failure_severity, checked_at, details_json
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				consecutive_failures, failure_threshold, failure_severity, checked_at, details_json,
+				speedtest_history_id
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			result.Key,
 			result.Name,
 			result.Type,
@@ -1833,6 +2014,7 @@ func (d *DB) SaveServiceCheckResults(results []internal.ServiceCheckResult) erro
 			result.FailureSeverity,
 			checkedAt,
 			detailsPayload,
+			speedHistID,
 		)
 		if err != nil {
 			return err
@@ -1874,7 +2056,7 @@ func (d *DB) ListLatestServiceChecks(limit int) ([]ServiceCheckEntry, error) {
 		`SELECT check_key, name, check_type, target, status,
 				COALESCE(response_ms, 0), COALESCE(error_message, ''),
 				COALESCE(consecutive_failures, 0), COALESCE(failure_threshold, 1), COALESCE(failure_severity, 'warning'),
-				checked_at, details_json
+				checked_at, details_json, speedtest_history_id
 		 FROM service_checks_history
 		 WHERE id IN (
 			SELECT MAX(id) FROM service_checks_history GROUP BY check_key
@@ -1893,6 +2075,7 @@ func (d *DB) ListLatestServiceChecks(limit int) ([]ServiceCheckEntry, error) {
 		var e ServiceCheckEntry
 		var checkedAt time.Time
 		var detailsJSON sql.NullString
+		var speedHistID sql.NullInt64
 		if err := rows.Scan(
 			&e.Key,
 			&e.Name,
@@ -1906,11 +2089,15 @@ func (d *DB) ListLatestServiceChecks(limit int) ([]ServiceCheckEntry, error) {
 			&e.FailureSeverity,
 			&checkedAt,
 			&detailsJSON,
+			&speedHistID,
 		); err != nil {
 			return nil, err
 		}
 		e.CheckedAt = checkedAt.UTC().Format(time.RFC3339)
 		e.Details = decodeDetailsJSON(d.logger, detailsJSON, e.Key)
+		if speedHistID.Valid {
+			e.SpeedTestHistoryID = speedHistID.Int64
+		}
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
@@ -1928,7 +2115,7 @@ func (d *DB) GetServiceCheckHistory(checkKey string, limit int) ([]ServiceCheckE
 		`SELECT check_key, name, check_type, target, status,
 				COALESCE(response_ms, 0), COALESCE(error_message, ''),
 				COALESCE(consecutive_failures, 0), COALESCE(failure_threshold, 1), COALESCE(failure_severity, 'warning'),
-				checked_at, details_json
+				checked_at, details_json, speedtest_history_id
 		 FROM service_checks_history
 		 WHERE check_key = ?
 		 ORDER BY checked_at DESC
@@ -1946,6 +2133,7 @@ func (d *DB) GetServiceCheckHistory(checkKey string, limit int) ([]ServiceCheckE
 		var e ServiceCheckEntry
 		var checkedAt time.Time
 		var detailsJSON sql.NullString
+		var speedHistID sql.NullInt64
 		if err := rows.Scan(
 			&e.Key,
 			&e.Name,
@@ -1959,11 +2147,15 @@ func (d *DB) GetServiceCheckHistory(checkKey string, limit int) ([]ServiceCheckE
 			&e.FailureSeverity,
 			&checkedAt,
 			&detailsJSON,
+			&speedHistID,
 		); err != nil {
 			return nil, err
 		}
 		e.CheckedAt = checkedAt.UTC().Format(time.RFC3339)
 		e.Details = decodeDetailsJSON(d.logger, detailsJSON, e.Key)
+		if speedHistID.Valid {
+			e.SpeedTestHistoryID = speedHistID.Int64
+		}
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()

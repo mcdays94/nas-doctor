@@ -148,6 +148,13 @@ func (s *Server) Router() http.Handler {
 	// extra wiring.
 	r.With(s.apiKeyMiddleware).Post("/api/v1/speedtest/run", s.handleSpeedtestRun)
 	r.With(s.apiKeyMiddleware).Get("/api/v1/speedtest/stream/{test_id}", s.handleSpeedtestStream)
+	// Per-sample JSON for COMPLETED tests (PRD #283 slice 3 / #286).
+	// Strict separation from /stream/{id}: in-flight tests get a 404
+	// here with a hint pointing at /stream/{id}. Lives outside the
+	// 30s timeout group because the samples query is fast (single
+	// indexed read) but kept on the same line as run/stream for the
+	// route-grouping reader's mental model.
+	r.With(s.apiKeyMiddleware).Get("/api/v1/speedtest/samples/{test_id}", s.handleSpeedtestSamples)
 
 	// Standard-latency routes — 30s soft timeout via a Group so we don't
 	// apply it to the long-running route above.
