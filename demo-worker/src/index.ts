@@ -172,6 +172,16 @@ async function handleAPI(path: string, url: URL, platform: Platform, env: Env): 
     const data = await env.DEMO_DATA.get(`api:${platform}:disks`, "text");
     return json(data ? JSON.parse(data) : []);
   }
+  // PRD #283 slice 3 / issue #286 — per-sample telemetry for the
+  // /service-checks expanded log row's mini-chart. The demo carries
+  // one canonical dataset per platform (the feeder synthesises it
+  // under api:<platform>:speedtest_samples), so the test_id is
+  // ignored for routing and trusted for the round-trip echo.
+  if (path.match(/^\/api\/v1\/speedtest\/samples\/[^/]+$/)) {
+    const data = await env.DEMO_DATA.get(`api:${platform}:speedtest_samples`, "text");
+    if (data) return json(JSON.parse(data));
+    return json({ test_id: 0, samples: [], count: 0 });
+  }
 
   const kvKey = kvMap[path];
   if (!kvKey) return json({ error: "not found" }, 404);

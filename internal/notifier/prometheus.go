@@ -152,6 +152,16 @@ type Metrics struct {
 	// duration). Updated by SetSpeedTestInProgress, called from the
 	// scheduler/registry wiring.
 	speedtestInProgress prometheus.Gauge
+	// nasdoctor_speedtest_samples_count{test_id="…"} — sample row
+	// count for the most-recent COMPLETED test. PRD #283 / issue
+	// #286 (slice 3). Low-cardinality by construction: the gauge
+	// vec is reset before the latest test_id is exported, so only
+	// ONE label-value pair is ever live at a time. Without the
+	// reset Prometheus would accumulate one series per historical
+	// test_id over the lifetime of the process — a cardinality
+	// landmine. Updated by SetSpeedTestSamplesCount, called from
+	// the scheduler's post-completion bulk-insert path.
+	speedtestSamplesCount *prometheus.GaugeVec
 
 	// ── GPU ──
 	gpuUsagePct    *prometheus.GaugeVec
@@ -351,6 +361,7 @@ func NewMetrics() *Metrics {
 	m.speedtestLatency = gauge(ns, "speedtest", "latency_ms", "Latest speed test latency in ms")
 	m.speedtestEngine = gaugeVec(ns, "speedtest", "engine", "Engine that produced the most recent successful speed test (1=in use, 0=not in use)", []string{"engine"})
 	m.speedtestInProgress = gauge(ns, "speedtest", "in_progress", "1 if a live speed test is currently running, 0 otherwise")
+	m.speedtestSamplesCount = gaugeVec(ns, "speedtest", "samples_count", "Per-sample telemetry row count for the most recent completed speed test (low-cardinality: only the latest test_id is exported)", []string{"test_id"})
 
 	// ── Findings ──
 	m.findingsTotal = gaugeVec(ns, "findings", "total", "Findings by severity", []string{"severity"})
@@ -397,7 +408,7 @@ func NewMetrics() *Metrics {
 		m.gpuTemperature, m.gpuPowerW, m.gpuPowerMaxW, m.gpuFanPct,
 		m.gpuEncoderPct, m.gpuDecoderPct,
 		m.backupLastSuccess, m.backupSizeBytes, m.backupStatus,
-		m.speedtestDownload, m.speedtestUpload, m.speedtestLatency, m.speedtestEngine, m.speedtestInProgress,
+		m.speedtestDownload, m.speedtestUpload, m.speedtestLatency, m.speedtestEngine, m.speedtestInProgress, m.speedtestSamplesCount,
 		m.findingsTotal, m.findingsCritical, m.findingsWarning,
 		m.collectionDuration, m.lastCollectionTime, m.updateAvailable,
 	}
@@ -772,6 +783,21 @@ func (m *Metrics) SetSpeedTestInProgress(running bool) {
 	} else {
 		m.speedtestInProgress.Set(0)
 	}
+}
+
+// SetSpeedTestSamplesCount records the per-sample row count for the
+// MOST RECENT completed speed test. Resets the underlying GaugeVec
+// before stamping the new label-value pair so only ONE series exists
+// at a time — without the reset Prometheus would accumulate a series
+// per historical test_id forever, blowing up cardinality. PRD #283 /
+// issue #286.
+func (m *Metrics) SetSpeedTestSamplesCount(testID int64, count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.speedtestSamplesCount.Reset()
+	m.speedtestSamplesCount.With(prometheus.Labels{
+		"test_id": fmt.Sprintf("%d", testID),
+	}).Set(float64(count))
 }
 
 func boolToFloat(b bool) float64 {

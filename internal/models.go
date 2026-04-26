@@ -311,6 +311,17 @@ type ServiceCheckResult struct {
 	// service_checks_history.details_json column so the log UI can render
 	// the same rich context the Test button already shows.
 	Details map[string]any `json:"details,omitempty"`
+
+	// SpeedTestHistoryID links a type=speed result to the
+	// speedtest_history row that produced it. Populated by the
+	// scheduled-dispatch path (runSpeedCheck reads the latest history
+	// row's ID via GetLatestSpeedTestHistoryID). Persisted in
+	// service_checks_history.speedtest_history_id so the
+	// /service-checks expanded-log mini-chart can fetch
+	// /api/v1/speedtest/samples/{id}. Zero on legacy + non-speed
+	// results — the UI renders the "no per-sample data available"
+	// empty state. PRD #283 slice 3 / issue #286.
+	SpeedTestHistoryID int64 `json:"speedtest_history_id,omitempty"`
 }
 
 // ---------- System ----------

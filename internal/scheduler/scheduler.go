@@ -1374,14 +1374,37 @@ func (s *Scheduler) runSpeedTestViaRegistry(registry livetest.Registry) {
 			fmt.Sprintf("speed test failed: %v", err))
 		return
 	}
-	s.handleSpeedTestResult(lt.Result())
+	// Pull the buffered sample set BEFORE handleSpeedTestResult so
+	// the bulk-insert is hooked to the same parent history row that
+	// SaveSpeedTestReturningID just produced. PRD #283 slice 3 / #286.
+	samples := lt.SnapshotSamples()
+	s.handleSpeedTestResultWithSamples(lt.Result(), samples)
 }
 
 // handleSpeedTestResult applies the post-run side effects shared by
 // both the registry path and the legacy result-only path: log,
 // persist history row, mirror state onto s.latest. Extracted to keep
-// the two paths in sync.
+// the two paths in sync. The legacy (non-registry) path has no
+// per-sample data, so this thin wrapper passes a nil samples slice
+// to the merged implementation.
 func (s *Scheduler) handleSpeedTestResult(result *internal.SpeedTestResult) {
+	s.handleSpeedTestResultWithSamples(result, nil)
+}
+
+// handleSpeedTestResultWithSamples is the registry-path variant: in
+// addition to writing the speedtest_history row + flipping the attempt
+// state, it bulk-inserts any per-sample telemetry buffered by the
+// LiveTest into speedtest_samples. The bulk-insert MUST happen AFTER
+// SaveSpeedTestReturningID returns the parent ID — otherwise the FK
+// has no target and the insert would fail. PRD #283 slice 3 / #286.
+//
+// Sample-insert errors are warn-logged but do not fail the call: the
+// history row is the canonical source of truth, and a missed
+// per-sample row only degrades the expanded-log mini-chart (which
+// falls back to the empty-state hint). Fail-closed would be a
+// regression for callers that expect the speed test to still be
+// considered "successful" even if the optional sample sidecar fails.
+func (s *Scheduler) handleSpeedTestResultWithSamples(result *internal.SpeedTestResult, samples []collector.SpeedTestSample) {
 	if result == nil {
 		s.logger.Info("speed test failed: no speedtest tool available or zero-throughput result")
 		s.recordSpeedTestAttempt(time.Now().UTC(), "failed",
@@ -1392,11 +1415,47 @@ func (s *Scheduler) handleSpeedTestResult(result *internal.SpeedTestResult) {
 		"download", fmt.Sprintf("%.1f Mbps", result.DownloadMbps),
 		"upload", fmt.Sprintf("%.1f Mbps", result.UploadMbps),
 		"latency", fmt.Sprintf("%.1f ms", result.LatencyMs),
+		"samples", len(samples),
 	)
-	if err := s.store.SaveSpeedTest("speedtest-"+time.Now().Format("20060102-150405"), result); err != nil {
+	historyID, err := s.store.SaveSpeedTestReturningID(
+		"speedtest-"+time.Now().Format("20060102-150405"),
+		result,
+	)
+	if err != nil {
 		s.logger.Warn("failed to save speed test result", "error", err)
 	}
+	if historyID > 0 && len(samples) > 0 {
+		converted := convertSpeedTestSamples(samples)
+		if err := s.store.InsertSpeedTestSamples(historyID, converted); err != nil {
+			s.logger.Warn("failed to persist speed test samples; mini-chart will show empty state for this test",
+				"test_id", historyID, "samples", len(converted), "error", err)
+		} else {
+			s.logger.Info("persisted speed test samples", "test_id", historyID, "samples", len(converted))
+			if s.metrics != nil {
+				s.metrics.SetSpeedTestSamplesCount(historyID, len(converted))
+			}
+		}
+	}
 	s.recordSpeedTestSuccess(time.Now().UTC(), result)
+}
+
+// convertSpeedTestSamples re-shapes the in-memory collector samples
+// into the storage layer's persistence shape. The two structs differ
+// in field naming (At vs Timestamp, no SampleIndex on the in-memory
+// side because emission order is implicit). The sample_index is
+// assigned monotonically based on the slice order.
+func convertSpeedTestSamples(in []collector.SpeedTestSample) []storage.SpeedTestSample {
+	out := make([]storage.SpeedTestSample, 0, len(in))
+	for i, s := range in {
+		out = append(out, storage.SpeedTestSample{
+			SampleIndex: i,
+			Phase:       string(s.Phase),
+			Timestamp:   s.At,
+			Mbps:        s.Mbps,
+			LatencyMs:   s.LatencyMs,
+		})
+	}
+	return out
 }
 
 // recordSpeedTestAttempt persists the attempt state to the store AND

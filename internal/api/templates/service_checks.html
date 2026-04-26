@@ -454,6 +454,24 @@
         h+='<div class="log-detail-item"><div class="ld-label">Latency</div><div class="ld-val">'+(e.latency_ms?e.latency_ms.toFixed(1)+' ms':'—')+'</div></div>';
         if(e.download_ok!=null) h+='<div class="log-detail-item"><div class="ld-label">Download OK</div><div class="ld-val" style="color:'+(e.download_ok?'var(--green)':'var(--red)')+'">'+e.download_ok+'</div></div>';
         if(e.upload_ok!=null) h+='<div class="log-detail-item"><div class="ld-label">Upload OK</div><div class="ld-val" style="color:'+(e.upload_ok?'var(--green)':'var(--red)')+'">'+e.upload_ok+'</div></div>';
+        // Per-sample mini-chart (PRD #283 slice 3 / issue #286).
+        // Container always renders; the renderer is fired by
+        // toggleLogDetail when the row opens. Empty-state copy
+        // shown when the parent test pre-dates this slice
+        // (no speedtest_history_id link) or has no samples row.
+        // Intentionally small (~200x80) to stay secondary to
+        // the main result.
+        var chartId="speedtest-samples-"+i;
+        var sthid=e.speedtest_history_id||0;
+        h+='<div class="log-detail-item" style="grid-column:1/-1" data-speedtest-history-id="'+sthid+'" data-chart-id="'+chartId+'">'
+          +'<div class="ld-label">Per-sample throughput</div>'
+          +'<div class="ld-val" style="margin-top:4px">'
+          +'<canvas id="'+chartId+'" width="240" height="90" style="display:block;max-width:100%"></canvas>'
+          +'<div class="speedtest-samples-empty" style="font-size:11px;color:var(--text3);font-weight:400">'
+          +(sthid>0?'Loading per-sample chart…':'No per-sample data available — run a new test to populate.')
+          +'</div>'
+          +'</div>'
+          +'</div>';
       }
       h+='</div></div></td></tr>';
     }
@@ -475,10 +493,95 @@
     // tick can consult it. Using the classList as source of truth
     // (rather than pre-computing) handles both open and close paths
     // with one branch. #187.
-    if(el.classList.contains("open"))expandedRows[id]=true;
-    else delete expandedRows[id];
+    if(el.classList.contains("open")){
+      expandedRows[id]=true;
+      // Lazy-render the speed-test per-sample mini-chart on open.
+      // Drawing on collapse is wasteful (canvas is hidden), and
+      // drawing on every page render of the table would re-fetch
+      // the API for every row. PRD #283 slice 3 / issue #286.
+      lazyRenderSpeedtestSamples(el);
+    } else {
+      delete expandedRows[id];
+    }
     updatePausedIndicator();
   };
+
+  // lazyRenderSpeedtestSamples finds the per-sample mini-chart
+  // container inside an expanded log-detail panel, fetches
+  // /api/v1/speedtest/samples/{id}, and draws the throughput
+  // evolution via NasChart.line. Idempotent: if the chart was
+  // already drawn (data-rendered="1") subsequent toggles do
+  // nothing. Empty-state hint shown when the parent row has no
+  // speedtest_history_id link or when the API returns zero
+  // samples. Issue #286 / PRD #283 slice 3.
+  function lazyRenderSpeedtestSamples(panel){
+    if(!panel)return;
+    var holder=panel.querySelector("[data-speedtest-history-id]");
+    if(!holder)return;
+    if(holder.getAttribute("data-rendered")==="1")return;
+    var sthid=parseInt(holder.getAttribute("data-speedtest-history-id"),10)||0;
+    var chartId=holder.getAttribute("data-chart-id");
+    var emptyEl=holder.querySelector(".speedtest-samples-empty");
+    var canvas=holder.querySelector("canvas");
+    if(sthid<=0){
+      // Legacy entry: keep the empty-state copy already rendered
+      // and hide the canvas so it doesn't show as a 240x90 blank.
+      if(canvas)canvas.style.display="none";
+      holder.setAttribute("data-rendered","1");
+      return;
+    }
+    fetch("/api/v1/speedtest/samples/"+encodeURIComponent(String(sthid)))
+      .then(function(r){
+        if(r.status===404)return {samples:[]};
+        if(!r.ok)throw new Error("HTTP "+r.status);
+        return r.json();
+      })
+      .then(function(d){
+        var samples=(d&&d.samples)||[];
+        holder.setAttribute("data-rendered","1");
+        if(samples.length===0){
+          if(canvas)canvas.style.display="none";
+          if(emptyEl)emptyEl.textContent="No per-sample data available — run a new test to populate.";
+          return;
+        }
+        // Two series: download (green) + upload (blue). Latency
+        // samples are zero on Mbps so they render as a flat line
+        // at the start of the chart — fine for the secondary
+        // visual but not the focus.
+        var labels=[],dlData=[],ulData=[];
+        for(var i=0;i<samples.length;i++){
+          var s=samples[i];
+          labels.push(String(i));
+          var phase=String(s.phase||"").toLowerCase();
+          if(phase==="upload"){
+            dlData.push(0);
+            ulData.push(s.mbps||0);
+          } else if(phase==="download"){
+            dlData.push(s.mbps||0);
+            ulData.push(0);
+          } else {
+            dlData.push(0);
+            ulData.push(0);
+          }
+        }
+        if(emptyEl)emptyEl.style.display="none";
+        if(window.NasChart&&NasChart.line){
+          NasChart.line(chartId,{
+            datasets:[
+              {data:dlData,color:"var(--green)",label:"Download Mbps"},
+              {data:ulData,color:"var(--accent)",label:"Upload Mbps"}
+            ],
+            labels:labels,
+            margin:{l:30,r:8,t:8,b:18}
+          });
+        }
+      })
+      .catch(function(){
+        holder.setAttribute("data-rendered","1");
+        if(canvas)canvas.style.display="none";
+        if(emptyEl)emptyEl.textContent="Per-sample data unavailable for this test.";
+      });
+  }
 
   window.filterByCheck=function(key){
     var sel=document.getElementById("f-check");

@@ -23,7 +23,20 @@ const ENDPOINTS = [
   "container_history", "system_history", "process_history", "settings", "db_stats",
   "disks", "smart_trends", "replacement_plan", "capacity_forecast",
   "speedtest_history",
+  // PRD #283 slice 3 / issue #286 — per-sample telemetry for the
+  // /service-checks expanded-log mini-chart. Lives at
+  // api:<platform>:speedtest_samples in KV; the demo worker serves
+  // it under /api/v1/speedtest/samples/{id} with the test_id
+  // ignored (the demo only carries one set of samples per platform).
+  "speedtest_samples",
 ];
+
+// SAMPLED_TEST_ID is the synthetic speedtest_history.id stamped onto
+// the demo's "Internet Speed" service-check entry so the
+// /service-checks expanded log row knows which test_id to fetch
+// samples for. Stable across feeder runs so links from the SC log
+// row don't break between cron ticks. Issue #286.
+const SAMPLED_TEST_ID = 1001;
 
 // ── Platform profiles: define what makes each platform unique ──
 export interface PlatformProfile {
@@ -283,6 +296,9 @@ function transformForPlatform(endpoint: string, data: unknown, platform: Platfor
   if (endpoint === "sparklines") return transformSparklines(data as Record<string, unknown>, PROFILES[platform]);
   if (endpoint === "snapshot") return transformSnapshot(data as Record<string, unknown>, PROFILES[platform], platform);
   if (endpoint === "speedtest_history") return buildSpeedTestHistory(PROFILES[platform], 24);
+  // Per-sample telemetry: synthesised on demand, one canonical
+  // dataset per platform. Issue #286.
+  if (endpoint === "speedtest_samples") return buildSpeedTestSamples(PROFILES[platform], SAMPLED_TEST_ID);
 
   return data; // everything else passed through from seed
 }
@@ -788,9 +804,81 @@ function buildServiceChecks(): unknown[] {
     contracted_upload_mbps: 40,
     margin_pct: 10,
   });
+  // Stamp the speedtest_history_id on the most-recent speed entry so
+  // the /service-checks expanded-log mini-chart knows which test_id
+  // to fetch from /api/v1/speedtest/samples/{id}. Issue #286.
+  const last = checks[checks.length - 1] as Record<string, unknown>;
+  if (last && last.type === "speed") {
+    last.speedtest_history_id = SAMPLED_TEST_ID;
+  }
 
   return checks;
 }
+
+// buildSpeedTestSamples — synthesises a realistic ~30-sample stream
+// per platform: latency phase (~5 samples) → download ramp-up + sustained
+// (~15 samples) → upload similar (~10 samples). Mbps values modulated
+// by the platform's profile.speedTest baseline so a gigabit datacentre
+// link looks different from a 100/10 residential synology. PRD #283
+// slice 3 / issue #286.
+//
+// The shape mirrors storage.SpeedTestSample (the JSON tags on the Go
+// struct): {sample_index, phase, ts, mbps, latency_ms}. This is what
+// the new /api/v1/speedtest/samples/{id} endpoint returns and what
+// the dashboard's NasChart.line consumer expects.
+function buildSpeedTestSamples(p: PlatformProfile, testID: number): unknown {
+  const t = p.speedTest;
+  const seed = hashStr(p.hostname + "-samples-" + String(testID));
+  const startMs = Date.now() - 30 * 1000; // 30s ago, simulating a recent test
+  const samples: unknown[] = [];
+  let idx = 0;
+  let elapsed = 0; // milliseconds since test start
+
+  // Latency phase — 5 ping samples ~200ms apart.
+  for (let i = 0; i < 5; i++, idx++) {
+    samples.push({
+      sample_index: idx,
+      phase: "latency",
+      ts: new Date(startMs + elapsed).toISOString(),
+      mbps: 0,
+      latency_ms: round2(clamp(jitter(t.latencyMs, 30, seed + idx), Math.max(0.5, t.latencyMs * 0.5), t.latencyMs * 2)),
+    });
+    elapsed += 200;
+  }
+  // Download phase — 15 samples spaced ~600ms apart, ramp-up over the
+  // first 4 then sustained near peak with realistic jitter.
+  for (let i = 0; i < 15; i++, idx++) {
+    const rampFactor = i < 4 ? 0.4 + (i / 4) * 0.5 : 1.0;
+    samples.push({
+      sample_index: idx,
+      phase: "download",
+      ts: new Date(startMs + elapsed).toISOString(),
+      mbps: round2(clamp(jitter(t.downloadMbps * rampFactor, 8, seed + idx), t.downloadMbps * 0.3, t.downloadMbps * 1.1)),
+      latency_ms: 0,
+    });
+    elapsed += 600;
+  }
+  // Upload phase — 10 samples, similar shape.
+  for (let i = 0; i < 10; i++, idx++) {
+    const rampFactor = i < 3 ? 0.4 + (i / 3) * 0.5 : 1.0;
+    samples.push({
+      sample_index: idx,
+      phase: "upload",
+      ts: new Date(startMs + elapsed).toISOString(),
+      mbps: round2(clamp(jitter(t.uploadMbps * rampFactor, 10, seed + idx), t.uploadMbps * 0.3, t.uploadMbps * 1.1)),
+      latency_ms: 0,
+    });
+    elapsed += 600;
+  }
+  return {
+    test_id: testID,
+    samples,
+    count: samples.length,
+  };
+}
+
+// Exported for vitest widget-coverage tests.
+export { buildSpeedTestSamples, SAMPLED_TEST_ID };
 
 function buildZFS(p: PlatformProfile): unknown {
   const isTrueNAS = p.platformName.includes("TrueNAS");

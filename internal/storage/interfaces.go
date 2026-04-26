@@ -83,10 +83,18 @@ type HistoryStore interface {
 	SaveProcessStatsAt(procs []internal.ProcessInfo, ts time.Time) error
 	GetProcessHistory(hours int) ([]ProcessHistoryPoint, error)
 	SaveSpeedTest(snapshotID string, result *internal.SpeedTestResult) error
+	// SaveSpeedTestReturningID is the ID-returning variant added in
+	// PRD #283 slice 3 / issue #286 so the scheduler can wire the new
+	// history row to per-sample bulk-insert.
+	SaveSpeedTestReturningID(snapshotID string, result *internal.SpeedTestResult) (int64, error)
 	GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error)
+	GetLatestSpeedTestHistoryID() (int64, bool, error)
 	// Issue #210 — last attempt state (single-row table).
 	SaveSpeedTestAttempt(att LastSpeedTestAttempt) error
 	GetLastSpeedTestAttempt() (*LastSpeedTestAttempt, error)
+	// PRD #283 slice 3 / issue #286 — per-sample telemetry.
+	InsertSpeedTestSamples(testID int64, samples []SpeedTestSample) error
+	GetSpeedTestSamples(testID int64) ([]SpeedTestSample, error)
 }
 
 // ConfigStore handles key/value configuration persistence.
