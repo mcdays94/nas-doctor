@@ -530,7 +530,14 @@ function drawGauge(id,opts){
     ctx.fillText(label,cx,cy+rad*0.38);
   }
 
-  animate(500,function(t){render(t);});
+  // PRD #283 / issue #285: opts.animate=false skips the sweep so
+  // live-progress redraws don't re-sweep from zero on every sample
+  // tick. Default behaviour unchanged (full sweep on first render).
+  if (opts.animate === false) {
+    render(1);
+  } else {
+    animate(500,function(t){render(t);});
+  }
 }
 
 /* ─── NasChart.sparkline ─────────────────────────────────────────── */

@@ -21,11 +21,14 @@ import (
 )
 
 // runSpeedtestGoLibrary fetches the closest server, runs the three
-// phases sequentially, and returns the composed SpeedTestResult. The
-// samples channel is created and closed empty in slice 1 — slice 2
-// will hook showwin's per-sample callbacks (PingTestContext,
-// DownloadTestContext, UploadTestContext) and emit live samples
-// before returning the channel.
+// phases sequentially, and returns the composed SpeedTestResult.
+//
+// Slice 2 (#285) wires showwin's per-sample callbacks
+// (SetCallbackDownload, SetCallbackUpload, PingTestContext callback)
+// to emit SpeedTestSample values into the returned samples channel.
+// The channel is buffered generously and closed by the producer
+// goroutine when all three phases complete — subscribers must drain
+// it to avoid leaking the goroutine.
 //
 // Errors propagate verbatim (the runner layer wraps them). Defense-
 // in-depth zero-throughput guard mirrors the legacy Ookla-CLI path —
@@ -58,15 +61,58 @@ func runSpeedtestGoLibrary(ctx context.Context) (*internal.SpeedTestResult, <-ch
 		defer cancel()
 	}
 
-	if err := srv.PingTestContext(ctx, nil); err != nil {
+	// Buffered samples channel. Showwin's callbacks fire from the
+	// upload/download data goroutines — we don't want them to
+	// block. Sized to comfortably hold a 60-second test's worth of
+	// per-second samples plus headroom; if the registry's broadcast
+	// fan-out lags, samples back up here briefly and then catch up.
+	samples := make(chan SpeedTestSample, 256)
+	emit := func(s SpeedTestSample) {
+		select {
+		case samples <- s:
+		default:
+			// Drop — registry's slow-client policy applies at
+			// the broadcast layer; here we just don't block
+			// the showwin internal goroutine.
+		}
+	}
+
+	client.SetCallbackDownload(func(rate speedtest.ByteRate) {
+		emit(SpeedTestSample{
+			Phase: SpeedTestPhaseDownload,
+			At:    time.Now(),
+			Mbps:  float64(rate.Mbps()),
+		})
+	})
+	client.SetCallbackUpload(func(rate speedtest.ByteRate) {
+		emit(SpeedTestSample{
+			Phase: SpeedTestPhaseUpload,
+			At:    time.Now(),
+			Mbps:  float64(rate.Mbps()),
+		})
+	})
+
+	pingCallback := func(latency time.Duration) {
+		emit(SpeedTestSample{
+			Phase:     SpeedTestPhaseLatency,
+			At:        time.Now(),
+			LatencyMs: float64(latency) / float64(time.Millisecond),
+		})
+	}
+
+	if err := srv.PingTestContext(ctx, pingCallback); err != nil {
+		close(samples)
 		return nil, nil, fmt.Errorf("ping: %w", err)
 	}
 	if err := srv.DownloadTestContext(ctx); err != nil {
+		close(samples)
 		return nil, nil, fmt.Errorf("download: %w", err)
 	}
 	if err := srv.UploadTestContext(ctx); err != nil {
+		close(samples)
 		return nil, nil, fmt.Errorf("upload: %w", err)
 	}
+	close(samples)
 
 	dlMbps := srv.DLSpeed.Mbps()
 	ulMbps := srv.ULSpeed.Mbps()
@@ -89,8 +135,6 @@ func runSpeedtestGoLibrary(ctx context.Context) (*internal.SpeedTestResult, <-ch
 		ISP:          firstNonEmpty(client.User.Isp, srv.Sponsor),
 		ExternalIP:   client.User.IP,
 	}
-	samples := make(chan SpeedTestSample)
-	close(samples)
 	return res, samples, nil
 }
 

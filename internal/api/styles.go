@@ -465,6 +465,73 @@ body.theme-clean .sort-pill.active { color:rgba(0,0,0,0.7); background:rgba(0,0,
   .summary-bar { flex-direction:column }
   .sort-bar { flex-wrap:wrap }
 }
+
+/* ── Speed Test Live Progress Strip (PRD #283 / issue #285) ────── */
+/* The strip is rendered above the historical chart; data-state
+   controls whether it's visible (running) or collapsed (idle). The
+   max-height transition gives a 220ms grow/shrink without abrupt
+   layout shift. CSS rules duplicated into midnight.html + clean.html
+   because dashboard themes do not link /css/shared.css — see AGENTS
+   architectural note. */
+.speedtest-live-strip {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 220ms ease-out, opacity 220ms ease-out;
+  opacity: 0;
+  margin-bottom: 0;
+}
+.speedtest-live-strip[data-state="running"],
+.speedtest-live-strip[data-state="completing"] {
+  max-height: 100px;
+  opacity: 1;
+  margin-bottom: 8px;
+}
+.speedtest-live-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-panel, #1a1a24);
+  border: 1px solid var(--border, #2a2a35);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.speedtest-live-phase-pill {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  background: rgba(99,102,241,0.15);
+  color: #818cf8;
+  flex-shrink: 0;
+}
+.speedtest-live-phase-pill[data-phase="latency"]   { background: rgba(34,197,94,0.15);  color: #4ade80 }
+.speedtest-live-phase-pill[data-phase="download"]  { background: rgba(59,130,246,0.15); color: #60a5fa }
+.speedtest-live-phase-pill[data-phase="upload"]    { background: rgba(139,92,246,0.15); color: #a78bfa }
+.speedtest-live-readout {
+  display: flex; flex-direction: column; line-height: 1;
+}
+.speedtest-live-mbps {
+  font-size: 22px; font-weight: 700; color: var(--text-primary, #f0f0f5);
+  font-variant-numeric: tabular-nums;
+}
+.speedtest-live-mbps-label {
+  font-size: 10px; color: var(--text-quaternary, #6e6e7e);
+  letter-spacing: 0.5px; text-transform: uppercase; margin-top: 2px;
+}
+.speedtest-live-cancel {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border, #2a2a35);
+  border-radius: 6px;
+  color: var(--text-quaternary, #6e6e7e);
+  font-size: 11px;
+  cursor: not-allowed;
+}
 `
 
 func serveSharedCSS(w http.ResponseWriter, r *http.Request) {
