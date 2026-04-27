@@ -42,6 +42,35 @@ var (
 	platformOnce     sync.Once
 )
 
+// synologyKernelMarkers are sysctl files exposed by every Synology DSM
+// kernel build under /proc/sys/kernel/. They survive Docker namespacing
+// (Linux exposes /proc fully into containers by default) so they're
+// visible from any container on a DSM host even when /etc isn't
+// bind-mounted. Used as a third Synology platform-detection signal
+// (issue #300) after /etc/synoinfo.conf and /proc/version.
+//
+// Stored as a package var rather than a constant so tests can swap it
+// out for files in a t.TempDir() without poking real /proc paths.
+var synologyKernelMarkers = []string{
+	"/proc/sys/kernel/syno_CPU_info_clock",
+	"/proc/sys/kernel/syno_CPU_info_core",
+	"/proc/sys/kernel/syno_ata_debug",
+}
+
+// hasSynologyKernelMarker reports whether any of the
+// synologyKernelMarkers paths exist on this filesystem. A single
+// match is sufficient — DSM kernels expose all three but only one
+// needs to survive future kernel changes for detection to keep
+// working.
+func hasSynologyKernelMarker() bool {
+	for _, p := range synologyKernelMarkers {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // DetectPlatform runs OS detection and caches the result.
 // Safe to call from multiple goroutines; detection runs only once.
 func DetectPlatform(hp internal.HostPaths) Platform {
@@ -111,6 +140,18 @@ func runDetection(hp internal.HostPaths) Platform {
 				p.Name = PlatformSynology
 			}
 		}
+	}
+	// Tertiary signal (issue #300): Synology kernel sysctl markers.
+	// /proc/sys/kernel/syno_* files are baked into every DSM kernel
+	// build and visible from any container on a Synology host without
+	// requiring /etc bind mounts. Catches the typical Container Manager
+	// deployment that follows the Synology section of the README but
+	// doesn't bind-mount /etc — the previous two checks miss it
+	// (/etc/synoinfo.conf isn't there, /proc/version's banner doesn't
+	// include the literal "synology" string for kernels built on
+	// Synology's `build7` farm).
+	if p.Name == "" && hasSynologyKernelMarker() {
+		p.Name = PlatformSynology
 	}
 	if p.Name == PlatformSynology {
 		// Try to get DSM version from /etc/VERSION or /etc.defaults/VERSION
