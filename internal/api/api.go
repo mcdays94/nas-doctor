@@ -392,7 +392,44 @@ func (s *Server) handleLatestSnapshot(w http.ResponseWriter, r *http.Request) {
 	// Processes container attribution is preserved so users still see
 	// which container is chewing CPU even when the Docker tile hides it.
 	s.applyDockerHiddenContainers(snap)
+	// Hydrate snap.SpeedTest.Latest from speedtest_history when the
+	// in-memory snapshot does not carry it (issue #290 / Slice A of
+	// #261). Closes the cold-start gap where /snapshot/latest returns
+	// speed_test=null right after a container restart even though
+	// historical rows exist — the dashboard widget would render the
+	// "first-boot" empty-state copy in that window. Hydration is a
+	// FALLBACK: if the in-memory snapshot already has Latest, we
+	// preserve it (live data always wins over a stale history row).
+	s.hydrateSpeedTestFromHistory(snap)
 	writeJSON(w, http.StatusOK, snap)
+}
+
+// hydrateSpeedTestFromHistory populates snap.SpeedTest.Latest from the
+// most-recent speedtest_history row if and only if Latest is nil.
+// Snap is mutated in place. Errors during the lookup are logged and
+// swallowed — a missing speed-test card on the dashboard is a strictly
+// better outcome than a 500 on /snapshot/latest. Issue #290.
+func (s *Server) hydrateSpeedTestFromHistory(snap *internal.Snapshot) {
+	if snap == nil {
+		return
+	}
+	// Already populated — live data wins.
+	if snap.SpeedTest != nil && snap.SpeedTest.Latest != nil {
+		return
+	}
+	latest, ok, err := s.store.GetLatestSpeedTestResult()
+	if err != nil {
+		s.logger.Warn("hydrate speedtest from history failed", "error", err)
+		return
+	}
+	if !ok || latest == nil {
+		return
+	}
+	if snap.SpeedTest == nil {
+		snap.SpeedTest = &internal.SpeedTestInfo{}
+	}
+	snap.SpeedTest.Available = true
+	snap.SpeedTest.Latest = latest
 }
 
 // applyDockerHiddenContainers filters out containers in the user's hidden

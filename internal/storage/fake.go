@@ -636,6 +636,38 @@ func (f *FakeStore) GetLastSpeedTestAttempt() (*LastSpeedTestAttempt, error) {
 	return &cp, nil
 }
 
+// GetLatestSpeedTestResult returns the newest stored speedtest_history
+// row reshaped as an internal.SpeedTestResult, or (nil, false, nil)
+// when the store is empty. Mirror of *DB.GetLatestSpeedTestResult.
+// Issue #290 (Slice A of #261).
+func (f *FakeStore) GetLatestSpeedTestResult() (*internal.SpeedTestResult, bool, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if len(f.speedTestHistory) == 0 {
+		return nil, false, nil
+	}
+	// Find row with the latest timestamp. Append order is not
+	// guaranteed to match timestamp order in fake usage.
+	var newest *SpeedTestHistoryPoint
+	for i := range f.speedTestHistory {
+		p := &f.speedTestHistory[i]
+		if newest == nil || p.Timestamp.After(newest.Timestamp) {
+			newest = p
+		}
+	}
+	r := &internal.SpeedTestResult{
+		Timestamp:    newest.Timestamp,
+		DownloadMbps: newest.DownloadMbps,
+		UploadMbps:   newest.UploadMbps,
+		LatencyMs:    newest.LatencyMs,
+		JitterMs:     newest.JitterMs,
+		ServerName:   newest.ServerName,
+		ISP:          newest.ISP,
+		Engine:       newest.Engine,
+	}
+	return r, true, nil
+}
+
 // GetLatestSpeedTestHistoryID returns the most-recently-saved history
 // row's synthetic ID. Returns (0, false, nil) on an empty store.
 // PRD #283 slice 3 / issue #286.

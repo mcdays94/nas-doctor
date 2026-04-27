@@ -67,6 +67,40 @@ util.fetchJSON = function(url) {
   });
 };
 
+/* Issue #290 (Slice A of #261): relative-time helper used by the
+   speed-test card's "Last test: X ago" caption. Returns one of:
+     "just now"       — under 5s
+     "Ns ago"         — under 1 minute
+     "Nm ago"         — under 1 hour
+     "Nh ago"         — under 1 day
+     "Nd ago"         — under 30 days
+     ">1mo ago"       — anything older
+     ""               — invalid / missing input (caption suppressed)
+
+   Mirrors the formatting bucketing used by the dashboard's
+   refresh-ago indicator (see the setInterval block at the bottom of
+   this file) so visual cadence stays consistent across the page.
+   Accepts ISO-8601 / RFC3339 strings or millisecond Date values. */
+util.relativeTimeAgo = function(when) {
+  if (!when) return "";
+  var ms;
+  if (typeof when === "number") {
+    ms = when;
+  } else {
+    ms = new Date(when).getTime();
+  }
+  if (!ms || isNaN(ms)) return "";
+  var secs = Math.round((Date.now() - ms) / 1000);
+  if (secs < 0) secs = 0;
+  if (secs < 5) return "just now";
+  if (secs < 60) return secs + "s ago";
+  if (secs < 3600) return Math.floor(secs / 60) + "m ago";
+  if (secs < 86400) return Math.floor(secs / 3600) + "h ago";
+  var days = Math.floor(secs / 86400);
+  if (days < 30) return days + "d ago";
+  return ">1mo ago";
+};
+
 util.colorForPct = function(pct) {
   if (pct >= 90) return "var(--red)";
   if (pct >= 75) return "var(--amber)";
@@ -867,6 +901,21 @@ sections.speedtest = function(sn) {
       var engineLabel = r.engine === 'speedtest_go' ? 'speedtest-go' : 'Ookla CLI';
       h += (r.server_name || r.isp) ? ' &middot; ' : '';
       h += '<span data-speedtest-engine="' + esc(r.engine) + '">via ' + esc(engineLabel) + '</span>';
+    }
+    /* Issue #290 (Slice A of #261): "Last test: X ago" caption. Sits
+       on the same metadata line as the engine annotation when both
+       fit, providing a freshness cue when the dashboard is rendering
+       a row hydrated from speedtest_history (no in-memory live state)
+       — typically right after a container restart. Gated on
+       r.timestamp so pre-#290 rows lacking the field don't render an
+       empty caption. The caption is suppressed entirely when
+       util.relativeTimeAgo can't parse the timestamp. */
+    if (r.timestamp) {
+      var ago = util.relativeTimeAgo(r.timestamp);
+      if (ago) {
+        h += (r.server_name || r.isp || r.engine) ? ' &middot; ' : '';
+        h += '<span data-speedtest-last-test="' + esc(r.timestamp) + '">Last test: ' + esc(ago) + '</span>';
+      }
     }
     h += '</div>';
     h += '<canvas id="speedtest-chart" style="width:100%;height:80px"></canvas>';
