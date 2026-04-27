@@ -116,6 +116,12 @@ func collectSystem(hp internal.HostPaths) (internal.SystemInfo, error) {
 		}
 	}
 
+	// CPU + mainboard temperature (issue #269). Best-effort: returns
+	// (0, 0) on platforms without /sys/class/hwmon (Synology, K8s
+	// pods, ...). The dashboard header hides the gauge when the
+	// value is 0 — JSON tags use omitempty for the same reason.
+	info.CPUTempC, info.MoboTempC = collectCPUMoboTemps()
+
 	// Top processes by CPU
 	info.TopProcesses = collectTopProcesses(10)
 

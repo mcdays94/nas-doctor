@@ -121,7 +121,7 @@ body{min-height:100vh;background:#fff}
 .sb-handle:hover::after{background:rgba(0,0,0,0.3)}
 .sb-handle:active::after{background:#171717}
 
-@media(max-width:900px){.two-col{grid-template-columns:1fr}.top-bar{flex-wrap:wrap;max-height:none}.col-left > .section{max-height:600px}}
+@media(max-width:900px){.two-col{grid-template-columns:1fr}.top-bar{flex-wrap:wrap;max-height:none}.col-left > .section{max-height:600px}.top-bar-right{flex-wrap:wrap;white-space:normal;row-gap:4px}}
 .section{margin-top:28px}
 .section:first-child{margin-top:0}
 .section-title{font-size:12px;font-weight:500;color:#808080;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px}
@@ -385,6 +385,21 @@ tbody tr:hover{background:rgba(0,0,0,0.03)}
       h += '<span class="stat-item"><span class="stat-label">Mem</span> <span class="stat-val">' + mem.toFixed(1) + '%</span><canvas id="spark-mem" width="40" height="18" style="margin-left:3px;vertical-align:middle"></canvas></span>';
       h += '<span class="dot-sep">&middot;</span>';
       h += '<span class="stat-item"><span class="stat-label">I/O</span> <span class="stat-val">' + io.toFixed(1) + '%</span></span>';
+      // Issue #269 — CPU + mainboard temperature gauges. Same
+      // graceful-fallback pattern as midnight.html: render only
+      // when the snapshot reports a non-zero value, so platforms
+      // without thermal sensors (Synology, K8s pods, virtualised
+      // hosts) show no gauge at all rather than a "—" placeholder.
+      var cpuTemp = sys.cpu_temp_c || 0;
+      var moboTemp = sys.mobo_temp_c || 0;
+      if (cpuTemp > 0) {
+        h += '<span class="dot-sep">&middot;</span>';
+        h += '<span class="stat-item"><span class="stat-label">CPU \u00b0C</span> <span class="stat-val ' + NasDashboard.util.classForTemp(cpuTemp) + '">' + cpuTemp + '\u00b0</span></span>';
+      }
+      if (moboTemp > 0) {
+        h += '<span class="dot-sep">&middot;</span>';
+        h += '<span class="stat-item"><span class="stat-label">Mobo \u00b0C</span> <span class="stat-val ' + NasDashboard.util.classForTemp(moboTemp) + '">' + moboTemp + '\u00b0</span></span>';
+      }
       h += '<span class="dot-sep">&middot;</span>';
       h += '<span class="stat-item"><span class="stat-label">Up</span> <span class="stat-val">' + esc(uptime) + '</span></span>';
     }

@@ -79,6 +79,21 @@ util.classForPct = function(pct) {
   return "text-green";
 };
 
+/* Issue #269 — colour mapping for CPU and mainboard temperature
+   gauges in the dashboard header. Thresholds:
+       <  60 deg C : green   (cool)
+     60-75 deg C : amber   (warm)
+       >  75 deg C : red     (hot)
+   Reuses the existing text-red/text-amber/text-green classes that
+   are inlined in BOTH theme templates (midnight.html L240 and
+   clean.html L283-285). No new CSS class added — theme-template
+   parity is automatic. */
+util.classForTemp = function(degC) {
+  if (degC > 75) return "text-red";
+  if (degC >= 60) return "text-amber";
+  return "text-green";
+};
+
 util.severityClass = function(sev) {
   if (sev === "critical") return "td-crit";
   if (sev === "warning") return "td-warn";

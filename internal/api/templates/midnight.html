@@ -331,6 +331,22 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
       h += '<div class="stat-item"><span class="stat-item-label">CPU</span><span class="stat-item-value ' + classForPct(cpu) + '">' + cpu.toFixed(1) + '%</span><canvas id="spark-cpu" width="48" height="20" style="margin-left:4px;vertical-align:middle"></canvas></div>';
       h += '<div class="stat-item"><span class="stat-item-label">Mem</span><span class="stat-item-value ' + classForPct(mem) + '">' + mem.toFixed(1) + '%</span><canvas id="spark-mem" width="48" height="20" style="margin-left:4px;vertical-align:middle"></canvas></div>';
       h += '<div class="stat-item"><span class="stat-item-label">I/O</span><span class="stat-item-value ' + classForPct(io > 20 ? 90 : io > 10 ? 75 : 0) + '">' + io.toFixed(1) + '%</span><canvas id="spark-io" width="48" height="20" style="margin-left:4px;vertical-align:middle"></canvas></div>';
+      // Issue #269 — CPU + mainboard temperature gauges. Rendered
+      // ONLY when sys.cpu_temp_c / sys.mobo_temp_c is non-zero, so
+      // platforms without /sys/class/hwmon (Synology, K8s pods,
+      // virtualised environments) hide the gauge entirely instead
+      // of showing an empty "—" placeholder. Server-side omitempty
+      // on SystemInfo.CPUTempC / MoboTempC ensures the field is
+      // missing (not just 0) in that case, so a `truthy` JS check
+      // is all that's needed here.
+      var cpuTemp = sys.cpu_temp_c || 0;
+      var moboTemp = sys.mobo_temp_c || 0;
+      if (cpuTemp > 0) {
+        h += '<div class="stat-item"><span class="stat-item-label">CPU \u00b0C</span><span class="stat-item-value ' + NasDashboard.util.classForTemp(cpuTemp) + '">' + cpuTemp + '\u00b0</span></div>';
+      }
+      if (moboTemp > 0) {
+        h += '<div class="stat-item"><span class="stat-item-label">Mobo \u00b0C</span><span class="stat-item-value ' + NasDashboard.util.classForTemp(moboTemp) + '">' + moboTemp + '\u00b0</span></div>';
+      }
       h += '<div class="stat-item"><span class="stat-item-label">Up</span><span class="stat-item-value" style="color:var(--text-primary)">' + esc(uptime) + '</span></div>';
     }
     h += '</div></div>';

@@ -346,6 +346,16 @@ type SystemInfo struct {
 	IOWait       float64       `json:"io_wait_percent"`
 	UptimeSecs   int64         `json:"uptime_seconds"`
 	Motherboard  string        `json:"motherboard"`
+	// CPUTempC is the package-level CPU temperature in °C, or 0 when no
+	// reliable sensor is available (e.g. Synology, K8s pods, virtualised
+	// environments without /sys/class/hwmon). Zero values are omitted from
+	// the JSON snapshot so the dashboard header gauge can hide gracefully
+	// rather than rendering an "—" placeholder. Issue #269.
+	CPUTempC int `json:"cpu_temp_c,omitempty"`
+	// MoboTempC is the mainboard / system / ACPI thermal-zone temperature
+	// in °C, or 0 when no reliable sensor is available. Same omitempty
+	// semantics as CPUTempC. Issue #269.
+	MoboTempC    int           `json:"mobo_temp_c,omitempty"`
 	TopProcesses []ProcessInfo `json:"top_processes"`
 }
 
