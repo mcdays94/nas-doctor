@@ -24,6 +24,14 @@ type Metrics struct {
 	ioWait     prometheus.Gauge
 	uptime     prometheus.Gauge
 	cpuCores   prometheus.Gauge
+	// Issue #269 — package-level CPU and mainboard temperatures from
+	// /sys/class/hwmon. Plain gauges that emit 0 when no sensor is
+	// available (Synology, K8s pods, virtualised environments). The
+	// dashboard header hides the value entirely on graceful fallback;
+	// Prometheus consumers should filter with `> 0` to exclude
+	// platforms without thermal probes.
+	cpuTempC  prometheus.Gauge
+	moboTempC prometheus.Gauge
 
 	// ── Disk ──
 	diskUsedBytes  *prometheus.GaugeVec
@@ -217,6 +225,8 @@ func NewMetrics() *Metrics {
 	m.ioWait = gauge(ns, "system", "io_wait_percent", "CPU I/O wait percentage")
 	m.uptime = gauge(ns, "system", "uptime_seconds", "System uptime in seconds")
 	m.cpuCores = gauge(ns, "system", "cpu_cores", "Number of CPU cores")
+	m.cpuTempC = gauge(ns, "system", "cpu_temp_celsius", "CPU package temperature in Celsius (0 when no sensor available)")
+	m.moboTempC = gauge(ns, "system", "mobo_temp_celsius", "Mainboard / system temperature in Celsius (0 when no sensor available)")
 
 	// ── Disk ──
 	diskLabels := []string{"device", "mountpoint", "label"}
@@ -379,6 +389,7 @@ func NewMetrics() *Metrics {
 	collectors := []prometheus.Collector{
 		m.cpuUsage, m.memUsed, m.memTotal, m.memPercent, m.swapUsed, m.swapTotal,
 		m.loadAvg1, m.loadAvg5, m.loadAvg15, m.ioWait, m.uptime, m.cpuCores,
+		m.cpuTempC, m.moboTempC,
 		m.diskUsedBytes, m.diskTotalBytes, m.diskUsedPct,
 		m.smartHealthy, m.smartTemp, m.smartTempMax, m.smartReallocated, m.smartPending,
 		m.smartOffline, m.smartUDMACRC, m.smartCmdTimeout, m.smartSpinRetry,
@@ -439,6 +450,8 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 	m.ioWait.Set(snap.System.IOWait)
 	m.uptime.Set(float64(snap.System.UptimeSecs))
 	m.cpuCores.Set(float64(snap.System.CPUCores))
+	m.cpuTempC.Set(float64(snap.System.CPUTempC))
+	m.moboTempC.Set(float64(snap.System.MoboTempC))
 
 	// Reset label-based metrics to clear stale entries
 	m.diskUsedBytes.Reset()

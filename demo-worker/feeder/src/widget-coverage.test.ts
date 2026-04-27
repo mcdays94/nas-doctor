@@ -295,6 +295,44 @@ describe("demo feeder widget coverage", () => {
   // engine fields. Without these, the demo never showcases the
   // engine-aware UX.
 
+  // ── Header CPU + mainboard temperature gauges (#269) ─────────────
+  // The dashboard header renders cpu_temp_c and mobo_temp_c when the
+  // snapshot reports them; platforms without a sensor (Synology
+  // Celeron without hwmon-exposed coretemp; Kubernetes pods without
+  // /sys/class/hwmon) MUST omit the field so the gauge hides
+  // gracefully rather than rendering "0°" or "—". These tests pin
+  // both surfaces of the contract — present-when-supported,
+  // absent-when-not-supported.
+
+  it("emits cpu_temp_c + mobo_temp_c on platforms with hwmon sensors", () => {
+    for (const platform of ["unraid", "truenas", "proxmox"] as Platform[]) {
+      const snap = transformSnapshot(SEED, PROFILES[platform], platform);
+      const cpuTemp = getPath(snap, "system.cpu_temp_c");
+      const moboTemp = getPath(snap, "system.mobo_temp_c");
+      expect(typeof cpuTemp, `${platform} system.cpu_temp_c must be a number`).toBe("number");
+      expect(typeof moboTemp, `${platform} system.mobo_temp_c must be a number`).toBe("number");
+      expect(cpuTemp as number, `${platform} cpu_temp_c plausibility (>=30, <=95)`).toBeGreaterThanOrEqual(30);
+      expect(cpuTemp as number, `${platform} cpu_temp_c plausibility (>=30, <=95)`).toBeLessThanOrEqual(95);
+      expect(moboTemp as number, `${platform} mobo_temp_c plausibility (>=25, <=70)`).toBeGreaterThanOrEqual(25);
+      expect(moboTemp as number, `${platform} mobo_temp_c plausibility (>=25, <=70)`).toBeLessThanOrEqual(70);
+    }
+  });
+
+  it("omits cpu_temp_c + mobo_temp_c on platforms without hwmon sensors (graceful fallback)", () => {
+    // Synology and Kubernetes pods don't expose /sys/class/hwmon
+    // CPU/mobo temps in the production collector — the demo mirrors
+    // that by leaving the profile values undefined so the feeder
+    // omits the fields. Without this, the dashboard header would
+    // render a misleading "0°" gauge on those platforms.
+    for (const platform of ["synology", "kubernetes"] as Platform[]) {
+      const snap = transformSnapshot(SEED, PROFILES[platform], platform);
+      const cpuTemp = getPath(snap, "system.cpu_temp_c");
+      const moboTemp = getPath(snap, "system.mobo_temp_c");
+      expect(cpuTemp, `${platform} system.cpu_temp_c MUST be undefined to hide the gauge`).toBeUndefined();
+      expect(moboTemp, `${platform} system.mobo_temp_c MUST be undefined to hide the gauge`).toBeUndefined();
+    }
+  });
+
   it("emits engine='speedtest_go' on snapshot.speed_test.latest for all platforms", () => {
     for (const platform of ["unraid", "synology", "truenas", "proxmox", "kubernetes"] as Platform[]) {
       const snap = transformSnapshot(SEED, PROFILES[platform], platform);

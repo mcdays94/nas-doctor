@@ -53,6 +53,15 @@ export interface PlatformProfile {
   hasKubernetes: boolean;
   hasTunnels: boolean;
   hasGPU: boolean;
+  // Issue #269 — base CPU and mainboard temperatures in °C used to
+  // synthesise demo dashboard-header gauges. When undefined, the
+  // feeder omits the field from snapshot.system, which lets the
+  // dashboard hide the gauge entirely (graceful fallback for
+  // platforms without /sys/class/hwmon — Synology, Kubernetes pods,
+  // virtualised hosts). Production collectors return 0; the demo
+  // mirrors that by simply leaving the field unset.
+  cpuTempC?: number;
+  moboTempC?: number;
   drives: { device: string; model: string; serial: string; sizeGB: number; type: string; mount: string; label: string; usedPct: number; temp: number; poh: number }[];
   containers: { name: string; image: string; state: string; cpu: number; mem: number }[];
   // Speed-test profile: realistic per-platform throughput. Feeds
@@ -118,6 +127,9 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
   unraid: {
     hostname: "unraid-tower", platformName: "Unraid 7.0.1", cpuModel: "AMD Ryzen 9 5950X", cpuCores: 16, ramGB: 64, uptimeDays: 30,
     hasZFS: false, hasUPS: true, hasParity: true, hasProxmox: false, hasKubernetes: false, hasTunnels: true, hasGPU: true,
+    // Realistic Unraid bare-metal: Ryzen idle is ~50-60°C, mobo
+    // ~38-44°C with average airflow. Issue #269.
+    cpuTempC: 58, moboTempC: 42,
     drives: [
       { device: "sda", model: "WDC WD180EDGZ", serial: "WD-WX12345678", sizeGB: 18000, type: "hdd", mount: "/mnt/disk1", label: "Disk 1", usedPct: 72, temp: 35, poh: 28000 },
       { device: "sdb", model: "WDC WD180EDGZ", serial: "WD-WX23456789", sizeGB: 18000, type: "hdd", mount: "/mnt/disk2", label: "Disk 2", usedPct: 65, temp: 34, poh: 28000 },
@@ -175,6 +187,9 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
   truenas: {
     hostname: "truenas-scale", platformName: "TrueNAS SCALE 24.10", cpuModel: "Intel Xeon E-2278G", cpuCores: 8, ramGB: 64, uptimeDays: 120,
     hasZFS: true, hasUPS: true, hasParity: false, hasProxmox: false, hasKubernetes: false, hasTunnels: false, hasGPU: false,
+    // Server-grade Xeon, well-cooled chassis: ~50°C CPU / ~38°C
+    // mobo. Issue #269.
+    cpuTempC: 51, moboTempC: 38,
     drives: [
       { device: "sda", model: "WDC WD120EMFZ", serial: "WD-WMC540123456", sizeGB: 12000, type: "hdd", mount: "/mnt/tank", label: "tank (raidz2)", usedPct: 68, temp: 34, poh: 38000 },
       { device: "sdb", model: "WDC WD120EMFZ", serial: "WD-WMC540234567", sizeGB: 12000, type: "hdd", mount: "/mnt/tank", label: "tank (raidz2)", usedPct: 68, temp: 35, poh: 38000 },
@@ -202,6 +217,10 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
   proxmox: {
     hostname: "pve-node01", platformName: "Proxmox VE 8.3.2", cpuModel: "Intel Xeon E-2388G", cpuCores: 8, ramGB: 128, uptimeDays: 45,
     hasZFS: true, hasUPS: true, hasParity: false, hasProxmox: true, hasKubernetes: false, hasTunnels: true, hasGPU: true,
+    // Proxmox host running VMs + GPU passthrough: warmer than idle
+    // NAS workloads. Sits in the amber band so the demo shows the
+    // colour change. Issue #269.
+    cpuTempC: 63, moboTempC: 44,
     drives: [
       { device: "sda", model: "Samsung PM893 960GB", serial: "S6XNNS0T567890", sizeGB: 960, type: "ssd", mount: "/", label: "Boot SSD", usedPct: 18, temp: 32, poh: 15000 },
       { device: "sdb", model: "Samsung PM893 960GB", serial: "S6XNNS0T678901", sizeGB: 960, type: "ssd", mount: "/", label: "Boot Mirror", usedPct: 18, temp: 33, poh: 15000 },
@@ -393,6 +412,20 @@ export function transformSnapshot(d: Record<string, unknown>, p: PlatformProfile
   sys.mem_percent = round2(((sys.mem_used_gb as number) / p.ramGB) * 100);
   sys.cpu_usage = round2(clamp(jitter(22 * df, 20, hashStr(platform) + 2), 3, 85));
   sys.uptime_seconds = p.uptimeDays * 86400 + Math.floor(Date.now() / 1000) % 86400;
+
+  // Issue #269 — CPU + mainboard temperature gauges in the dashboard
+  // header. Per-platform realistic values with a small jitter so the
+  // demo telemetry looks alive between feeder ticks. Synology and
+  // Kubernetes (containers / pods without /sys/class/hwmon) showcase
+  // the graceful-fallback path: omitting the field makes the
+  // dashboard hide the gauge entirely (no "—" placeholder), matching
+  // what real users see on those platforms.
+  if (p.cpuTempC !== undefined) {
+    sys.cpu_temp_c = Math.round(clamp(jitter(p.cpuTempC, 8, hashStr(platform) + 3), 30, 95));
+  }
+  if (p.moboTempC !== undefined) {
+    sys.mobo_temp_c = Math.round(clamp(jitter(p.moboTempC, 8, hashStr(platform) + 4), 25, 70));
+  }
 
   // Disks
   const disks = p.drives.map((dr, i) => ({
