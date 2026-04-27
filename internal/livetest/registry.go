@@ -136,16 +136,63 @@ const graceWindow = 5 * time.Second
 // production runner (e.g. the collector's compositeRunner) for live
 // use; pass a fake runner in tests.
 //
-// idGen is the test-ID source. Production wiring uses
-// time.Now().UnixNano(); tests pass a deterministic counter.
+// idGen is the test-ID source. Production wiring uses millisecond-
+// resolution Unix timestamps (time.Now().UnixMilli()) — values fit
+// safely under JavaScript's Number.MAX_SAFE_INTEGER (2^53 - 1) so the
+// dashboard's `JSON.parse(body).test_id.toString()` URL-build chain
+// is lossless. The previous default (time.Now().UnixNano(), ~1.78e18
+// in 2026) silently rounded in float64, producing a `/stream/{id}`
+// URL that targeted a DIFFERENT int64 than the registry's m.active.id
+// and caused GetLive to return 404 mid-test. Issue #296 B2.
+//
+// Tests can still pass a deterministic counter via the idGen
+// parameter; the JS-safety constraint only applies to production
+// wiring.
 func NewManager(runner Runner, logger *slog.Logger, idGen func() int64) *Manager {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if idGen == nil {
-		idGen = func() int64 { return time.Now().UnixNano() }
+		idGen = defaultJSSafeIDGen()
 	}
 	return &Manager{runner: runner, logger: logger, idGen: idGen}
+}
+
+// defaultJSSafeIDGen returns a closure that produces monotonically-
+// increasing JavaScript-safe int64 IDs.
+//
+// Two constraints in tension:
+//
+//  1. Values must fit under Number.MAX_SAFE_INTEGER (2^53 - 1) so
+//     the dashboard's int64 ↔ float64 ↔ string roundtrip is lossless
+//     (issue #296 B2).
+//
+//  2. Successive calls within the same millisecond must NOT collide.
+//     A user clicking Run twice in rapid succession on a multi-core
+//     box, or a test fixture starting back-to-back tests, would
+//     otherwise produce duplicate IDs and confuse the registry's
+//     idempotency check.
+//
+// UnixMilli alone satisfies (1) — values are ~1.78e12, three orders
+// of magnitude under the JS ceiling. To also satisfy (2) we add a
+// monotonic counter that advances when the clock hasn't moved; the
+// closure remembers the last id returned and never returns the
+// same or a smaller value.
+func defaultJSSafeIDGen() func() int64 {
+	var (
+		mu   sync.Mutex
+		last int64
+	)
+	return func() int64 {
+		mu.Lock()
+		defer mu.Unlock()
+		now := time.Now().UnixMilli()
+		if now <= last {
+			now = last + 1
+		}
+		last = now
+		return now
+	}
 }
 
 // RegisterStateChangeObserver registers a callback invoked at every
