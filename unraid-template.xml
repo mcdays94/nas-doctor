@@ -26,7 +26,7 @@ Features:
 - 2 dashboard themes (Midnight and Clean)
 - Export professional PDF diagnostic reports
 - Multi-server fleet monitoring (monitor all your NAS instances)
-- Prometheus /metrics endpoint (110+ gauges)
+- Prometheus /metrics endpoint (120+ gauges)
 - Webhook alerts: Discord, Slack, Gotify, Ntfy, generic HTTP
 - Automatic backups with configurable schedule and location
 - Data lifecycle management (retention policies, DB size cap)

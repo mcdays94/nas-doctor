@@ -58,7 +58,7 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 - **SMART Health**: Per-drive health, temperature, reallocated sectors, pending sectors, UDMA CRC errors, power-on hours, ATA port mapping, with **Backblaze failure-rate thresholds** (Q4-2025 data, 337k+ drives). By default, NAS Doctor respects drive standby and skips spun-down drives rather than waking them for SMART reads — history will show gaps for drives that spin down, which is intentional (reduces wear). Flip **Wake drives for SMART check** in Settings → Advanced to restore every-cycle polling (v0.9.4 behaviour).
 - **Historical Sparklines**: CPU, memory, I/O wait, and per-drive temperature trends inline on the dashboard
 - **Disk Space**: Usage per mount point with color-coded thresholds
-- **System**: CPU, memory, load average, I/O wait, uptime, platform detection
+- **System**: CPU, memory, load average, I/O wait, uptime, platform detection, **CPU package temperature**, **mainboard temperature** (auto-detected via `/sys/class/hwmon`; rendered as colour-coded gauges in the dashboard header alongside CPU/Mem/I/O; gracefully hidden when no sensors are exposed, e.g. on Synology DSM)
 - **Docker**: Container listing with status and uptime
 - **ZFS Pool Health**: Pool state, vdev tree, scrub/resilver status, ARC hit rate, fragmentation, dataset listing with compression ratios
 - **UPS / Power**: Battery level, load, runtime, wattage via NUT or apcupsd (local or remote) — with critical alerts for on-battery and low-battery events
@@ -193,10 +193,14 @@ needed — the repo appears on the dashboard at the next scan tick.
 
 ### Network Speed Test
 
-- Periodic speed test via **Ookla CLI** (bundled in the Docker image). Falls back to `speedtest-cli` (Python) if you've installed it via a custom image — auto-detected at runtime, Ookla preferred.
-- Download, upload, latency, jitter with historical charts (1H/1D/1W)
-- Independent 4-hour schedule (configurable, or "Disabled" for metered connections)
-- Server name, ISP, and external IP reported
+- **Live-progress streaming during a test** — when a manual or scheduled test runs, the dashboard speed-test card grows a strip showing the active phase (`LATENCY → DOWNLOAD → UPLOAD`), a sweeping gauge with current Mbps, a big numeric readout, and a mini sparkline of recent samples. Streamed via Server-Sent Events; multi-tab and reconnect-mid-test work transparently (full sample replay on reconnect).
+- **"Run now" button** on the speedtest card — idempotent. Kicks off a one-off test or attaches to one already in flight. Bypasses the "Disabled" cron setting (Disabled governs *scheduled* tests, not manual runs).
+- **Engine**: bundled `showwin/speedtest-go` (pure Go, primary). Falls back to bundled Ookla CLI if the primary engine errors. Each historical row records which engine produced it; the dashboard caption next to the latest result shows `via {engine}`, and a per-row engine column is exported via Prometheus + the snapshot API so you can correlate cross-engine measurements yourself.
+- **Per-sample history** — every test's per-sample throughput is persisted in a `speedtest_samples` table. Expand any past type=speed entry on `/service-checks` to see how throughput evolved during that test window.
+- **Empty-state from history** — fresh installs and cold-starts render the most-recent successful test from history with a "Last test: X ago" relative-time caption rather than waiting for the next cron tick.
+- Download, upload, latency, jitter with historical charts (1H/1D/1W).
+- Independent 4-hour schedule (configurable, or "Disabled" for metered connections).
+- Server name, ISP, and external IP reported.
 
 ### Tunnel Monitoring
 
@@ -264,7 +268,7 @@ Monitor all your NAS Doctor instances from a visual topology view at `/fleet`:
 
 | Integration | How |
 |---|---|
-| **Prometheus** | Scrape `/metrics` — 110+ gauges for system, disk, SMART, Docker, network, UPS, ZFS, GPU, services, parity, tunnels, Proxmox, Kubernetes, backup, speed test, findings |
+| **Prometheus** | Scrape `/metrics` — 120+ gauges for system (incl. CPU/mobo temps), disk, SMART, Docker, network, UPS, ZFS, GPU, services, parity, tunnels, Proxmox, Kubernetes, backup, speed test (incl. live-test in-progress + per-engine + per-sample-count gauges), findings |
 | **Grafana** | Connect via Prometheus data source |
 | **Discord** | Webhook with rich embeds, severity colors, finding details |
 | **Slack** | Webhook with blocks, severity counts, top findings |
@@ -613,6 +617,9 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `/api/v1/service-checks` | GET | Latest service check results |
 | `/api/v1/service-checks/history` | GET | Service check result history |
 | `/api/v1/service-checks/run` | POST | Trigger service checks immediately |
+| `/api/v1/speedtest/run` | POST | Start a speed test (or attach to one in flight). Idempotent — returns `{test_id, started_at, engine}` |
+| `/api/v1/speedtest/stream/{test_id}` | GET | Server-Sent Events stream of a live test's progress. Event types: `start`, `phase_change`, `sample`, `result`, `error`, `end` |
+| `/api/v1/speedtest/samples/{test_id}` | GET | JSON array of per-sample throughput readings for a completed test (used by the expanded-log mini-chart on `/service-checks`) |
 | `/api/v1/findings/dismiss` | POST | Dismiss a finding from the dashboard |
 | `/api/v1/findings/restore` | POST | Restore a dismissed finding |
 | `/api/v1/db/stats` | GET | Database size and row counts |
@@ -631,15 +638,16 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 All metrics prefixed with `nasdoctor_`. Full list:
 
 <details>
-<summary>Expand metric list (110+ metrics)</summary>
+<summary>Expand metric list (120+ metrics)</summary>
 
 ```
-# System (12 gauges)
+# System (14 gauges)
 nasdoctor_system_cpu_usage_percent / _cpu_cores
 nasdoctor_system_memory_used_bytes / _total_bytes / _used_percent
 nasdoctor_system_swap_used_bytes / _total_bytes
 nasdoctor_system_load_avg_1 / _5 / _15
 nasdoctor_system_io_wait_percent / _uptime_seconds
+nasdoctor_system_cpu_temp_celsius / _mobo_temp_celsius   # 0 when no sensor available
 
 # Disks (labels: device, mountpoint, label)
 nasdoctor_disk_used_bytes / _total_bytes / _used_percent
@@ -702,6 +710,9 @@ nasdoctor_backup_last_success_timestamp / _size_bytes / _status
 
 # Speed Test
 nasdoctor_speedtest_download_mbps / _upload_mbps / _latency_ms
+nasdoctor_speedtest_in_progress                            # 1 while a test is running
+nasdoctor_speedtest_engine{engine="speedtest_go|ookla_cli"}  # 1 for the engine of the most-recent successful test
+nasdoctor_speedtest_samples_count{test_id="..."}           # sample count of the most-recent completed test
 
 # Findings
 nasdoctor_findings_critical_count / _warning_count
@@ -779,9 +790,10 @@ internal/
 ├── analyzer/              # Diagnostic rules engine, Backblaze thresholds
 ├── api/                   # HTTP handlers, embedded HTML templates, shared CSS
 │   └── templates/         # Dashboard themes (midnight, clean) + subpages
-├── collector/             # Data collection (SMART, disk, docker, network, UPS, tunnels)
+├── collector/             # Data collection (SMART, disk, docker, network, UPS, tunnels, sensors)
 ├── demo/                  # Mock data generation for demo mode
 ├── fleet/                 # Multi-server fleet polling
+├── livetest/              # In-flight speed-test broadcast registry (SSE fan-out + replay)
 ├── logfwd/                # Log forwarding (Loki, HTTP JSON, syslog)
 ├── notifier/              # Webhook delivery + Prometheus exporter
 ├── scheduler/             # Scan scheduling, notification rules, service checks
@@ -810,9 +822,9 @@ NAS Doctor is designed to be invisible on your system:
 Each platform renders realistic per-platform telemetry:
 
 - **Drives** — 2–8 SMART drives per platform with Backblaze-informed findings, 30-day temperature sparklines, replacement planner with health scoring, capacity forecast
-- **Compute** — 3–11 Docker containers per platform, Top Processes with container attribution, GPU monitoring (Unraid RTX A2000, Proxmox Tesla P4)
+- **Compute** — 3–11 Docker containers per platform, Top Processes with container attribution, GPU monitoring (Unraid RTX A2000, Proxmox Tesla P4), CPU + mainboard temperature gauges in the header (Unraid, TrueNAS, Proxmox; gracefully hidden on Synology / Kubernetes to showcase the empty-sensor fallback)
 - **Storage health** — ZFS pools where applicable (TrueNAS raidz2, Proxmox mirror), UPS power monitoring, parity history (Unraid)
-- **Network** — 8 service checks (one per check type: http/tcp/dns/ping/smb/nfs/speed/traceroute) with 7 days of history, 24h speed-test history, Cloudflared + Tailscale tunnels (Unraid + Proxmox)
+- **Network** — 8 service checks (one per check type: http/tcp/dns/ping/smb/nfs/speed/traceroute) with 7 days of history, 24h speed-test history with `via {engine}` caption on the latest result and per-row engine annotation, expand any speed entry on `/service-checks` for the per-sample throughput chart, Cloudflared + Tailscale tunnels (Unraid + Proxmox)
 - **Backups** — Borg / Restic / PBS / Duplicati / rclone repos with healthy + warning + error states, including v0.9.10's external-Borg "CONFIGURED" pill and error-card reason codes
 - **Alerts & incidents** — Active + resolved + snoozed alerts, 10-event incident timeline with system-metric correlation, webhook delivery history
 - **Fleet** — 4 remote servers with topology view and tunnel-type detection
