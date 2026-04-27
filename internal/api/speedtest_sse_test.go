@@ -239,8 +239,13 @@ func TestSpeedtestSSE_Stream_FullEventSequence(t *testing.T) {
 			return
 		}
 		defer resp.Body.Close()
-		if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
-			streamErr = fmt.Errorf("Content-Type = %q, want text/event-stream", got)
+		// v0.9.11.1: Content-Type carries explicit charset=utf-8 so
+		// content-sniffing proxies don't second-guess the MIME type and
+		// re-engage compression / transformation. Accept either the
+		// bare media type or the parameterised form so the assertion
+		// stays robust to header-canonicalisation differences.
+		if got := resp.Header.Get("Content-Type"); got != "text/event-stream" && got != "text/event-stream; charset=utf-8" {
+			streamErr = fmt.Errorf("Content-Type = %q, want text/event-stream (with optional charset=utf-8)", got)
 			return
 		}
 		events, streamErr = parseSSEStream(resp.Body)

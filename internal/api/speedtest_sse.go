@@ -127,12 +127,16 @@ func (s *Server) handleSpeedtestStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// SSE headers. Cache-Control: no-cache prevents intermediaries
-	// from buffering the stream; X-Accel-Buffering: no instructs
-	// nginx-style proxies to flush per chunk; Connection: keep-alive
-	// is implied by HTTP/1.1 but stated explicitly for clarity.
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	// SSE headers. Cache-Control: no-cache, no-transform prevents
+	// intermediaries from buffering OR transforming (e.g. Cloudflare
+	// auto-gzip would buffer chunks until enough bytes accumulate).
+	// X-Accel-Buffering: no instructs nginx-style proxies to flush
+	// per chunk. Connection: keep-alive is implied by HTTP/1.1 but
+	// stated explicitly for clarity. Content-Type carries an explicit
+	// charset so any content-sniffing proxy doesn't second-guess the
+	// MIME type and accidentally enable compression / transformation.
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.Header().Set("Connection", "keep-alive")
 
@@ -162,10 +166,39 @@ func (s *Server) handleSpeedtestStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Initial padding to defeat first-N-bytes proxy buffers. Some
+	// intermediaries (Cloudflare, certain CDN tunnels, scanning
+	// gateways) hold the first chunk(s) of a streaming response
+	// until N bytes have accumulated — typically 2KB. Without
+	// padding, the SSE consumer on the dashboard sees the `start`
+	// event but no progressive sample events: each per-event chunk
+	// is small (~150 bytes) so the proxy keeps buffering them
+	// until the test completes. A 2KB comment block (which the
+	// SSE spec ignores — comment lines start with ":") fills that
+	// initial buffer immediately, so subsequent flushes get
+	// delivered chunk-by-chunk. Issue surfaced in v0.9.11-rc3 UAT
+	// against the live host through Cloudflare; chunked encoding
+	// alone is not enough.
+	if !writeSSEPadding(w, flusher) {
+		return
+	}
+
 	currentPhase := ""
 	phaseIndex := 0
 	totalPhases := 3 // latency, download, upload — PRD-pinned ordering
 	sampleIndex := 0
+
+	// Heartbeat ticker — sends a `: keepalive` SSE comment every
+	// second to force flushes through any chunked-encoding-aware
+	// intermediary that might still coalesce small writes. The
+	// browser ignores comment lines per the SSE spec, so this is
+	// invisible to the dashboard. Without heartbeats, a test phase
+	// that emits no samples for a few seconds (e.g. between latency
+	// samples on a fast link) would let the proxy re-engage its
+	// buffer. Stop on defer so the ticker doesn't outlive the
+	// handler.
+	heartbeat := time.NewTicker(1 * time.Second)
+	defer heartbeat.Stop()
 
 	// Pump samples until the channel closes (test ended OR slow-
 	// client drop). Either way we then emit the terminal event.
@@ -173,6 +206,10 @@ func (s *Server) handleSpeedtestStream(w http.ResponseWriter, r *http.Request) {
 loop:
 	for {
 		select {
+		case <-heartbeat.C:
+			if !writeSSEHeartbeat(w, flusher) {
+				return
+			}
 		case s, ok := <-sub:
 			if !ok {
 				break loop
@@ -233,6 +270,51 @@ func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, da
 		return false
 	}
 	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, buf); err != nil {
+		return false
+	}
+	flusher.Flush()
+	return true
+}
+
+// ssePaddingBytes is the SSE comment block written immediately
+// after the start event to defeat first-N-bytes proxy buffering.
+// 2048 bytes of dots is chosen empirically as enough to clear
+// the buffer threshold of common intermediaries (Cloudflare's
+// auto-buffering layer, scanning gateways, CDN tunnels) while
+// staying small enough to not feel wasteful. The leading ":"
+// makes this a valid SSE comment line per the spec — the
+// browser's EventSource parser ignores it entirely.
+var ssePaddingBytes = func() []byte {
+	const padSize = 2048
+	b := make([]byte, padSize+3)
+	b[0] = ':'
+	b[1] = ' '
+	for i := 2; i < padSize+1; i++ {
+		b[i] = '.'
+	}
+	b[padSize+1] = '\n'
+	b[padSize+2] = '\n'
+	return b
+}()
+
+// writeSSEPadding writes the initial padding comment block. Called
+// once after the start event to release first-N-bytes proxy buffers
+// so subsequent per-sample chunks stream rather than accumulate.
+func writeSSEPadding(w http.ResponseWriter, flusher http.Flusher) bool {
+	if _, err := w.Write(ssePaddingBytes); err != nil {
+		return false
+	}
+	flusher.Flush()
+	return true
+}
+
+// writeSSEHeartbeat writes a periodic SSE comment line. Called
+// once per second from the handler's select loop to force
+// chunked-encoding intermediaries to keep flushing buffered
+// per-sample chunks rather than coalescing them. Browsers ignore
+// comment lines per the SSE spec.
+func writeSSEHeartbeat(w http.ResponseWriter, flusher http.Flusher) bool {
+	if _, err := fmt.Fprintf(w, ": keepalive\n\n"); err != nil {
 		return false
 	}
 	flusher.Flush()

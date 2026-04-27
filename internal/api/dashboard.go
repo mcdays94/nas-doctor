@@ -892,7 +892,12 @@ sections.speedtest = function(sn) {
   if (spd && spd.available && spd.latest) {
     var r = spd.latest;
     h += '<div>';
-    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">';
+    /* gap:12px ensures the Run-now button and the 1H/1D/1W range
+       buttons stay separated even on narrow column widths where
+       justify-content:space-between's distribution collapses to
+       zero. v0.9.11 UAT bug — without gap the buttons rendered
+       touching on the 3-column dashboard layout. */
+    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">';
     h +=   '<span>Speed Test' + runButton + '</span>';
     h +=   sections._rangeButtons("st", "loadSpeedTestChart", _chartRange);
     h += '</div>';
