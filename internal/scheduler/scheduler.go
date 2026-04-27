@@ -397,10 +397,57 @@ func (s *Scheduler) SetSpeedTestRunner(fn SpeedTestRunner) {
 // SetSpeedTestRunner to inject the legacy result-only stub — that
 // path is preserved so existing scheduler tests (#180, #210) keep
 // working unchanged. PRD #283 slice 2 / issue #285.
+//
+// If the registry implements the observable lifecycle interface
+// (livetest.Manager does), the scheduler registers two callbacks:
+//
+//   - state-change → flips notifier.Metrics.SetSpeedTestInProgress
+//     so the gauge is correct regardless of whether a test was
+//     started by the cron loop OR a manual POST /api/v1/speedtest/run.
+//     Closes #294 R3a.
+//
+//   - completion → persists the test's history row + samples through
+//     handleSpeedTestResultWithSamples. Both cron- and API-triggered
+//     tests therefore produce identical persistence side effects.
+//     Closes #294 R3b.
+//
+// Calling SetLiveTestRegistry more than once is supported but the
+// observer registrations stack — only call once per Scheduler in
+// production. Tests that need to re-wire should construct a fresh
+// registry/manager.
 func (s *Scheduler) SetLiveTestRegistry(reg livetest.Registry) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.liveTestRegistry = reg
+	s.mu.Unlock()
+
+	// Type-assert to the observable interface. *livetest.Manager
+	// satisfies it; lightweight test fakes that DON'T need
+	// completion-handling can elect not to implement it.
+	type observable interface {
+		RegisterStateChangeObserver(func(running bool))
+		RegisterCompletionHandler(func(*livetest.LiveTest))
+	}
+	if obs, ok := reg.(observable); ok {
+		obs.RegisterStateChangeObserver(func(running bool) {
+			if s.metrics != nil {
+				s.metrics.SetSpeedTestInProgress(running)
+			}
+		})
+		obs.RegisterCompletionHandler(func(lt *livetest.LiveTest) {
+			if err := lt.Err(); err != nil {
+				s.logger.Info("speed test failed via registry", "error", err, "test_id", lt.ID())
+				s.recordSpeedTestAttempt(time.Now().UTC(), "failed",
+					fmt.Sprintf("speed test failed: %v", err))
+				return
+			}
+			// Pull the buffered sample set BEFORE
+			// handleSpeedTestResult so the bulk-insert is hooked
+			// to the same parent history row that
+			// SaveSpeedTestReturningID just produced.
+			samples := lt.SnapshotSamples()
+			s.handleSpeedTestResultWithSamples(lt.Result(), samples)
+		})
+	}
 }
 
 // LiveTestRegistry returns the wired registry. Used by the API layer
@@ -623,6 +670,13 @@ func (s *Scheduler) RunOnce() {
 		}
 	}
 
+	// Hydrate snap.SpeedTest.Latest from history if the in-memory
+	// snap doesn't carry it. Mirrors what Latest() does for HTTP
+	// callers and ensures Prometheus reads the same hydrated view —
+	// otherwise post-restart /metrics shows the speedtest gauge
+	// family stuck at zero. Issue #294 R1+R2.
+	s.hydrateSpeedTestFromHistory(snap)
+
 	// Update Prometheus metrics
 	if s.metrics != nil {
 		s.metrics.Update(snap)
@@ -770,11 +824,57 @@ func (s *Scheduler) carryForwardSubsystems(snap *internal.Snapshot, skipped []st
 	}
 }
 
-// Latest returns the most recent snapshot from the cache.
+// Latest returns the most recent snapshot from the cache. The returned
+// snapshot's SpeedTest.Latest is hydrated from speedtest_history when
+// the in-memory snapshot lacks it — closes the cold-start gap where
+// /api/v1/snapshot/latest AND the Prometheus exporter would see
+// SpeedTest=nil after a fresh container start, even though historical
+// rows exist on disk. Issue #294 R1+R2.
+//
+// Hydration is a fallback: if Latest is already populated (steady
+// state, after the speed-test loop has fired), live data wins over
+// any stale history row.
 func (s *Scheduler) Latest() *internal.Snapshot {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.latest
+	snap := s.latest
+	s.mu.RUnlock()
+	if snap == nil {
+		return nil
+	}
+	s.hydrateSpeedTestFromHistory(snap)
+	return snap
+}
+
+// hydrateSpeedTestFromHistory mutates snap.SpeedTest.Latest in place
+// from the most-recent speedtest_history row IFF Latest is nil. Idempotent
+// — safe to call repeatedly. Errors during the lookup are logged and
+// swallowed: a missing speed-test card is strictly better than a
+// failure on snapshot read. Single source of truth for hydration so
+// both Prometheus's Update() (driven from RunOnce) and the API
+// handleLatestSnapshot path see the same hydrated state. Issue #294.
+func (s *Scheduler) hydrateSpeedTestFromHistory(snap *internal.Snapshot) {
+	if snap == nil {
+		return
+	}
+	if snap.SpeedTest != nil && snap.SpeedTest.Latest != nil {
+		return
+	}
+	if s.store == nil {
+		return
+	}
+	latest, ok, err := s.store.GetLatestSpeedTestResult()
+	if err != nil {
+		s.logger.Warn("hydrate speedtest from history failed", "error", err)
+		return
+	}
+	if !ok || latest == nil {
+		return
+	}
+	if snap.SpeedTest == nil {
+		snap.SpeedTest = &internal.SpeedTestInfo{}
+	}
+	snap.SpeedTest.Available = true
+	snap.SpeedTest.Latest = latest
 }
 
 // SetLatest injects a snapshot into the scheduler's cache (used by demo mode).
@@ -1346,16 +1446,17 @@ func (s *Scheduler) runSpeedTest() {
 // this cron tick, the registry's idempotency guarantees both paths
 // converge on the same in-flight test (one runner invocation).
 //
-// Sets the nasdoctor_speedtest_in_progress Prometheus gauge to 1
-// while the test runs (PRD #283). The set+unset is wrapped in a
-// defer so a panic in the runner still flips the gauge back to 0
-// — otherwise alerting on stuck tests would emit false positives.
+// State-change + persistence side effects are now driven by registry
+// observers wired in SetLiveTestRegistry, so this function is a thin
+// orchestration layer: kick off the test and block until it finishes.
+// The block is needed so the cron loop's lastRun timestamp doesn't
+// advance until the test actually completes — without it, a 30-60s
+// test could let a subsequent tick fire a parallel run before the
+// first one finishes (the registry's idempotency would collapse them
+// onto one runner, but the cron lastRun would skew). Issue #294
+// R3a/R3b moved gauge + persistence into the registry observers.
 func (s *Scheduler) runSpeedTestViaRegistry(registry livetest.Registry) {
-	if s.metrics != nil {
-		s.metrics.SetSpeedTestInProgress(true)
-		defer s.metrics.SetSpeedTestInProgress(false)
-	}
-	ctx := context.Background()
+	ctx := livetest.WithCaller(context.Background(), "cron")
 	lt, err := registry.StartTest(ctx)
 	if err != nil {
 		s.logger.Warn("speed test: registry start failed", "error", err)
@@ -1363,22 +1464,11 @@ func (s *Scheduler) runSpeedTestViaRegistry(registry livetest.Registry) {
 			fmt.Sprintf("registry start failed: %v", err))
 		return
 	}
-	// Wait for the test to fully complete (samples drained,
-	// subscribers fanned out, registry slot cleared). Don't drain
-	// samples here — that's the SSE handler's job; we only care
-	// about the terminal result.
+	// Wait for the test to fully complete. Persistence + gauge flip
+	// happen via observers inside the registry's driveTest defer
+	// chain; this goroutine only blocks so the cron loop's own
+	// lastRun cadence doesn't advance prematurely.
 	<-lt.Done()
-	if err := lt.Err(); err != nil {
-		s.logger.Info("speed test failed via registry", "error", err)
-		s.recordSpeedTestAttempt(time.Now().UTC(), "failed",
-			fmt.Sprintf("speed test failed: %v", err))
-		return
-	}
-	// Pull the buffered sample set BEFORE handleSpeedTestResult so
-	// the bulk-insert is hooked to the same parent history row that
-	// SaveSpeedTestReturningID just produced. PRD #283 slice 3 / #286.
-	samples := lt.SnapshotSamples()
-	s.handleSpeedTestResultWithSamples(lt.Result(), samples)
 }
 
 // handleSpeedTestResult applies the post-run side effects shared by

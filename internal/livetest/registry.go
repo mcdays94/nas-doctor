@@ -32,6 +32,7 @@ package livetest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -97,14 +98,39 @@ type Registry interface {
 // LiveTest under a mutex. After completion the LiveTest is retained
 // for a short grace window so a late-arriving SSE subscriber can see
 // the final result + end events before the test is fully forgotten.
+//
+// State-change + completion observers are registered ONCE during
+// production wiring (cmd/nas-doctor/main.go) and are read on every
+// test lifecycle event without acquiring the registry mutex; the
+// observer slice is treated as effectively-immutable after registration
+// to avoid lock-ordering hazards (driveTest defer chain holds m.mu
+// briefly to clear the slot, then calls observers without it).
 type Manager struct {
 	runner Runner
 	logger *slog.Logger
 	idGen  func() int64
 
-	mu     sync.Mutex
-	active *LiveTest // nil when no test in flight
+	mu       sync.Mutex
+	active   *LiveTest // nil when no test in flight
+	graceLT  *LiveTest // last completed test, available via GetLive within graceWindow
+	graceAt  time.Time // when graceLT completed; cleared after graceWindow elapses
+
+	// Observers registered before any tests run. Production wires
+	// these in main.go; tests wire their own. No mutex protection
+	// because the registration calls happen before any StartTest
+	// in production AND before parallel goroutines exist in tests.
+	stateChangeObservers []func(running bool)
+	completionHandlers   []func(*LiveTest)
 }
+
+// graceWindow is how long a just-completed test remains discoverable
+// via GetLive. Sized so a fast-failing runner (e.g. showwin's
+// FetchUserInfo erroring in <100ms — issue #294 R3 root cause on UAT)
+// can still hand a LiveTest off to a late-arriving SSE client. The
+// client gets the full replay (including the error event) and a
+// closed channel, which is the desired UX (error visible in stream)
+// rather than a 404 (confusing "test never existed" surface).
+const graceWindow = 5 * time.Second
 
 // NewManager constructs a Registry-implementing Manager. Pass a
 // production runner (e.g. the collector's compositeRunner) for live
@@ -120,6 +146,42 @@ func NewManager(runner Runner, logger *slog.Logger, idGen func() int64) *Manager
 		idGen = func() int64 { return time.Now().UnixNano() }
 	}
 	return &Manager{runner: runner, logger: logger, idGen: idGen}
+}
+
+// RegisterStateChangeObserver registers a callback invoked at every
+// test-lifecycle transition: running=true synchronously inside
+// StartTest (BEFORE the runner goroutine launches and BEFORE
+// StartTest returns), running=false on the runner goroutine after
+// the registry slot is cleared. Issue #294 R3a — production wires
+// this to notifier.Metrics.SetSpeedTestInProgress so the gauge flips
+// regardless of whether the test was triggered by cron or by a
+// manual POST /api/v1/speedtest/run.
+//
+// Observers are called in registration order. Panic-safety: if an
+// observer panics, the panic is logged and remaining observers still
+// fire (defensive against careless production wiring).
+func (m *Manager) RegisterStateChangeObserver(fn func(running bool)) {
+	if fn == nil {
+		return
+	}
+	m.stateChangeObservers = append(m.stateChangeObservers, fn)
+}
+
+// RegisterCompletionHandler registers a callback invoked exactly once
+// after the runner returns and BEFORE the registry slot is cleared.
+// The LiveTest's Result()/Err()/SnapshotSamples() are all readable
+// at handler invocation time. Issue #294 R3b — production wires this
+// to scheduler.handleSpeedTestResultWithSamples so EVERY completed
+// test (cron OR API-triggered) writes its history row + per-sample
+// telemetry through the same code path.
+//
+// Multiple handlers are called in registration order. Panic-safety
+// matches state-change observers.
+func (m *Manager) RegisterCompletionHandler(fn func(*LiveTest)) {
+	if fn == nil {
+		return
+	}
+	m.completionHandlers = append(m.completionHandlers, fn)
 }
 
 // StartTest acquires the singleton lock and starts a new test if none
@@ -156,7 +218,25 @@ func (m *Manager) StartTest(ctx context.Context) (*LiveTest, error) {
 		complete:    make(chan struct{}),
 	}
 	m.active = t
+	// Clear any prior grace test now that a fresh one is active —
+	// the grace window only applies to the most-recently-completed
+	// test, not a stale handle.
+	m.graceLT = nil
+	m.graceAt = time.Time{}
 	m.mu.Unlock()
+
+	m.logger.Info("livetest: start",
+		"test_id", t.id,
+		"caller", callerFromContext(ctx),
+	)
+
+	// Fire running=true BEFORE the runner goroutine launches so the
+	// in_progress gauge is set to 1 synchronously with StartTest's
+	// return. A metrics scrape immediately after POST /run will
+	// observe in_progress=1 even if the runner hasn't actually
+	// started yet — the registry IS in progress from the caller's
+	// perspective.
+	m.notifyStateChange(true)
 
 	// Drive the runner asynchronously. The goroutine owns the
 	// transition to terminal state (result/error -> done channel
@@ -164,6 +244,66 @@ func (m *Manager) StartTest(ctx context.Context) (*LiveTest, error) {
 	// touches m.active.
 	go m.driveTest(ctx, t)
 	return t, nil
+}
+
+// notifyStateChange invokes every registered state-change observer
+// with the given running flag. Panic in any observer is logged and
+// recovered; remaining observers still fire.
+func (m *Manager) notifyStateChange(running bool) {
+	for _, fn := range m.stateChangeObservers {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					m.logger.Warn("livetest: state-change observer panicked",
+						"running", running, "panic", r)
+				}
+			}()
+			fn(running)
+		}()
+	}
+}
+
+// notifyCompletion invokes every registered completion handler with
+// the just-completed LiveTest. Panic in any handler is logged and
+// recovered.
+func (m *Manager) notifyCompletion(t *LiveTest) {
+	for _, fn := range m.completionHandlers {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					m.logger.Warn("livetest: completion handler panicked",
+						"test_id", t.id, "panic", r)
+				}
+			}()
+			fn(t)
+		}()
+	}
+}
+
+// callerFromContext extracts a free-form "caller" tag from the
+// context (set via WithCaller). Used purely for structured logs so
+// future UAT can tell at a glance whether a test came from cron, the
+// API, or a test fixture. Returns "" if nothing was attached.
+func callerFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(callerCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+type callerCtxKey struct{}
+
+// WithCaller annotates the context with a caller tag. Production
+// wiring sets this to "cron" / "api" so /var/log entries from
+// livetest are filterable. Tests can leave it unset.
+func WithCaller(ctx context.Context, caller string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, callerCtxKey{}, caller)
 }
 
 // driveTest invokes the runner and broadcasts samples to subscribers.
@@ -184,8 +324,9 @@ func (m *Manager) StartTest(ctx context.Context) (*LiveTest, error) {
 // an error result so subscribers see a clean error event.
 func (m *Manager) driveTest(ctx context.Context, t *LiveTest) {
 	var (
-		res *Result
-		err error
+		res        *Result
+		err        error
+		samplesSeen int
 	)
 
 	defer func() {
@@ -193,19 +334,60 @@ func (m *Manager) driveTest(ctx context.Context, t *LiveTest) {
 			err = errFromPanic(r)
 			m.logger.Warn("livetest: runner panicked", "panic", r, "test_id", t.id)
 		}
-		// Clear the registry slot FIRST so observers waiting on
-		// Done() see InProgress()=false the moment Done closes.
+		// Stamp terminal state on the LiveTest. After this returns,
+		// Result()/Err()/SnapshotSamples() are all readable but the
+		// Done channel is NOT yet closed. This split lets the
+		// completion handler run BEFORE any goroutine waiting on
+		// <-lt.Done() proceeds — critical so the cron path observes
+		// "Done unblocked → persistence already happened" instead of
+		// racing against the registry's persistence callback.
+		// Issue #294 R3b.
+		t.stampTerminal(res, err)
+		// Fire completion handlers synchronously. Production wires
+		// this to scheduler persistence (history row + samples).
+		// Both cron- and API-triggered tests therefore produce
+		// identical persistence side effects via the SAME callback.
+		m.notifyCompletion(t)
+		// Now broadcast subscriber-channel close + Done close. SSE
+		// clients waiting on the channel get the buffered events +
+		// terminal close; cron callers waiting on Done() unblock
+		// AFTER the persistence handler has returned.
+		t.closeSubscribersAndDone()
+		// Clear the active slot + stash for the grace window so
+		// late SSE clients can still attach. GetLive checks both
+		// active and graceLT.
 		m.mu.Lock()
 		m.active = nil
+		m.graceLT = t
+		m.graceAt = time.Now()
 		m.mu.Unlock()
-		// Then transition the test to its terminal state, which
-		// closes every subscriber channel + Done.
-		if err != nil {
-			t.finishWithError(err)
+		// Broadcast running=false. By firing AFTER the slot is
+		// cleared, callers asserting "gauge==0 implies not in
+		// progress" stay correct (Prometheus scrapes during the
+		// race window will see in_progress=1 AND active==nil but
+		// the gauge clamps quickly to 0 once notify fires).
+		m.notifyStateChange(false)
+
+		var resultSummary string
+		if res != nil {
+			resultSummary = "success"
+		} else if err != nil {
+			resultSummary = "error"
 		} else {
-			t.finishWithResult(res)
+			resultSummary = "unknown"
 		}
+		m.logger.Info("livetest: end",
+			"test_id", t.id,
+			"samples_seen", samplesSeen,
+			"result", resultSummary,
+			"err", err,
+		)
 	}()
+
+	m.logger.Info("livetest: drive",
+		"test_id", t.id,
+		"runner_type", fmt.Sprintf("%T", m.runner),
+	)
 
 	var samples <-chan Sample
 	res, samples, err = m.runner.Run(ctx)
@@ -222,24 +404,35 @@ func (m *Manager) driveTest(ctx context.Context, t *LiveTest) {
 	// it does.
 	for s := range samples {
 		t.emit(s)
+		samplesSeen++
 	}
 }
 
 // GetLive returns the current in-flight LiveTest if its ID matches.
-// Returns (nil, false) if no test is in flight or the ID is for a
-// completed test (the registry forgets completed IDs once active
-// is cleared).
+// Returns (nil, false) if no test is in flight, the ID doesn't match,
+// AND no recently-completed test is within the grace window.
 //
-// Note: there's an unavoidable race window between a test completing
-// and m.active being cleared. In that window, GetLive may still
-// return the just-completed test. Callers that subscribe in that
-// window see a fully-populated replay + immediate end event, which
-// is the desired behaviour.
+// The grace window (graceWindow, currently 5s) keeps a just-completed
+// test discoverable so a late-arriving SSE subscriber can still
+// attach, receive the full replay (including the terminal event),
+// and exit cleanly. Without this, a fast-failing runner — e.g.
+// showwin's FetchUserInfo erroring in <100ms on UAT (issue #294 R3
+// root cause) — clears the registry slot before the browser can
+// issue GET /stream/{id}, and the user sees a 404 instead of the
+// error event in the stream.
 func (m *Manager) GetLive(testID int64) (*LiveTest, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.active != nil && m.active.id == testID {
 		return m.active, true
+	}
+	if m.graceLT != nil && m.graceLT.id == testID {
+		if time.Since(m.graceAt) <= graceWindow {
+			return m.graceLT, true
+		}
+		// Grace expired — clear so subsequent calls are O(1).
+		m.graceLT = nil
+		m.graceAt = time.Time{}
 	}
 	return nil, false
 }

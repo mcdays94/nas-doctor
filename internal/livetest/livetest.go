@@ -122,43 +122,64 @@ func (t *LiveTest) emit(s Sample) {
 	}
 }
 
-// finishWithResult transitions the test to its terminal state on
-// success: stamps the result, closes every remaining subscriber
-// channel, and closes the Done channel. Idempotent — a second call
-// is a no-op (defensive against runner contract violations).
-func (t *LiveTest) finishWithResult(res *Result) {
+// stampTerminal records the terminal result/err and marks the test
+// closed so emit() ignores any late samples. The Done channel is NOT
+// yet closed — that's deferred to closeSubscribersAndDone, which runs
+// AFTER completion handlers fire. This split guarantees that a cron
+// caller blocking on <-lt.Done() observes the registry's completion
+// handler having ALREADY persisted history+samples, instead of racing
+// against it. Issue #294 R3b. Idempotent.
+func (t *LiveTest) stampTerminal(res *Result, err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
 		return
 	}
 	t.result = res
+	t.err = err
 	t.closed = true
+}
+
+// closeSubscribersAndDone broadcasts the terminal-state signals: every
+// remaining subscriber channel is closed (their range loop exits with
+// the buffered events drained), then complete + done are closed so
+// any goroutine waiting on lt.Done() proceeds. Idempotent.
+//
+// MUST be called AFTER stampTerminal — emit() guards on t.closed so
+// stampTerminal first ensures no late sample slips into the buffer
+// after the close-broadcast.
+func (t *LiveTest) closeSubscribersAndDone() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// Closing a closed channel panics, so check via a sentinel that
+	// rides on the same mutex. We piggyback on an unexported flag.
+	if t.subscribers == nil {
+		return
+	}
 	for ch := range t.subscribers {
 		close(ch)
 		delete(t.subscribers, ch)
 	}
+	t.subscribers = nil
 	close(t.complete)
 	close(t.done)
 }
 
-// finishWithError transitions the test to its terminal state on
-// failure. Same shape as finishWithResult except err is set instead
-// of result.
+// finishWithResult is preserved as a thin wrapper for backward compat
+// with any path that doesn't need the split-stamp behaviour. The
+// registry's driveTest deliberately does NOT use this — it calls
+// stampTerminal + completion handlers + closeSubscribersAndDone in
+// that order so persistence runs before Done unblocks.
+func (t *LiveTest) finishWithResult(res *Result) {
+	t.stampTerminal(res, nil)
+	t.closeSubscribersAndDone()
+}
+
+// finishWithError mirrors finishWithResult for the error path. Same
+// thin-wrapper semantics.
 func (t *LiveTest) finishWithError(err error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.closed {
-		return
-	}
-	t.err = err
-	t.closed = true
-	for ch := range t.subscribers {
-		close(ch)
-		delete(t.subscribers, ch)
-	}
-	close(t.complete)
-	close(t.done)
+	t.stampTerminal(nil, err)
+	t.closeSubscribersAndDone()
 }
 
 // Done returns a channel that closes when the test has fully ended
