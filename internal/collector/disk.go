@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,7 +17,7 @@ func collectDisks() ([]internal.DiskInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		return parseDFSimple(out), nil
+		return dedupSameFilesystemMounts(parseDFSimple(out)), nil
 	}
 	disks := parseDFOutput(out)
 
@@ -40,7 +41,96 @@ func collectDisks() ([]internal.DiskInfo, error) {
 		}
 	}
 
-	return disks, nil
+	return dedupSameFilesystemMounts(disks), nil
+}
+
+// dedupSameFilesystemMounts collapses entries that report the same
+// physical filesystem mounted at multiple paths. Issue #300: on
+// Synology DSM, the system root partition (/dev/md0) is visible at
+// `/`, `/boot`, AND `/mnt`. When the typical Container Manager
+// deployment bind-mounts both `/boot:/host/boot:ro` and
+// `/mnt:/host/mnt:ro`, df reports both with identical Size/Used/%
+// numbers, and the dashboard shows the same partition twice — eating
+// vertical space and obscuring real user storage.
+//
+// Two entries are considered duplicates when (Device, TotalGB, UsedGB)
+// match exactly. df reports the same numbers for any mount of the
+// same filesystem, so this is a safe equality. The mount that "wins"
+// is chosen by preferUserStoragePath: real user-storage paths
+// (/volume*, /mnt/disk*, /mnt/cache, /mnt/user) beat system paths
+// (/boot, /, /log) which beat anything else; ties are broken by
+// shortest mount path. Non-duplicate entries pass through untouched
+// and the relative ordering of survivors is preserved (no map
+// iteration in the result path) so the dashboard stays
+// deterministic across scans.
+func dedupSameFilesystemMounts(disks []internal.DiskInfo) []internal.DiskInfo {
+	if len(disks) <= 1 {
+		return disks
+	}
+	// indexByKey records, for each (Device, TotalGB, UsedGB) tuple,
+	// the index in result of the currently-winning entry. We replace
+	// the entry in place when a better-named mount comes along, so
+	// the original ordering is preserved as long as the first
+	// occurrence of a tuple keeps its slot.
+	indexByKey := make(map[string]int, len(disks))
+	result := make([]internal.DiskInfo, 0, len(disks))
+	for _, d := range disks {
+		key := dedupKey(d)
+		if idx, seen := indexByKey[key]; seen {
+			if preferUserStoragePath(d, result[idx]) {
+				result[idx] = d
+			}
+			continue
+		}
+		indexByKey[key] = len(result)
+		result = append(result, d)
+	}
+	return result
+}
+
+// dedupKey is the fingerprint used to match "same filesystem mounted
+// twice". Includes Device + TotalGB + UsedGB; matches the granularity
+// df itself reports so we never collapse two genuinely-different
+// filesystems that happen to share a device name (rare but possible
+// for loop devices).
+func dedupKey(d internal.DiskInfo) string {
+	// Use 3 decimal places — the parseSize helper rounds to that
+	// granularity already, so trailing-digit jitter from re-running df
+	// can't artificially break dedup.
+	return fmt.Sprintf("%s|%.3f|%.3f", d.Device, d.TotalGB, d.UsedGB)
+}
+
+// preferUserStoragePath returns true when `a` is a more useful mount
+// path to display than `b` for the same filesystem. The hierarchy is:
+//
+//  1. real user-storage paths (/volume*, /mnt/disk*, /mnt/cache,
+//     /mnt/user) beat anything else — these are what users want to
+//     see in the storage section.
+//  2. otherwise, shorter path wins — `/boot` is more obvious than
+//     `/mnt` on a Synology system-root partition where neither is
+//     "real" storage.
+//  3. lexicographic tie-break for determinism.
+func preferUserStoragePath(a, b internal.DiskInfo) bool {
+	aReal := isUserStorageMount(a.MountPoint)
+	bReal := isUserStorageMount(b.MountPoint)
+	if aReal != bReal {
+		return aReal
+	}
+	if len(a.MountPoint) != len(b.MountPoint) {
+		return len(a.MountPoint) < len(b.MountPoint)
+	}
+	return a.MountPoint < b.MountPoint
+}
+
+// isUserStorageMount reports whether a mount path is a "real" user
+// storage location worth highlighting in the dashboard. The patterns
+// match the same prefixes collectHostMountDisks uses to decide what
+// host bind mounts to surface, kept in sync deliberately.
+func isUserStorageMount(mount string) bool {
+	return strings.HasPrefix(mount, "/volume") ||
+		strings.HasPrefix(mount, "/mnt/disk") ||
+		strings.HasPrefix(mount, "/mnt/cache") ||
+		strings.HasPrefix(mount, "/mnt/user")
 }
 
 // collectHostMountDisks reads disk info from the host's /mnt via the bind mount at /host/mnt.

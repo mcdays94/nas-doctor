@@ -21,6 +21,7 @@ func Analyze(snap *internal.Snapshot) []internal.Finding {
 	findings = append(findings, analyzeMemory(snap.System)...)
 	findings = append(findings, analyzeIOWait(snap.System)...)
 	findings = append(findings, analyzeDiskSpace(snap.Disks)...)
+	findings = append(findings, analyzeStorageMounts(snap)...)
 	findings = append(findings, analyzeDocker(snap.Docker)...)
 	findings = append(findings, analyzeNetwork(snap.Network)...)
 	findings = append(findings, analyzeLogs(snap.Logs)...)
@@ -461,6 +462,56 @@ func analyzeDiskSpace(disks []internal.DiskInfo) []internal.Finding {
 		}
 	}
 	return findings
+}
+
+// analyzeStorageMounts surfaces missing-bind-mount configuration
+// errors that produce a misleading dashboard. Issue #300: a Synology
+// DSM container that follows part of the Synology section of the
+// README — typically /boot, /var/log, /mnt — but skips the per-volume
+// bind mounts (/volume1:/host/volume1:ro, etc.) ends up showing only
+// system partitions in the storage section. The actual user storage
+// is invisible because nothing's bind-mounted.
+//
+// The finding only fires when:
+//   - Platform was detected as Synology (requires the issue-#300
+//     platform.go change so this works without /etc bind mounts).
+//   - No disks have a mount path starting with `/volume`.
+//   - At least one disk is being reported (so we don't fire on a
+//     fully-empty disk list, which usually means df itself failed
+//     and a different finding will surface).
+//
+// Mirrors the platform-aware Unraid finding at
+// "No SSD Cache with Docker Workloads" — same pattern of using
+// snap.System.Platform to gate platform-specific advice.
+func analyzeStorageMounts(snap *internal.Snapshot) []internal.Finding {
+	if snap.System.Platform != "synology" {
+		return nil
+	}
+	if len(snap.Disks) == 0 {
+		return nil
+	}
+	for _, d := range snap.Disks {
+		if strings.HasPrefix(d.MountPoint, "/volume") {
+			return nil // at least one volume is bind-mounted; user is set up
+		}
+	}
+	// Build evidence that names the bind mounts we DID see, so the
+	// operator can compare against the README at a glance.
+	mounts := make([]string, 0, len(snap.Disks))
+	for _, d := range snap.Disks {
+		mounts = append(mounts, fmt.Sprintf("%s (%s, %.1f GB)", d.MountPoint, d.Device, d.TotalGB))
+	}
+	return []internal.Finding{{
+		Severity:    internal.SeverityWarning,
+		Category:    internal.CategoryDisk,
+		Title:       "Synology storage volumes not bind-mounted",
+		Description: "The container is running on a Synology DSM host but has no /volume* paths visible. Storage tracking is incomplete — the dashboard is showing DSM system partitions, not your actual user storage.",
+		Evidence:    append([]string{"Bind mounts currently visible:"}, mounts...),
+		Impact:      "User volumes (/volume1, /volume2, ...) are invisible to NAS Doctor. Free-space alerts, disk-space findings, and capacity tracking will not fire for the storage you actually care about.",
+		Action:      "Stop the container, add `/volume1:/host/volume1:ro` (and one line per additional volume) to your docker-compose.yml or Container Manager configuration, then restart. See the Synology DSM section of the README for the full mount list.",
+		Priority:    "short-term",
+		Cost:        "Free",
+	}}
 }
 
 // ---------- Docker Rules ----------
