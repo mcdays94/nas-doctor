@@ -67,8 +67,11 @@ func (s *Server) handleSpeedtestRun(w http.ResponseWriter, r *http.Request) {
 	// cancels as soon as the POST response is written, which would
 	// kill the just-started runner before the first sample arrives.
 	// The registry owns the test's lifetime; the runner needs a
-	// context that outlives this handler call.
-	lt, err := reg.StartTest(context.Background())
+	// context that outlives this handler call. Annotate with the
+	// caller tag so livetest's structured logs differentiate
+	// API-triggered tests from cron-triggered ones (issue #294
+	// debugging hint).
+	lt, err := reg.StartTest(livetest.WithCaller(context.Background(), "api"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": err.Error(),

@@ -516,17 +516,13 @@ func TestRegistry_GetLive_Lookup(t *testing.T) {
 	close(runner.done)
 	<-lt.Done()
 
-	// After completion, GetLive may briefly still return the test
-	// (race window) — but eventually returns false. We don't pin
-	// timing; just check it eventually clears.
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if _, ok := mgr.GetLive(lt.ID()); !ok {
-			return
-		}
-		time.Sleep(time.Millisecond)
+	// After completion, the registry retains the just-completed
+	// test for a grace window (issue #294 R3 — keeps SSE clients
+	// from getting 404 on a fast-failing runner). GetLive must
+	// still resolve immediately after Done().
+	if _, ok := mgr.GetLive(lt.ID()); !ok {
+		t.Error("GetLive returned !ok during grace window — late SSE clients would get 404")
 	}
-	t.Error("GetLive still returned the completed test after 1s")
 }
 
 // counterIDGen returns deterministic monotonically-increasing IDs

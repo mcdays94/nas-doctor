@@ -43,6 +43,20 @@ func (f *fakeRegistry) InProgress() bool {
 	return f.mgr.InProgress()
 }
 
+// RegisterStateChangeObserver / RegisterCompletionHandler proxy to the
+// inner livetest.Manager so the scheduler's observer wiring fires
+// even when tests pass *fakeRegistry instead of the bare manager.
+// Without these methods the type-assertion in
+// Scheduler.SetLiveTestRegistry would fall through and persistence
+// would silently skip on the cron path. Issue #294.
+func (f *fakeRegistry) RegisterStateChangeObserver(fn func(running bool)) {
+	f.mgr.RegisterStateChangeObserver(fn)
+}
+
+func (f *fakeRegistry) RegisterCompletionHandler(fn func(*livetest.LiveTest)) {
+	f.mgr.RegisterCompletionHandler(fn)
+}
+
 func (f *fakeRegistry) Calls() int64 {
 	return atomic.LoadInt64(&f.startCalls)
 }
