@@ -730,6 +730,12 @@ nasdoctor_collection_duration_seconds / _last_collection_timestamp
 
 > Tested on **Unraid** daily. Synology, Proxmox, and Kubernetes have community reports / fleet-peer dogfooding. Other platforms should work but may have edge cases with disk detection, SMART access, or platform-specific features. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
+### A note from the maintainer
+
+NAS Doctor is maintained by one person, and the only platform I have hands-on every day is **Unraid**. Synology DSM, TrueNAS SCALE, Proxmox VE, Kubernetes/k3s, and Docker-on-Linux are all supported and tested via emulation, captured-snapshot replay, and a couple of community fleet peers — but bugs that would be obvious to me on a box I can poke with my hands tend to surface only when a non-Unraid user reports them.
+
+**If you're running NAS Doctor on Synology, TrueNAS, Proxmox, Kubernetes, or any other non-Unraid host and something looks off — please [open an issue](https://github.com/mcdays94/nas-doctor/issues/new/choose).** Even small UX oddities are useful: "the drive merge view lists my volume twice", "the Proxmox containers widget shows VMs instead of LXCs", "the UPS section is empty even though apcupsd is running". Your reports are how this project stays honest across platforms — they're appreciated, not a burden.
+
 ---
 
 ## File Structure & Data Locations
