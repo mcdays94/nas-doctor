@@ -262,20 +262,27 @@ func readSMARTDevice(device string, wakeDrives bool) (internal.SMARTInfo, error)
 	if !wakeDrives && looksLikeStandbyOutput(out) {
 		return info, errDriveInStandby
 	}
-	if strings.Contains(out, "json_format_version") {
+	// Only short-circuit into parseSMARTJSON when the initial probe
+	// actually got SMART data. needsSATFallback catches both the
+	// classic "Unknown USB bridge" / "Please specify device type"
+	// envelope (issue #206) AND the Synology DS918+ case where
+	// smartctl 7.x's auto-detect lands on SCSI mode and the JSON
+	// messages array carries "SMART support is: Unavailable" /
+	// "device lacks SMART capability" (issue #298). Without this
+	// check the parse succeeds but yields an empty SMARTInfo, which
+	// collectSMART then mis-categorises as `failed`.
+	if strings.Contains(out, "json_format_version") && !needsSATFallback(out) {
 		return parseSMARTJSON(device, out)
 	}
 
 	// Fallback: try with SCSI-to-ATA translation (needed for some Synology/QNAP bays)
-	if strings.Contains(out, "Unknown USB bridge") || strings.Contains(out, "Please specify device type") ||
-		strings.Contains(out, "INQUIRY failed") || strings.Contains(out, "unable to detect device") ||
-		out == "" {
+	if needsSATFallback(out) {
 		for _, devType := range []string{"sat", "auto", "scsi"} {
 			out2, _ := execCmd("smartctl", smartctlArgs("--json=c", "-a", "-d", devType, device)...)
 			if !wakeDrives && looksLikeStandbyOutput(out2) {
 				return info, errDriveInStandby
 			}
-			if strings.Contains(out2, "json_format_version") {
+			if strings.Contains(out2, "json_format_version") && !needsSATFallback(out2) {
 				return parseSMARTJSON(device, out2)
 			}
 		}
@@ -294,10 +301,89 @@ func readSMARTDevice(device string, wakeDrives bool) (internal.SMARTInfo, error)
 	if out == "" {
 		return info, fmt.Errorf("smartctl returned no output for %s", device)
 	}
+
+	// Text-mode SAT retry. The JSON retry loop above always passes
+	// `--json=c`, so on smartctl 6.x (which DSM 7 still ships — the
+	// reporter's DS918+ has 6.5) it returns "UNRECOGNIZED OPTION"
+	// for every device-type and the loop exits empty. Cover that
+	// path here: when the bare `smartctl -a /dev/...` output looks
+	// like a SAT-fallback case (SCSI auto-detect on a SATA drive,
+	// USB bridge without -d, etc.), retry text-mode without JSON
+	// and parse the first response that yields a usable model or
+	// serial. Matches the behaviour the README already advertises:
+	//
+	//   "NAS Doctor automatically tries SCSI-to-ATA translation
+	//    (--device=sat) as a fallback"
+	//
+	// — without this loop the README's claim wasn't true on
+	// smartctl 6.x systems (issue #298).
+	if needsSATFallback(out) {
+		for _, devType := range []string{"sat", "auto", "scsi"} {
+			out2, _ := execCmd("smartctl", smartctlArgs("-a", "-d", devType, device)...)
+			if !wakeDrives && looksLikeStandbyOutput(out2) {
+				return info, errDriveInStandby
+			}
+			if out2 == "" || needsSATFallback(out2) {
+				continue
+			}
+			parsed := parseSMARTText(device, out2)
+			if parsed.Model != "" || parsed.Serial != "" {
+				return parsed, nil
+			}
+		}
+	}
+
 	if strings.Contains(out, "Unknown USB bridge") || strings.Contains(out, "Please specify device type") {
 		return info, fmt.Errorf("%w: %s (USB bridge / requires -d option)", errDriveUnsupported, device)
 	}
 	return parseSMARTText(device, out), nil
+}
+
+// needsSATFallback returns true when smartctl's output indicates the
+// device responded but couldn't be queried via the auto-detected
+// device type. The cure is the same in every case: retry with an
+// explicit `-d sat` / `-d auto` / `-d scsi`. Centralising the trigger
+// strings here keeps the two retry sites (JSON and text) in lockstep
+// and prevents the issue #298 class of bug — where a new "I can't
+// reach this drive without help" smartctl phrase landed in only one
+// of the two retry triggers.
+//
+// Coverage:
+//   - "Unknown USB bridge" / "Please specify device type" — USB
+//     enclosures and Unraid boot flash (#206).
+//   - "INQUIRY failed" / "unable to detect device" — some HBAs.
+//   - "device lacks SMART capability" — smartctl 6.x text-mode
+//     output for the Synology DS918+ SCSI auto-detect case (#298).
+//     The full smartctl line is "SMART support is:     Unavailable -
+//     device lacks SMART capability." but only the trailing phrase
+//     is tested here, both because smartctl emits variable whitespace
+//     between fields and because "device lacks SMART capability" is
+//     the unique-to-smartctl substring; "Unavailable" alone could
+//     appear in user data, while the trailing phrase cannot.
+//   - `"smart_support":{"available":false}` — smartctl 7.x JSON-mode
+//     equivalent of the same condition. The bundled smartctl in
+//     the nas-doctor Docker image is 7.4, which emits this JSON key
+//     on the same DS918+ controller-topology where 6.x emits the
+//     "device lacks SMART capability" text (#298). The substring is
+//     specific enough that false positives on user data are
+//     implausible — JSON keys with this exact byte sequence appear
+//     only in smartctl envelopes.
+//   - empty output — connection-level failure or smartctl crash.
+//
+// All matches are substring matches against the raw output. The
+// substrings are specific enough to smartctl's diagnostic messages
+// that false positives on user data (model names, serials) are
+// implausible.
+func needsSATFallback(out string) bool {
+	if out == "" {
+		return true
+	}
+	return strings.Contains(out, "Unknown USB bridge") ||
+		strings.Contains(out, "Please specify device type") ||
+		strings.Contains(out, "INQUIRY failed") ||
+		strings.Contains(out, "unable to detect device") ||
+		strings.Contains(out, "device lacks SMART capability") ||
+		strings.Contains(out, `"smart_support":{"available":false}`)
 }
 
 // looksLikeStandbyOutput returns true when smartctl's output indicates the
