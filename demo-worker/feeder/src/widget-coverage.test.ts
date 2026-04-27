@@ -87,13 +87,18 @@ interface WidgetExpectation {
 
 const EXPECTED_WIDGETS: WidgetExpectation[] = [
   // sections.speedtest in dashboard.go L782 — reads
-  //   snapshot.speed_test.{available, latest.{download_mbps, upload_mbps, latency_ms, server_name, isp, engine}, last_attempt.{status, timestamp}}
+  //   snapshot.speed_test.{available, latest.{timestamp, download_mbps, upload_mbps, latency_ms, server_name, isp, engine}, last_attempt.{status, timestamp}}
   // PRD #283 / issue #284: latest.engine added so the dashboard's
   // "via {engine}" caption renders on every demo platform.
+  // Issue #290 (Slice A of #261): latest.timestamp added so the
+  // dashboard's "Last test: X ago" caption renders on every demo
+  // platform. Without it, util.relativeTimeAgo returns "" and the
+  // caption is suppressed.
   {
     widget: "speed_test",
     requiredKeys: [
       "speed_test.available",
+      "speed_test.latest.timestamp",
       "speed_test.latest.download_mbps",
       "speed_test.latest.upload_mbps",
       "speed_test.latest.latency_ms",

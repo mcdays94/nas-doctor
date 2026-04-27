@@ -89,6 +89,12 @@ type HistoryStore interface {
 	SaveSpeedTestReturningID(snapshotID string, result *internal.SpeedTestResult) (int64, error)
 	GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error)
 	GetLatestSpeedTestHistoryID() (int64, bool, error)
+	// Issue #290 (Slice A of #261) — single-row lookup of the most-
+	// recent speedtest_history entry, reshaped as
+	// internal.SpeedTestResult. Used by the API layer to hydrate
+	// snap.SpeedTest.Latest on /api/v1/snapshot/latest when the
+	// scheduler's in-memory cache lacks it (post-restart cold start).
+	GetLatestSpeedTestResult() (*internal.SpeedTestResult, bool, error)
 	// Issue #210 — last attempt state (single-row table).
 	SaveSpeedTestAttempt(att LastSpeedTestAttempt) error
 	GetLastSpeedTestAttempt() (*LastSpeedTestAttempt, error)

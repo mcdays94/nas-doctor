@@ -1092,6 +1092,38 @@ func (d *DB) GetLatestSpeedTestHistoryID() (int64, bool, error) {
 	return id, true, nil
 }
 
+// GetLatestSpeedTestResult returns the most-recent speedtest_history
+// row shaped as an internal.SpeedTestResult, or (nil, false, nil)
+// when no rows exist. Used by the API layer to hydrate
+// snap.SpeedTest.Latest on /api/v1/snapshot/latest when the
+// in-memory scheduler cache lacks it (typically after a container
+// restart, before the per-tick speed-test loop has fired).
+//
+// Issue #290 (Slice A of #261). Cheap single-row lookup; the
+// dashboard widget calls /api/v1/snapshot/latest on every poll, so
+// this read is on the hot path and must stay O(1) — guaranteed by
+// the existing idx_speedtest_ts index on timestamp DESC.
+func (d *DB) GetLatestSpeedTestResult() (*internal.SpeedTestResult, bool, error) {
+	row := d.db.QueryRow(
+		`SELECT timestamp, download_mbps, upload_mbps, latency_ms, jitter_ms,
+		        COALESCE(server_name, ''), COALESCE(isp, ''), COALESCE(engine, 'ookla_cli')
+		 FROM speedtest_history
+		 ORDER BY timestamp DESC
+		 LIMIT 1`,
+	)
+	var r internal.SpeedTestResult
+	if err := row.Scan(
+		&r.Timestamp, &r.DownloadMbps, &r.UploadMbps, &r.LatencyMs, &r.JitterMs,
+		&r.ServerName, &r.ISP, &r.Engine,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return &r, true, nil
+}
+
 // GetSpeedTestHistory returns speed test history for the given time range.
 func (d *DB) GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error) {
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
