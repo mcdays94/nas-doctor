@@ -144,7 +144,7 @@ func collectHostMountDisks() []internal.DiskInfo {
 	}
 
 	var disks []internal.DiskInfo
-	lines := strings.Split(out, "\n")
+	lines := joinWrappedDFLines(strings.Split(out, "\n"))
 	for i, line := range lines {
 		if i == 0 || strings.TrimSpace(line) == "" {
 			continue
@@ -201,7 +201,7 @@ func collectHostMountDisks() []internal.DiskInfo {
 
 func parseDFOutput(out string) []internal.DiskInfo {
 	var disks []internal.DiskInfo
-	lines := strings.Split(out, "\n")
+	lines := joinWrappedDFLines(strings.Split(out, "\n"))
 	for i, line := range lines {
 		if i == 0 || strings.TrimSpace(line) == "" {
 			continue
@@ -250,7 +250,7 @@ func parseDFOutput(out string) []internal.DiskInfo {
 
 func parseDFSimple(out string) []internal.DiskInfo {
 	var disks []internal.DiskInfo
-	lines := strings.Split(out, "\n")
+	lines := joinWrappedDFLines(strings.Split(out, "\n"))
 	for i, line := range lines {
 		if i == 0 || strings.TrimSpace(line) == "" {
 			continue
@@ -301,6 +301,76 @@ func isVirtualFS(device string) bool {
 		if strings.HasPrefix(device, p) {
 			return true
 		}
+	}
+	return false
+}
+
+// joinWrappedDFLines reconstructs records that BusyBox `df` line-wraps
+// when the device path exceeds the column width. BusyBox emits the
+// device on its own line followed by an indented data line:
+//
+//	/dev/mapper/cachedev_0
+//	                         22.7T     20.1T      2.6T  89% /host/volume1
+//
+// Without this pre-pass, the existing parsers' `len(fields) < 6` (or
+// `< 7`) guards silently drop both halves and the entry never reaches
+// the dashboard. Issue #302 surfaced it on Synology DSM where every
+// /volumeN bind mount lives on /dev/mapper/cachedev_N (≥21 chars,
+// always wraps), but the same shape hits LVM, dm-crypt/LUKS, ZFS
+// pool/dataset names, and long NFS mount sources on any platform
+// running BusyBox `df` (Alpine-based containers — including this
+// project's own image).
+//
+// GNU coreutils `df` does NOT wrap, so this function is a no-op on
+// the GNU path: a one-field line that doesn't pass `looksLikeDevicePath`
+// stays untouched, and a one-field line that DOES match but has no
+// continuation also stays untouched (orphan kept; the parsers skip it
+// for being too short — same as before).
+//
+// Detection rule: a wrapped header has exactly one whitespace-trimmed
+// field that looks like a device path (`/dev/...`, `host:/path`,
+// `pool/dataset`), AND the immediately-following non-empty line has
+// at least 5 fields (size, used, available, percent, mount-point).
+// Concatenating those two lines produces 6+ fields, which is exactly
+// what `parseDFSimple` already expects, and 7 fields when there's an
+// fstype column (`parseDFOutput` / `collectHostMountDisks`).
+func joinWrappedDFLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		fields := strings.Fields(line)
+		if len(fields) == 1 && i+1 < len(lines) && looksLikeDevicePath(fields[0]) {
+			next := strings.TrimSpace(lines[i+1])
+			if len(strings.Fields(next)) >= 5 {
+				out = append(out, fields[0]+" "+next)
+				i++ // consume continuation line
+				continue
+			}
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// looksLikeDevicePath returns true for the three shapes a df device
+// column commonly takes — local block device (`/dev/...`), NFS source
+// (`host:/exported/path`), or ZFS pool/dataset (`tank/data/movies`).
+// Used by joinWrappedDFLines to distinguish a wrapped device header
+// from a genuinely short line we should leave alone.
+//
+// The ZFS branch checks `strings.Contains(s, "/")` AND that `s` does
+// NOT start with `/` — `/dev/...` is local, `pool/data` is ZFS. The
+// NFS branch matches the literal `:/` substring rather than `:` alone
+// to avoid false-positives on percentages or other fields.
+func looksLikeDevicePath(s string) bool {
+	if strings.HasPrefix(s, "/dev/") {
+		return true
+	}
+	if strings.Contains(s, ":/") {
+		return true
+	}
+	if strings.Contains(s, "/") && !strings.HasPrefix(s, "/") {
+		return true
 	}
 	return false
 }
