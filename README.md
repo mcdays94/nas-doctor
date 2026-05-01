@@ -534,23 +534,27 @@ go build -o nas-doctor ./cmd/nas-doctor
 ---
 
 <p>
-  <img src="screenshots/service-checks-page.jpg" alt="Service Checks" width="380">
+  <img src="screenshots/service-checks-page.jpg" alt="Service Checks — every type (HTTP / TCP / DNS / SMB / NFS / PING / TRACEROUTE / SPEED) on one page with the v0.9.7 perceptual-distinct pill palette" width="380">
   <img src="screenshots/alerts-page.jpg" alt="Alerts" width="380">
 </p>
 <p>
-  <img src="screenshots/fleet-page.jpg" alt="Fleet" width="380">
-  <img src="screenshots/stats-page.jpg" alt="Stats" width="380">
+  <img src="screenshots/fleet-page.jpg" alt="Fleet — multi-server aggregation" width="380">
+  <img src="screenshots/stats-page.jpg" alt="Stats — system metric charts" width="380">
 </p>
 <p>
   <img src="screenshots/settings-page.jpg" alt="Settings" width="380">
+  <img src="screenshots/settings-advanced-scans.jpg" alt="Advanced Scan Settings — per-subsystem cadence (SMART / Docker / Proxmox / Kubernetes / ZFS / GPU) with humanised &quot;Use global&quot; presets, shipped in v0.9.9" width="380">
+</p>
+<p>
   <img src="screenshots/parity-page.jpg" alt="Parity" width="380">
+  <img src="screenshots/disk-detail.jpg" alt="Per-drive detail — Health Score gauge, drive identity badges, SMART attributes table; the maintenance log section (v0.9.7) lives further down with manual notes and auto-detected events from SMART history" width="380">
 </p>
 <p>
   <img src="screenshots/dashboard-processes.jpg" alt="Top Processes on Dashboard" width="380">
   <img src="screenshots/stats-process-history.jpg" alt="Process CPU History Chart" width="380">
 </p>
 <p>
-  <img src="screenshots/planner-page.jpg" alt="Replacement Planner" width="380">
+  <img src="screenshots/planner-page.jpg" alt="Replacement Planner — Backblaze-derived urgency rules with v0.9.x cost-per-TB modelling" width="380">
 </p>
 
 ---

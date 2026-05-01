@@ -40,6 +40,7 @@ nas-doctor-docker.tar.gz
 AGENT-CONTEXT.md
 AGENTS.md
 docs/alerts-2.0-design.md
+skill-observations/
 
 # Wrangler config (contains account IDs — use wrangler.toml.example)
 demo-worker/wrangler.toml
