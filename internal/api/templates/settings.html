@@ -1003,7 +1003,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
 <div class="save-bar" id="save-bar">
   <div class="save-bar-inner">
     <span class="save-bar-text" id="save-bar-text">Unsaved changes</span>
-    <button class="btn btn-primary" onclick="saveSettings()">Save All Settings</button>
+    <button class="btn btn-primary" onclick="saveSettingsImmediate()">Save All Settings</button>
   </div>
 </div>
 
@@ -2095,7 +2095,12 @@ function smartMaxAgeConflictConfirm(payload) {
   } catch (e) { return true; }
 }
 
-function saveSettings() {
+function saveSettingsImmediate() {
+  // Cancel any pending debounced save — this immediate call supersedes it.
+  if (saveSettingsDebounceTimer !== null) {
+    clearTimeout(saveSettingsDebounceTimer);
+    saveSettingsDebounceTimer = null;
+  }
   var payload = buildSettingsPayload();
   if (!smartMaxAgeConflictConfirm(payload)) {
     showToast("Save aborted", "info");
@@ -2127,6 +2132,28 @@ function saveSettings() {
     renderServiceChecks();
   })
   .catch(function(e) { showToast("Error: " + e.message, "error"); });
+}
+
+// Debounce window for auto-save flows (#258). 300ms collapses the
+// rapid-fire PUT cycle observed during v0.9.8-rc1 UAT (7 saves in
+// ~1s while clicking through a per-subsystem interval picker
+// dropdown) into a single PUT after the user stops triggering
+// changes. The explicit "Save All Settings" button calls
+// saveSettingsImmediate() directly so user-initiated saves are
+// never delayed. Errors from the network/validation path are
+// surfaced via the existing showToast("Error: ...") in
+// saveSettingsImmediate, so debouncing does not swallow failures.
+var SAVE_SETTINGS_DEBOUNCE_MS = 300;
+var saveSettingsDebounceTimer = null;
+
+function saveSettings() {
+  if (saveSettingsDebounceTimer !== null) {
+    clearTimeout(saveSettingsDebounceTimer);
+  }
+  saveSettingsDebounceTimer = setTimeout(function() {
+    saveSettingsDebounceTimer = null;
+    saveSettingsImmediate();
+  }, SAVE_SETTINGS_DEBOUNCE_MS);
 }
 
 /* ---------- Webhooks ---------- */
