@@ -92,7 +92,33 @@ type Registry interface {
 	StartTest(ctx context.Context) (*LiveTest, error)
 	GetLive(testID int64) (*LiveTest, bool)
 	InProgress() bool
+	// Cancel signals the in-flight test (matched by testID) to abort.
+	// Returns one of:
+	//   - nil: cancel signal accepted; the runner ctx is cancelled and
+	//     the test will terminate shortly with ErrCancelled.
+	//   - ErrTestNotFound: testID does not match the in-flight test
+	//     (no test running, or wrong id, or already-completed test
+	//     outside the grace window).
+	//   - ErrAlreadyCompleted: testID matches a recently-completed
+	//     test in the grace window — too late to cancel.
+	// Issue #304.
+	Cancel(testID int64) error
 }
+
+// ErrTestNotFound indicates Cancel could not find the requested test.
+// Surfaced as 404 by the HTTP handler.
+var ErrTestNotFound = errors.New("livetest: test not found")
+
+// ErrAlreadyCompleted indicates the test was found but had already
+// terminated (success/failure/panic) before Cancel arrived. Surfaced
+// as 409 by the HTTP handler.
+var ErrAlreadyCompleted = errors.New("livetest: test already completed")
+
+// ErrCancelled is the sentinel returned by LiveTest.Err() after a
+// successful Cancel. Distinguishing it from a generic context.Canceled
+// lets the persistence layer write status='cancelled' (vs 'failed')
+// without inspecting whether ctx was cancelled by some other path.
+var ErrCancelled = errors.New("livetest: test cancelled")
 
 // Manager is the production Registry. Holds a single optional in-flight
 // LiveTest under a mutex. After completion the LiveTest is retained
@@ -110,10 +136,10 @@ type Manager struct {
 	logger *slog.Logger
 	idGen  func() int64
 
-	mu       sync.Mutex
-	active   *LiveTest // nil when no test in flight
-	graceLT  *LiveTest // last completed test, available via GetLive within graceWindow
-	graceAt  time.Time // when graceLT completed; cleared after graceWindow elapses
+	mu      sync.Mutex
+	active  *LiveTest // nil when no test in flight
+	graceLT *LiveTest // last completed test, available via GetLive within graceWindow
+	graceAt time.Time // when graceLT completed; cleared after graceWindow elapses
 
 	// Observers registered before any tests run. Production wires
 	// these in main.go; tests wire their own. No mutex protection
@@ -256,6 +282,10 @@ func (m *Manager) StartTest(ctx context.Context) (*LiveTest, error) {
 	}
 
 	id := m.idGen()
+	// Wrap caller's ctx in a cancellable child so Cancel() can abort
+	// the runner without affecting the caller's parent context.
+	// Issue #304.
+	runCtx, cancelFn := context.WithCancel(ctx)
 	t := &LiveTest{
 		id:          id,
 		startedAt:   time.Now(),
@@ -263,6 +293,7 @@ func (m *Manager) StartTest(ctx context.Context) (*LiveTest, error) {
 		subscribers: make(map[chan Sample]struct{}),
 		done:        make(chan struct{}),
 		complete:    make(chan struct{}),
+		cancelFn:    cancelFn,
 	}
 	m.active = t
 	// Clear any prior grace test now that a fresh one is active —
@@ -289,8 +320,35 @@ func (m *Manager) StartTest(ctx context.Context) (*LiveTest, error) {
 	// transition to terminal state (result/error -> done channel
 	// closed -> registry's active slot cleared). Nothing else
 	// touches m.active.
-	go m.driveTest(ctx, t)
+	go m.driveTest(runCtx, t)
 	return t, nil
+}
+
+// Cancel signals the in-flight test (matched by testID) to abort.
+// Implementation: invokes the cancelFn captured at StartTest time,
+// which propagates ctx.Done() to the runner. The runner is then
+// expected to return promptly with a context-related error; the
+// registry's driveTest defer chain detects t.cancelRequested and
+// stamps ErrCancelled as the terminal error so observers (notably
+// the scheduler completion handler) can write status='cancelled'.
+//
+// Idempotent: multiple Cancel calls for the same in-flight test are
+// no-ops after the first. Cancel for a test that completed within
+// the grace window returns ErrAlreadyCompleted. Cancel for any
+// other testID returns ErrTestNotFound. Issue #304.
+func (m *Manager) Cancel(testID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.active != nil && m.active.id == testID {
+		m.active.markCancelled()
+		return nil
+	}
+	if m.graceLT != nil && m.graceLT.id == testID {
+		if time.Since(m.graceAt) <= graceWindow {
+			return ErrAlreadyCompleted
+		}
+	}
+	return ErrTestNotFound
 }
 
 // notifyStateChange invokes every registered state-change observer
@@ -371,8 +429,8 @@ func WithCaller(ctx context.Context, caller string) context.Context {
 // an error result so subscribers see a clean error event.
 func (m *Manager) driveTest(ctx context.Context, t *LiveTest) {
 	var (
-		res        *Result
-		err        error
+		res         *Result
+		err         error
 		samplesSeen int
 	)
 
@@ -380,6 +438,16 @@ func (m *Manager) driveTest(ctx context.Context, t *LiveTest) {
 		if r := recover(); r != nil {
 			err = errFromPanic(r)
 			m.logger.Warn("livetest: runner panicked", "panic", r, "test_id", t.id)
+		}
+		// If a Cancel call landed during this run, override whatever
+		// error the runner returned (likely context.Canceled or a
+		// subprocess-killed error) with the canonical ErrCancelled
+		// sentinel. Persistence + SSE consumers branch on this to
+		// distinguish a user-initiated abort from an organic failure.
+		// Issue #304.
+		if t.wasCancelled() {
+			err = ErrCancelled
+			res = nil
 		}
 		// Stamp terminal state on the LiveTest. After this returns,
 		// Result()/Err()/SnapshotSamples() are all readable but the

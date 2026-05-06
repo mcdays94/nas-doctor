@@ -304,7 +304,10 @@ tbody tr:hover{background:rgba(0,0,0,0.03)}
 .speedtest-live-readout { display:flex; flex-direction:column; line-height:1 }
 .speedtest-live-mbps { font-size:22px; font-weight:700; color:#171717; font-variant-numeric:tabular-nums }
 .speedtest-live-mbps-label { font-size:10px; color:#808080; letter-spacing:0.5px; text-transform:uppercase; margin-top:2px }
-.speedtest-live-cancel { margin-left:auto; padding:4px 10px; background:transparent; border:1px solid #e5e5e5; border-radius:6px; color:#808080; font-size:11px; cursor:not-allowed }
+.speedtest-live-cancel { margin-left:auto; padding:4px 10px; background:transparent; border:1px solid #e5e5e5; border-radius:6px; color:#525252; font-size:11px; cursor:pointer; transition:background 0.15s,color 0.15s,border-color 0.15s }
+.speedtest-live-cancel:hover:not(:disabled) { background:#f5f5f5; color:#171717; border-color:#a3a3a3 }
+.speedtest-live-cancel:active:not(:disabled) { background:#e5e5e5; color:#171717 }
+.speedtest-live-cancel:disabled { cursor:not-allowed; color:#a3a3a3; opacity:0.6 }
 </style>
 </head>
 <body>

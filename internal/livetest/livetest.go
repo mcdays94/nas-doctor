@@ -41,13 +41,18 @@ type LiveTest struct {
 	startedAt time.Time
 
 	mu          sync.Mutex
-	samples     []Sample            // replay buffer; append-only during run
+	samples     []Sample // replay buffer; append-only during run
 	subscribers map[chan Sample]struct{}
-	closed      bool                // true after finish*; subscribers should not be added to broadcast set
-	result      *Result             // set on successful completion
-	err         error               // set on failed completion
-	complete    chan struct{}       // closed when the runner returns; Done is closed simultaneously
-	done        chan struct{}       // closed when test ends + all subscriber channels closed
+	closed      bool          // true after finish*; subscribers should not be added to broadcast set
+	result      *Result       // set on successful completion
+	err         error         // set on failed completion
+	complete    chan struct{} // closed when the runner returns; Done is closed simultaneously
+	done        chan struct{} // closed when test ends + all subscriber channels closed
+	// cancelFn aborts the runner's context; Cancel() invokes it and
+	// the registry's driveTest defer chain checks cancelled to stamp
+	// ErrCancelled rather than the underlying ctx error. Issue #304.
+	cancelFn  func()
+	cancelled bool // true once a Cancel call has been observed
 }
 
 // ID returns the test's stable identifier. Used by SSE handler to
@@ -223,6 +228,33 @@ func (t *LiveTest) Engine() string {
 		return ""
 	}
 	return t.result.Engine
+}
+
+// markCancelled records that a Cancel call landed for this test and
+// invokes the captured cancelFn (idempotent). Called by Manager.Cancel
+// while holding the registry mutex; this method takes the per-test
+// mutex independently. Idempotent. Issue #304.
+func (t *LiveTest) markCancelled() {
+	t.mu.Lock()
+	already := t.cancelled
+	t.cancelled = true
+	fn := t.cancelFn
+	t.mu.Unlock()
+	if already {
+		return
+	}
+	if fn != nil {
+		fn()
+	}
+}
+
+// wasCancelled reports whether markCancelled was ever called for this
+// test. Read by the registry's driveTest defer chain to decide whether
+// to stamp ErrCancelled vs whatever the runner returned. Issue #304.
+func (t *LiveTest) wasCancelled() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.cancelled
 }
 
 // SnapshotSamples returns a copy of the in-memory replay buffer at

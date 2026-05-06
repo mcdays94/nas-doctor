@@ -30,6 +30,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -247,11 +248,21 @@ loop:
 		}
 	}
 
-	// Test ended. Emit result (or error) + end.
+	// Test ended. Emit result, error, or cancelled — then end.
+	// Cancellation is its own SSE event type so dashboard consumers
+	// can distinguish "user clicked Cancel" from "Ookla failed" /
+	// "showwin returned an error". Issue #304.
 	if err := lt.Err(); err != nil {
-		_ = writeSSEEvent(w, flusher, "error", map[string]any{
-			"message": err.Error(),
-		})
+		if errors.Is(err, livetest.ErrCancelled) {
+			_ = writeSSEEvent(w, flusher, "cancelled", map[string]any{
+				"test_id": lt.ID(),
+				"message": err.Error(),
+			})
+		} else {
+			_ = writeSSEEvent(w, flusher, "error", map[string]any{
+				"message": err.Error(),
+			})
+		}
 	} else if res := lt.Result(); res != nil {
 		_ = writeSSEEvent(w, flusher, "result", res)
 	}
@@ -319,6 +330,72 @@ func writeSSEHeartbeat(w http.ResponseWriter, flusher http.Flusher) bool {
 	}
 	flusher.Flush()
 	return true
+}
+
+// speedtestCancelResponse is the body of POST /api/v1/speedtest/cancel/{id}.
+type speedtestCancelResponse struct {
+	TestID    int64  `json:"test_id"`
+	Cancelled bool   `json:"cancelled"`
+	Message   string `json:"message,omitempty"`
+}
+
+// handleSpeedtestCancel implements POST /api/v1/speedtest/cancel/{test_id}.
+//
+// Status codes (issue #304 acceptance criteria):
+//   - 200 OK: cancel signal accepted; the in-flight test will abort
+//     promptly. Subscribers on the SSE stream will see the test end
+//     with an `error` event carrying ErrCancelled's message followed
+//     by the standard `end` event.
+//   - 400 Bad Request: test_id is not a valid int64.
+//   - 404 Not Found: no test in flight with the given id (or already
+//     forgotten beyond the grace window).
+//   - 409 Conflict: test was found in the grace window but had already
+//     completed before Cancel arrived — too late to abort.
+//   - 503 Service Unavailable: registry not configured (defensive).
+//
+// Idempotent: a second Cancel call for the same test_id returns 200
+// while the test is still in flight (between the first Cancel and
+// the runner's actual return), then transitions to 409 once it
+// completes, then 404 once the grace window expires.
+func (s *Server) handleSpeedtestCancel(w http.ResponseWriter, r *http.Request) {
+	reg := s.liveTestRegistry()
+	if reg == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "live speed test registry not configured",
+		})
+		return
+	}
+	idStr := chi.URLParam(r, "test_id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid test_id",
+		})
+		return
+	}
+	switch err := reg.Cancel(id); {
+	case err == nil:
+		writeJSON(w, http.StatusOK, speedtestCancelResponse{
+			TestID:    id,
+			Cancelled: true,
+		})
+	case errors.Is(err, livetest.ErrTestNotFound):
+		writeJSON(w, http.StatusNotFound, speedtestCancelResponse{
+			TestID:    id,
+			Cancelled: false,
+			Message:   "test not found or already forgotten",
+		})
+	case errors.Is(err, livetest.ErrAlreadyCompleted):
+		writeJSON(w, http.StatusConflict, speedtestCancelResponse{
+			TestID:    id,
+			Cancelled: false,
+			Message:   "test already completed",
+		})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
+	}
 }
 
 // liveTestRegistry returns the registry wired on the scheduler, or

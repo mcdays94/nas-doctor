@@ -74,6 +74,8 @@ type Server struct {
 		StartTest(ctx context.Context) (*livetest.LiveTest, error)
 		GetLive(testID int64) (*livetest.LiveTest, bool)
 		InProgress() bool
+		// Issue #304 — Cancel an in-flight test.
+		Cancel(testID int64) error
 	}
 	// dataEphemeral is set at startup from cmd/nas-doctor/main.go via
 	// SetDataPersistent. When true, the /api/v1/status response carries
@@ -148,6 +150,11 @@ func (s *Server) Router() http.Handler {
 	// extra wiring.
 	r.With(s.apiKeyMiddleware).Post("/api/v1/speedtest/run", s.handleSpeedtestRun)
 	r.With(s.apiKeyMiddleware).Get("/api/v1/speedtest/stream/{test_id}", s.handleSpeedtestStream)
+	// Cancel an in-flight test (issue #304). POST chosen over DELETE
+	// to keep the verb consistent with /run (both produce side-effects
+	// on the registry's singleton state) and to avoid the dashboard
+	// having to special-case fetch() for DELETE on older browsers.
+	r.With(s.apiKeyMiddleware).Post("/api/v1/speedtest/cancel/{test_id}", s.handleSpeedtestCancel)
 	// Per-sample JSON for COMPLETED tests (PRD #283 slice 3 / #286).
 	// Strict separation from /stream/{id}: in-flight tests get a 404
 	// here with a hint pointing at /stream/{id}. Lives outside the

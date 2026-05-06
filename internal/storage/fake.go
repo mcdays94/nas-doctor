@@ -75,6 +75,10 @@ type FakeStore struct {
 	// SaveSpeedTestReturningID. Starts at 1 so a zero ID is always
 	// "no row".
 	speedTestNextID int64
+	// cancelledSpeedTestIDs lists the synthetic IDs of every
+	// SaveSpeedTestCancelledReturningID-inserted row so tests can
+	// assert on the cancel-persistence path. Issue #304.
+	cancelledSpeedTestIDs []int64
 
 	// Drive maintenance events (issue #130).
 	driveEvents     []DriveEvent
@@ -557,6 +561,44 @@ func extractProcessName(command string) string {
 func (f *FakeStore) SaveSpeedTest(_ string, result *internal.SpeedTestResult) error {
 	_, err := f.SaveSpeedTestReturningID("", result)
 	return err
+}
+
+// SaveSpeedTestCancelledReturningID is the FakeStore counterpart of
+// *DB.SaveSpeedTestCancelledReturningID. Inserts a synthetic
+// status='cancelled' row so tests can assert the cancel path
+// produced a history row distinct from the success rows. Issue #304.
+//
+// CancelledSpeedTestRows() (test-only accessor) returns just the
+// cancelled rows so assertions stay focused.
+func (f *FakeStore) SaveSpeedTestCancelledReturningID(_ string, ts time.Time, engine string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	if engine == "" {
+		engine = internal.SpeedTestEngineSpeedTestGo
+	}
+	f.speedTestNextID++
+	id := f.speedTestNextID
+	f.speedTestHistory = append(f.speedTestHistory, SpeedTestHistoryPoint{
+		ID:        id,
+		Timestamp: ts,
+		Engine:    engine,
+	})
+	f.cancelledSpeedTestIDs = append(f.cancelledSpeedTestIDs, id)
+	return id, nil
+}
+
+// CancelledSpeedTestRows returns the IDs of every cancelled row
+// recorded via SaveSpeedTestCancelledReturningID. Test-only helper.
+// Issue #304.
+func (f *FakeStore) CancelledSpeedTestRows() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]int64, len(f.cancelledSpeedTestIDs))
+	copy(out, f.cancelledSpeedTestIDs)
+	return out
 }
 
 // SaveSpeedTestReturningID mirrors *DB's same-named method: appends a

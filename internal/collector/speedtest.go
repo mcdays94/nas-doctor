@@ -101,13 +101,22 @@ func RunSpeedTest() *internal.SpeedTestResult {
 // ---------- Ookla speedtest CLI ----------
 
 func runOoklaSpeedtest() *internal.SpeedTestResult {
+	return runOoklaSpeedtestCtx(context.Background())
+}
+
+// runOoklaSpeedtestCtx is the context-aware variant. When ctx is
+// cancelled (via livetest.Manager.Cancel), the underlying speedtest
+// subprocess is killed via cmd.Process.Kill(), short-circuiting the
+// 30-60s natural runtime. Returns nil on cancellation OR error;
+// callers should inspect ctx.Err() to distinguish. Issue #304.
+func runOoklaSpeedtestCtx(ctx context.Context) *internal.SpeedTestResult {
 	path, err := exec.LookPath("speedtest")
 	if err != nil {
 		return nil
 	}
 	_ = path
 
-	out, err := execCmdTimeout("speedtest", 120, "--format=json", "--accept-license", "--accept-gdpr")
+	out, err := execCmdCtx(ctx, "speedtest", 120, "--format=json", "--accept-license", "--accept-gdpr")
 	if err != nil {
 		return nil
 	}
@@ -218,6 +227,19 @@ func runSpeedtestCLI() *internal.SpeedTestResult {
 func execCmdTimeout(name string, timeoutSec int, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	// Set a timeout via context would be better, but for simplicity:
+	out, err := cmd.Output()
+	return string(out), err
+}
+
+// execCmdCtx runs a command and returns its stdout. The subprocess is
+// killed if ctx is cancelled before it exits naturally — implemented
+// via exec.CommandContext (which does cmd.Process.Kill on ctx.Done()).
+// timeoutSec is currently unused but preserved for parity with
+// execCmdTimeout's signature in case a future caller wants a hard
+// upper bound on top of ctx. Issue #304.
+func execCmdCtx(ctx context.Context, name string, timeoutSec int, args ...string) (string, error) {
+	_ = timeoutSec
+	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.Output()
 	return string(out), err
 }

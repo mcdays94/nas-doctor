@@ -87,6 +87,9 @@ type HistoryStore interface {
 	// PRD #283 slice 3 / issue #286 so the scheduler can wire the new
 	// history row to per-sample bulk-insert.
 	SaveSpeedTestReturningID(snapshotID string, result *internal.SpeedTestResult) (int64, error)
+	// SaveSpeedTestCancelledReturningID inserts a status='cancelled'
+	// row for a user-aborted live test. Issue #304.
+	SaveSpeedTestCancelledReturningID(snapshotID string, ts time.Time, engine string) (int64, error)
 	GetSpeedTestHistory(hours int) ([]SpeedTestHistoryPoint, error)
 	GetLatestSpeedTestHistoryID() (int64, bool, error)
 	// Issue #290 (Slice A of #261) — single-row lookup of the most-

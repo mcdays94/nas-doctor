@@ -528,9 +528,24 @@ body.theme-clean .sort-pill.active { color:rgba(0,0,0,0.7); background:rgba(0,0,
   background: transparent;
   border: 1px solid var(--border, #2a2a35);
   border-radius: 6px;
-  color: var(--text-quaternary, #6e6e7e);
+  color: var(--text-secondary, #b3b3b3);
   font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.speedtest-live-cancel:hover:not(:disabled) {
+  background: var(--bg-elevated, #1a1a22);
+  color: var(--text-primary, #ffffff);
+  border-color: var(--text-tertiary, #8a8a9c);
+}
+.speedtest-live-cancel:active:not(:disabled) {
+  background: var(--bg-panel, #14141c);
+  color: var(--text-primary, #ffffff);
+}
+.speedtest-live-cancel:disabled {
   cursor: not-allowed;
+  color: var(--text-quaternary, #6e6e7e);
+  opacity: 0.6;
 }
 `
 
