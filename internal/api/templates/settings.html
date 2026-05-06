@@ -2773,6 +2773,14 @@ function renderServiceCheckDetails(type, details, result) {
 // etc.) via toast. Speed-type checks can take up to 60s on real hardware
 // (Ookla CLI), so we warn the user up-front and disable the button for
 // the duration of the request. See issue #154.
+//
+// Traceroute checks use the SSE streaming variant
+// (POST /api/v1/service-checks/test-stream) so the user sees per-cycle
+// hop progress in the toast — closes the "dead spinner" UX surfaced
+// in v0.9.7 UAT of #189 (issue #224). All other types use the
+// synchronous /test endpoint unchanged. ReadableStream + the SSE
+// wire format is hand-parsed because EventSource is GET-only and
+// the Test button has to POST the form payload.
 function testServiceCheck() {
   var sc = readServiceCheckForm();
   if (!sc) return;
@@ -2780,6 +2788,12 @@ function testServiceCheck() {
   var btn = document.getElementById("sc-test-btn");
   var originalLabel = btn ? btn.textContent : "Test";
   if (btn) { btn.disabled = true; btn.textContent = "Testing…"; }
+
+  // Traceroute → live-progress SSE branch.
+  if (sc.type === "traceroute" && typeof window.ReadableStream !== "undefined") {
+    runTraceTestStream(sc, btn, originalLabel);
+    return;
+  }
 
   if (sc.type === "speed") {
     showToast("Running speed test (can take up to 60s)…", "info");
@@ -2835,6 +2849,130 @@ function testServiceCheck() {
     .finally(function() {
       if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
     });
+}
+
+// runTraceTestStream consumes the SSE response from
+// POST /api/v1/service-checks/test-stream for a type=traceroute Test.
+// Renders incremental progress via toast — each `hop` event refreshes
+// the toast with the cumulative hop table; the terminal `result`
+// event finalises with the same shape as the sync endpoint so the
+// existing renderServiceCheckDetails helper can be reused.
+//
+// The SSE wire format (event:/data:/blank-line) is parsed by hand
+// because EventSource is GET-only and the Test button must POST the
+// form payload. AbortController wires the fetch to cancellation, so
+// closing/refreshing the page promptly aborts the HTTP request and
+// the server-side runner subprocess (issue #224).
+function runTraceTestStream(sc, btn, originalLabel) {
+  showToast("Running traceroute (10 cycles)…", "info");
+
+  var controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  var signal = controller ? controller.signal : undefined;
+
+  fetch("/api/v1/service-checks/test-stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+    body: JSON.stringify(sc),
+    signal: signal
+  })
+    .then(function(resp) {
+      if (!resp.ok) {
+        return resp.json().then(function(d) {
+          throw new Error((d && d.error) ? d.error : ("HTTP " + resp.status));
+        }).catch(function() {
+          throw new Error("HTTP " + resp.status);
+        });
+      }
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder("utf-8");
+      var buf = "";
+      var lastHopUpdate = null;
+
+      function pump() {
+        return reader.read().then(function(chunk) {
+          if (chunk.done) return;
+          buf += decoder.decode(chunk.value, { stream: true });
+          // Frames are terminated by a blank line. Split on the
+          // SSE "\n\n" frame separator.
+          var frames = buf.split("\n\n");
+          buf = frames.pop(); // tail may be partial
+          for (var i = 0; i < frames.length; i++) {
+            var frame = frames[i];
+            if (!frame) continue;
+            var ev = "", data = "";
+            var lines = frame.split("\n");
+            for (var j = 0; j < lines.length; j++) {
+              var line = lines[j];
+              if (line.indexOf("event: ") === 0) ev = line.substring(7);
+              else if (line.indexOf("data: ") === 0) data = line.substring(6);
+            }
+            if (!ev) continue;
+            handleTraceEvent(ev, data, sc, lastHopUpdate);
+            if (ev === "hop") {
+              try { lastHopUpdate = JSON.parse(data); } catch (e) { /* ignore */ }
+            }
+          }
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(function(e) {
+      if (e && e.name === "AbortError") return;
+      showToast("Test failed: " + (e && e.message ? e.message : "network error"), "error");
+    })
+    .finally(function() {
+      if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    });
+}
+
+// handleTraceEvent dispatches a parsed SSE event to the appropriate
+// rendering path. `hop` events refresh the toast with cumulative
+// progress; `result` produces the canonical pass/fail summary
+// using the existing per-type renderer.
+function handleTraceEvent(ev, data, sc) {
+  if (ev === "hop") {
+    var u = null;
+    try { u = JSON.parse(data); } catch (e) { return; }
+    if (!u || !u.hops) return;
+    var lines = ["Tracing " + (sc.target || "") + " — cycle " + (u.cycle || 0) + "/" + (u.total_cycles || 0)];
+    for (var i = 0; i < u.hops.length; i++) {
+      var h = u.hops[i];
+      var avg = (typeof h.Avg === "number") ? h.Avg.toFixed(1) + " ms" : "—";
+      var lossPct = (typeof h["Loss%"] === "number") ? h["Loss%"].toFixed(1) + "%" : "—";
+      lines.push("  " + (i + 1) + ". " + (h.host || "???") + "  avg " + avg + "  loss " + lossPct);
+    }
+    showToast(lines.join("\n"), "info");
+    return;
+  }
+  if (ev === "result") {
+    var r = null;
+    try { r = JSON.parse(data); } catch (e) { return; }
+    if (!r) return;
+    var status = r.status || "unknown";
+    var ms = r.response_ms;
+    var headline;
+    var toastKind = "info";
+    if (status === "up") {
+      headline = "✓ Check is UP" + (typeof ms === "number" ? " (" + ms + " ms)" : "");
+      toastKind = "success";
+    } else if (status === "degraded") {
+      headline = "△ Degraded";
+      toastKind = "warning";
+    } else {
+      headline = "✗ Check is DOWN";
+      toastKind = "error";
+    }
+    var msg = headline;
+    var detailsText = renderServiceCheckDetails(sc.type, r.details, r);
+    if (detailsText) msg += "\n" + detailsText;
+    if (r.error) msg += "\n" + r.error;
+    showToast(msg, toastKind);
+    return;
+  }
+  // Other events (start, end, error) are passive — nothing to
+  // render. Heartbeat comments never reach the dispatcher because
+  // they have no `event:` line.
 }
 
 function removeServiceCheck(idx) {

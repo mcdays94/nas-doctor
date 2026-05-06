@@ -54,6 +54,12 @@ type Server struct {
 	// to collector.RunMTR. Tests override this to inject deterministic
 	// results without needing mtr installed. See issue #189.
 	tracerouteRunner scheduler.TracerouteRunner
+	// streamingTracerouteRunner is the function invoked by
+	// handleTestServiceCheckStream for the SSE Test endpoint. Nil
+	// means the handler will fall back to collector.RunStreamingMTR.
+	// Tests inject a fake so they don't need a real mtr binary.
+	// Issue #224.
+	streamingTracerouteRunner collector.StreamingTracerouteRunner
 	// borgRunner is the BorgRunner used by the external-Borg Test
 	// endpoint (POST /api/v1/backup-monitor/borg/test) and the
 	// scheduler's external-repo polling. Nil means the handler
@@ -146,6 +152,11 @@ func (s *Server) Router() http.Handler {
 	// 10-60s, so we can't subject them to the 30s router-wide timeout.
 	// RunCheck uses its own per-check context from cfg.TimeoutSec.
 	r.Post("/api/v1/service-checks/test", s.handleTestServiceCheck)
+	// SSE streaming variant for long-running Test invocations
+	// (traceroute only in this slice — issue #224). Lives outside
+	// the Timeout group so the EventSource connection can stay
+	// open for the full 10-cycle traceroute (~10-30s).
+	r.Post("/api/v1/service-checks/test-stream", s.handleTestServiceCheckStream)
 
 	// SSE live-progress endpoints (PRD #283 / issue #285). Both routes
 	// run OUTSIDE the 30s Timeout group: POST /run kicks off a 30-60s
