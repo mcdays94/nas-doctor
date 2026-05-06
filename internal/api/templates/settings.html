@@ -1224,6 +1224,54 @@ document.getElementById("scan-hours").addEventListener("input", updateIntervalPr
 document.getElementById("scan-minutes").addEventListener("input", updateIntervalPreview);
 document.getElementById("scan-seconds").addEventListener("input", updateIntervalPreview);
 
+// Live-update the per-subsystem pickers' "Use global (X)" labels
+// whenever the global Diagnostic Scan Interval changes. Issue #306:
+// before this hook, createIntervalPicker baked the humanised label
+// into each picker's <option value="0"> at mount time, so changing
+// the global scan_interval after pickers were rendered left them
+// advertising the old value until a full page reload. Surgical
+// DOM-mutate approach (option 2 in the issue body): walk the six
+// picker selects and rewrite the textContent of the value="0"
+// option in place. Idempotent — pickers that aren't yet rendered
+// are silently skipped (the renderAdvancedScanPickers path runs
+// inside loadSettings' .then, after this listener attaches; the
+// initial render reads globalIntervalDisplay() so the first paint
+// is already correct).
+//
+// We read the live form value via getScanInterval() (not
+// settings.scan_interval) so the label tracks the user's typing
+// in the custom d/h/m/s panel, not just the post-save snapshot.
+function updateAllPickerUseGlobalLabels() {
+  var dur;
+  try { dur = getScanInterval(); }
+  catch (e) { dur = (settings && settings.scan_interval) || "30m"; }
+  var humanized;
+  try {
+    var fields = parseIntervalDurationToFields(dur);
+    humanized = fieldsToIntervalDuration(fields);
+    if (!humanized || humanized === "0") humanized = dur || "30m";
+  } catch (e) {
+    humanized = dur || "30m";
+  }
+  var ids = ["smart", "docker", "proxmox", "kubernetes", "zfs", "gpu"];
+  for (var i = 0; i < ids.length; i++) {
+    var sel = document.getElementById("scan-interval-" + ids[i] + "-preset");
+    if (!sel) continue;
+    for (var j = 0; j < sel.options.length; j++) {
+      if (sel.options[j].value === "0") {
+        sel.options[j].textContent = "Use global (" + humanized + ")";
+        break;
+      }
+    }
+  }
+}
+
+document.getElementById("scan-preset").addEventListener("change", updateAllPickerUseGlobalLabels);
+document.getElementById("scan-days").addEventListener("input", updateAllPickerUseGlobalLabels);
+document.getElementById("scan-hours").addEventListener("input", updateAllPickerUseGlobalLabels);
+document.getElementById("scan-minutes").addEventListener("input", updateAllPickerUseGlobalLabels);
+document.getElementById("scan-seconds").addEventListener("input", updateAllPickerUseGlobalLabels);
+
 /* ---------- Advanced Scan Settings: per-subsystem interval pickers ----------
 
    Introduced in slice 2a (PRD #239 / issue #259). Six subsystems get
