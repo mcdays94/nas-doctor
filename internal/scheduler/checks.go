@@ -577,6 +577,14 @@ func extractPacketLossPercent(out string) float64 {
 // alongside #205 — Uptime Kuma federation — which needs the same
 // primitives).
 //
+// Issue #215 resolution: starting in v0.9.x the Settings UI hides the
+// Instance picker when type=speed is selected, so newly-saved speed
+// checks always carry Instance="". Legacy saved configs created
+// before that fix may still arrive here with a non-empty Instance —
+// we ignore it (read local history regardless) rather than silently
+// dropping it on load. Documented + pinned by
+// TestRunSpeedCheck_FleetTargetReadsLocalHistory.
+//
 // Test-button carve-out: the /api/v1/service-checks/test endpoint
 // (handleTestServiceCheck) builds a fresh ServiceChecker and injects
 // collector.RunSpeedTest via SetSpeedTestRunner. When the runner is
