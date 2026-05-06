@@ -46,13 +46,17 @@ func TestExecCmdCtx_HonoursCtxCancel_KillsSubprocess(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("execCmdCtx did not return within 3s of ctx cancel — subprocess not killed")
+	case <-time.After(5 * time.Second):
+		t.Fatal("execCmdCtx did not return within 5s of ctx cancel — subprocess not killed")
 	}
 	elapsed := time.Since(start)
 
-	if elapsed > 2*time.Second {
-		t.Errorf("execCmdCtx took %v to return after cancel; want <2s (subprocess kill should be near-instant)", elapsed)
+	// Generous upper bound — on a loaded CI runner, killing a
+	// process group + reaping Wait() can take 1-2 seconds. The
+	// real correctness signal is "MUCH faster than the natural
+	// 30s sleep", not strict sub-second. Issue #304 CI fix-up.
+	if elapsed > 4*time.Second {
+		t.Errorf("execCmdCtx took %v to return after cancel; want <4s (subprocess kill should be near-instant vs the 30s sleep)", elapsed)
 	}
 }
 

@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os/exec"
@@ -231,15 +232,55 @@ func execCmdTimeout(name string, timeoutSec int, args ...string) (string, error)
 	return string(out), err
 }
 
-// execCmdCtx runs a command and returns its stdout. The subprocess is
-// killed if ctx is cancelled before it exits naturally — implemented
-// via exec.CommandContext (which does cmd.Process.Kill on ctx.Done()).
-// timeoutSec is currently unused but preserved for parity with
-// execCmdTimeout's signature in case a future caller wants a hard
-// upper bound on top of ctx. Issue #304.
+// execCmdCtx runs a command and returns its stdout. The subprocess
+// AND ITS DESCENDANTS are killed when ctx is cancelled. The naive
+// `exec.CommandContext` approach kills only the direct child (the
+// shell `/bin/sh` in our case); any grandchild process the shell
+// spawned (e.g. `speedtest` itself, or `sleep 30` in tests) keeps
+// running, inherits the stdout pipe, and blocks `cmd.Output()` on
+// EOF for the full natural duration of the orphaned process. This
+// reproduces on Linux but not macOS (different kqueue semantics for
+// abandoned pipes) and is exactly the v0.9.11+ "Cancel button must
+// abort promptly" contract from issue #304.
+//
+// Fix: put the subprocess in its own process group via SysProcAttr.
+// Setpgid, then on ctx cancellation send SIGKILL to the entire
+// process group with `syscall.Kill(-pgid, SIGKILL)`. The negative pid
+// signals the group, which propagates to every descendant. cmd.Wait()
+// then unblocks promptly.
+//
+// Implementation note: we replicate exec.CommandContext's
+// "kill on ctx.Done()" behaviour manually rather than using it,
+// because CommandContext's kill is hardcoded to Process.Kill (single
+// process, no group). Issue #304 / fix-up commit.
 func execCmdCtx(ctx context.Context, name string, timeoutSec int, args ...string) (string, error) {
 	_ = timeoutSec
-	cmd := exec.CommandContext(ctx, name, args...)
-	out, err := cmd.Output()
-	return string(out), err
+	cmd := exec.Command(name, args...)
+	setProcessGroup(cmd)
+
+	// Capture stdout via a buffer (mirrors cmd.Output) so we don't
+	// rely on the inherited-pipe-EOF semantics that the orphaned-
+	// child case poisons.
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	// Watch ctx in a goroutine; on cancel, kill the process group.
+	// Closing `done` on ctx-cancel-or-natural-exit prevents the
+	// goroutine from leaking past the function return.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			killProcessGroup(cmd)
+		case <-done:
+		}
+	}()
+
+	err := cmd.Wait()
+	return stdout.String(), err
 }
