@@ -39,6 +39,10 @@ func (f *fakeRegistry) GetLive(id int64) (*livetest.LiveTest, bool) {
 	return f.mgr.GetLive(id)
 }
 
+func (f *fakeRegistry) Cancel(id int64) error {
+	return livetest.ErrTestNotFound
+}
+
 func (f *fakeRegistry) InProgress() bool {
 	return f.mgr.InProgress()
 }

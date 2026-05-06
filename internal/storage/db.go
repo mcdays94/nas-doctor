@@ -202,6 +202,7 @@ func (d *DB) migrate() error {
 			isp TEXT,
 			timestamp DATETIME NOT NULL,
 			engine TEXT NOT NULL DEFAULT 'ookla_cli',
+			status TEXT NOT NULL DEFAULT 'success',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_speedtest_ts ON speedtest_history(timestamp DESC)`,
@@ -444,6 +445,17 @@ func (d *DB) migrate() error {
 	// no-ops on first launch of a brand-new install.
 	if err := d.ensureColumn("speedtest_history", "engine", "TEXT NOT NULL DEFAULT 'ookla_cli'"); err != nil {
 		return fmt.Errorf("ensure speedtest_history.engine: %w", err)
+	}
+
+	// Issue #304 — speedtest_history.status was added so the live-
+	// progress Cancel button can persist a 'cancelled' row distinct
+	// from organic 'success' or 'failed' completions. The column
+	// defaults to 'success' which back-fills every pre-#304 row at
+	// one stroke (preserving the historical-chart's interpretation
+	// of every row as a successful test). Idempotent: ALTER TABLE
+	// .. ADD COLUMN noops on second launch.
+	if err := d.ensureColumn("speedtest_history", "status", "TEXT NOT NULL DEFAULT 'success'"); err != nil {
+		return fmt.Errorf("ensure speedtest_history.status: %w", err)
 	}
 
 	return nil
@@ -998,9 +1010,37 @@ func (d *DB) SaveSpeedTestReturningID(snapshotID string, result *internal.SpeedT
 		engine = internal.SpeedTestEngineOoklaCLI
 	}
 	res, err := d.db.Exec(
-		`INSERT INTO speedtest_history (snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp, engine)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO speedtest_history (snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp, engine, status)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'success')`,
 		snapshotID, result.DownloadMbps, result.UploadMbps, result.LatencyMs, result.JitterMs, result.ServerName, result.ISP, result.Timestamp, engine,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// SaveSpeedTestCancelledReturningID inserts a speedtest_history row
+// marking a user-cancelled test (issue #304). Mirrors
+// SaveSpeedTestReturningID but stamps status='cancelled' so the
+// historical chart + replacement-planner ignore it (they filter on
+// status='success' implicitly via download_mbps>0 AND can be tightened
+// to filter on status if a future regression slips a non-success row
+// past). Engine is stamped from the partially-completed result if one
+// is available; otherwise defaults to 'speedtest_go' (the modern
+// primary path). Throughput numbers are zero because we don't have a
+// reliable mid-test snapshot to record.
+func (d *DB) SaveSpeedTestCancelledReturningID(snapshotID string, ts time.Time, engine string) (int64, error) {
+	if engine == "" {
+		engine = internal.SpeedTestEngineSpeedTestGo
+	}
+	if ts.IsZero() {
+		ts = time.Now().UTC()
+	}
+	res, err := d.db.Exec(
+		`INSERT INTO speedtest_history (snapshot_id, download_mbps, upload_mbps, latency_ms, jitter_ms, server_name, isp, timestamp, engine, status)
+		 VALUES (?, 0, 0, 0, 0, '', '', ?, ?, 'cancelled')`,
+		snapshotID, ts, engine,
 	)
 	if err != nil {
 		return 0, err
@@ -1104,10 +1144,18 @@ func (d *DB) GetLatestSpeedTestHistoryID() (int64, bool, error) {
 // this read is on the hot path and must stay O(1) — guaranteed by
 // the existing idx_speedtest_ts index on timestamp DESC.
 func (d *DB) GetLatestSpeedTestResult() (*internal.SpeedTestResult, bool, error) {
+	// Exclude cancelled rows (issue #304) — a cancelled test should
+	// not be surfaced as the "most recent successful test" on the
+	// dashboard's Latest widget. The COALESCE on status keeps this
+	// query backwards-compatible with pre-#304 rows that don't have
+	// the column populated yet (the schema migration's DEFAULT
+	// 'success' should already back-fill them, but defense-in-depth
+	// keeps a partial migration from corrupting the widget).
 	row := d.db.QueryRow(
 		`SELECT timestamp, download_mbps, upload_mbps, latency_ms, jitter_ms,
 		        COALESCE(server_name, ''), COALESCE(isp, ''), COALESCE(engine, 'ookla_cli')
 		 FROM speedtest_history
+		 WHERE COALESCE(status, 'success') != 'cancelled'
 		 ORDER BY timestamp DESC
 		 LIMIT 1`,
 	)

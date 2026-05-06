@@ -2,6 +2,7 @@
 package scheduler
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -113,12 +114,12 @@ type Scheduler struct {
 	// New(); tests swap it for a deterministic stub to exercise the
 	// three logging branches (error / unavailable / success) added in
 	// issue #226. Read under s.mu.
-	dockerStatsFn  func() (*internal.DockerInfo, error)
-	retention      RetentionConfig
-	alerting       AlertingConfig
-	serviceChecks  []internal.ServiceCheckConfig
-	checker        *ServiceChecker
-	retentionMgr   *RetentionManager
+	dockerStatsFn func() (*internal.DockerInfo, error)
+	retention     RetentionConfig
+	alerting      AlertingConfig
+	serviceChecks []internal.ServiceCheckConfig
+	checker       *ServiceChecker
+	retentionMgr  *RetentionManager
 
 	// smartMaxAgeDays is the Settings.SMART.MaxAgeDays value driving
 	// the StaleSMARTChecker (issue #238). 0 disables the feature
@@ -435,6 +436,24 @@ func (s *Scheduler) SetLiveTestRegistry(reg livetest.Registry) {
 		})
 		obs.RegisterCompletionHandler(func(lt *livetest.LiveTest) {
 			if err := lt.Err(); err != nil {
+				// Cancellation gets a distinct LastSpeedTestAttempt
+				// status + a history row stamped status='cancelled'
+				// so the dashboard widget + replacement-planner can
+				// distinguish "user aborted mid-test" from organic
+				// failures (no Ookla, network down, parse error).
+				// Issue #304.
+				if errors.Is(err, livetest.ErrCancelled) {
+					s.logger.Info("speed test cancelled via registry", "test_id", lt.ID())
+					if _, saveErr := s.store.SaveSpeedTestCancelledReturningID(
+						"speedtest-cancelled-"+time.Now().Format("20060102-150405"),
+						time.Now().UTC(),
+						"",
+					); saveErr != nil {
+						s.logger.Warn("failed to save cancelled speed test row", "error", saveErr)
+					}
+					s.recordSpeedTestAttempt(time.Now().UTC(), "cancelled", "")
+					return
+				}
 				s.logger.Info("speed test failed via registry", "error", err, "test_id", lt.ID())
 				s.recordSpeedTestAttempt(time.Now().UTC(), "failed",
 					fmt.Sprintf("speed test failed: %v", err))

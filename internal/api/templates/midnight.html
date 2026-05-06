@@ -258,7 +258,10 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
 .speedtest-live-readout{display:flex;flex-direction:column;line-height:1}
 .speedtest-live-mbps{font-size:22px;font-weight:700;color:var(--text-primary);font-variant-numeric:tabular-nums}
 .speedtest-live-mbps-label{font-size:10px;color:var(--text-quaternary);letter-spacing:0.5px;text-transform:uppercase;margin-top:2px}
-.speedtest-live-cancel{margin-left:auto;padding:4px 10px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text-quaternary);font-size:11px;cursor:not-allowed}
+.speedtest-live-cancel{margin-left:auto;padding:4px 10px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);font-size:11px;cursor:pointer;transition:background 0.15s,color 0.15s,border-color 0.15s}
+.speedtest-live-cancel:hover:not(:disabled){background:var(--bg-elevated);color:var(--text-primary);border-color:var(--text-tertiary)}
+.speedtest-live-cancel:active:not(:disabled){background:var(--bg-panel);color:var(--text-primary)}
+.speedtest-live-cancel:disabled{cursor:not-allowed;color:var(--text-quaternary);opacity:0.6}
 </style>
 </head>
 <body>
