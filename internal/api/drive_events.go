@@ -205,13 +205,10 @@ func (s *Server) handleDeleteDriveEvent(w http.ResponseWriter, r *http.Request) 
 // currentPlatform returns the platform string captured by the latest
 // snapshot, or "" if unknown. Used to stamp drive_events rows at
 // creation time; downstream readers can filter or enrich by platform.
+// Routed through ensureLatestSnapshot so it benefits from the same
+// post-restart hydration as every other s.latest reader (#305).
 func (s *Server) currentPlatform() string {
-	if s.scheduler != nil {
-		if snap := s.scheduler.Latest(); snap != nil {
-			return snap.System.Platform
-		}
-	}
-	snap, _ := s.store.GetLatestSnapshot()
+	snap := s.ensureLatestSnapshot()
 	if snap == nil {
 		return ""
 	}
