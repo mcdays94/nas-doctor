@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -67,7 +69,19 @@ func parseTraceSSEStream(body io.Reader) ([]sseEvent, error) {
 // TestServiceChecksTestStream_TraceHappyPath — type=trace request
 // produces start + per-cycle hop + result + end events with parseable
 // JSON payloads.
+//
+// Regression guard: the test asserts the WHOLE flow completes in
+// well under 5s. A nil-channel range bug caused
+// v0.9.15-rc1 CI to hang for the full 10-minute test timeout while
+// the local dev box passed in <100ms — Go's select is pseudo-random
+// and the local box happened to schedule `final` before all
+// `updates` had drained, hitting a safe code path that masked the
+// bug. The deadline is the discipline that keeps a recurrence loud
+// and fast instead of silent and slow.
 func TestServiceChecksTestStream_TraceHappyPath(t *testing.T) {
+	deadline := assertCompletesWithin(t, 5*time.Second)
+	defer deadline()
+
 	srv := newSettingsTestServer()
 
 	// Inject a fake streaming runner that emits 3 cumulative hop
@@ -308,6 +322,115 @@ func TestServiceChecksTestStream_CtxCancelKillsRunner(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("runner did not exit within 2s of client cancel — ctx cancellation not propagating")
 	}
+}
+
+// TestServiceChecksTestStream_UpdatesCloseBeforeFinal — pins the
+// exact channel-ordering edge case that caused the v0.9.15-rc1 CI
+// hang. Drives the runner to close `updates` BEFORE emitting
+// `final` so the handler's outer select observes the
+// `case u, ok := <-updates: if !ok { updates = nil }` branch
+// FIRST, and only then sees `final`. Without the nil-channel
+// guard, the post-final drain `for u := range updates` ranges
+// over a nil channel and blocks forever.
+//
+// Local dev boxes hit this rarely because Go's select is
+// pseudo-random and a small runner queue can complete in any
+// order. CI's slower scheduler made the bad ordering reliably
+// reproducible. This test pins the bad ordering deterministically
+// by using a stepped-channel runner.
+func TestServiceChecksTestStream_UpdatesCloseBeforeFinal(t *testing.T) {
+	deadline := assertCompletesWithin(t, 5*time.Second)
+	defer deadline()
+
+	srv := newSettingsTestServer()
+	srv.streamingTracerouteRunner = func(_ context.Context, target string, _ int) (<-chan collector.StreamingMTRUpdate, <-chan collector.StreamingTraceFinal) {
+		updates := make(chan collector.StreamingMTRUpdate, 1)
+		final := make(chan collector.StreamingTraceFinal)
+		// Push exactly one update, close updates immediately, THEN
+		// emit final on a separate goroutine after a short pause.
+		// This sequence forces the handler to:
+		//   1. select pulls the buffered update.
+		//   2. select pulls the close signal → updates set to nil.
+		//   3. select pulls final → enters drain branch.
+		// Without the nil-channel guard step 3 ranges over nil
+		// and blocks forever.
+		updates <- collector.StreamingMTRUpdate{
+			Cycle:      1,
+			TotalCycle: 1,
+			Hops:       []collector.MTRHop{{Count: 1, Host: "10.0.0.1", AvgMs: 0.5}},
+		}
+		close(updates)
+		go func() {
+			// Tiny pause so the handler definitely processes the
+			// updates close before final arrives — guarantees the
+			// nil-assignment branch fires.
+			time.Sleep(50 * time.Millisecond)
+			final <- collector.StreamingTraceFinal{
+				Result: &collector.MTRResult{
+					Target: target,
+					Hops:   []collector.MTRHop{{Count: 1, Host: "10.0.0.1", AvgMs: 0.5}},
+				},
+			}
+			close(final)
+		}()
+		return updates, final
+	}
+
+	resp := postTestStream(t, srv, map[string]any{
+		"name":   "trace-ordering",
+		"type":   "traceroute",
+		"target": "8.8.8.8",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	events, err := parseTraceSSEStream(resp.Body)
+	if err != nil {
+		t.Fatalf("parse SSE: %v", err)
+	}
+	gotEnd := false
+	for _, e := range events {
+		if e.Event == "end" {
+			gotEnd = true
+			break
+		}
+	}
+	if !gotEnd {
+		t.Fatalf("expected terminal end event; sequence: %v", eventNames(events))
+	}
+}
+
+// assertCompletesWithin returns a stop function that, when invoked,
+// cancels the deadline timer. If the deadline expires before stop
+// is called the goroutine kills the process with a stack dump so
+// CI shows where the test was hung instead of timing out 10
+// minutes later. Mirrors the discipline added to the speedtest SSE
+// tests after the v0.9.11-rc UAT cycles.
+func assertCompletesWithin(t *testing.T, d time.Duration) func() {
+	t.Helper()
+	timer := time.AfterFunc(d, func() {
+		// Print every goroutine's stack so the cause of the hang
+		// is obvious in the failure log, then fail the test.
+		// We can't call t.Fatal from a non-test goroutine; the
+		// best alternative is panic which fails the test cleanly.
+		buf := make([]byte, 1<<20)
+		n := runtime.Stack(buf, true)
+		panic(fmt.Sprintf("test exceeded %s deadline; goroutine dump:\n%s", d, buf[:n]))
+	})
+	return func() { timer.Stop() }
+}
+
+// eventNames is a small helper for diagnostic output in failure
+// messages — turns a slice of sseEvent into a flat slice of event
+// names so the failure log shows the wire-level sequence.
+func eventNames(events []sseEvent) []string {
+	out := make([]string, len(events))
+	for i, e := range events {
+		out[i] = e.Event
+	}
+	return out
 }
 
 // TestServiceChecksHTML_TestStreamWiring — settings.html JS must

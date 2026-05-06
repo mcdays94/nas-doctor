@@ -201,15 +201,25 @@ loop:
 			// schedule `final` before pending `updates` when
 			// both are ready, and we don't want the SSE
 			// consumer to miss a hop event the runner emitted.
-			// updates is closed by the runner so the loop
-			// terminates naturally.
-			for u := range updates {
-				if !writeSSEEvent(w, flusher, "hop", map[string]any{
-					"cycle":        u.Cycle,
-					"total_cycles": u.TotalCycle,
-					"hops":         u.Hops,
-				}) {
-					return
+			//
+			// CRITICAL: guard against `updates == nil`. When the
+			// updates channel closes BEFORE final arrives in the
+			// outer select (a legal ordering when the runner
+			// closes both channels back-to-back via defers and
+			// CI scheduling drains updates first), the
+			// `case u, ok := <-updates: if !ok { updates = nil }`
+			// branch above sets the local var to nil. Ranging
+			// over a nil channel blocks forever — the original
+			// handler bug that caused the v0.9.15-rc1 CI hang.
+			if updates != nil {
+				for u := range updates {
+					if !writeSSEEvent(w, flusher, "hop", map[string]any{
+						"cycle":        u.Cycle,
+						"total_cycles": u.TotalCycle,
+						"hops":         u.Hops,
+					}) {
+						return
+					}
 				}
 			}
 			break loop
