@@ -244,9 +244,22 @@ func newRealOoklaCLIEngine() speedTestEngine {
 	return &realOoklaCLIEngine{}
 }
 
-func (e *realOoklaCLIEngine) Run(_ context.Context) (*internal.SpeedTestResult, <-chan SpeedTestSample, error) {
-	res := runOoklaSpeedtest()
+func (e *realOoklaCLIEngine) Run(ctx context.Context) (*internal.SpeedTestResult, <-chan SpeedTestSample, error) {
+	// Run the Ookla CLI in a goroutine wrapped on ctx so a Cancel()
+	// from the registry kills the subprocess promptly via cmd.Process
+	// .Kill(). Without this, a 30-60s `speedtest` invocation would
+	// continue running even after the user clicks Cancel — wasting
+	// bandwidth and leaving the registry slot busy until the natural
+	// completion. Issue #304.
+	res := runOoklaSpeedtestCtx(ctx)
 	if res == nil {
+		// Distinguish ctx-cancellation from generic CLI failure so
+		// the runner stack can return the right error to the
+		// registry. The cancellation case is most useful for tests
+		// that drive the engine directly with a cancelled ctx.
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		return nil, nil, errors.New("ooklaCLIRunner: speedtest CLI unavailable or returned zero throughput")
 	}
 	ch := make(chan SpeedTestSample)

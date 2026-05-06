@@ -880,7 +880,7 @@ sections.speedtest = function(sn) {
     +       '<div class="speedtest-live-mbps-label">Mbps</div>'
     +     '</div>'
     +     '<canvas id="speedtest-live-spark" width="80" height="30"></canvas>'
-    +     '<button type="button" id="speedtest-live-cancel" class="speedtest-live-cancel" disabled>Cancel</button>'
+    +     '<button type="button" id="speedtest-live-cancel" data-action="speedtest-cancel" class="speedtest-live-cancel" disabled>Cancel</button>'
     +   '</div>'
     + '</div>';
   /* Run-now button is part of the section title row. The button is
@@ -1483,6 +1483,16 @@ var speedtestLive = (function() {
     var strip = $('speedtest-live-strip');
     if (strip) strip.setAttribute('data-state', s);
   }
+  function setCancelEnabled(enabled, label) {
+    /* Cancel button (issue #304) — enabled while a test is in flight,
+       disabled when idle/completed. The label flips to "Cancelling..."
+       between the click and the SSE cancelled event so the user sees
+       immediate feedback even if the server takes a beat to abort. */
+    var btn = $('speedtest-live-cancel');
+    if (!btn) return;
+    btn.disabled = !enabled;
+    if (typeof label === 'string') btn.textContent = label;
+  }
   function setPhasePill(phase) {
     var pill = document.querySelector('.speedtest-live-phase-pill');
     if (!pill) return;
@@ -1553,6 +1563,9 @@ var speedtestLive = (function() {
     state.gaugeMax = 100;
     setStripState('running');
     setPhasePill('latency');
+    /* Issue #304 — Cancel button is enabled the moment a test starts
+       streaming; it returns to disabled on end/error/cancelled. */
+    setCancelEnabled(true, 'Cancel');
   }
   function onPhaseChange(data) {
     state.phase = data.phase;
@@ -1575,6 +1588,7 @@ var speedtestLive = (function() {
   function onEnd() {
     setStripState('idle');
     state.testId = null;
+    setCancelEnabled(false, 'Cancel');
     if (state.es) { state.es.close(); state.es = null; }
     // Refresh the historical chart so the new point lands.
     if (window.charts && window.charts.loadSpeedTest) {
@@ -1585,7 +1599,15 @@ var speedtestLive = (function() {
   }
   function onError(data) {
     setStripState('idle');
+    setCancelEnabled(false, 'Cancel');
     if (state.es) { state.es.close(); state.es = null; }
+  }
+  /* Issue #304 — server confirmed the cancel; the strip transitions
+     to idle and the historical chart is refreshed so the cancelled
+     row (if any was persisted) is visible. */
+  function onCancelled(data) {
+    setStripState('idle');
+    setCancelEnabled(false, 'Cancel');
   }
 
   function attach(testId) {
@@ -1599,8 +1621,29 @@ var speedtestLive = (function() {
     es.addEventListener('sample', function(e) { try { onSample(JSON.parse(e.data)); } catch (err) {} });
     es.addEventListener('result', function(e) { try { onResult(JSON.parse(e.data)); } catch (err) {} });
     es.addEventListener('end', function(e) { onEnd(); });
+    es.addEventListener('cancelled', function(e) { try { onCancelled(JSON.parse(e.data)); } catch (err) { onCancelled({}); } });
     es.addEventListener('error', function(e) { try { onError(e.data ? JSON.parse(e.data) : {}); } catch (err) { onError({}); } });
     setStripState('running');
+    /* Issue #304 — attach() may be called for a test that is already
+       in flight (auto-attach on dashboard load); the strip is in the
+       running state so the Cancel button must be live immediately,
+       not wait for the next start event (which won't fire mid-test). */
+    setCancelEnabled(true, 'Cancel');
+  }
+  /* Issue #304 — fire-and-forget cancel. The SSE stream's cancelled
+     event is the authoritative signal that finalises the strip state;
+     this just sends the request and flips the button to a transient
+     "Cancelling..." label so the user sees immediate feedback. */
+  function cancel() {
+    if (!state.testId) return;
+    setCancelEnabled(false, 'Cancelling...');
+    fetch('/api/v1/speedtest/cancel/' + state.testId, { method: 'POST' })
+      .catch(function() {
+        /* If the request itself fails (offline, etc.) re-enable the
+           button so the user can retry. The SSE stream's terminal
+           event will eventually finalise the state regardless. */
+        setCancelEnabled(true, 'Cancel');
+      });
   }
   function runNow() {
     fetch('/api/v1/speedtest/run', { method: 'POST' })
@@ -1632,17 +1675,21 @@ var speedtestLive = (function() {
 
   // Wire up the Run-now button. Uses event delegation on body so a
   // re-render (which destroys the in-place button) doesn't lose the
-  // listener.
+  // listener. Issue #304 piggybacks Cancel on the same delegation.
   if (typeof document !== 'undefined' && document.body) {
     document.body.addEventListener('click', function(e) {
       var t = e.target;
-      if (t && t.getAttribute && t.getAttribute('data-action') === 'speedtest-run-now') {
+      if (!t || !t.getAttribute) return;
+      var action = t.getAttribute('data-action');
+      if (action === 'speedtest-run-now') {
         runNow();
+      } else if (action === 'speedtest-cancel') {
+        cancel();
       }
     });
   }
 
-  return { attach: attach, runNow: runNow, detach: detach, autoAttachIfRunning: autoAttachIfRunning };
+  return { attach: attach, runNow: runNow, cancel: cancel, detach: detach, autoAttachIfRunning: autoAttachIfRunning };
 })();
 window.speedtestLive = speedtestLive;
 
