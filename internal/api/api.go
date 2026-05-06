@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -84,6 +85,13 @@ type Server struct {
 	// value is the safe default — bare Servers in tests and demo mode
 	// don't scare users with a false-positive banner. See #227.
 	dataEphemeral bool
+	// ensureLatestMu serializes ensureLatestSnapshot so concurrent
+	// readers (e.g. parallel /metrics scrapes plus an API hit) do not
+	// race on the lazy-hydration path that loads from disk and
+	// populates the scheduler cache + Prometheus gauge family. See
+	// #305 for the post-restart silent-window class of bug this
+	// helper closes.
+	ensureLatestMu sync.Mutex
 }
 
 // SetDataPersistent records whether /data resolved to a real bind-mount
@@ -175,9 +183,19 @@ func (s *Server) Router() http.Handler {
 			r.Get("/report", s.handleReport)
 		})
 
-		// Prometheus metrics
+		// Prometheus metrics. Wrapped so a scrape that arrives before
+		// the first scan tick (or before any API hit) lazily hydrates
+		// s.latest from disk and populates the gauge family — closes
+		// the post-restart silent-window where /metrics returned
+		// zero/missing values for any gauge derived from s.latest
+		// until /api/v1/snapshot/latest happened to be hit. Issue
+		// #305.
 		if s.metrics != nil {
-			r.Handle("/metrics", promhttp.HandlerFor(s.metrics.Registry(), promhttp.HandlerOpts{}))
+			promHandler := promhttp.HandlerFor(s.metrics.Registry(), promhttp.HandlerOpts{})
+			r.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				s.ensureLatestSnapshot()
+				promHandler.ServeHTTP(w, r)
+			}))
 		}
 
 		// Extended API routes (settings, disks, history, notifications)
@@ -323,13 +341,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		resp.ScanIntervalSecs = int(s.scheduler.Interval().Seconds())
 	}
 
-	var snap *internal.Snapshot
-	if s.scheduler != nil {
-		snap = s.scheduler.Latest()
-	}
-	if snap == nil {
-		snap, _ = s.store.GetLatestSnapshot()
-	}
+	snap := s.ensureLatestSnapshot()
 	if snap != nil {
 		resp.Hostname = snap.System.Hostname
 		resp.Platform = snap.System.Platform
@@ -372,18 +384,102 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) handleLatestSnapshot(w http.ResponseWriter, r *http.Request) {
-	var snap *internal.Snapshot
+// ensureLatestSnapshot returns the most recent snapshot, hydrating the
+// scheduler's in-memory cache and the Prometheus gauge family from disk
+// on first access if neither has been populated yet. This is the single
+// hydration point shared by every reader of s.latest — the API
+// /snapshot/latest path, the /metrics scraper, /api/v1/status,
+// /api/v1/report, drive_events.currentPlatform, and the per-disk
+// detail endpoints.
+//
+// Why a single helper: prior to issue #305, /metrics read s.latest
+// directly with no fallback path. After a container restart, every
+// gauge derived from s.latest read zero/missing values until either a
+// full Collect tick fired (up to 7 days on installs with high
+// scan_interval) or some other endpoint coincidentally hit the
+// API-side hydration in handleLatestSnapshot. Centralising the
+// hydration here means every reader benefits from the same warm-up
+// behaviour, and any future gauge added to notifier.Metrics inherits
+// the post-restart safety net for free.
+//
+// Behaviour:
+//   - If the scheduler already holds a snapshot, return it (same path
+//     as scheduler.Latest, which also runs the speed-test history
+//     hydration so /metrics sees the same numbers as /snapshot/latest).
+//   - Otherwise load the latest persisted snapshot from storage. On a
+//     successful disk read we ALSO seed the scheduler cache via
+//     SetLatest and prime the Prometheus gauge family via Update so
+//     subsequent /metrics scrapes don't repeat the disk round-trip.
+//   - On store error or empty database (fresh install), return nil and
+//     let the caller render its own empty-state.
+//
+// Concurrency: serialised by ensureLatestMu. Multiple concurrent
+// /metrics scrapes plus an API hit will fall through to a single disk
+// read; subsequent callers see the populated cache and return without
+// re-hitting storage. Idempotent — once the scheduler cache is
+// populated, the helper short-circuits at the scheduler.Latest call.
+func (s *Server) ensureLatestSnapshot() *internal.Snapshot {
+	// Fast path: scheduler already has a snapshot. No mutex needed —
+	// scheduler.Latest is itself goroutine-safe (RWMutex protected) and
+	// re-running it on every call is cheap. Still routes through
+	// scheduler.Latest so the speed-test history hydration (#294) runs.
 	if s.scheduler != nil {
-		snap = s.scheduler.Latest()
-	}
-	if snap == nil {
-		var err error
-		snap, err = s.store.GetLatestSnapshot()
-		if err != nil || snap == nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no snapshots available"})
-			return
+		if snap := s.scheduler.Latest(); snap != nil {
+			return snap
 		}
+	}
+
+	// Slow path: scheduler cache empty (or scheduler nil). Serialise
+	// the disk read + cache seeding so concurrent callers don't race.
+	s.ensureLatestMu.Lock()
+	defer s.ensureLatestMu.Unlock()
+
+	// Re-check under the lock — another goroutine may have populated
+	// the cache while we waited for the mutex.
+	if s.scheduler != nil {
+		if snap := s.scheduler.Latest(); snap != nil {
+			return snap
+		}
+	}
+
+	if s.store == nil {
+		return nil
+	}
+	snap, err := s.store.GetLatestSnapshot()
+	if err != nil || snap == nil {
+		return nil
+	}
+
+	// Seed the scheduler cache so subsequent readers (including the
+	// next /metrics scrape) hit the fast path. SetLatest is a simple
+	// pointer swap under the scheduler's write lock; safe to call
+	// while holding ensureLatestMu.
+	if s.scheduler != nil {
+		s.scheduler.SetLatest(snap)
+		// Re-fetch via scheduler.Latest to pick up any post-cache
+		// hydration the scheduler applies (e.g. speed-test history).
+		if hydrated := s.scheduler.Latest(); hydrated != nil {
+			snap = hydrated
+		}
+	}
+
+	// Prime the Prometheus gauge family. Without this, the very first
+	// /metrics scrape after restart would still see empty gauges even
+	// though we just hydrated s.latest — Update is what writes the
+	// snapshot's values onto the registry. Subsequent ticks of the
+	// scheduler's full scan loop call Update again with fresh data.
+	if s.metrics != nil {
+		s.metrics.Update(snap)
+	}
+
+	return snap
+}
+
+func (s *Server) handleLatestSnapshot(w http.ResponseWriter, r *http.Request) {
+	snap := s.ensureLatestSnapshot()
+	if snap == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no snapshots available"})
+		return
 	}
 	// Enrich parity checks with avg/max array temperature from smart_history
 	s.enrichParityTemps(snap)
@@ -535,13 +631,7 @@ func (s *Server) handleTriggerScan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
-	var snap *internal.Snapshot
-	if s.scheduler != nil {
-		snap = s.scheduler.Latest()
-	}
-	if snap == nil {
-		snap, _ = s.store.GetLatestSnapshot()
-	}
+	snap := s.ensureLatestSnapshot()
 	if snap == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no snapshot available for report"})
 		return
