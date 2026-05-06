@@ -2980,13 +2980,9 @@ func parseAlertActor(r *http.Request) (string, error) {
 }
 
 // latestSnapshot retrieves the most recent snapshot, preferring the in-memory
-// scheduler copy and falling back to the database.
+// scheduler copy and falling back to the database. Routed through
+// ensureLatestSnapshot so every reader of s.latest goes through the same
+// hydration path — see #305 for the class-of-bug this fixes.
 func (s *Server) latestSnapshot() *internal.Snapshot {
-	if s.scheduler != nil {
-		if snap := s.scheduler.Latest(); snap != nil {
-			return snap
-		}
-	}
-	snap, _ := s.store.GetLatestSnapshot()
-	return snap
+	return s.ensureLatestSnapshot()
 }
