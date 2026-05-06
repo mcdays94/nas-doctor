@@ -2496,12 +2496,36 @@ function onServiceTypeChange() {
   var traceWrap = document.getElementById("sc-traceroute-wrap");
   var dnsWrap = document.getElementById("sc-dns-wrap");
   var targetWrap = document.getElementById("sc-target-wrap");
+  var instanceWrap = document.getElementById("sc-instance-wrap");
   if (httpWrap) httpWrap.style.display = (type === "http") ? "block" : "none";
   if (portWrap) portWrap.style.display = (type === "tcp" || type === "smb" || type === "nfs") ? "block" : "none";
   if (headersWrap) headersWrap.style.display = (type === "http") ? "block" : "none";
   if (speedWrap) speedWrap.style.display = (type === "speed") ? "block" : "none";
   if (traceWrap) traceWrap.style.display = (type === "traceroute") ? "block" : "none";
   if (dnsWrap) dnsWrap.style.display = (type === "dns") ? "block" : "none";
+  // Issue #215 — fleet-instance targeting is decorative metadata for every
+  // check type (the scheduler does not dispatch to peers; checks always run
+  // locally). For type=speed this is especially confusing because the
+  // dashboard reads from the local speedtest_history table, so picking a
+  // peer in the dropdown would silently measure the local instance's WAN.
+  // Hide the picker AND coerce the value back to "" (local) so the saved
+  // payload doesn't carry a stale fleet ID that would mislead a future
+  // version where fleet dispatch lands. Existing saved checks that already
+  // have a fleet instance get their value cleared on next edit-save round
+  // through this form (deliberately conservative — no silent on-load
+  // mutation of stored config).
+  var instanceSelect = document.getElementById("sc-instance");
+  if (type === "speed") {
+    if (instanceWrap) instanceWrap.style.display = "none";
+    if (instanceSelect) instanceSelect.value = "";
+  } else if (instanceWrap) {
+    // Restore the default visibility logic: show the wrap only when there
+    // is at least one fleet server configured. populateInstanceSelector()
+    // sets this on form open/edit; we mirror its rule here so toggling
+    // away from speed re-shows it correctly without re-running the full
+    // populate (which would clobber the user's currently-selected option).
+    instanceWrap.style.display = (typeof fleetServers !== "undefined" && fleetServers && fleetServers.length > 0) ? "" : "none";
+  }
   // Hide target field for speed checks — speedtest auto-selects the best server
   if (targetWrap) targetWrap.style.display = (type === "speed") ? "none" : "";
   var targetInput = document.getElementById("sc-target");
