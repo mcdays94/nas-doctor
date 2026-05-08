@@ -91,6 +91,66 @@ type BackupMonitorSettings struct {
 	// optional binary override, passphrase env var name, and SSH key
 	// path. Zero-length array = no external monitoring (default).
 	Borg []BorgExternalRepo `json:"borg"`
+
+	// Duplicacy is the list of user-configured Duplicacy backup repos
+	// (PRD #310 / issue #311). Each entry carries an enable toggle,
+	// display label, kind (cli-repo | web-cache), filesystem path,
+	// optional storage_id (for kind=web-cache), and stale-after
+	// threshold in days. Zero-length array = no Duplicacy monitoring
+	// (default; preserves pre-V1a behaviour exactly).
+	//
+	// Disk-read by design — no `duplicacy` binary is invoked, no
+	// subprocess spawned, no network calls made. The runner reads the
+	// on-disk JSON snapshot files that both Duplicacy CLI and the
+	// saspus/duplicacy-web container write under their respective
+	// layouts. See collector.DuplicacyRunner.
+	//
+	// Additive only — no settings_version bump. Existing v3 blobs
+	// decode with an empty/nil Duplicacy slice. The omitempty tag
+	// keeps the JSON output minimal for users who haven't configured
+	// any entries yet.
+	Duplicacy []DuplicacyEntry `json:"duplicacy,omitempty"`
+}
+
+// DuplicacyEntry is one user-configured Duplicacy repo entry. Kind
+// selects which path-resolver the runner uses; both resolvers
+// converge on the same JSON-snapshot parser. Issue #311.
+type DuplicacyEntry struct {
+	// Enabled toggles the entry off without deleting its config.
+	// Disabled entries are skipped by the runner and produce no
+	// dashboard row. (V1a: schema only; runner-level dispatch lives
+	// in V1c.)
+	Enabled bool `json:"enabled"`
+
+	// Label is a user-supplied display name. Optional — the dashboard
+	// widget falls back to the basename of Path when empty.
+	Label string `json:"label,omitempty"`
+
+	// Kind selects the layout of the on-disk repo state. Closed set:
+	//   "cli-repo"  — vanilla CLI install. Path points at the repo
+	//                 root, which contains a .duplicacy/ subdir with
+	//                 a preferences file + cache/<storage>/snapshots/.
+	//   "web-cache" — saspus/duplicacy-web container layout. Path
+	//                 points at the cache root and StorageID names
+	//                 the per-repo subdir under it.
+	Kind string `json:"kind"`
+
+	// Path is the container-visible filesystem path to either the
+	// repo root (kind=cli-repo) or the web cache root (kind=web-cache).
+	// Required when Enabled.
+	Path string `json:"path"`
+
+	// StorageID is the per-repo subdir under Path when Kind=web-cache.
+	// Required for web-cache; ignored for cli-repo (resolved from the
+	// repo's preferences file). Empty for cli-repo.
+	StorageID string `json:"storage_id,omitempty"`
+
+	// StaleAfter is the age threshold in days. A repo whose latest
+	// snapshot is older than StaleAfter days reports the "stale"
+	// reason. Zero (the empty form value) means "use default" — the
+	// runner substitutes 30 days at read time so users can leave the
+	// field blank without persisting a magic number.
+	StaleAfter int `json:"stale_after,omitempty"`
 }
 
 // BorgExternalRepo is one explicit external-Borg repo entry.

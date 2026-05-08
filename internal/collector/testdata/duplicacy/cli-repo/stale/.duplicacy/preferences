@@ -1,0 +1,16 @@
+[
+    {
+        "name": "default",
+        "id": "documents",
+        "repository": "",
+        "storage": "/mnt/backups/documents",
+        "encrypted": false,
+        "no_backup": false,
+        "no_restore": false,
+        "no_save_password": false,
+        "nobackup_file": "",
+        "keys": null,
+        "filters": "",
+        "exclude_by_attribute": false
+    }
+]

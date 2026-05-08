@@ -1,0 +1,3 @@
+This directory is intentionally missing a .duplicacy/ subdir, so the
+runner classifies it as not_a_duplicacy_repo. Used by
+TestDiskDuplicacyRunner_CLIRepo_NotARepo.
