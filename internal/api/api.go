@@ -72,6 +72,13 @@ type Server struct {
 	// passphrase value can be resolved without exporting it into
 	// the test process env. Issue #279.
 	borgTestEnvLookup func(string) string
+	// duplicacyRunner is the DuplicacyRunner used by the Duplicacy
+	// Test endpoint (POST /api/v1/backup-monitor/duplicacy/test).
+	// Nil means the handler falls back to
+	// collector.NewDiskDuplicacyRunner (production filesystem read).
+	// Tests override this to inject canned responses without
+	// touching the real filesystem. PRD #310 / issue #313.
+	duplicacyRunner collector.DuplicacyRunner
 	// testLiveTestRegistry is a test-only override for the
 	// LiveTestRegistry resolved from s.scheduler. Production code
 	// always reads through s.liveTestRegistry() which checks this
