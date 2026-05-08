@@ -987,6 +987,27 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
             Add Borg repo
           </button>
         </div>
+
+        <!-- External Duplicacy monitoring (PRD #310 / issue #313).
+             Disk-read by design: NAS Doctor reads the on-disk JSON
+             snapshot files under either a CLI repo's .duplicacy/ tree
+             or a saspus/duplicacy-web container's per-storage cache
+             directory. No duplicacy binary is invoked, no subprocess
+             spawned, no network calls. Users only need to bind-mount
+             the path. -->
+        <div id="duplicacy-monitor-section" style="margin-top:22px;padding-top:16px;border-top:1px solid var(--border)">
+          <div style="display:block;font-weight:600;font-size:13px;color:var(--text);margin-bottom:4px">Backup Monitors &rarr; Duplicacy</div>
+          <p style="font-size:12px;color:var(--text2);margin-top:4px;margin-bottom:10px;line-height:1.5">
+            Monitor <strong>Duplicacy</strong> backups by bind-mounting either the repo root (CLI install) or the cache directory (<code style="font-size:11px;background:var(--input-bg);padding:1px 4px;border-radius:3px">saspus/duplicacy-web</code>) into NAS Doctor.
+            Disk-read only &mdash; the <code style="font-size:11px;background:var(--input-bg);padding:1px 4px;border-radius:3px">duplicacy</code> binary is never invoked.
+            Pick <em>CLI repo</em> for vanilla installs (path is the repo root); pick <em>Web cache</em> for duplicacy-web (path is the cache root, plus the per-repo storage id).
+          </p>
+          <div id="duplicacy-monitor-list" style="margin-bottom:10px"></div>
+          <button class="btn btn-secondary btn-sm" onclick="addDuplicacyMonitorEntry()" style="display:inline-flex;align-items:center;gap:4px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Duplicacy entry
+          </button>
+        </div>
       </div>
     </details>
   </div>
@@ -1799,6 +1820,8 @@ function loadSettings() {
       loadDockerHiddenContainersCheckboxes(hidden);
       /* Advanced: external Borg monitor repos (#279) */
       loadBorgMonitorFromSettings(data.backup_monitor);
+      /* Advanced: Duplicacy backup monitor entries (#313) */
+      loadDuplicacyMonitorFromSettings(data.backup_monitor);
       /* Proxmox VE */
       var pve = data.proxmox || {};
       if (pve.enabled) document.getElementById("pve-toggle").classList.add("on"); else document.getElementById("pve-toggle").classList.remove("on");
@@ -1948,10 +1971,13 @@ function buildSettingsPayload() {
       gpu:        { interval_sec: readPickerIntervalSec("gpu") }
     },
     docker_hidden_containers: collectCheckedHiddenContainers(),
-    /* External BorgBackup monitor config (PRD #278 / issue #279).
-       Purely additive — old v3 blobs decode with an empty array. */
+    /* External BorgBackup monitor config (PRD #278 / issue #279)
+       and external Duplicacy monitor config (PRD #310 / issue #313).
+       Both are purely additive &mdash; old v3 blobs decode with empty
+       arrays. */
     backup_monitor: {
-      borg: collectBorgMonitorRepos()
+      borg: collectBorgMonitorRepos(),
+      duplicacy: collectDuplicacyMonitorEntries()
     }
   };
 }
@@ -4162,6 +4188,206 @@ function testBorgMonitorRepo(idx) {
       resultEl.style.color = "var(--red)";
       resultEl.textContent = "Failed: " + (res.data.message || res.data.reason || "unknown");
     }
+  })
+  .catch(function(e) {
+    if (resultEl) { resultEl.style.color = "var(--red)"; resultEl.textContent = "Network error: " + e.message; }
+  });
+}
+
+/* ---------- External Duplicacy monitor (#313) ---------- */
+// duplicacyMonitorEntries mirrors the BackupMonitor.Duplicacy array
+// from the loaded settings. Each entry carries UI state for one
+// configured Duplicacy repo. Persisted as part of saveSettings.
+//
+// Mirrors the Borg plumbing structurally — same lifecycle: load from
+// settings, render per-entry forms, collect on save, Test against
+// the live form values without first persisting.
+var duplicacyMonitorEntries = [];
+
+function loadDuplicacyMonitorFromSettings(bm) {
+  duplicacyMonitorEntries = (bm && Array.isArray(bm.duplicacy)) ? bm.duplicacy.slice() : [];
+  renderDuplicacyMonitorList();
+}
+
+function renderDuplicacyMonitorList() {
+  var el = document.getElementById("duplicacy-monitor-list");
+  if (!el) return;
+  if (!duplicacyMonitorEntries || duplicacyMonitorEntries.length === 0) {
+    el.innerHTML = '<p style="font-size:12px;color:var(--text2);margin:0;font-style:italic">No Duplicacy entries configured.</p>';
+    return;
+  }
+  var h = '';
+  for (var i = 0; i < duplicacyMonitorEntries.length; i++) {
+    var d = duplicacyMonitorEntries[i] || {};
+    h += renderDuplicacyEntryForm(i, d);
+  }
+  el.innerHTML = h;
+  // After the DOM is populated, run the kind-driven storage_id
+  // visibility for each entry so the initial render matches state.
+  for (var j = 0; j < duplicacyMonitorEntries.length; j++) {
+    onDuplicacyKindChange(j);
+  }
+}
+
+function renderDuplicacyEntryForm(i, d) {
+  // Each form is a self-contained panel with its own inputs; values
+  // are read out in collectDuplicacyMonitorEntries via DOM lookup
+  // by id. Mirrors renderBorgRepoForm structurally.
+  var enabledCls = d.enabled ? 'toggle on' : 'toggle';
+  var kind = (d.kind === 'web-cache') ? 'web-cache' : 'cli-repo';
+  var staleVal = (typeof d.stale_after === 'number' && d.stale_after > 0) ? String(d.stale_after) : '';
+  var h = '';
+  h += '<div class="duplicacy-monitor-entry" data-duplicacy-idx="' + i + '" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px">';
+  h += '<div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">';
+  h += '<div class="toggle-wrap"><div class="' + escapeHtml(enabledCls) + '" id="duplicacy-enabled-' + i + '" onclick="this.classList.toggle(\'on\');markChanged()"><div class="toggle-knob"></div></div><span class="toggle-label">Enabled</span></div>';
+  h += '<input type="text" id="duplicacy-label-' + i + '" value="' + escapeHtml(d.label || '') + '" placeholder="Label (e.g. Documents)" style="flex:1;max-width:260px">';
+  h += '<button class="btn btn-danger btn-sm" onclick="removeDuplicacyMonitorEntry(' + i + ')" style="margin-left:auto">Remove</button>';
+  h += '</div>';
+  h += '<div class="form-row">';
+  // Kind dropdown — drives the storage_id visibility.
+  h += '<div><label for="duplicacy-kind-' + i + '">Kind</label>';
+  h += '<select id="duplicacy-kind-' + i + '" onchange="onDuplicacyKindChange(' + i + ');markChanged()">';
+  h += '<option value="cli-repo"' + (kind === 'cli-repo' ? ' selected' : '') + '>CLI repo (path = repo root)</option>';
+  h += '<option value="web-cache"' + (kind === 'web-cache' ? ' selected' : '') + '>Web cache (saspus/duplicacy-web)</option>';
+  h += '</select></div>';
+  // StaleAfter — number of days, default-30 placeholder cue.
+  h += '<div><label for="duplicacy-stale-after-' + i + '">Stale after (days)</label>';
+  h += '<input type="number" id="duplicacy-stale-after-' + i + '" value="' + escapeHtml(staleVal) + '" placeholder="30" min="0" max="3650" style="font-family:var(--font-mono);font-size:12px"></div>';
+  h += '</div>';
+  h += '<div class="form-row">';
+  // Path — repo root or cache root.
+  h += '<div><label for="duplicacy-path-' + i + '">Path</label>';
+  h += '<input type="text" id="duplicacy-path-' + i + '" value="' + escapeHtml(d.path || '') + '" placeholder="/mnt/duplicacy/repo or /cache/localhost/0" style="font-family:var(--font-mono);font-size:12px"></div>';
+  // StorageID — only meaningful for kind=web-cache. Wrapper carries
+  // the id used by onDuplicacyKindChange to toggle visibility.
+  h += '<div id="duplicacy-storage-id-wrap-' + i + '"><label for="duplicacy-storage-id-' + i + '">Storage ID</label>';
+  h += '<input type="text" id="duplicacy-storage-id-' + i + '" value="' + escapeHtml(d.storage_id || '') + '" placeholder="default or media-storage" style="font-family:var(--font-mono);font-size:12px"></div>';
+  h += '</div>';
+  h += '<div style="display:flex;align-items:center;gap:10px;margin-top:10px">';
+  h += '<button class="btn btn-secondary btn-sm" onclick="testDuplicacyMonitorEntry(' + i + ')">Test</button>';
+  h += '<span id="duplicacy-test-result-' + i + '" style="font-size:12px"></span>';
+  h += '</div>';
+  h += '</div>';
+  return h;
+}
+
+// onDuplicacyKindChange shows the StorageID input only when the
+// per-entry Kind dropdown reads "web-cache". Mirrors how the
+// service-checks form toggles the fleet-instance picker on
+// type=speed (#316) — vanilla JS conditional show/hide.
+function onDuplicacyKindChange(i) {
+  var sel = document.getElementById("duplicacy-kind-" + i);
+  var wrap = document.getElementById("duplicacy-storage-id-wrap-" + i);
+  if (!sel || !wrap) return;
+  if (sel.value === 'web-cache') {
+    wrap.style.display = '';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+function addDuplicacyMonitorEntry() {
+  duplicacyMonitorEntries = collectDuplicacyMonitorEntries();
+  duplicacyMonitorEntries.push({
+    enabled: true,
+    label: "",
+    kind: "cli-repo",
+    path: "",
+    storage_id: "",
+    stale_after: 0
+  });
+  renderDuplicacyMonitorList();
+  markChanged();
+}
+
+function removeDuplicacyMonitorEntry(idx) {
+  // Snapshot current form state first so removing entry N doesn't
+  // drop edits the user made on untouched entries.
+  duplicacyMonitorEntries = collectDuplicacyMonitorEntries();
+  duplicacyMonitorEntries.splice(idx, 1);
+  renderDuplicacyMonitorList();
+  markChanged();
+}
+
+function collectDuplicacyMonitorEntries() {
+  var out = [];
+  for (var i = 0; i < duplicacyMonitorEntries.length; i++) {
+    var enabledEl = document.getElementById("duplicacy-enabled-" + i);
+    var kindEl = document.getElementById("duplicacy-kind-" + i);
+    var staleEl = document.getElementById("duplicacy-stale-after-" + i);
+    var staleRaw = staleEl ? staleEl.value : "";
+    var staleNum = parseInt(staleRaw, 10);
+    if (isNaN(staleNum) || staleNum < 0) staleNum = 0;
+    out.push({
+      enabled: enabledEl ? enabledEl.classList.contains("on") : !!duplicacyMonitorEntries[i].enabled,
+      label: (document.getElementById("duplicacy-label-" + i) || {}).value || "",
+      kind: kindEl ? kindEl.value : "cli-repo",
+      path: ((document.getElementById("duplicacy-path-" + i) || {}).value || "").trim(),
+      storage_id: ((document.getElementById("duplicacy-storage-id-" + i) || {}).value || "").trim(),
+      stale_after: staleNum
+    });
+  }
+  return out;
+}
+
+function testDuplicacyMonitorEntry(idx) {
+  // Read the entry's CURRENT form values rather than the saved
+  // snapshot so users can iterate on Path / Kind / StorageID
+  // without first saving (acceptance criterion 6).
+  var all = collectDuplicacyMonitorEntries();
+  var entry = all[idx];
+  var resultEl = document.getElementById("duplicacy-test-result-" + idx);
+  if (!entry) { return; }
+  if (!entry.path) {
+    if (resultEl) { resultEl.style.color = "var(--red)"; resultEl.textContent = "Path required"; }
+    return;
+  }
+  if (entry.kind === 'web-cache' && !entry.storage_id) {
+    if (resultEl) { resultEl.style.color = "var(--red)"; resultEl.textContent = "Storage ID required for web-cache"; }
+    return;
+  }
+  if (resultEl) { resultEl.style.color = "var(--text2)"; resultEl.textContent = "Testing..."; }
+  fetch("/api/v1/backup-monitor/duplicacy/test", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(entry)
+  })
+  .then(function(r) { return r.json().then(function(d) { return { status: r.status, data: d }; }); })
+  .then(function(res) {
+    if (!resultEl) return;
+    if (res.status >= 400) {
+      resultEl.style.color = "var(--red)";
+      resultEl.textContent = "Error: " + (res.data.error || res.status);
+      return;
+    }
+    var d = res.data || {};
+    var color, label;
+    if (d.ok) {
+      color = "var(--green)";
+      label = "OK";
+    } else if (d.reason === 'no_snapshots_yet') {
+      color = "var(--text2)";
+      label = "No snapshots yet";
+    } else if (d.reason === 'stale') {
+      color = "var(--yellow, #d4a017)";
+      label = "Stale";
+    } else {
+      color = "var(--red)";
+      label = "Failed: " + (d.reason || "unknown");
+    }
+    var details = "";
+    if (d.snapshot_count) {
+      details += " · " + d.snapshot_count + " snapshot(s)";
+    }
+    if (d.latest_backup_at) {
+      details += " · latest " + d.latest_backup_at;
+    }
+    if (d.message) {
+      details += " — " + d.message;
+    }
+    var runningBadge = d.currently_running ? " · running" : "";
+    resultEl.style.color = color;
+    resultEl.textContent = label + runningBadge + details;
   })
   .catch(function(e) {
     if (resultEl) { resultEl.style.color = "var(--red)"; resultEl.textContent = "Network error: " + e.message; }
