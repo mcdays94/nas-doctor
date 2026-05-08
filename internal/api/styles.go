@@ -251,6 +251,24 @@ body.theme-clean .badge-generic { background:rgba(0,0,0,0.06) }
 .pill-speed { background:rgba( 34,211,238,0.14); color:#22d3ee } /* cyan-400    */
 .pill-trace { background:rgba( 45,212,191,0.14); color:#2dd4bf } /* teal-400    */
 
+/* ── Backup row variants (Duplicacy) ──────────────────────────
+   PRD #310 V1c / issue #314. Mirrored verbatim into both dashboard
+   theme templates (midnight.html, clean.html) — they don't link
+   /css/shared.css so any class used on the dashboard MUST be
+   inlined into both themes. Locked by
+   TestStyles_DuplicacyBackupRow_ThreeSourceParity. */
+.backup-card-duplicacy { /* layout inherits from .backup-card */ }
+.duplicacy-kind-tag {
+  font-size:10px; font-weight:600; letter-spacing:0.5px;
+  padding:2px 6px; border-radius:4px;
+  background:rgba(168,85,247,0.15); color:#c084fc; /* purple-400 */
+}
+.duplicacy-running-badge {
+  font-size:10px; font-weight:600; letter-spacing:0.5px;
+  padding:2px 6px; border-radius:4px;
+  background:rgba( 34,211,238,0.15); color:#22d3ee; /* cyan-400 */
+}
+
 /* ── Status Dots ────────────────────────────────────────────── */
 .status-dot.degraded { background:#f59e0b }
 

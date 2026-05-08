@@ -186,12 +186,12 @@ type BorgExternalRepo struct {
 // slice-1 WakeDrives and MaxAgeDays knobs that it inherited from the
 // retired top-level Settings.SMART.
 type AdvancedScansSettings struct {
-	SMART      AdvancedScansSMART      `json:"smart"`
-	Docker     AdvancedScansSubsystem  `json:"docker"`
-	Proxmox    AdvancedScansSubsystem  `json:"proxmox"`
-	Kubernetes AdvancedScansSubsystem  `json:"kubernetes"`
-	ZFS        AdvancedScansSubsystem  `json:"zfs"`
-	GPU        AdvancedScansSubsystem  `json:"gpu"`
+	SMART      AdvancedScansSMART     `json:"smart"`
+	Docker     AdvancedScansSubsystem `json:"docker"`
+	Proxmox    AdvancedScansSubsystem `json:"proxmox"`
+	Kubernetes AdvancedScansSubsystem `json:"kubernetes"`
+	ZFS        AdvancedScansSubsystem `json:"zfs"`
+	GPU        AdvancedScansSubsystem `json:"gpu"`
 }
 
 // AdvancedScansSubsystem is the minimal shape shared by the five
@@ -1171,6 +1171,10 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		// next backup tick picks up changes without a restart
 		// (issue #279 user stories 2/4/7).
 		s.collector.SetBackupMonitorBorg(apiBorgReposToCollector(settings.BackupMonitor.Borg))
+		// Push Duplicacy entry config onto the collector so the next
+		// backup tick picks up changes without a restart (issue #314 /
+		// PRD #310 V1c). Mirrors the Borg pattern above.
+		s.collector.SetBackupMonitorDuplicacy(apiDuplicacyEntriesToCollector(settings.BackupMonitor.Duplicacy))
 		// Update the max-age safety-net threshold on the scheduler
 		// (#238). The scheduler owns this policy (the collector stays
 		// DB-unaware) and applies it after each scan's Collect().

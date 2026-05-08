@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
 	"github.com/prometheus/client_golang/prometheus"
@@ -142,6 +143,25 @@ type Metrics struct {
 	backupLastSuccess *prometheus.GaugeVec
 	backupSizeBytes   *prometheus.GaugeVec
 	backupStatus      *prometheus.GaugeVec
+
+	// ── Backup (Duplicacy, PRD #310 V1c / issue #314) ──
+	// Per-entry gauges for Duplicacy repos. Naming + label
+	// conventions parallel nasdoctor_backup_borg_* would have, except
+	// the existing Borg gauges live under `backup` (not
+	// backup_borg). Per the V1c PRD §8 the new gauges go under
+	// `backup_duplicacy` so Grafana panels can group "duplicacy
+	// across all repos" with a single regex on the metric name.
+	// label = entry's user-supplied Label (sanitized to lowercase
+	// alphanumeric + `_` + `-`).
+	//
+	// last_backup_age_seconds is computed at scrape time (now - latest_backup_at)
+	// rather than scan time so the gauge monotonically increases between
+	// scans — matching how the Borg `backup_last_success_timestamp`
+	// gauge gets translated to "age" in Grafana queries.
+	backupDuplicacySnapshotsTotal      *prometheus.GaugeVec
+	backupDuplicacyLastBackupAgeSec    *prometheus.GaugeVec
+	backupDuplicacyLastBackupSizeBytes *prometheus.GaugeVec
+	backupDuplicacyStatus              *prometheus.GaugeVec
 
 	// ── Speed Test ──
 	speedtestDownload prometheus.Gauge
@@ -365,6 +385,14 @@ func NewMetrics() *Metrics {
 	m.backupSizeBytes = gaugeVec(ns, "backup", "size_bytes", "Backup total size in bytes", backupLabels)
 	m.backupStatus = gaugeVec(ns, "backup", "status", "Backup status (1=ok, 0.5=warning, 0=stale/failed)", backupLabels)
 
+	// ── Backup (Duplicacy) ── — PRD #310 V1c / issue #314
+	dupSimpleLabels := []string{"label"}
+	dupStatusLabels := []string{"label", "reason"}
+	m.backupDuplicacySnapshotsTotal = gaugeVec(ns, "backup_duplicacy", "snapshots_total", "Total Duplicacy snapshot revisions across all snapshot IDs in the repo", dupSimpleLabels)
+	m.backupDuplicacyLastBackupAgeSec = gaugeVec(ns, "backup_duplicacy", "last_backup_age_seconds", "Age in seconds of the newest Duplicacy snapshot at scrape time (resolves at scrape, monotonic between scans)", dupSimpleLabels)
+	m.backupDuplicacyLastBackupSizeBytes = gaugeVec(ns, "backup_duplicacy", "last_backup_size_bytes", "file_size of the newest Duplicacy snapshot in bytes", dupSimpleLabels)
+	m.backupDuplicacyStatus = gaugeVec(ns, "backup_duplicacy", "status", "Duplicacy entry status — 1 for the entry's current reason code, 0 for the others (mirrors Borg status convention with reason as a label)", dupStatusLabels)
+
 	// ── Speed Test ──
 	m.speedtestDownload = gauge(ns, "speedtest", "download_mbps", "Latest speed test download in Mbps")
 	m.speedtestUpload = gauge(ns, "speedtest", "upload_mbps", "Latest speed test upload in Mbps")
@@ -419,6 +447,8 @@ func NewMetrics() *Metrics {
 		m.gpuTemperature, m.gpuPowerW, m.gpuPowerMaxW, m.gpuFanPct,
 		m.gpuEncoderPct, m.gpuDecoderPct,
 		m.backupLastSuccess, m.backupSizeBytes, m.backupStatus,
+		m.backupDuplicacySnapshotsTotal, m.backupDuplicacyLastBackupAgeSec,
+		m.backupDuplicacyLastBackupSizeBytes, m.backupDuplicacyStatus,
 		m.speedtestDownload, m.speedtestUpload, m.speedtestLatency, m.speedtestEngine, m.speedtestInProgress, m.speedtestSamplesCount,
 		m.findingsTotal, m.findingsCritical, m.findingsWarning,
 		m.collectionDuration, m.lastCollectionTime, m.updateAvailable,
@@ -727,6 +757,15 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 	m.backupLastSuccess.Reset()
 	m.backupSizeBytes.Reset()
 	m.backupStatus.Reset()
+	// Duplicacy gauges (#314): reset before re-stamping so removed
+	// entries don't linger. Status family resets first because it
+	// emits one series per (label, reason) pair — without the reset
+	// a renamed/removed entry would leave 8 stale 0-valued series
+	// per old label.
+	m.backupDuplicacySnapshotsTotal.Reset()
+	m.backupDuplicacyLastBackupAgeSec.Reset()
+	m.backupDuplicacyLastBackupSizeBytes.Reset()
+	m.backupDuplicacyStatus.Reset()
 	if snap.Backup != nil && snap.Backup.Available {
 		for _, job := range snap.Backup.Jobs {
 			l := prometheus.Labels{"provider": job.Provider, "name": job.Name}
@@ -741,6 +780,60 @@ func (m *Metrics) Update(snap *internal.Snapshot) {
 				m.backupStatus.With(l).Set(0.5)
 			default: // stale, failed
 				m.backupStatus.With(l).Set(0)
+			}
+		}
+		// Duplicacy: one series-set per entry. Naming + label
+		// conventions match `backup_borg_*` (issue #314 acceptance
+		// criterion). last_backup_age_seconds is computed at scrape
+		// time so it monotonically increases between scans — same
+		// pattern as nasdoctor_speedtest_in_progress.
+		nowUnix := snap.Timestamp.Unix()
+		if snap.Timestamp.IsZero() {
+			nowUnix = time.Now().Unix()
+		}
+		for _, dup := range snap.Backup.Duplicacy {
+			// Duplicacy gauges use a slug-form label (lowercase
+			// alphanumeric + `_` + `-`) so Grafana panels can group
+			// "all duplicacy entries" with stable label values
+			// regardless of casing/whitespace in the user's display
+			// name. PRD #310 §8.
+			label := slugifyDuplicacyLabel(dup.Label)
+			if label == "" {
+				// Empty Label falls back to the basename of Path so
+				// the series doesn't carry an empty label{} pair.
+				label = slugifyDuplicacyLabel(deriveLabelFromPath(dup.Path))
+			}
+			if label == "" {
+				label = "duplicacy"
+			}
+			simple := prometheus.Labels{"label": label}
+			m.backupDuplicacySnapshotsTotal.With(simple).Set(float64(dup.SnapshotCount))
+			m.backupDuplicacyLastBackupSizeBytes.With(simple).Set(float64(dup.LatestBackupSizeBytes))
+			if !dup.LatestBackupAt.IsZero() {
+				age := nowUnix - dup.LatestBackupAt.Unix()
+				if age < 0 {
+					age = 0
+				}
+				m.backupDuplicacyLastBackupAgeSec.With(simple).Set(float64(age))
+			} else {
+				// No snapshots yet — emit 0 so the gauge exists with
+				// the entry's label (vs being absent, which Grafana
+				// queries treat differently).
+				m.backupDuplicacyLastBackupAgeSec.With(simple).Set(0)
+			}
+			// Status family — one series per (label, reason) pair,
+			// 1 for the entry's current reason code and 0 for the
+			// others. Mirrors notifier convention used for
+			// nasdoctor_speedtest_engine{engine=…}.
+			for _, reason := range duplicacyAllReasons {
+				val := 0.0
+				if reason == dup.ReasonCode {
+					val = 1.0
+				}
+				m.backupDuplicacyStatus.With(prometheus.Labels{
+					"label":  label,
+					"reason": reason,
+				}).Set(val)
 			}
 		}
 	}
@@ -818,6 +911,94 @@ func boolToFloat(b bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+// duplicacyAllReasons mirrors collector.DuplicacyReason* values in
+// stable string form. Kept as a package-private slice rather than
+// importing internal/collector to avoid pulling the runner +
+// fixture-machinery into the notifier's dependency graph. The list
+// is locked by TestPrometheus_DuplicacyReasonStability in the
+// collector package's test suite + a notifier-side regression test
+// asserting len(this) == 8 (matches PRD #310 §4 closed set). Issue
+// #314.
+var duplicacyAllReasons = []string{
+	"ok",
+	"path_not_found",
+	"path_unreadable",
+	"not_a_duplicacy_repo",
+	"storage_id_not_found",
+	"no_snapshots_yet",
+	"stale",
+	"corrupt_snapshot",
+}
+
+// slugifyDuplicacyLabel lowercases + replaces non-alphanumeric runs
+// with `_`, trimming leading/trailing underscores. Used for the
+// `label` Prometheus label on the four nasdoctor_backup_duplicacy_*
+// gauge families. The slug form keeps Grafana panel queries stable
+// across user-display-name edits ("Photos Nightly" → "photos_nightly")
+// and across casing differences. Mirrors the slug shape Grafana
+// dashboards typically use for label-pivoted queries. Issue #314.
+func slugifyDuplicacyLabel(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	out := make([]byte, 0, len(s))
+	prevSep := true // collapse leading separators
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+			out = append(out, c+('a'-'A'))
+			prevSep = false
+		case (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'):
+			out = append(out, c)
+			prevSep = false
+		case c == '-':
+			// Preserve dashes — mirror Prometheus convention of
+			// allowing `-` in label values; nas-doctor's existing
+			// label conventions accept it.
+			if !prevSep {
+				out = append(out, '-')
+				prevSep = true
+			}
+		default:
+			if !prevSep {
+				out = append(out, '_')
+				prevSep = true
+			}
+		}
+	}
+	// Trim trailing separator.
+	for len(out) > 0 && (out[len(out)-1] == '_' || out[len(out)-1] == '-') {
+		out = out[:len(out)-1]
+	}
+	if len(out) > 128 {
+		out = out[:128]
+	}
+	return string(out)
+}
+
+// deriveLabelFromPath returns the basename of a duplicacy entry path,
+// used as a fallback when the user-supplied Label is empty. Mirrors
+// filepath.Base but avoids that import here (notifier should stay
+// dep-light) — string-split is cheap and the path values are short.
+func deriveLabelFromPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' {
+			if i == len(path)-1 {
+				// Trailing slash — strip and continue.
+				path = path[:i]
+				return deriveLabelFromPath(path)
+			}
+			return path[i+1:]
+		}
+	}
+	return path
 }
 
 func sanitizeLabel(s string) string {

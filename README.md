@@ -119,13 +119,15 @@ Auto-detects and tracks backups from the following tools when their CLI
 is reachable from the NAS Doctor container:
 
 - **Borg**, **Restic**, **Proxmox Backup Server (PBS)**, **Duplicati** — probed via `exec.LookPath` at each scan
+- **Duplicacy** — disk-read, no `duplicacy` binary required (since v0.10.0). Configure CLI repos or saspus/duplicacy-web cache layouts in **Settings → Advanced → Backup Monitors → Duplicacy**. See [Duplicacy Monitoring](#duplicacy-monitoring-disk-read-no-binary-required) below.
 - Tracks last backup time, size, snapshot count, duration, encryption status
 - **Stale backup alerts**: warning >24h, critical >48h, failed backups
 
 > **Note**: Restic, PBS, and Duplicati binaries don't ship in the
 > NAS Doctor Docker image. Borg **is** bundled (since v0.9.10; see
 > External Borg Monitoring below) and can be pointed at host-managed
-> repos via a Read Only bind-mount — no custom image needed. For
+> repos via a Read Only bind-mount — no custom image needed. **Duplicacy**
+> needs no binary at all (disk-read; see Duplicacy Monitoring below). For
 > Restic/PBS/Duplicati the Backup dashboard section stays empty unless
 > you install the provider CLI inside the container (custom Dockerfile)
 > or run the provider in a sibling container that shares volumes/network
@@ -190,6 +192,55 @@ SSH Key Path:      (leave blank — local repo)
 Click **Test** to verify; the response shows the archive count on
 success or a specific error reason on failure. No container restart
 needed — the repo appears on the dashboard at the next scan tick.
+
+#### Duplicacy Monitoring (disk-read, no binary required)
+
+Both vanilla Duplicacy CLI installs and the popular
+[saspus/duplicacy-web](https://hub.docker.com/r/saspus/duplicacy-web)
+container are monitored by **reading the on-disk JSON snapshot files**
+that Duplicacy writes alongside its repo cache — **no `duplicacy` binary
+is invoked, no subprocess spawned, no network call made**. This sidesteps
+Duplicacy's source-available CLI licence (so we don't bundle a binary)
+and works equally well for both deployment shapes.
+
+Configure in **Settings → Advanced → Backup Monitors → Duplicacy**:
+
+1. **Kind** — `cli-repo` (vanilla CLI install) or `web-cache` (saspus/
+   duplicacy-web container layout).
+2. **Path** — repo root (cli-repo) or the cache root (web-cache),
+   visible inside the NAS Doctor container. Bind-mount your Duplicacy
+   path **Read Only** — disk-read makes RO mounts safe.
+3. **Storage ID** — only for `kind=web-cache`. Names the per-repo
+   subdir under Path that the saspus container writes to.
+4. **Stale After (days)** — repo whose newest snapshot is older than
+   this threshold reports the `stale` reason. Default 30 days; set
+   per-entry to support mixed daily/weekly/monthly schedules.
+5. **Label** — optional display name for the dashboard.
+
+Each entry has a **Test** button that runs the disk-read against the
+tentative config and shows the outcome immediately (no save+scan+wait
+loop). Reason codes are a closed set:
+
+`ok` · `path_not_found` · `path_unreadable` · `not_a_duplicacy_repo` ·
+`storage_id_not_found` · `no_snapshots_yet` · `stale` · `corrupt_snapshot`
+
+The dashboard widget renders one row per configured entry with the
+kind tag (`DUPLICACY:CLI-REPO` / `DUPLICACY:WEB-CACHE`), a
+severity-coloured status pill keyed off the reason code (ok=success,
+no_snapshots_yet=info, stale=warning, anything else=error), snapshot
+count, last-backup-age, and an orthogonal `RUNNING` badge when a
+lock or `incomplete` marker is detected on disk. Failed entries
+render as red error cards with the specific reason so users can tell
+at a glance whether they have a misconfigured Path, a missing Storage
+ID, or a fresh-never-run repo.
+
+Per-entry Prometheus gauges:
+`nasdoctor_backup_duplicacy_snapshots_total{label="…"}`,
+`_last_backup_age_seconds{label="…"}`,
+`_last_backup_size_bytes{label="…"}`,
+`_status{label="…",reason="…"}` (1 for the entry's current reason
+code, 0 for the others — same convention as
+`nasdoctor_speedtest_engine`).
 
 ### Network Speed Test
 
@@ -712,6 +763,12 @@ nasdoctor_gpu_encoder_percent / _decoder_percent
 # Backup (labels: provider, name)
 nasdoctor_backup_last_success_timestamp / _size_bytes / _status
 
+# Backup — Duplicacy (labels: label, +reason on _status) — 4 gauges per entry
+nasdoctor_backup_duplicacy_snapshots_total{label="…"}
+nasdoctor_backup_duplicacy_last_backup_age_seconds{label="…"}     # resolves at scrape time, monotonic between scans
+nasdoctor_backup_duplicacy_last_backup_size_bytes{label="…"}
+nasdoctor_backup_duplicacy_status{label="…",reason="…"}           # 1 for current reason, 0 for others (8-reason closed set)
+
 # Speed Test
 nasdoctor_speedtest_download_mbps / _upload_mbps / _latency_ms
 nasdoctor_speedtest_in_progress                            # 1 while a test is running
@@ -785,6 +842,8 @@ All bind mounts in one place — match the per-platform Quick Start tables above
 | `/var/run/tailscale` | `/var/run/tailscale` | Tailscale peer graph (mount only if you use Tailscale on the host) |
 
 > **External Borg repos** add their own bind-mount entries on top of the table — see [External Borg Monitoring (host-managed repos)](#external-borg-monitoring-host-managed-repos) above for repo-path mount conventions and required env vars.
+>
+> **Duplicacy entries** also add bind-mount entries (one per repo or cache root, **Read Only** — disk-read makes RO mounts safe). See [Duplicacy Monitoring (disk-read, no binary required)](#duplicacy-monitoring-disk-read-no-binary-required) above. **No env vars required**, no binary mount, no extra Docker capability.
 
 ### Source tree
 
@@ -829,7 +888,7 @@ Each platform renders realistic per-platform telemetry:
 - **Compute** — 3–11 Docker containers per platform, Top Processes with container attribution, GPU monitoring (Unraid RTX A2000, Proxmox Tesla P4), CPU + mainboard temperature gauges in the header (Unraid, TrueNAS, Proxmox; gracefully hidden on Synology / Kubernetes to showcase the empty-sensor fallback)
 - **Storage health** — ZFS pools where applicable (TrueNAS raidz2, Proxmox mirror), UPS power monitoring, parity history (Unraid)
 - **Network** — 8 service checks (one per check type: http/tcp/dns/ping/smb/nfs/speed/traceroute) with 7 days of history, 24h speed-test history with `via {engine}` caption on the latest result and per-row engine annotation, expand any speed entry on `/service-checks` for the per-sample throughput chart, Cloudflared + Tailscale tunnels (Unraid + Proxmox)
-- **Backups** — Borg / Restic / PBS / Duplicati / rclone repos with healthy + warning + error states, including v0.9.10's external-Borg "CONFIGURED" pill and error-card reason codes
+- **Backups** — Borg / Restic / PBS / Duplicati / rclone repos with healthy + warning + error states, v0.9.10's external-Borg "CONFIGURED" pill + error-card reason codes, **and v0.10.0's Duplicacy rows** showing both `cli-repo` + `web-cache` layouts on Unraid (one healthy + one stale-with-RUNNING-badge to demonstrate the V1c severity rendering and orthogonal aux flag)
 - **Alerts & incidents** — Active + resolved + snoozed alerts, 10-event incident timeline with system-metric correlation, webhook delivery history
 - **Fleet** — 4 remote servers with topology view and tunnel-type detection
 

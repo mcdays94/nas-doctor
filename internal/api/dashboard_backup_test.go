@@ -65,7 +65,12 @@ func TestDashboardJS_BackupSection_PreservesExistingBehavior(t *testing.T) {
 		{"sections.backup defined", "sections.backup = function(sn)"},
 		{"data-section attribute", `data-section="backup"`},
 		{"renders backup jobs count", "Backup Jobs ("},
-		{"guards on backup.available and jobs", "backup.available && backup.jobs && backup.jobs.length > 0"},
+		// Combined-guard pattern after issue #314 — total row count
+		// covers both Borg jobs and Duplicacy entries. Borg-only
+		// installs still hit the empty-state branch on
+		// backup.jobs=[] AND backup.duplicacy=[]/undef, preserving
+		// pre-V1c behaviour.
+		{"guards on totalRows > 0", "backup.available && totalRows > 0"},
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {

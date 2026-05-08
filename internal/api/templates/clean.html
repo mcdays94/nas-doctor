@@ -65,6 +65,12 @@ body{min-height:100vh;background:#fff}
 .pill-ping  { background:rgba(139, 92,246,0.14); color:#a78bfa }
 .pill-speed { background:rgba( 34,211,238,0.14); color:#22d3ee }
 .pill-trace { background:rgba( 45,212,191,0.14); color:#2dd4bf }
+/* Duplicacy backup row variants (PRD #310 V1c / issue #314).
+   Pinned by TestStyles_DuplicacyBackupRow_ThreeSourceParity. Themes
+   do not link /css/shared.css so this MUST be inlined here. */
+.backup-card-duplicacy { /* layout inherits from .backup-card */ }
+.duplicacy-kind-tag { font-size:10px; font-weight:600; letter-spacing:0.5px; padding:2px 6px; border-radius:4px; background:rgba(168,85,247,0.15); color:#c084fc }
+.duplicacy-running-badge { font-size:10px; font-weight:600; letter-spacing:0.5px; padding:2px 6px; border-radius:4px; background:rgba( 34,211,238,0.15); color:#22d3ee }
 /* Ephemeral /data warning banner (#227). Rendered by util.ephemeralDataBanner
    when /api/v1/status reports data_ephemeral=true. MUST be inlined here
    because dashboard theme templates do not link /css/shared.css — see
