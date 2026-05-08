@@ -98,6 +98,52 @@ export interface PlatformProfile {
   // error card with the matching error_reason code (showcases the
   // failure UI without needing real broken repos).
   configuredBorgRepos?: ConfiguredBorgRepo[];
+  // Duplicacy entries configured under Settings → Advanced → Backup
+  // Monitors → Duplicacy (PRD #310 / V1c, issue #314, shipped in
+  // v0.10.0). Each entry shows up in two places:
+  // (1) snapshot.backup.duplicacy[] as a DuplicacyJobState — the
+  //     dashboard widget renders one row per entry with the kind
+  //     tag, status pill keyed off reason_code, snapshot count,
+  //     last-backup-age, optional running badge, and (on non-OK
+  //     reasons) an error-card body.
+  // (2) settings.backup_monitor.duplicacy as the user-configured
+  //     list, so visitors who click into Settings see the entries
+  //     pre-populated rather than an empty form.
+  // The feeder synthesises plausible aggregate state per entry so
+  // both healthy + stale layouts are demonstrated on the public
+  // demo without a real Duplicacy install.
+  configuredDuplicacyEntries?: ConfiguredDuplicacyEntry[];
+}
+
+// ConfiguredDuplicacyEntry mirrors api.DuplicacyEntry (CLI-repo or
+// web-cache layouts) plus the synthetic state the feeder fabricates
+// for the snapshot. Reason codes form a closed set; severity mapping
+// matches the dashboard widget (ok=success, no_snapshots_yet=info,
+// stale=warning, everything else=error). Issue #314.
+interface ConfiguredDuplicacyEntry {
+  label: string;
+  // Closed set: "cli-repo" | "web-cache". Validated by the demo
+  // widget-coverage test so a typo in this file fails CI.
+  kind: "cli-repo" | "web-cache";
+  // Container-visible path. Repo root for cli-repo; cache root for
+  // web-cache.
+  path: string;
+  // Per-repo subdir for kind=web-cache. Empty for cli-repo.
+  storage_id?: string;
+  stale_after_days?: number;
+  // Synthetic state for the snapshot. reason_code closed set:
+  //   "ok" | "no_snapshots_yet" | "stale" | "path_not_found" |
+  //   "path_unreadable" | "not_a_duplicacy_repo" |
+  //   "storage_id_not_found" | "corrupt_snapshot"
+  reason_code: string;
+  snapshot_count?: number;
+  last_backup_hours_ago?: number;
+  last_backup_size_bytes?: number;
+  last_backup_files?: number;
+  currently_running?: boolean;
+  latest_snapshot_id?: string;
+  latest_snapshot_revision?: number;
+  snapshot_ids?: string[];
 }
 
 // ConfiguredBorgRepo is one external-Borg entry the demo wires into
@@ -162,6 +208,47 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
       // like in the dashboard widget. v0.9.10 #279 user stories 12-14.
       { label: "Cold Storage", repo_path: "/mnt/user/borg/cold", passphrase_env: "BORG_PASSPHRASE_COLD", error: { reason: "passphrase_rejected", message: "borg list exited 2: passphrase supplied in BORG_PASSPHRASE_COLD does not decrypt the repository" } },
     ],
+    // Duplicacy entries — one healthy CLI repo and one stale
+    // web-cache so visitors see BOTH layout kinds + BOTH severity
+    // bands rendered in the same dashboard widget. PRD #310 V1c /
+    // issue #314 acceptance criterion 3.
+    configuredDuplicacyEntries: [
+      // Healthy CLI-layout repo, daily backups.
+      {
+        label: "Documents",
+        kind: "cli-repo",
+        path: "/mnt/user/duplicacy/documents",
+        stale_after_days: 7,
+        reason_code: "ok",
+        snapshot_count: 217,
+        last_backup_hours_ago: 5.2,
+        last_backup_size_bytes: 44_000_000_000,
+        last_backup_files: 38500,
+        currently_running: false,
+        latest_snapshot_id: "documents",
+        latest_snapshot_revision: 217,
+        snapshot_ids: ["documents"],
+      },
+      // Stale saspus/duplicacy-web layout — last successful backup
+      // 12 days ago, StaleAfter=7d → stale reason. Currently running
+      // is true to also showcase the orthogonal RUNNING badge.
+      {
+        label: "Media via duplicacy-web",
+        kind: "web-cache",
+        path: "/mnt/user/appdata/duplicacy-web/cache/localhost/0/.duplicacy/cache",
+        storage_id: "media",
+        stale_after_days: 7,
+        reason_code: "stale",
+        snapshot_count: 36,
+        last_backup_hours_ago: 288, // 12 days
+        last_backup_size_bytes: 1_840_000_000_000,
+        last_backup_files: 1_120_000,
+        currently_running: true,
+        latest_snapshot_id: "media",
+        latest_snapshot_revision: 36,
+        snapshot_ids: ["media"],
+      },
+    ],
   },
   synology: {
     hostname: "synology-nas", platformName: "Synology DSM 7.2.2", cpuModel: "Intel Celeron J4125", cpuCores: 4, ramGB: 8, uptimeDays: 90,
@@ -182,6 +269,27 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
     speedTest: { downloadMbps: 450, uploadMbps: 42, latencyMs: 14.2, jitterMs: 2.8, serverName: "BT Wholesale Manchester", isp: "BT Broadband" },
     configuredBorgRepos: [
       { label: "Photos Nightly", repo_path: "/volume1/borg/photos-nightly", passphrase_env: "BORG_PASSPHRASE", snapshotCount: 152, sizeBytes: 920_000_000_000, lastSuccessHoursAgo: 5.1 },
+    ],
+    // One healthy Duplicacy CLI-repo on Synology — same path-layout
+    // most saspus-web users have, just shown via the cli-repo kind
+    // because the demo profile already showcases web-cache on
+    // Unraid. PRD #310 V1c / issue #314.
+    configuredDuplicacyEntries: [
+      {
+        label: "Family Photos",
+        kind: "cli-repo",
+        path: "/volume1/duplicacy/family-photos",
+        stale_after_days: 14,
+        reason_code: "ok",
+        snapshot_count: 89,
+        last_backup_hours_ago: 11.3,
+        last_backup_size_bytes: 612_000_000_000,
+        last_backup_files: 425000,
+        currently_running: false,
+        latest_snapshot_id: "family-photos",
+        latest_snapshot_revision: 89,
+        snapshot_ids: ["family-photos"],
+      },
     ],
   },
   truenas: {
@@ -213,6 +321,26 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
     configuredBorgRepos: [
       { label: "Tank Archive", repo_path: "/mnt/tank/backups/borg-archive", passphrase_env: "BORG_PASSPHRASE", snapshotCount: 218, sizeBytes: 2_700_000_000_000, lastSuccessHoursAgo: 14.3 },
     ],
+    configuredDuplicacyEntries: [
+      // Healthy web-cache layout to give TrueNAS visitors a
+      // representative view too.
+      {
+        label: "Tank Snapshots",
+        kind: "web-cache",
+        path: "/mnt/tank/duplicacy-web/cache/localhost/0/.duplicacy/cache",
+        storage_id: "tank-main",
+        stale_after_days: 30,
+        reason_code: "ok",
+        snapshot_count: 142,
+        last_backup_hours_ago: 16.1,
+        last_backup_size_bytes: 4_900_000_000_000,
+        last_backup_files: 2_100_000,
+        currently_running: false,
+        latest_snapshot_id: "tank-main",
+        latest_snapshot_revision: 142,
+        snapshot_ids: ["tank-main"],
+      },
+    ],
   },
   proxmox: {
     hostname: "pve-node01", platformName: "Proxmox VE 8.3.2", cpuModel: "Intel Xeon E-2388G", cpuCores: 8, ramGB: 128, uptimeDays: 45,
@@ -236,6 +364,23 @@ export const PROFILES: Record<Platform, PlatformProfile> = {
     gpuDevice: { name: "NVIDIA Tesla P4", vendor: "nvidia", driver: "535.216", memTotalMB: 8192, memUsedPct: 58, powerMaxW: 75, usagePct: 62, tempC: 48 },
     configuredBorgRepos: [
       { label: "VM Config Snapshots", repo_path: "/mnt/vm-storage/borg-vmconf", passphrase_env: "BORG_PASSPHRASE", snapshotCount: 96, sizeBytes: 48_000_000_000, lastSuccessHoursAgo: 3.7 },
+    ],
+    configuredDuplicacyEntries: [
+      {
+        label: "VM Snapshots",
+        kind: "cli-repo",
+        path: "/mnt/vm-storage/duplicacy-vmsnap",
+        stale_after_days: 7,
+        reason_code: "ok",
+        snapshot_count: 168,
+        last_backup_hours_ago: 4.1,
+        last_backup_size_bytes: 2_300_000_000_000,
+        last_backup_files: 88000,
+        currently_running: false,
+        latest_snapshot_id: "vm-snapshots",
+        latest_snapshot_revision: 168,
+        snapshot_ids: ["vm-snapshots"],
+      },
     ],
   },
   kubernetes: {
@@ -379,6 +524,21 @@ export function transformSettings(d: Record<string, unknown>, p: PlatformProfile
     },
     backup_monitor: {
       borg: borgMonitorList,
+      // Duplicacy entries (PRD #310 V1c / issue #314) — mirror of
+      // PlatformProfile.configuredDuplicacyEntries with the
+      // {enabled, label, kind, path, storage_id, stale_after}
+      // shape that api.DuplicacyEntry persists. Used by the
+      // Settings page's Backup Monitors → Duplicacy subsection
+      // (V1b) so visitors clicking through Settings see the
+      // entries pre-populated.
+      duplicacy: (p.configuredDuplicacyEntries || []).map((d) => ({
+        enabled: true,
+        label: d.label,
+        kind: d.kind,
+        path: d.path,
+        storage_id: d.storage_id || "",
+        stale_after: d.stale_after_days || 0,
+      })),
     },
     service_checks: {
       checks: [
@@ -1191,7 +1351,7 @@ function buildBackup(p: PlatformProfile, platform: Platform): Record<string, unk
     // dashboard renders the "no backup provider detected" empty
     // state, which is what a Velero-managed cluster would show
     // to NAS Doctor.
-    return { available: false, jobs: [] };
+    return { available: false, jobs: [], duplicacy: [] };
   }
   // Append the explicit external Borg repos configured under
   // Settings → Backup Monitors → Borg (v0.9.10 / #279). These
@@ -1199,7 +1359,40 @@ function buildBackup(p: PlatformProfile, platform: Platform): Record<string, unk
   // an injected `error` render as red error cards with the
   // matching reason code.
   const configured = buildConfiguredBorgEntries(p);
-  return { available: true, jobs: [...repos, ...configured] };
+  // Append the Duplicacy entries (PRD #310 V1c / issue #314) as a
+  // sibling field. The dashboard widget reads backup.duplicacy[]
+  // separately from backup.jobs[] and renders the two groups in
+  // one combined "Backup Jobs (N)" section, distinguished by the
+  // Kind tag on each Duplicacy row.
+  const duplicacy = buildDuplicacyEntries(p);
+  return { available: true, jobs: [...repos, ...configured], duplicacy };
+}
+
+// buildDuplicacyEntries — converts the profile's
+// configuredDuplicacyEntries list into snapshot.backup.duplicacy[]
+// matching internal.DuplicacyJobState. Mirrors what the production
+// scheduler's CollectBackups path produces from the disk-read runner.
+// PRD #310 V1c / issue #314.
+function buildDuplicacyEntries(p: PlatformProfile): Record<string, unknown>[] {
+  const entries = p.configuredDuplicacyEntries;
+  if (!entries || entries.length === 0) return [];
+  const nowMs = Date.now();
+  const hoursAgoIso = (h: number) => new Date(nowMs - h * 3600000).toISOString();
+  return entries.map((e): Record<string, unknown> => ({
+    label: e.label,
+    kind: e.kind,
+    path: e.path,
+    storage_id: e.storage_id || "",
+    reason_code: e.reason_code,
+    snapshot_count: e.snapshot_count ?? 0,
+    latest_backup_at: e.last_backup_hours_ago !== undefined ? hoursAgoIso(e.last_backup_hours_ago) : null,
+    latest_backup_size_bytes: e.last_backup_size_bytes ?? 0,
+    latest_backup_files: e.last_backup_files ?? 0,
+    currently_running: e.currently_running ?? false,
+    latest_snapshot_id: e.latest_snapshot_id || "",
+    latest_snapshot_revision: e.latest_snapshot_revision ?? 0,
+    snapshot_ids: e.snapshot_ids ?? [],
+  }));
 }
 
 // buildTopProcesses — produces snapshot.system.top_processes matching

@@ -124,6 +124,23 @@ const EXPECTED_WIDGETS: WidgetExpectation[] = [
     // k8s uses its own backup story (velero, etc) and hides the widget.
     platforms: ["unraid", "synology", "truenas", "proxmox"],
   },
+  // sections.backup also reads snapshot.backup.duplicacy[] — the
+  // V1c surface added by issue #314. One entry minimum on every
+  // non-k8s platform; field-level shape guarded by the per-entry
+  // tests below.
+  {
+    widget: "backup_duplicacy",
+    requiredKeys: [
+      "backup.duplicacy.0.label",
+      "backup.duplicacy.0.kind",
+      "backup.duplicacy.0.path",
+      "backup.duplicacy.0.reason_code",
+      "backup.duplicacy.0.snapshot_count",
+      "backup.duplicacy.0.latest_backup_size_bytes",
+      "backup.duplicacy.0.currently_running",
+    ],
+    platforms: ["unraid", "synology", "truenas", "proxmox"],
+  },
   // sections.processes in dashboard.go L1144 — reads
   //   snapshot.system.top_processes[].{command, cpu_percent, mem_percent, user, container_name}
   {
@@ -262,6 +279,90 @@ describe("demo feeder widget coverage", () => {
     // Empty array is fine — populated array would be wrong.
     expect(Array.isArray(borgList)).toBe(true);
     expect(borgList.length).toBe(0);
+  });
+
+  // ── External Duplicacy Monitor demo coverage (v0.10.0 / #314) ──────
+  // Sibling test family to the Borg coverage above. Pins the
+  // contract so a future refactor can't silently drop the demo's
+  // Duplicacy showcase. The dashboard widget reads
+  // snapshot.backup.duplicacy[].{label, kind, reason_code,
+  // snapshot_count, latest_backup_at, latest_backup_size_bytes,
+  // currently_running} and the Settings page reads
+  // settings.backup_monitor.duplicacy[].{enabled, label, kind, path,
+  // storage_id, stale_after}.
+
+  it("emits at least one Duplicacy entry on each non-k8s platform's snapshot.backup.duplicacy", () => {
+    for (const platform of ["unraid", "synology", "truenas", "proxmox"] as Platform[]) {
+      const snap = transformSnapshot(SEED, PROFILES[platform], platform);
+      const entries = (getPath(snap, "backup.duplicacy") as Array<Record<string, unknown>>) || [];
+      expect(
+        entries.length,
+        `${platform} should have at least one Duplicacy entry to showcase the V1c dashboard rendering`,
+      ).toBeGreaterThan(0);
+      // Each entry must carry every field the dashboard widget reads.
+      const validKinds = new Set(["cli-repo", "web-cache"]);
+      const validReasons = new Set([
+        "ok",
+        "no_snapshots_yet",
+        "stale",
+        "path_not_found",
+        "path_unreadable",
+        "not_a_duplicacy_repo",
+        "storage_id_not_found",
+        "corrupt_snapshot",
+      ]);
+      for (const e of entries) {
+        expect(typeof e.label, `${platform} entry must have a string label`).toBe("string");
+        expect(validKinds.has(e.kind as string), `${platform} entry kind ${JSON.stringify(e.kind)} must be cli-repo or web-cache`).toBe(true);
+        expect(typeof e.path, `${platform} entry must have a string path`).toBe("string");
+        expect(validReasons.has(e.reason_code as string), `${platform} reason_code ${JSON.stringify(e.reason_code)} must be in the canonical V1a closed set`).toBe(true);
+        expect(typeof e.snapshot_count, `${platform} snapshot_count must be a number`).toBe("number");
+        expect(typeof e.latest_backup_size_bytes, `${platform} latest_backup_size_bytes must be a number`).toBe("number");
+        expect(typeof e.currently_running, `${platform} currently_running must be a boolean`).toBe("boolean");
+      }
+    }
+  });
+
+  it("kubernetes does not surface a backup.duplicacy list (Velero territory)", () => {
+    const snap = transformSnapshot(SEED, PROFILES.kubernetes, "kubernetes");
+    const entries = getPath(snap, "backup.duplicacy") as Array<unknown>;
+    expect(Array.isArray(entries), "backup.duplicacy must be an array (empty is fine)").toBe(true);
+    expect(entries.length, "k8s must not emit Duplicacy entries (Velero-territory)").toBe(0);
+  });
+
+  it("Unraid showcases BOTH cli-repo AND web-cache layouts to demonstrate severity rendering", () => {
+    const snap = transformSnapshot(SEED, PROFILES.unraid, "unraid");
+    const entries = (getPath(snap, "backup.duplicacy") as Array<Record<string, unknown>>) || [];
+    const kinds = new Set(entries.map((e) => e.kind as string));
+    expect(kinds.has("cli-repo"), "Unraid demo must include a cli-repo entry").toBe(true);
+    expect(kinds.has("web-cache"), "Unraid demo must include a web-cache entry").toBe(true);
+    // At least one stale entry so the demo demonstrates the warning
+    // severity band (the v0.9.10 Borg demo did this for error severity;
+    // Duplicacy's stale=warning is the equivalent showcase).
+    const stale = entries.filter((e) => e.reason_code === "stale");
+    expect(stale.length, "Unraid demo must include at least one stale=warning Duplicacy entry to showcase severity").toBeGreaterThan(0);
+  });
+
+  it("transformSettings populates backup_monitor.duplicacy matching the profile's configured entries", () => {
+    const seedSettings: Record<string, unknown> = { sections: {}, backup_monitor: { borg: [], duplicacy: [] } };
+    for (const platform of ["unraid", "synology", "truenas", "proxmox"] as Platform[]) {
+      const profile = PROFILES[platform];
+      const settings = transformSettings(seedSettings, profile);
+      const list = (getPath(settings, "backup_monitor.duplicacy") as Array<Record<string, unknown>>) || [];
+      const expectedCount = profile.configuredDuplicacyEntries?.length ?? 0;
+      expect(
+        list.length,
+        `${platform} settings.backup_monitor.duplicacy length must match profile.configuredDuplicacyEntries`,
+      ).toBe(expectedCount);
+      for (let i = 0; i < list.length; i++) {
+        const entry = list[i];
+        const expected = profile.configuredDuplicacyEntries![i];
+        expect(entry.enabled, "configured Duplicacy entries default enabled=true on the demo").toBe(true);
+        expect(entry.label, "label round-trips").toBe(expected.label);
+        expect(entry.kind, "kind round-trips").toBe(expected.kind);
+        expect(entry.path, "path round-trips").toBe(expected.path);
+      }
+    }
   });
 
   it("emits at least one error-card Borg entry on Unraid (showcases v0.9.10 error UI)", () => {

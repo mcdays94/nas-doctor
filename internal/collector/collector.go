@@ -27,6 +27,18 @@ type Collector struct {
 	// explicit-config backup probes. Nil → NewExecBorgRunner. Tests
 	// inject a fake to keep Collect() hermetic.
 	borgRunner BorgRunner
+	// duplicacyEntries is the user-configured list of Duplicacy
+	// repos fed in from Settings.BackupMonitor.Duplicacy. Nil/empty
+	// = no Duplicacy monitoring (preserves pre-#314 behaviour).
+	// Updated live via SetBackupMonitorDuplicacy on every Settings
+	// PUT. Issue #314.
+	duplicacyEntries []DuplicacyEntry
+	// duplicacyRunner is the DuplicacyRunner used for all Duplicacy
+	// reads. Nil → NewDiskDuplicacyRunner. Test seam — production
+	// main.go doesn't call SetDuplicacyRunner and the zero value
+	// in collectBackups picks up the disk runner on its own. Issue
+	// #314.
+	duplicacyRunner DuplicacyRunner
 }
 
 // SetProxmoxConfig updates the Proxmox VE API connection settings.
@@ -59,6 +71,23 @@ func (c *Collector) SetBackupMonitorBorg(repos []BorgExternalRepo) {
 // collectBackups-path picks up the exec runner on its own.
 func (c *Collector) SetBorgRunner(r BorgRunner) {
 	c.borgRunner = r
+}
+
+// SetBackupMonitorDuplicacy stores the user-configured Duplicacy
+// entry list. Called from the Settings PUT handler on every save and
+// from main.go at startup once the persisted settings are decoded.
+// Changes take effect on the next backup-collection tick; no
+// restart required. Issue #314 (PRD #310 V1c).
+func (c *Collector) SetBackupMonitorDuplicacy(entries []DuplicacyEntry) {
+	c.duplicacyEntries = append([]DuplicacyEntry(nil), entries...)
+}
+
+// SetDuplicacyRunner injects a DuplicacyRunner used for all
+// Duplicacy reads. Nil = reset to default (NewDiskDuplicacyRunner).
+// Primarily a test seam — production main.go doesn't call this and
+// CollectBackups picks up the disk runner on its own.
+func (c *Collector) SetDuplicacyRunner(r DuplicacyRunner) {
+	c.duplicacyRunner = r
 }
 
 // New creates a new Collector with the given host path mappings.
@@ -182,8 +211,10 @@ func (c *Collector) Collect() (*internal.Snapshot, error) {
 	// reason so operators can correlate dashboard state with logs.
 	c.logger.Info("collecting backup info")
 	backupInfo := CollectBackups(CollectBackupsOptions{
-		Runner:       c.borgRunner,
-		ExternalBorg: c.externalBorg,
+		Runner:          c.borgRunner,
+		ExternalBorg:    c.externalBorg,
+		DuplicacyRunner: c.duplicacyRunner,
+		Duplicacy:       c.duplicacyEntries,
 	})
 	if backupInfo != nil && backupInfo.Available {
 		snap.Backup = backupInfo
