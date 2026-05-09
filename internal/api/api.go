@@ -60,6 +60,19 @@ type Server struct {
 	// Tests inject a fake so they don't need a real mtr binary.
 	// Issue #224.
 	streamingTracerouteRunner collector.StreamingTracerouteRunner
+	// streamingSpeedTestRunner is the function invoked by
+	// handleTestServiceCheckStream for type=speed checks. Nil
+	// means the handler will fall back to
+	// collector.RunStreamingSpeedTest. Tests inject a fake so they
+	// don't need a real speedtest tool installed.
+	//
+	// Deliberately separate from the dashboard's livetest.Registry
+	// (handleSpeedtestRun / handleSpeedtestStream): the Test
+	// button is ad-hoc and ephemeral — it must not collapse onto
+	// whatever scheduled or manual run is currently driving the
+	// dashboard's singleton, and it must not write history.
+	// Issue #318.
+	streamingSpeedTestRunner collector.StreamingSpeedTestRunner
 	// borgRunner is the BorgRunner used by the external-Borg Test
 	// endpoint (POST /api/v1/backup-monitor/borg/test) and the
 	// scheduler's external-repo polling. Nil means the handler

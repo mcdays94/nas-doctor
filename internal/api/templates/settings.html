@@ -2800,13 +2800,18 @@ function renderServiceCheckDetails(type, details, result) {
 // (Ookla CLI), so we warn the user up-front and disable the button for
 // the duration of the request. See issue #154.
 //
-// Traceroute checks use the SSE streaming variant
-// (POST /api/v1/service-checks/test-stream) so the user sees per-cycle
-// hop progress in the toast — closes the "dead spinner" UX surfaced
-// in v0.9.7 UAT of #189 (issue #224). All other types use the
-// synchronous /test endpoint unchanged. ReadableStream + the SSE
-// wire format is hand-parsed because EventSource is GET-only and
-// the Test button has to POST the form payload.
+// Traceroute and speed checks use the SSE streaming variant
+// (POST /api/v1/service-checks/test-stream) so the user sees
+// per-cycle hop progress (traceroute) or per-phase live samples
+// (speed) in the toast. Closes the "dead spinner" UX surfaced in
+// v0.9.7 UAT of #189 (issue #224, traceroute slice in v0.9.15) and
+// the same problem for the long-running Ookla CLI invocation
+// (issue #318, speed slice). All other types use the synchronous
+// /test endpoint unchanged.
+//
+// ReadableStream + the SSE wire format is hand-parsed because
+// EventSource is GET-only and the Test button has to POST the
+// form payload.
 function testServiceCheck() {
   var sc = readServiceCheckForm();
   if (!sc) return;
@@ -2818,6 +2823,15 @@ function testServiceCheck() {
   // Traceroute → live-progress SSE branch.
   if (sc.type === "traceroute" && typeof window.ReadableStream !== "undefined") {
     runTraceTestStream(sc, btn, originalLabel);
+    return;
+  }
+
+  // Speed → live-progress SSE branch (issue #318). Falls back to
+  // the synchronous path on browsers without ReadableStream
+  // (essentially nobody in practice but the guard mirrors the
+  // traceroute branch above).
+  if (sc.type === "speed" && typeof window.ReadableStream !== "undefined") {
+    runSpeedTestStream(sc, btn, originalLabel);
     return;
   }
 
@@ -2999,6 +3013,159 @@ function handleTraceEvent(ev, data, sc) {
   // Other events (start, end, error) are passive — nothing to
   // render. Heartbeat comments never reach the dispatcher because
   // they have no `event:` line.
+}
+
+// runSpeedTestStream consumes the SSE response from
+// POST /api/v1/service-checks/test-stream for a type=speed Test.
+// Renders incremental progress via toast — each `phase_change`
+// event refreshes the toast headline with the current phase, and
+// each `sample` event updates the live throughput readout. The
+// terminal `result` event finalises with the same shape as the
+// sync endpoint so the existing renderServiceCheckDetails helper
+// can be reused (issue #318).
+//
+// Cancellation: AbortController wires the fetch to the page
+// lifecycle, so navigating away or closing the page promptly
+// aborts the HTTP request. The server-side runner sees ctx.Done()
+// and kills the speedtest subprocess via the v0.9.14 #304
+// process-group SIGKILL plumbing in collector.runOoklaSpeedtestCtx.
+//
+// Anti-pattern guards (AGENTS.md): no backticks anywhere in this
+// function (Go raw-string DashboardJS/SharedCSS unaffected). All
+// comments are line comments — no `/* */` block comments contain
+// `*/` substrings that would close the block early and break the
+// entire <script> parse (the v0.9.9-rc1 trap).
+function runSpeedTestStream(sc, btn, originalLabel) {
+  showToast("Running speed test (live, 30-60s)…", "info");
+
+  var controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  var signal = controller ? controller.signal : undefined;
+
+  fetch("/api/v1/service-checks/test-stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+    body: JSON.stringify(sc),
+    signal: signal
+  })
+    .then(function(resp) {
+      if (!resp.ok) {
+        return resp.json().then(function(d) {
+          throw new Error((d && d.error) ? d.error : ("HTTP " + resp.status));
+        }).catch(function() {
+          throw new Error("HTTP " + resp.status);
+        });
+      }
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder("utf-8");
+      var buf = "";
+      // Tracks live progress so the toast update on each `sample`
+      // event has the latest phase + Mbps headline available.
+      var liveState = { phase: "", phaseIndex: 0, totalPhases: 3, lastMbps: 0, lastLatencyMs: 0 };
+
+      function pump() {
+        return reader.read().then(function(chunk) {
+          if (chunk.done) return;
+          buf += decoder.decode(chunk.value, { stream: true });
+          // Frames are terminated by a blank line. Split on the
+          // SSE "\n\n" frame separator.
+          var frames = buf.split("\n\n");
+          buf = frames.pop(); // tail may be partial
+          for (var i = 0; i < frames.length; i++) {
+            var frame = frames[i];
+            if (!frame) continue;
+            var ev = "", data = "";
+            var lines = frame.split("\n");
+            for (var j = 0; j < lines.length; j++) {
+              var line = lines[j];
+              if (line.indexOf("event: ") === 0) ev = line.substring(7);
+              else if (line.indexOf("data: ") === 0) data = line.substring(6);
+            }
+            if (!ev) continue;
+            handleSpeedEvent(ev, data, sc, liveState);
+          }
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(function(e) {
+      if (e && e.name === "AbortError") return;
+      showToast("Test failed: " + (e && e.message ? e.message : "network error"), "error");
+    })
+    .finally(function() {
+      if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    });
+}
+
+// handleSpeedEvent dispatches a parsed speed-test SSE event to
+// the appropriate rendering path. `phase_change` updates the
+// liveState's current phase + headline; `sample` refreshes the
+// toast with the live throughput readout; `result` produces the
+// canonical pass/fail summary using the existing per-type
+// renderer; `error` surfaces engine-specific failures (e.g.
+// "no speedtest tool available").
+function handleSpeedEvent(ev, data, sc, liveState) {
+  if (ev === "phase_change") {
+    var p = null;
+    try { p = JSON.parse(data); } catch (e) { return; }
+    if (!p) return;
+    liveState.phase = p.phase || "";
+    liveState.phaseIndex = p.phase_index || 0;
+    liveState.totalPhases = p.total_phases || 3;
+    var headline = "Speed test — phase " + liveState.phaseIndex + "/" + liveState.totalPhases + ": " + (liveState.phase || "?");
+    showToast(headline, "info");
+    return;
+  }
+  if (ev === "sample") {
+    var s = null;
+    try { s = JSON.parse(data); } catch (e) { return; }
+    if (!s) return;
+    if (typeof s.mbps === "number") liveState.lastMbps = s.mbps;
+    if (typeof s.latency_ms === "number") liveState.lastLatencyMs = s.latency_ms;
+    var lines = ["Speed test — phase " + liveState.phaseIndex + "/" + liveState.totalPhases + ": " + (liveState.phase || "?")];
+    if (s.phase === "latency") {
+      lines.push("  latency " + (typeof s.latency_ms === "number" ? s.latency_ms.toFixed(1) + " ms" : "—"));
+    } else {
+      lines.push("  " + (s.phase || "?") + " " + (typeof s.mbps === "number" ? s.mbps.toFixed(1) + " Mbps" : "—"));
+    }
+    showToast(lines.join("\n"), "info");
+    return;
+  }
+  if (ev === "error") {
+    var err = null;
+    try { err = JSON.parse(data); } catch (e) { return; }
+    var msg = (err && err.message) ? err.message : "speed test engine error";
+    showToast("Speed test engine error: " + msg, "error");
+    return;
+  }
+  if (ev === "result") {
+    var r = null;
+    try { r = JSON.parse(data); } catch (e) { return; }
+    if (!r) return;
+    var status = r.status || "unknown";
+    var ms = r.response_ms;
+    var headline;
+    var toastKind = "info";
+    if (status === "up") {
+      headline = "✓ Check is UP" + (typeof ms === "number" ? " (" + ms + " ms)" : "");
+      toastKind = "success";
+    } else if (status === "degraded") {
+      headline = "△ Degraded";
+      toastKind = "warning";
+    } else {
+      headline = "✗ Check is DOWN";
+      toastKind = "error";
+    }
+    var msg = headline;
+    var detailsText = renderServiceCheckDetails(sc.type, r.details, r);
+    if (detailsText) msg += "\n" + detailsText;
+    if (r.error) msg += "\n" + r.error;
+    showToast(msg, toastKind);
+    return;
+  }
+  // Other events (start, end) are passive. Heartbeat comments
+  // never reach the dispatcher because they have no `event:`
+  // line.
 }
 
 function removeServiceCheck(idx) {
