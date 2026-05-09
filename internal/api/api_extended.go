@@ -529,6 +529,14 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 
 	// External backup monitor test button — issue #279.
 	r.Post("/api/v1/backup-monitor/borg/test", s.handleTestBorgMonitor)
+	// External Duplicacy backup monitor test button — issue #313.
+	// Mirrors the Borg test endpoint shape; the runner is disk-read
+	// (no subprocess) so the wiring is simpler. API-key middleware
+	// is applied explicitly (acceptance criterion 5) — borg's
+	// existing endpoint is registered the same way but predates the
+	// 401 contract; we make ours explicit so a future router refactor
+	// doesn't strip the protection silently.
+	r.With(s.apiKeyMiddleware).Post("/api/v1/backup-monitor/duplicacy/test", s.handleTestDuplicacyMonitor)
 
 	// Fleet dashboard page
 	r.Get("/fleet", s.handleFleetPage)
