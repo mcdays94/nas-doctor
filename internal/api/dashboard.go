@@ -757,11 +757,26 @@ sections.backup = function(sn) {
   var h = '';
   h += '<div class="section-block" data-section="backup">';
   var backup = sn ? sn.backup : null;
-  if (backup && backup.available && backup.jobs && backup.jobs.length > 0) {
+  /* Duplicacy reason → severity mapping (PRD #310 §4 / issue #314).
+     Mirrors the dashboard widget contract for the new per-provider
+     reason set. ok=success, no_snapshots_yet=info, stale=warning,
+     everything else=error. Kept inline so the dashboard JS stays
+     self-contained — the runner-side classifier produces these
+     exact codes. */
+  var dupSeverity = function(reason) {
+    if (reason === 'ok') return 'ok';
+    if (reason === 'no_snapshots_yet') return 'info';
+    if (reason === 'stale') return 'warning';
+    return 'error';
+  };
+  var jobsList = (backup && backup.available && backup.jobs) ? backup.jobs : [];
+  var dupList  = (backup && backup.duplicacy) ? backup.duplicacy : [];
+  var totalRows = jobsList.length + dupList.length;
+  if (backup && backup.available && totalRows > 0) {
     h += '<div>';
-    h += '<div class="section-title">Backup Jobs (' + backup.jobs.length + ')</div>';
-    for (var bi = 0; bi < backup.jobs.length; bi++) {
-      var bj = backup.jobs[bi];
+    h += '<div class="section-title">Backup Jobs (' + totalRows + ')</div>';
+    for (var bi = 0; bi < jobsList.length; bi++) {
+      var bj = jobsList[bi];
       var isError = !!bj.error;
       var statusClass = isError ? 'td-crit' : (bj.status === 'ok' ? 'td-healthy' : bj.status === 'warning' ? 'td-warn' : 'td-crit');
       var provLabel = bj.provider.toUpperCase();
@@ -808,12 +823,77 @@ sections.backup = function(sn) {
       }
       h += '</div>';
     }
+    /* Duplicacy rows — rendered with the same per-row visual rhythm
+       as Borg, but driven by the per-provider DuplicacyJobState
+       shape (reason_code + currently_running + kind). Issue #314 /
+       PRD #310 V1c.
+
+       The rendering mirrors the Borg row's structure on purpose
+       so operators see one coherent "Backup Jobs (N)" section
+       rather than two visually-different lists. The Kind tag
+       ("DUPLICACY:CLI-REPO" or "DUPLICACY:WEB-CACHE") + the
+       per-provider reason pill is what distinguishes a Duplicacy
+       row from a Borg row at a glance. */
+    for (var di = 0; di < dupList.length; di++) {
+      var de = dupList[di];
+      var dupReason = de.reason_code || 'unknown';
+      var dupSev = dupSeverity(dupReason);
+      var dupIsError = (dupSev === 'error');
+      var dupStatusClass = dupSev === 'ok' ? 'td-healthy' : dupSev === 'warning' || dupSev === 'info' ? 'td-warn' : 'td-crit';
+      var dupCardBorder = dupIsError ? '1px solid var(--red,#dc2626)' : '1px solid var(--border)';
+      var dupDisplayName = de.label || (de.path ? (de.path.split('/').filter(function(x){return x;}).pop() || de.path) : 'Duplicacy');
+      var dupKindTag = ('DUPLICACY' + (de.kind ? ':' + de.kind.toUpperCase() : '')).replace(/_/g, '-');
+      h += '<div class="backup-card backup-card-duplicacy' + (dupIsError ? ' backup-card-error' : '') + '" data-provider="duplicacy" style="background:var(--bg-panel);border:' + dupCardBorder + ';border-radius:calc(var(--radius)*1.5);padding:12px;margin-bottom:6px">';
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+      h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+      h += '<span style="font-weight:600;font-size:13px;color:var(--text-primary)">' + esc(dupDisplayName) + '</span>';
+      /* Kind tag — purpose-built CSS class so themes can theme it
+         independently from the existing Borg provider chip. Locked
+         by the 3-source theme-parity test. */
+      h += '<span class="duplicacy-kind-tag" style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(168,85,247,0.15);color:#c084fc;font-weight:600;letter-spacing:0.5px">' + esc(dupKindTag) + '</span>';
+      /* "Configured" pill — every Duplicacy entry is by definition
+         user-configured (we don't auto-detect Duplicacy repos), so
+         render the pill unconditionally to match Borg's pattern. */
+      h += '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--accent,#3b82f6);color:#fff">CONFIGURED</span>';
+      /* currently_running aux flag (PRD #310 user story 13). Renders
+         orthogonally to the reason pill so a stuck-lock + stale repo
+         can show both signals at once. */
+      if (de.currently_running) {
+        h += '<span class="duplicacy-running-badge" style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(34,211,238,0.15);color:#22d3ee;font-weight:600;letter-spacing:0.5px">RUNNING</span>';
+      }
+      h += '</div>';
+      var dupStatusText = dupReason.toUpperCase().replace(/_/g, ' ');
+      h += '<span class="' + dupStatusClass + '" style="font-size:12px;font-weight:600">' + esc(dupStatusText) + '</span>';
+      h += '</div>';
+      if (dupIsError) {
+        /* Error-card body: the reason text + path. No "error message"
+           string from the runner — Duplicacy runs disk-read and the
+           reason code itself is the actionable signal (e.g.
+           PATH NOT FOUND vs STORAGE ID NOT FOUND). */
+        h += '<div style="font-size:12px;color:var(--text-tertiary);line-height:1.5">';
+        var dupReasonHuman = dupStatusText.charAt(0) + dupStatusText.slice(1).toLowerCase();
+        h += '<div style="color:var(--red,#dc2626);font-weight:500;margin-bottom:4px">' + esc(dupReasonHuman) + '</div>';
+        if (de.path) {
+          var dupPathDisplay = de.path + (de.storage_id ? ' / ' + de.storage_id : '');
+          h += '<div style="font-family:var(--font-mono,monospace);font-size:11px;color:var(--text-quaternary);word-break:break-all">' + esc(dupPathDisplay) + '</div>';
+        }
+        h += '</div>';
+      } else {
+        h += '<div style="display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);flex-wrap:wrap">';
+        if (de.snapshot_count) h += '<span>Snapshots: <strong style="color:var(--text-primary)">' + de.snapshot_count + '</strong></span>';
+        if (de.latest_backup_size_bytes > 0) h += '<span>Size: <strong style="color:var(--text-primary)">' + fmtBytes(de.latest_backup_size_bytes) + '</strong></span>';
+        if (de.latest_backup_at) { var dupAge = Math.round((Date.now() - new Date(de.latest_backup_at).getTime()) / 3600000); h += '<span>Last: <strong style="color:var(--text-primary)">' + (dupAge < 1 ? '<1h ago' : dupAge + 'h ago') + '</strong></span>'; }
+        if (de.latest_snapshot_id && de.latest_snapshot_revision) h += '<span style="color:var(--text-quaternary)">' + esc(de.latest_snapshot_id) + ' @ rev ' + de.latest_snapshot_revision + '</span>';
+        h += '</div>';
+      }
+      h += '</div>';
+    }
     h += '</div>';
   } else {
     h += '<div>';
     h += '<div class="section-title">Backup Monitoring</div>';
     h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:14px;font-size:12px;color:var(--text-tertiary);line-height:1.5">';
-    h += 'No backup provider detected or configured. NAS Doctor <strong>bundles the Borg CLI</strong> and auto-detects local Borg repos. For externally-managed Borg setups (e.g. Unraid User Scripts), configure the repo path in <a href="/settings#backup-monitors" style="color:var(--brand)">Settings &rarr; Backup Monitors &rarr; Borg</a>. For <strong>Restic</strong>, <strong>Proxmox Backup Server</strong>, or <strong>Duplicati</strong> monitoring, install those CLIs via a custom Dockerfile or sibling container.';
+    h += 'No backup provider detected or configured. NAS Doctor <strong>bundles the Borg CLI</strong> and auto-detects local Borg repos. For externally-managed Borg setups (e.g. Unraid User Scripts), configure the repo path in <a href="/settings#backup-monitors" style="color:var(--brand)">Settings &rarr; Backup Monitors &rarr; Borg</a>. For <strong>Duplicacy</strong> repos (CLI or saspus/duplicacy-web layouts), configure the path in <a href="/settings#backup-monitors" style="color:var(--brand)">Settings &rarr; Backup Monitors &rarr; Duplicacy</a> — disk-read, no extra binary required. For <strong>Restic</strong>, <strong>Proxmox Backup Server</strong>, or <strong>Duplicati</strong> monitoring, install those CLIs via a custom Dockerfile or sibling container.';
     h += '<br><br><span style="font-size:11px;color:var(--text-quaternary)">You can hide this section in <a href="/settings#card-sections" style="color:var(--brand)">Settings → Dashboard Sections</a> if it does not apply to you.</span>';
     h += '</div></div>';
   }

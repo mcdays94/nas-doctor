@@ -61,6 +61,15 @@ type CollectBackupsOptions struct {
 	// ReadEnv resolves a named env var — injected so tests don't have
 	// to touch os.Getenv. Defaults to os.Getenv when nil.
 	ReadEnv func(string) string
+	// DuplicacyRunner is the DuplicacyRunner used to read on-disk
+	// state for each enabled Duplicacy entry. Nil → uses
+	// NewDiskDuplicacyRunner() (production default). Issue #314.
+	DuplicacyRunner DuplicacyRunner
+	// Duplicacy is the user-configured list of Duplicacy entries.
+	// Each entry resolves to one DuplicacyJobState in the resulting
+	// BackupInfo.Duplicacy slice. Disabled entries are skipped (no
+	// dashboard row produced). Issue #314.
+	Duplicacy []DuplicacyEntry
 }
 
 // CollectBackups detects and queries backup tools: Borg, Restic, PBS,
@@ -91,10 +100,69 @@ func CollectBackups(opts CollectBackupsOptions) *internal.BackupInfo {
 	info.Jobs = append(info.Jobs, pbsJobs...)
 	info.Jobs = append(info.Jobs, duplicatiJobs...)
 
-	if len(info.Jobs) > 0 {
+	// Duplicacy (PRD #310 / V1c, issue #314). Disk-read by design — no
+	// subprocess invocation. Each enabled entry produces one
+	// DuplicacyJobState; disabled entries are skipped (no dashboard
+	// row). The runner's Read() is total: every classifier outcome
+	// (including filesystem failures) maps to a non-error return with
+	// the corresponding ReasonCode, so we never lose visibility on a
+	// misconfigured entry.
+	dupRunner := opts.DuplicacyRunner
+	if dupRunner == nil {
+		dupRunner = NewDiskDuplicacyRunner()
+	}
+	info.Duplicacy = collectDuplicacyEntries(dupRunner, opts.Duplicacy)
+
+	if len(info.Jobs) > 0 || len(info.Duplicacy) > 0 {
 		info.Available = true
 	}
 	return info
+}
+
+// collectDuplicacyEntries calls DuplicacyRunner.Read for each enabled
+// configured entry and converts the per-entry DuplicacyState into a
+// DuplicacyJobState destined for snapshot.backup.duplicacy. Disabled
+// entries are skipped. Returns nil for an empty/nil input so the
+// snapshot's `duplicacy` JSON key stays absent (omitempty on
+// internal.BackupInfo.Duplicacy) for users without any Duplicacy
+// config — preserves pre-V1c snapshot bytes for upgraders. Issue #314.
+func collectDuplicacyEntries(runner DuplicacyRunner, entries []DuplicacyEntry) []internal.DuplicacyJobState {
+	if len(entries) == 0 || runner == nil {
+		return nil
+	}
+	out := make([]internal.DuplicacyJobState, 0, len(entries))
+	for _, e := range entries {
+		if !e.Enabled {
+			continue
+		}
+		ctx := context.Background()
+		state, err := runner.Read(ctx, e)
+		if err != nil {
+			// Total-function contract: runner SHOULD encode errors as
+			// reason codes, not Go errors. Defense-in-depth: if a
+			// future refactor breaks that contract, surface as
+			// path_unreadable so the user still sees a row with a
+			// recognisable reason rather than a silently-dropped
+			// entry. Better-than-nothing observability.
+			state = DuplicacyState{ReasonCode: DuplicacyReasonPathUnreadable}
+		}
+		out = append(out, internal.DuplicacyJobState{
+			Label:                  e.Label,
+			Kind:                   e.Kind,
+			Path:                   e.Path,
+			StorageID:              e.StorageID,
+			ReasonCode:             string(state.ReasonCode),
+			SnapshotCount:          state.SnapshotCount,
+			LatestBackupAt:         state.LatestBackupAt,
+			LatestBackupSizeBytes:  state.LatestBackupSizeBytes,
+			LatestBackupFiles:      state.LatestBackupFiles,
+			CurrentlyRunning:       state.CurrentlyRunning,
+			LatestSnapshotID:       state.LatestSnapshotID,
+			LatestSnapshotRevision: state.LatestSnapshotRevision,
+			SnapshotIDs:            append([]string(nil), state.SnapshotIDs...),
+		})
+	}
+	return out
 }
 
 // collectBackups is the zero-options shim used by the monolithic

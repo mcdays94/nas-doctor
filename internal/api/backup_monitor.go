@@ -90,3 +90,25 @@ func apiBorgReposToCollector(repos []BorgExternalRepo) []collector.BorgExternalR
 	}
 	return out
 }
+
+// apiDuplicacyEntriesToCollector converts the API-layer DuplicacyEntry
+// list into the collector-layer list. Mirrors apiBorgReposToCollector
+// in shape so the conversion stays trivial as more provider types
+// are added. Issue #314.
+func apiDuplicacyEntriesToCollector(entries []DuplicacyEntry) []collector.DuplicacyEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]collector.DuplicacyEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, collector.DuplicacyEntry{
+			Enabled:    e.Enabled,
+			Label:      strings.TrimSpace(e.Label),
+			Kind:       strings.TrimSpace(e.Kind),
+			Path:       strings.TrimSpace(e.Path),
+			StorageID:  strings.TrimSpace(e.StorageID),
+			StaleAfter: e.StaleAfter,
+		})
+	}
+	return out
+}

@@ -327,25 +327,25 @@ type ServiceCheckResult struct {
 // ---------- System ----------
 
 type SystemInfo struct {
-	Hostname     string        `json:"hostname"`
-	OS           string        `json:"os"`
-	Kernel       string        `json:"kernel"`
-	Platform     string        `json:"platform"` // unraid, truenas, synology, linux, etc.
-	PlatformVer  string        `json:"platform_version"`
-	CPUModel     string        `json:"cpu_model"`
-	CPUCores     int           `json:"cpu_cores"`
-	CPUUsage     float64       `json:"cpu_usage_percent"`
-	LoadAvg1     float64       `json:"load_avg_1"`
-	LoadAvg5     float64       `json:"load_avg_5"`
-	LoadAvg15    float64       `json:"load_avg_15"`
-	MemTotalMB   int64         `json:"mem_total_mb"`
-	MemUsedMB    int64         `json:"mem_used_mb"`
-	MemPercent   float64       `json:"mem_percent"`
-	SwapTotalMB  int64         `json:"swap_total_mb"`
-	SwapUsedMB   int64         `json:"swap_used_mb"`
-	IOWait       float64       `json:"io_wait_percent"`
-	UptimeSecs   int64         `json:"uptime_seconds"`
-	Motherboard  string        `json:"motherboard"`
+	Hostname    string  `json:"hostname"`
+	OS          string  `json:"os"`
+	Kernel      string  `json:"kernel"`
+	Platform    string  `json:"platform"` // unraid, truenas, synology, linux, etc.
+	PlatformVer string  `json:"platform_version"`
+	CPUModel    string  `json:"cpu_model"`
+	CPUCores    int     `json:"cpu_cores"`
+	CPUUsage    float64 `json:"cpu_usage_percent"`
+	LoadAvg1    float64 `json:"load_avg_1"`
+	LoadAvg5    float64 `json:"load_avg_5"`
+	LoadAvg15   float64 `json:"load_avg_15"`
+	MemTotalMB  int64   `json:"mem_total_mb"`
+	MemUsedMB   int64   `json:"mem_used_mb"`
+	MemPercent  float64 `json:"mem_percent"`
+	SwapTotalMB int64   `json:"swap_total_mb"`
+	SwapUsedMB  int64   `json:"swap_used_mb"`
+	IOWait      float64 `json:"io_wait_percent"`
+	UptimeSecs  int64   `json:"uptime_seconds"`
+	Motherboard string  `json:"motherboard"`
 	// CPUTempC is the package-level CPU temperature in °C, or 0 when no
 	// reliable sensor is available (e.g. Synology, K8s pods, virtualised
 	// environments without /sys/class/hwmon). Zero values are omitted from
@@ -623,6 +623,71 @@ type GPUDevice struct {
 type BackupInfo struct {
 	Available bool        `json:"available"`
 	Jobs      []BackupJob `json:"jobs"`
+	// Duplicacy is the per-entry state for user-configured Duplicacy
+	// repos (PRD #310 / V1c, issue #314). Sibling to Jobs rather than
+	// merged into it because Duplicacy carries a per-provider reason
+	// type + auxiliary flags (currently_running) that don't fit the
+	// generic BackupJob shape, and per-PRD §4 we deliberately don't
+	// share reason enums across providers. Empty/nil when no
+	// Duplicacy entries are configured — preserves the pre-V1c
+	// snapshot shape exactly.
+	Duplicacy []DuplicacyJobState `json:"duplicacy,omitempty"`
+}
+
+// DuplicacyJobState is the per-entry runtime state surfaced by the
+// dashboard widget, /metrics exporter, and /api/v1/snapshot/latest.
+// Mirrors collector.DuplicacyState in shape but lives in `internal`
+// so callers above the collector layer (api, notifier) can reference
+// the type without an import cycle. Issue #314 (V1c).
+//
+// Field semantics match collector.DuplicacyState verbatim — the
+// scheduler's backup-collection tick copies values across one-for-one.
+// See internal/collector/duplicacy_runner.go for the canonical
+// per-field rationale.
+type DuplicacyJobState struct {
+	// Label is the user-supplied display name from settings; falls
+	// back to the basename of Path on the dashboard widget when empty.
+	Label string `json:"label,omitempty"`
+	// Kind is "cli-repo" or "web-cache". Surfaced as a tag on the
+	// dashboard row + as a Prometheus label so Grafana panels can
+	// group by kind.
+	Kind string `json:"kind"`
+	// Path is echoed back for the dashboard's per-row diagnostic
+	// display (so users can correlate a stale row with its config).
+	Path string `json:"path,omitempty"`
+	// StorageID is echoed back for kind=web-cache rows. Empty for
+	// cli-repo.
+	StorageID string `json:"storage_id,omitempty"`
+	// ReasonCode is one of collector.DuplicacyReason*. Empty string
+	// means "not yet evaluated" (the runner hasn't been called for
+	// this entry yet — should not happen in production but kept
+	// distinct from "ok" so an uninitialised state isn't reported as
+	// healthy).
+	ReasonCode string `json:"reason_code"`
+	// SnapshotCount is the total snapshot-revision count across all
+	// snapshot IDs in the repo.
+	SnapshotCount int `json:"snapshot_count"`
+	// LatestBackupAt is the end_time (or start_time fallback) of the
+	// newest snapshot found.
+	LatestBackupAt time.Time `json:"latest_backup_at,omitempty"`
+	// LatestBackupSizeBytes is the file_size field on the newest
+	// snapshot.
+	LatestBackupSizeBytes int64 `json:"latest_backup_size_bytes"`
+	// LatestBackupFiles is the number_of_files field on the newest
+	// snapshot.
+	LatestBackupFiles int64 `json:"latest_backup_files"`
+	// CurrentlyRunning is the orthogonal aux flag — true when a lock
+	// or incomplete marker is detected on disk. Best-effort.
+	CurrentlyRunning bool `json:"currently_running"`
+	// LatestSnapshotID is the snapshot id (per-repo identifier;
+	// e.g. "documents", "media") that produced LatestBackupAt.
+	LatestSnapshotID string `json:"latest_snapshot_id,omitempty"`
+	// LatestSnapshotRevision is the integer revision number of the
+	// newest snapshot.
+	LatestSnapshotRevision int `json:"latest_snapshot_revision,omitempty"`
+	// SnapshotIDs is the sorted, deduped list of distinct snapshot
+	// ids discovered in the repo.
+	SnapshotIDs []string `json:"snapshot_ids,omitempty"`
 }
 
 type BackupJob struct {

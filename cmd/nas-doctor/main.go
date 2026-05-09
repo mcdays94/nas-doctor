@@ -31,9 +31,9 @@ import (
 	"github.com/mcdays94/nas-doctor/internal/analyzer"
 	"github.com/mcdays94/nas-doctor/internal/api"
 	"github.com/mcdays94/nas-doctor/internal/collector"
-	"github.com/mcdays94/nas-doctor/internal/livetest"
 	"github.com/mcdays94/nas-doctor/internal/demo"
 	"github.com/mcdays94/nas-doctor/internal/fleet"
+	"github.com/mcdays94/nas-doctor/internal/livetest"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/scheduler"
 	"github.com/mcdays94/nas-doctor/internal/storage"
@@ -421,6 +421,26 @@ func main() {
 				}
 				coll.SetBackupMonitorBorg(ext)
 				logger.Info("external backup monitor loaded", "borg_repos", len(ext))
+			}
+			// Apply Duplicacy monitor config on startup (#314 / V1c).
+			// Mirrors the Borg startup wire-up above. Without this,
+			// configured Duplicacy entries wouldn't appear on the
+			// dashboard (or in /metrics) until the user re-saved
+			// settings.
+			if len(persistedSettings.BackupMonitor.Duplicacy) > 0 {
+				dup := make([]collector.DuplicacyEntry, 0, len(persistedSettings.BackupMonitor.Duplicacy))
+				for _, e := range persistedSettings.BackupMonitor.Duplicacy {
+					dup = append(dup, collector.DuplicacyEntry{
+						Enabled:    e.Enabled,
+						Label:      e.Label,
+						Kind:       e.Kind,
+						Path:       e.Path,
+						StorageID:  e.StorageID,
+						StaleAfter: e.StaleAfter,
+					})
+				}
+				coll.SetBackupMonitorDuplicacy(dup)
+				logger.Info("duplicacy backup monitor loaded", "entries", len(dup))
 			}
 		}
 		// Wire the LiveTestRegistry so manual /api/v1/speedtest/run +
