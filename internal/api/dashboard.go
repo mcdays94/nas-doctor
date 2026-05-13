@@ -404,7 +404,13 @@ sections.drives = function(sn, st) {
   h += '<div class="section-block" data-section="drives">';
   var smart = sn ? (sn.smart || []) : [];
   var disks = sn ? (sn.disks || []) : [];
-  if (smart.length > 0 || disks.length > 0) {
+  /* Issue #324: drives that were in standby during the most recent SMART
+     scan are reported in snap.smart_standby_devices but NOT included in
+     snap.smart (since we have no SMART data for them). Render them as
+     placeholder rows below the active drives so the user sees the full
+     drive count and an explanation of why no SMART data is shown. */
+  var standbyDevices = sn ? (sn.smart_standby_devices || []) : [];
+  if (smart.length > 0 || disks.length > 0 || standbyDevices.length > 0) {
     h += '<div>';
     var healthOk = 0, healthWarn = 0, healthCrit = 0;
     for (var hc = 0; hc < smart.length; hc++) {
@@ -413,7 +419,7 @@ sections.drives = function(sn, st) {
       else if ((smart[hc].temperature_c || 0) >= 50 || smart[hc].reallocated_sectors > 0 || smart[hc].pending_sectors > 0) healthWarn++;
       else healthOk++;
     }
-    h += '<div class="section-title" style="display:flex;align-items:center;gap:12px">Drives (' + (smart.length || disks.length) + ')';
+    h += '<div class="section-title" style="display:flex;align-items:center;gap:12px">Drives (' + ((smart.length + standbyDevices.length) || disks.length) + ')';
     h += '<span class="health-summary" style="display:inline-flex;gap:8px;font-size:11px;color:var(--text-quaternary);font-weight:400;text-transform:none;letter-spacing:0">';
     if (healthOk > 0) h += '<span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green)"></span>' + healthOk + ' ok</span>';
     if (healthWarn > 0) h += '<span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:var(--amber)"></span>' + healthWarn + ' warn</span>';
@@ -490,6 +496,23 @@ sections.drives = function(sn, st) {
 
         h += '</div>';
       }
+    }
+
+    /* Issue #324: render placeholder rows for drives currently in standby.
+       Below the active-drive rows but above the storage list, since
+       standby drives are physical drives without SMART data, not storage
+       mount points. Visually de-emphasised (opacity, no temp/sparkline)
+       so users can scan past them when triaging real-drive issues. */
+    for (var stbI = 0; stbI < standbyDevices.length; stbI++) {
+      var stbDev = standbyDevices[stbI];
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px;margin-bottom:6px;opacity:0.65">';
+      h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
+      h += '<span class="status-dot unknown"></span>';
+      h += '<span style="font-weight:600;font-size:13px;min-width:55px">' + esc(stbDev) + '</span>';
+      h += '<span style="font-size:11px;color:var(--text-quaternary);background:var(--bg-elevated);padding:1px 6px;border-radius:4px">standby</span>';
+      h += '<span style="font-size:12px;color:var(--text-tertiary);flex:1">No SMART data: drive is in standby and <a href="/settings#card-advanced" style="color:var(--accent)">Wake drives for SMART check</a> is off.</span>';
+      h += '</div>';
+      h += '</div>';
     }
 
     var usedInMerge = {};
