@@ -228,15 +228,17 @@ func (s *Scheduler) Start() {
 		"global_interval", s.interval,
 		"tick_interval", tickInterval,
 	)
-	// Main diagnostic collection loop
+	// Main diagnostic collection loop. Per-tick work is wrapped in
+	// runWithRecover (#325) so a panic in any sub-collector doesn't
+	// silently kill the goroutine and stop collection forever.
 	go func() {
-		s.RunOnce()
+		s.runWithRecover("main-scan", s.RunOnce)
 		ticker := time.NewTicker(tickInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				s.RunOnce()
+				s.runWithRecover("main-scan", s.RunOnce)
 			case newInterval := <-s.restart:
 				ticker.Stop()
 				// The `restart` channel carries a GLOBAL scan_interval
@@ -269,14 +271,15 @@ func (s *Scheduler) Start() {
 			}
 		}
 	}()
-	// Independent service check loop — ticks every 30s, runs due checks
+	// Independent service check loop — ticks every 30s, runs due checks.
+	// Wrapped in runWithRecover (#325).
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				s.runDueServiceChecks()
+				s.runWithRecover("service-checks", s.runDueServiceChecks)
 			case <-s.stop:
 				return
 			}
@@ -286,6 +289,8 @@ func (s *Scheduler) Start() {
 	// Independent container & process stats loop — collects Docker metrics and
 	// top processes every 5 minutes for chart history (full scans happen at the
 	// configured interval which is too infrequent for granular charts).
+	// Wrapped in runWithRecover (#325); both calls share one recovery so a
+	// panic in either keeps the loop alive for the next tick.
 	go func() {
 		time.Sleep(30 * time.Second) // let first scan finish
 		ticker := time.NewTicker(5 * time.Minute)
@@ -293,58 +298,65 @@ func (s *Scheduler) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				s.collectContainerStats()
-				s.collectProcessStats()
+				s.runWithRecover("container-process-stats", func() {
+					s.collectContainerStats()
+					s.collectProcessStats()
+				})
 			case <-s.stop:
 				return
 			}
 		}
 	}()
 
-	// Independent speed test loop — runs on interval or at scheduled times
+	// Independent speed test loop — runs on interval or at scheduled times.
+	// Wrapped in runWithRecover (#325); the entire tick body (timing logic
+	// plus runSpeedTest invocations) is one recovery unit because any panic
+	// inside is equally fatal to subsequent ticks.
 	go func() {
 		time.Sleep(2 * time.Minute)
-		s.runSpeedTest()
+		s.runWithRecover("speed-test-initial", s.runSpeedTest)
 		ticker := time.NewTicker(1 * time.Minute) // check every minute for schedule hits
 		defer ticker.Stop()
 		lastRun := time.Now()
 		for {
 			select {
 			case <-ticker.C:
-				s.mu.RLock()
-				schedule := s.speedTestSchedule
-				interval := s.speedTestInterval
-				s.mu.RUnlock()
-				now := time.Now()
-				if len(schedule) > 0 {
+				s.runWithRecover("speed-test", func() {
 					s.mu.RLock()
-					day := s.speedTestDay
-					freq := s.speedTestFreq
+					schedule := s.speedTestSchedule
+					interval := s.speedTestInterval
 					s.mu.RUnlock()
-					// Check if today matches the schedule day
-					dayMatch := true
-					if freq == "weekly" && day != "" {
-						dayMatch = strings.EqualFold(now.Weekday().String(), day)
-					} else if freq == "monthly" && day != "" {
-						dayNum, _ := strconv.Atoi(day)
-						dayMatch = dayNum > 0 && now.Day() == dayNum
-					}
-					// Scheduled mode: run at specific HH:MM times on matching days
-					nowHHMM := now.Format("15:04")
-					for _, t := range schedule {
-						if dayMatch && nowHHMM == t && now.Sub(lastRun) > 5*time.Minute {
+					now := time.Now()
+					if len(schedule) > 0 {
+						s.mu.RLock()
+						day := s.speedTestDay
+						freq := s.speedTestFreq
+						s.mu.RUnlock()
+						// Check if today matches the schedule day
+						dayMatch := true
+						if freq == "weekly" && day != "" {
+							dayMatch = strings.EqualFold(now.Weekday().String(), day)
+						} else if freq == "monthly" && day != "" {
+							dayNum, _ := strconv.Atoi(day)
+							dayMatch = dayNum > 0 && now.Day() == dayNum
+						}
+						// Scheduled mode: run at specific HH:MM times on matching days
+						nowHHMM := now.Format("15:04")
+						for _, t := range schedule {
+							if dayMatch && nowHHMM == t && now.Sub(lastRun) > 5*time.Minute {
+								s.runSpeedTest()
+								lastRun = now
+								break
+							}
+						}
+					} else {
+						// Interval mode
+						if now.Sub(lastRun) >= interval {
 							s.runSpeedTest()
 							lastRun = now
-							break
 						}
 					}
-				} else {
-					// Interval mode
-					if now.Sub(lastRun) >= interval {
-						s.runSpeedTest()
-						lastRun = now
-					}
-				}
+				})
 			case <-s.stop:
 				return
 			}
