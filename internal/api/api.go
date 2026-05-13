@@ -346,6 +346,22 @@ type statusResponse struct {
 	// (omitempty) on the happy path so unrelated consumers of the status
 	// endpoint don't need to care. Issue #227.
 	DataEphemeral bool `json:"data_ephemeral,omitempty"`
+	// BackupMonitor surfaces the count of enabled external Borg and
+	// Duplicacy repos configured via Settings → Backup Monitors. The
+	// dashboard JS reads these counts to detect the "configured but
+	// awaiting first scan" window and render the "Initial scan pending"
+	// placeholder instead of the misleading "No backup provider detected"
+	// copy. Paths and credentials are intentionally NOT exposed — counts
+	// are sufficient signal for the render-branch decision. Absent via
+	// omitempty when both counts are zero. Issue #328.
+	BackupMonitor *backupMonitorStatus `json:"backup_monitor,omitempty"`
+}
+
+// backupMonitorStatus carries the per-provider count of enabled external
+// repos from settings. Issue #328.
+type backupMonitorStatus struct {
+	BorgCount      int `json:"borg_count"`
+	DuplicacyCount int `json:"duplicacy_count"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -405,6 +421,29 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp.SectionHeights = settings.SectionHeights
 	resp.SectionOrder = settings.SectionOrder
 	resp.DismissedFindings = settings.DismissedFindings
+
+	// Surface enabled-only external-backup-repo counts so the dashboard
+	// JS can render the "Initial scan pending" placeholder during the
+	// post-deploy window before snap.Backup is populated (issue #328).
+	// Disabled entries are intentionally skipped — a user who has set
+	// Enabled=false should not see the awaiting placeholder forever.
+	var borgEnabled, duplicacyEnabled int
+	for _, r := range settings.BackupMonitor.Borg {
+		if r.Enabled {
+			borgEnabled++
+		}
+	}
+	for _, d := range settings.BackupMonitor.Duplicacy {
+		if d.Enabled {
+			duplicacyEnabled++
+		}
+	}
+	if borgEnabled > 0 || duplicacyEnabled > 0 {
+		resp.BackupMonitor = &backupMonitorStatus{
+			BorgCount:      borgEnabled,
+			DuplicacyCount: duplicacyEnabled,
+		}
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }

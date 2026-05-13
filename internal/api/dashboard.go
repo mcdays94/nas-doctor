@@ -774,12 +774,24 @@ sections.ups = function(sn) {
 };
 
 /* ── Section: Backup ─────────────────────────────────────────── */
-sections.backup = function(sn) {
+sections.backup = function(sn, st) {
   var esc = util.esc;
   var fmtBytes = util.fmtBytes;
   var h = '';
   h += '<div class="section-block" data-section="backup">';
   var backup = sn ? sn.backup : null;
+  /* Awaiting-first-scan detection (issue #328). When the user has
+     configured external Borg or Duplicacy repos via Settings →
+     Backup Monitors, but the first scan post-deploy hasn't landed
+     yet, the existing empty-state copy ("No backup provider
+     detected or configured") reads as a failure. Detect this
+     window via st.backup_monitor.{borg_count,duplicacy_count}
+     (set server-side in handleStatus from
+     settings.BackupMonitor.{Borg,Duplicacy}) and render a distinct
+     "Initial scan pending" placeholder. */
+  var borgConfigured = (st && st.backup_monitor && st.backup_monitor.borg_count) || 0;
+  var duplicacyConfigured = (st && st.backup_monitor && st.backup_monitor.duplicacy_count) || 0;
+  var anyConfigured = (borgConfigured + duplicacyConfigured) > 0;
   /* Duplicacy reason → severity mapping (PRD #310 §4 / issue #314).
      Mirrors the dashboard widget contract for the new per-provider
      reason set. ok=success, no_snapshots_yet=info, stale=warning,
@@ -912,6 +924,26 @@ sections.backup = function(sn) {
       h += '</div>';
     }
     h += '</div>';
+  } else if (anyConfigured) {
+    /* Awaiting-first-scan placeholder (#328). Visually distinct from a
+       failure: no red, no error pill, uses the same neutral panel
+       background as the empty state. The SYNCING badge mirrors the
+       Borg/Duplicacy "CONFIGURED" pill family so users see the
+       relationship between the placeholder and the configured-repos
+       state. */
+    var configuredParts = [];
+    if (borgConfigured > 0) configuredParts.push(borgConfigured + ' Borg repo' + (borgConfigured === 1 ? '' : 's'));
+    if (duplicacyConfigured > 0) configuredParts.push(duplicacyConfigured + ' Duplicacy repo' + (duplicacyConfigured === 1 ? '' : 's'));
+    var configuredSummary = configuredParts.join(' + ');
+    h += '<div>';
+    h += '<div class="section-title">Initial scan pending</div>';
+    h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:14px;font-size:12px;color:var(--text-tertiary);line-height:1.5">';
+    h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
+    h += '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(34,211,238,0.15);color:#22d3ee;font-weight:600;letter-spacing:0.5px">SYNCING</span>';
+    h += '<span style="color:var(--text-secondary)">' + esc(configuredSummary) + ' configured</span>';
+    h += '</div>';
+    h += 'First scan in progress. This message will disappear once the initial probe completes — typically within a few seconds. Configure additional repos in <a href="/settings#backup-monitors" style="color:var(--brand)">Settings &rarr; Backup Monitors</a>.';
+    h += '</div></div>';
   } else {
     h += '<div>';
     h += '<div class="section-title">Backup Monitoring</div>';
