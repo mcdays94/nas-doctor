@@ -1684,6 +1684,15 @@ func (s *Server) handleGetDisk(w http.ResponseWriter, r *http.Request) {
 			hours = 8760
 		}
 		history, err = s.store.GetDiskHistoryInRange(serial, time.Duration(hours)*time.Hour)
+		// If the chosen time window is too sparse to render a chart, fall
+		// back to the latest samples for this drive. This mirrors the /stats
+		// page's sparkline behaviour (latest N points regardless of age) and
+		// avoids a false "Not enough history data" state for drives that are
+		// polled infrequently or spend long periods in standby. See the
+		// v0.10.2-rc1 UAT finding on /disk/5PK9RPTB.
+		if err == nil && len(history) < 2 {
+			history, err = s.store.GetDiskHistory(serial, 500)
+		}
 	} else {
 		history, err = s.store.GetDiskHistory(serial, 500)
 	}
