@@ -374,6 +374,15 @@ func (d *DB) migrate() error {
 			platform TEXT NOT NULL DEFAULT '',
 			observed_at DATETIME NOT NULL
 		)`,
+
+		// Tracks last-observed Docker container state so notification rules
+		// can alert on running → stopped transitions instead of steady-state
+		// stopped containers.
+		`CREATE TABLE IF NOT EXISTS container_state (
+			container_name TEXT PRIMARY KEY,
+			state TEXT NOT NULL,
+			observed_at DATETIME NOT NULL
+		)`,
 	}
 
 	for _, m := range migrations {

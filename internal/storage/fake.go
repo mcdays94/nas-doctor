@@ -83,7 +83,8 @@ type FakeStore struct {
 	// Drive maintenance events (issue #130).
 	driveEvents     []DriveEvent
 	driveEventSeq   int64
-	driveSlotStates map[string]DriveSlotState
+	driveSlotStates    map[string]DriveSlotState
+	containerStates    map[string]ContainerState
 }
 
 // diskUsageRow is the minimal fake representation of a disk_usage_history row.
@@ -1165,6 +1166,35 @@ func (f *FakeStore) SaveDriveSlotState(state DriveSlotState) error {
 		state.ObservedAt = time.Now().UTC()
 	}
 	f.driveSlotStates[state.SlotKey] = state
+	return nil
+}
+
+// GetContainerState returns the last-observed state for containerName, or
+// (nil, nil) if no state has been recorded.
+func (f *FakeStore) GetContainerState(containerName string) (*ContainerState, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if state, ok := f.containerStates[containerName]; ok {
+		cp := state
+		return &cp, nil
+	}
+	return nil, nil
+}
+
+// SaveContainerState UPSERTs the last-observed state for a container.
+func (f *FakeStore) SaveContainerState(state ContainerState) error {
+	if state.ContainerName == "" {
+		return fmt.Errorf("container_name is required")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.containerStates == nil {
+		f.containerStates = make(map[string]ContainerState)
+	}
+	if state.ObservedAt.IsZero() {
+		state.ObservedAt = time.Now().UTC()
+	}
+	f.containerStates[state.ContainerName] = state
 	return nil
 }
 

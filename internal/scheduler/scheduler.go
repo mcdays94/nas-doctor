@@ -793,6 +793,13 @@ func (s *Scheduler) runSubsystem(name string, snap *internal.Snapshot) {
 	case "docker":
 		docker, _ := s.collector.CollectDocker()
 		snap.Docker = docker
+		if docker.Available {
+			if unexpected, err := detectUnexpectedContainerStops(s.store, docker, snap.Timestamp); err != nil {
+				s.logger.Warn("failed to detect unexpected container stops", "error", err)
+			} else {
+				snap.UnexpectedContainerStops = unexpected
+			}
+		}
 		// Enrich top processes with container attribution (previously
 		// done inline in Collect(); preserved here so the full-scan
 		// snapshot still has enrichment when both Docker + system ran

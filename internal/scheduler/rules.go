@@ -35,7 +35,7 @@ func evaluateRule(rule internal.NotificationRule, snap *internal.Snapshot) []int
 	case "ups":
 		return evalUPS(cond, val, snap.UPS)
 	case "docker":
-		return evalDocker(cond, target, snap.Docker)
+		return evalDocker(cond, target, snap.Docker, unexpectedStopSet(snap.UnexpectedContainerStops))
 	case "system":
 		return evalSystem(cond, val, snap.System)
 	case "zfs":
@@ -57,6 +57,20 @@ func parseFloat(s string) float64 {
 
 func synth(id string, sev internal.Severity, cat internal.Category, title, desc string) internal.Finding {
 	return internal.Finding{ID: id, Severity: sev, Category: cat, Title: title, Description: desc}
+}
+
+func unexpectedStopSet(names []string) map[string]struct{} {
+	if len(names) == 0 {
+		return map[string]struct{}{}
+	}
+	out := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		out[name] = struct{}{}
+	}
+	return out
 }
 
 func matchTarget(target, candidate string) bool {
@@ -260,7 +274,7 @@ func evalUPS(cond string, val float64, ups *internal.UPSInfo) []internal.Finding
 	return nil
 }
 
-func evalDocker(cond, target string, docker internal.DockerInfo) []internal.Finding {
+func evalDocker(cond, target string, docker internal.DockerInfo, unexpectedStops map[string]struct{}) []internal.Finding {
 	var out []internal.Finding
 	for _, c := range docker.Containers {
 		if !matchTarget(target, c.Name) {
@@ -268,10 +282,11 @@ func evalDocker(cond, target string, docker internal.DockerInfo) []internal.Find
 		}
 		switch cond {
 		case "stopped":
-			if c.State != "running" {
-				out = append(out, synth("rule:docker-stop:"+c.Name, internal.SeverityWarning, internal.CategoryDocker,
-					"Container stopped: "+c.Name, c.Image+" — state: "+c.State))
+			if _, ok := unexpectedStops[c.Name]; !ok {
+				continue
 			}
+			out = append(out, synth("rule:docker-stop:"+c.Name, internal.SeverityWarning, internal.CategoryDocker,
+				"Container stopped: "+c.Name, c.Image+" — state: "+c.State))
 		}
 	}
 	return out

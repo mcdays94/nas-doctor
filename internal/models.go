@@ -78,6 +78,11 @@ type Snapshot struct {
 	// key disappears when the dispatcher isn't populated (e.g. demo
 	// mode with a synthetic snapshot).
 	SubsystemLastRan map[string]string `json:"subsystem_last_ran,omitempty"`
+
+	// UnexpectedContainerStops lists containers that transitioned from
+	// running to a non-running state since the last docker observation.
+	// Populated by the scheduler before notification dispatch; not persisted.
+	UnexpectedContainerStops []string `json:"-"`
 }
 
 // ---------- Proxmox VE ----------

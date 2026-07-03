@@ -159,6 +159,13 @@ type DriveEventStore interface {
 	SaveDriveSlotState(state DriveSlotState) error
 }
 
+// ContainerStateStore tracks last-observed Docker container states for
+// unexpected-stop detection across scans.
+type ContainerStateStore interface {
+	GetContainerState(containerName string) (*ContainerState, error)
+	SaveContainerState(state ContainerState) error
+}
+
 // Store composes all domain-specific interfaces into a single aggregate.
 // Use the narrower interfaces when possible; use Store when a consumer
 // genuinely needs access to multiple domains.
@@ -172,6 +179,7 @@ type Store interface {
 	FindingStore
 	LifecycleStore
 	DriveEventStore
+	ContainerStateStore
 }
 
 // Compile-time checks: *DB must satisfy Store.
