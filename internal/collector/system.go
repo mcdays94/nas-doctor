@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -339,7 +338,5 @@ func extractHexID(s string) string {
 // function) so tests can swap in a fake implementation — see
 // smart_standby_test.go for the seam usage.
 var execCmd = func(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	return execCmdContext(defaultExecTimeout, name, args...)
 }

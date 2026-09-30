@@ -14,11 +14,13 @@ import (
 var (
 	cloudflaredLookPath   = exec.LookPath
 	cloudflaredRunCommand = func(name string, args ...string) ([]byte, error) {
-		return exec.Command(name, args...).CombinedOutput()
+		out, err := execCmdContext(defaultExecTimeout, name, args...)
+		return []byte(out), err
 	}
 	tailscaleLookPath   = exec.LookPath
 	tailscaleRunCommand = func(name string, args ...string) ([]byte, error) {
-		return exec.Command(name, args...).CombinedOutput()
+		out, err := execCmdContext(defaultExecTimeout, name, args...)
+		return []byte(out), err
 	}
 	tailscaleSocketStat = os.Stat
 	// tailscaleSocketPath is the expected tailscaled control socket. Can be

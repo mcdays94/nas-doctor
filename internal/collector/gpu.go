@@ -58,10 +58,10 @@ func collectNvidia() []internal.GPUDevice {
 		"utilization.encoder", "utilization.decoder",
 	}, ",")
 
-	out, err := exec.Command("nvidia-smi",
+	out, err := execOutputContext(defaultExecTimeout, "nvidia-smi",
 		"--query-gpu="+fields,
 		"--format=csv,noheader,nounits",
-	).Output()
+	)
 	if err != nil {
 		return nil
 	}
@@ -124,8 +124,8 @@ func collectAMDRocm() []internal.GPUDevice {
 	if _, err := exec.LookPath("rocm-smi"); err != nil {
 		return nil
 	}
-	out, err := exec.Command("rocm-smi", "--showid", "--showtemp", "--showuse",
-		"--showmeminfo", "vram", "--showpower", "--showclocks", "--csv").Output()
+	out, err := execOutputContext(defaultExecTimeout, "rocm-smi", "--showid", "--showtemp", "--showuse",
+		"--showmeminfo", "vram", "--showpower", "--showclocks", "--csv")
 	if err != nil {
 		return nil
 	}

@@ -29,7 +29,7 @@ type execRunner struct{}
 
 func (execRunner) LookPath(name string) (string, error) { return exec.LookPath(name) }
 func (execRunner) Output(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return execOutputContext(defaultExecTimeout, name, args...)
 }
 
 // defaultRunner is used by the exported collectUPS / collectNUT / collectApcupsd entrypoints.

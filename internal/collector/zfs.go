@@ -51,14 +51,14 @@ func collectZFS() (*internal.ZFSInfo, error) {
 // collectZPools runs zpool list and zpool status to get pool info.
 func collectZPools() ([]internal.ZPool, error) {
 	// Get basic pool info from zpool list
-	listOut, err := exec.Command("zpool", "list", "-Hp", "-o", "name,size,alloc,free,frag,cap,health").Output()
+	listOut, err := execOutputContext(defaultExecTimeout, "zpool", "list", "-Hp", "-o", "name,size,alloc,free,frag,cap,health")
 	if err != nil {
 		return nil, fmt.Errorf("zpool list: %w", err)
 	}
 	pools := parseZPoolList(string(listOut))
 
 	// Get detailed status from zpool status
-	statusOut, err := exec.Command("zpool", "status", "-v").Output()
+	statusOut, err := execOutputContext(defaultExecTimeout, "zpool", "status", "-v")
 	if err != nil {
 		return pools, nil // Return basic info even if status fails
 	}
@@ -398,7 +398,7 @@ func classifyVDev(name string) string {
 
 // collectZDatasets runs `zfs list` to get dataset info.
 func collectZDatasets() ([]internal.ZDataset, error) {
-	out, err := exec.Command("zfs", "list", "-Hp", "-o", "name,used,avail,refer,mountpoint,compression,compressratio,type").Output()
+	out, err := execOutputContext(defaultExecTimeout, "zfs", "list", "-Hp", "-o", "name,used,avail,refer,mountpoint,compression,compressratio,type")
 	if err != nil {
 		return nil, err
 	}
