@@ -314,10 +314,19 @@ func (s *Scheduler) Start() {
 	// inside is equally fatal to subsequent ticks.
 	go func() {
 		time.Sleep(2 * time.Minute)
-		s.runWithRecover("speed-test-initial", s.runSpeedTest)
+		// A restart must not add an off-schedule test (#339): decide from the
+		// cadence and the last persisted test. If the plan panics, fall back
+		// to running now, the pre-#339 behaviour.
+		runNow, lastRun := true, time.Now()
+		s.runWithRecover("speed-test-startup-plan", func() {
+			runNow, lastRun = s.speedTestStartupPlan(time.Now())
+		})
+		if runNow {
+			s.runWithRecover("speed-test-initial", s.runSpeedTest)
+			lastRun = time.Now()
+		}
 		ticker := time.NewTicker(1 * time.Minute) // check every minute for schedule hits
 		defer ticker.Stop()
-		lastRun := time.Now()
 		for {
 			select {
 			case <-ticker.C:
@@ -1453,6 +1462,57 @@ func (s *Scheduler) collectProcessStats() {
 		s.latest.System.TopProcesses = procs
 	}
 	s.mu.Unlock()
+}
+
+// speedTestStartupPlan decides whether the speed-test loop runs a test right
+// after startup, and which lastRun it counts the cadence from (#339). It reads
+// the current cadence and the newest persisted result, then applies
+// speedTestStartupRun.
+func (s *Scheduler) speedTestStartupPlan(now time.Time) (runNow bool, lastRun time.Time) {
+	s.mu.RLock()
+	interval := s.speedTestInterval
+	scheduled := len(s.speedTestSchedule) > 0
+	s.mu.RUnlock()
+
+	var lastTest time.Time
+	if res, ok, err := s.store.GetLatestSpeedTestResult(); err != nil {
+		s.logger.Warn("speed test: could not read the last result, treating it as never run", "error", err)
+	} else if ok && res != nil {
+		lastTest = res.Timestamp
+	}
+
+	runNow, lastRun = speedTestStartupRun(now, lastTest, interval, scheduled)
+	if !runNow {
+		s.logger.Info("speed test: skipping the startup run, cadence continues from the last test",
+			"last_test", lastTest, "scheduled", scheduled, "interval", interval)
+	}
+	return runNow, lastRun
+}
+
+// speedTestStartupRun is the decision behind speedTestStartupPlan. A restart
+// must not add an off-schedule test:
+//   - disabled: run, so runSpeedTest records the disabled state (it never
+//     calls the runner);
+//   - no test on record: run once so a new install gets a first reading;
+//   - scheduled (daily, weekly, monthly): wait for the next scheduled time;
+//   - interval: run only if the last test is at least one interval old,
+//     otherwise resume the cadence from it.
+func speedTestStartupRun(now, lastTest time.Time, interval time.Duration, scheduled bool) (runNow bool, lastRun time.Time) {
+	if lastTest.After(now) {
+		lastTest = now // clock moved backwards; don't wait longer than one interval
+	}
+	switch {
+	case interval == SpeedTestIntervalDisabled:
+		return true, now
+	case lastTest.IsZero():
+		return true, now
+	case scheduled:
+		return false, lastTest
+	case now.Sub(lastTest) >= interval:
+		return true, now
+	default:
+		return false, lastTest
+	}
 }
 
 // runSpeedTest executes a network speed test and records the attempt
