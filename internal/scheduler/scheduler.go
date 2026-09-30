@@ -576,6 +576,19 @@ func (s *Scheduler) SetSpeedTestSchedule(times []string, day string, freq string
 	}
 }
 
+// SpeedTestConfig returns a read-only snapshot of the current speed-test
+// cadence: the interval (or SpeedTestIntervalDisabled), the scheduled HH:MM
+// times, the day selector, and the frequency keyword. Exposed so
+// startup/settings-parity tests can confirm persisted speed-test settings
+// are actually applied at boot rather than left at the New() default
+// (issue #333).
+func (s *Scheduler) SpeedTestConfig() (interval time.Duration, schedule []string, day, freq string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	schedule = append([]string(nil), s.speedTestSchedule...)
+	return s.speedTestInterval, schedule, s.speedTestDay, s.speedTestFreq
+}
+
 func (s *Scheduler) UpdateInterval(d time.Duration) {
 	if d < 1*time.Second {
 		d = 1 * time.Second // minimum 1 second
@@ -1022,6 +1035,18 @@ func (s *Scheduler) UpdateAlerting(cfg AlertingConfig) {
 		"maintenance_windows", len(cfg.MaintenanceWindows),
 		"quiet_hours_enabled", cfg.QuietHours.Enabled,
 	)
+}
+
+// AlertingConfig returns the active alerting configuration. The returned
+// struct is a shallow copy (its slices share backing storage, so callers
+// must treat it as read-only). Exposed so startup/settings-parity tests can
+// confirm notification routing rules are applied at boot — before this they
+// were dropped at startup, silently falling back to the legacy "every
+// finding to every webhook" path until the next settings save.
+func (s *Scheduler) AlertingConfig() AlertingConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.alerting
 }
 
 // UpdateServiceChecks replaces service check configuration used in each run.

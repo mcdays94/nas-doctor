@@ -345,7 +345,14 @@ func main() {
 		notif := buildNotifier(webhooks, logger, store)
 
 		sched = scheduler.New(coll, store, notif, metrics, logger, interval)
-		applySchedulerSettingsFromStore(sched, persistedSettings)
+		// Apply all persisted runtime settings (speed-test cadence, retention,
+		// backup, alerting rules, per-subsystem scan intervals, log forwarding,
+		// Proxmox/Kubernetes/SMART/Borg/Duplicacy config) through the same
+		// entry point the settings-save handler uses, so startup and save can
+		// no longer drift. This is the fix for issue #333: previously the
+		// speed-test schedule, notification rules and log forwarding were only
+		// applied on save and silently reverted on every restart.
+		applySchedulerSettingsFromStore(sched, coll, persistedSettings, interval)
 		// Defense-in-depth: guarantee the scheduler's in-memory service check
 		// set matches whatever history the DB carries, even when the settings
 		// payload failed to load or was nil (empty DB, corrupt JSON). Without
@@ -356,92 +363,6 @@ func main() {
 			logger.Warn("startup: purge orphan service check history", "error", err)
 		} else if pruned > 0 {
 			logger.Info("startup: pruned orphan service check history", "rows", pruned)
-		}
-		// Apply Proxmox config to collector on startup
-		if persistedSettings != nil && persistedSettings.Proxmox.Enabled {
-			coll.SetProxmoxConfig(collector.ProxmoxConfig{
-				Enabled:  true,
-				URL:      persistedSettings.Proxmox.URL,
-				TokenID:  persistedSettings.Proxmox.TokenID,
-				Secret:   persistedSettings.Proxmox.Secret,
-				NodeName: persistedSettings.Proxmox.NodeName,
-				Alias:    persistedSettings.Proxmox.Alias,
-			})
-			logger.Info("proxmox integration loaded", "url", persistedSettings.Proxmox.URL)
-		}
-		if persistedSettings != nil && persistedSettings.Kubernetes.Enabled {
-			coll.SetKubeConfig(collector.KubeConfig{
-				Enabled:   true,
-				URL:       persistedSettings.Kubernetes.URL,
-				Token:     persistedSettings.Kubernetes.Token,
-				Alias:     persistedSettings.Kubernetes.Alias,
-				InCluster: persistedSettings.Kubernetes.InCluster,
-			})
-			logger.Info("kubernetes integration loaded", "url", persistedSettings.Kubernetes.URL, "in_cluster", persistedSettings.Kubernetes.InCluster)
-		}
-		// Apply SMART standby-awareness preference on startup (#198). Default
-		// (false) uses `-n standby` so spun-down drives aren't woken by scans.
-		// Moved from Settings.SMART → Settings.AdvancedScans.SMART in
-		// schema v3 (#259).
-		if persistedSettings != nil {
-			coll.SetSMARTConfig(collector.SMARTConfig{
-				WakeDrives: persistedSettings.AdvancedScans.SMART.WakeDrives,
-			})
-			// Apply the max-age force-wake threshold on startup (#238).
-			// Scheduler owns this policy; 0 disables the safety net.
-			sched.SetSMARTMaxAgeDays(persistedSettings.AdvancedScans.SMART.MaxAgeDays)
-			// Apply per-subsystem scan intervals on startup (#260).
-			// The scheduler's dispatcher is the source of truth for
-			// "what runs when" — without this push, fresh boots
-			// would silently run every subsystem on the global
-			// cadence regardless of persisted settings.
-			sched.SetDispatcherIntervals(scheduler.DispatcherIntervalsConfig{
-				SMARTSec:      persistedSettings.AdvancedScans.SMART.IntervalSec,
-				DockerSec:     persistedSettings.AdvancedScans.Docker.IntervalSec,
-				ProxmoxSec:    persistedSettings.AdvancedScans.Proxmox.IntervalSec,
-				KubernetesSec: persistedSettings.AdvancedScans.Kubernetes.IntervalSec,
-				ZFSSec:        persistedSettings.AdvancedScans.ZFS.IntervalSec,
-				GPUSec:        persistedSettings.AdvancedScans.GPU.IntervalSec,
-			}, interval)
-			// Apply external Borg monitor config on startup (#279).
-			// The collector reads this on every backup tick — without
-			// it, configured repos wouldn't show up until the user
-			// re-saved settings.
-			if len(persistedSettings.BackupMonitor.Borg) > 0 {
-				ext := make([]collector.BorgExternalRepo, 0, len(persistedSettings.BackupMonitor.Borg))
-				for _, r := range persistedSettings.BackupMonitor.Borg {
-					ext = append(ext, collector.BorgExternalRepo{
-						Enabled:       r.Enabled,
-						Label:         r.Label,
-						RepoPath:      r.RepoPath,
-						BinaryPath:    r.BinaryPath,
-						PassphraseEnv: r.PassphraseEnv,
-						SSHKeyPath:    r.SSHKeyPath,
-					})
-				}
-				coll.SetBackupMonitorBorg(ext)
-				logger.Info("external backup monitor loaded", "borg_repos", len(ext))
-			}
-			// Apply Duplicacy monitor config on startup (#314 / V1c).
-			// Mirrors the Borg startup wire-up above. Without this,
-			// configured Duplicacy entries wouldn't appear on the
-			// dashboard (or in /metrics) until the user re-saved
-			// settings.
-			if len(persistedSettings.BackupMonitor.Duplicacy) > 0 {
-				dup := make([]collector.DuplicacyEntry, 0, len(persistedSettings.BackupMonitor.Duplicacy))
-				for _, e := range persistedSettings.BackupMonitor.Duplicacy {
-					dup = append(dup, collector.DuplicacyEntry{
-						Enabled:    e.Enabled,
-						Label:      e.Label,
-						Kind:       e.Kind,
-						Path:       e.Path,
-						StorageID:  e.StorageID,
-						StaleAfter: e.StaleAfter,
-					})
-				}
-				coll.SetBackupMonitorDuplicacy(dup)
-				logger.Info("duplicacy backup monitor loaded", "entries", len(dup))
-			}
 		}
 		// Wire the LiveTestRegistry so manual /api/v1/speedtest/run +
 		// the cron-driven 4h cadence share a single in-flight test.
@@ -640,53 +561,21 @@ func buildNotifier(webhooks []internal.WebhookConfig, logger *slog.Logger, store
 	return n
 }
 
-func applySchedulerSettingsFromStore(sched *scheduler.Scheduler, settings *api.Settings) {
+// applySchedulerSettingsFromStore pushes persisted settings into the scheduler
+// and collector at startup. It delegates to api.ApplyRuntimeSettings — the same
+// entry point the settings-save handler uses — so the boot path and the save
+// path can no longer drift. Before this consolidation the boot path applied
+// retention/backup/alerting here but silently omitted the speed-test cadence,
+// notification routing rules and log forwarding, so those reverted on every
+// restart (issue #333).
+//
+// Service checks are applied here rather than inside ApplyRuntimeSettings so
+// the caller's startup orphan-history purge runs against the freshly installed
+// list.
+func applySchedulerSettingsFromStore(sched *scheduler.Scheduler, coll *collector.Collector, settings *api.Settings, globalScanInterval time.Duration) {
 	if sched == nil || settings == nil {
 		return
 	}
-
-	snapshotDays := settings.Retention.SnapshotDays
-	if snapshotDays < 7 {
-		snapshotDays = 90
-	}
-	maxDBSizeMB := settings.Retention.MaxDBSizeMB
-	if maxDBSizeMB < 50 {
-		maxDBSizeMB = 500
-	}
-	notifyLogDays := settings.Retention.NotifyLogDays
-	if notifyLogDays < 1 {
-		notifyLogDays = 30
-	}
-	sched.UpdateRetention(scheduler.RetentionConfig{
-		SnapshotDays:  snapshotDays,
-		MaxDBSizeMB:   maxDBSizeMB,
-		NotifyLogDays: notifyLogDays,
-	})
-
-	keepCount := settings.Backup.KeepCount
-	if keepCount <= 0 {
-		keepCount = 4
-	}
-	intervalH := settings.Backup.IntervalH
-	if intervalH <= 0 {
-		intervalH = 168
-	}
-	sched.UpdateBackup(scheduler.BackupConfig{
-		Enabled:   settings.Backup.Enabled,
-		Path:      settings.Backup.Path,
-		KeepCount: keepCount,
-		IntervalH: intervalH,
-	})
-
-	defaultCooldown := settings.Notifications.DefaultCooldownSec
-	if defaultCooldown <= 0 {
-		defaultCooldown = 900
-	}
-	sched.UpdateAlerting(scheduler.AlertingConfig{
-		Policies:           settings.Notifications.Policies,
-		QuietHours:         settings.Notifications.QuietHours,
-		MaintenanceWindows: settings.Notifications.MaintenanceWindows,
-		DefaultCooldownSec: defaultCooldown,
-	})
+	api.ApplyRuntimeSettings(sched, coll, *settings, globalScanInterval)
 	sched.UpdateServiceChecks(settings.ServiceChecks.Checks)
 }
