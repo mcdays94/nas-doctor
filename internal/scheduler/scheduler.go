@@ -689,6 +689,15 @@ func (s *Scheduler) RunOnce() {
 	// Analyze
 	snap.Findings = analyzer.Analyze(snap)
 	snap.Findings = append(snap.Findings, s.buildSMARTTrendFindings(snap)...)
+	// analyzer.Analyze numbers its own findings F001..FNNN, but the SMART
+	// trend findings appended above arrive with no ID. Two ID-less findings
+	// (e.g. two drives trending worse) would collide on the findings-table
+	// primary key (snapshot_id, id) and roll back the ENTIRE SaveSnapshot
+	// transaction — snapshot, SMART, system and disk history all lost — and
+	// because the trend is computed from that (now frozen) history, the
+	// failure latches until the DB is wiped. This is the silent
+	// history-freeze behind #323/#325. Stamp unique IDs before persisting.
+	ensureUniqueFindingIDs(snap.Findings)
 	// Stamp findings with detection timestamp
 	ts := snap.Timestamp.Format(time.RFC3339)
 	for i := range snap.Findings {
@@ -1170,6 +1179,37 @@ func (s *Scheduler) checkBackup() {
 		s.mu.Lock()
 		s.backup.LastBackup = result.Timestamp
 		s.mu.Unlock()
+	}
+}
+
+// ensureUniqueFindingIDs fills any empty finding ID with the next available
+// F%03d identifier, leaving already-numbered findings untouched. It guarantees
+// every finding in the slice carries a distinct, non-empty ID so the persisted
+// rows cannot collide on the findings-table primary key (snapshot_id, id).
+// Findings produced by analyzer.Analyze are already numbered; the SMART trend
+// findings appended afterwards are not, and a duplicate/empty ID there would
+// roll back the whole snapshot save (#323/#325).
+func ensureUniqueFindingIDs(findings []internal.Finding) {
+	used := make(map[string]bool, len(findings))
+	for _, f := range findings {
+		if f.ID != "" {
+			used[f.ID] = true
+		}
+	}
+	next := 1
+	for i := range findings {
+		if findings[i].ID != "" {
+			continue
+		}
+		for {
+			id := fmt.Sprintf("F%03d", next)
+			next++
+			if !used[id] {
+				findings[i].ID = id
+				used[id] = true
+				break
+			}
+		}
 	}
 }
 
