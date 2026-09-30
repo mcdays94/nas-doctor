@@ -2855,6 +2855,53 @@ func (d *DB) PruneDiskUsageHistory(cutoff time.Time) (int64, error) {
 	return n, nil
 }
 
+// PruneContainerStats deletes container_stats_history rows older than cutoff.
+// The container-stats loop writes this table every 5 minutes with a synthetic
+// snapshot_id ("cstats-<ms>"), so PruneSnapshots — which only deletes rows
+// whose snapshot_id is a real snapshot — never reaches it. Without this
+// dedicated horizon the table grows without bound (the DB-longevity failure
+// behind history-loss reports). Snapshot-independent, like PruneDiskUsageHistory.
+func (d *DB) PruneContainerStats(cutoff time.Time) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM container_stats_history WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune container_stats_history: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// PruneProcessHistory deletes process_history rows older than cutoff. Written
+// every 5 minutes (and on each full scan) with a synthetic snapshot_id, so it
+// shares container_stats_history's unbounded-growth problem and gets the same
+// timestamp-based retention.
+func (d *DB) PruneProcessHistory(cutoff time.Time) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM process_history WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune process_history: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// PruneSpeedTestHistory deletes speedtest_history rows older than cutoff and
+// clears any speedtest_samples orphaned by that delete. Orphans are removed
+// explicitly rather than relying on the ON DELETE CASCADE foreign key, because
+// PRAGMA foreign_keys is set per-connection and is not guaranteed on every
+// pooled connection — a cascade that silently no-ops would leak sample rows.
+func (d *DB) PruneSpeedTestHistory(cutoff time.Time) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM speedtest_history WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune speedtest_history: %w", err)
+	}
+	if _, err := d.db.Exec(
+		`DELETE FROM speedtest_samples WHERE test_id NOT IN (SELECT id FROM speedtest_history)`,
+	); err != nil {
+		return 0, fmt.Errorf("prune orphaned speedtest_samples: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // PruneToSizeMB aggressively deletes the oldest snapshots until the DB is under the target size.
 // Returns the number of snapshots deleted.
 func (d *DB) PruneToSizeMB(targetMB float64) (int, error) {
