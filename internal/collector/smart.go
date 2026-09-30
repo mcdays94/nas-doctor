@@ -457,6 +457,32 @@ type smartctlJSON struct {
 	} `json:"form_factor"`
 }
 
+// decodeCommandTimeout normalizes SMART attribute 188 (Command_Timeout).
+// Seagate — and some other vendors — pack three 16-bit sub-counters into the
+// 48-bit raw value, so a drive that saw a single timeout reports
+// 0x0001_0001_0001 = 4295032833. Surfacing that raw decimal produced a false
+// "4.2 billion command timeouts — drive or controller failing" CRITICAL
+// (issue #330). A real Command_Timeout count is small (the analyzer's top tier
+// starts at 100), so any value that cannot fit in 16 bits is treated as the
+// packed form and decoded to the largest of its three sub-counters — the worst
+// bucket. That yields 1 for the 0x100010001 case, can never under-report a
+// genuine elevated count, and is bounded to <= 65535, killing the absurd
+// reading. Plain values that already fit in 16 bits pass through unchanged, and
+// this is vendor-agnostic (keyed on the value shape, not a model-string match).
+func decodeCommandTimeout(raw int64) int64 {
+	if raw <= 0xFFFF {
+		return raw
+	}
+	worst := raw & 0xFFFF
+	if w := (raw >> 16) & 0xFFFF; w > worst {
+		worst = w
+	}
+	if w := (raw >> 32) & 0xFFFF; w > worst {
+		worst = w
+	}
+	return worst
+}
+
 func parseSMARTJSON(device, out string) (internal.SMARTInfo, error) {
 	info := internal.SMARTInfo{Device: device}
 
@@ -546,7 +572,7 @@ func parseSMARTJSON(device, out string) (internal.SMARTInfo, error) {
 		case 187:
 			// Reported Uncorrectable - use as fallback for reallocated
 		case 188:
-			info.CommandTimeout = attr.Raw.Value
+			info.CommandTimeout = decodeCommandTimeout(attr.Raw.Value)
 		case 194:
 			info.Temperature = int(attr.Raw.Value & 0xFF) // lower byte is current temp
 		case 196:
@@ -617,7 +643,7 @@ func parseSMARTText(device, out string) internal.SMARTInfo {
 			case 10:
 				info.SpinRetry = rawVal
 			case 188:
-				info.CommandTimeout = rawVal
+				info.CommandTimeout = decodeCommandTimeout(rawVal)
 			case 194:
 				info.Temperature = int(rawVal)
 			case 197:
