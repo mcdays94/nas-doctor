@@ -2393,7 +2393,7 @@ func (d *DB) SetConfig(key, value string) error {
 }
 
 // PruneSnapshots deletes snapshots older than the given duration, keeping at least `keepMin`.
-// Associated smart_history and system_history rows are also pruned (via CASCADE or explicit DELETE).
+// Their findings and snapshot-bound history rows are deleted explicitly in the same transaction.
 func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 	cutoff := time.Now().Add(-olderThan)
 
@@ -2428,7 +2428,18 @@ func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 		}
 	}
 
-	// Delete the snapshots themselves (findings cascade via FK or are orphaned)
+	// Findings must go before their snapshots. findings.snapshot_id has no
+	// ON DELETE CASCADE, so on the pooled connection that runs with
+	// foreign_keys=ON the snapshot DELETE below would fail with "FOREIGN KEY
+	// constraint failed" and roll back the whole prune; on the others it would
+	// leave the findings orphaned. PruneToSizeMB does the same.
+	if _, err := tx.Exec(fmt.Sprintf(
+		`DELETE FROM findings WHERE snapshot_id IN (%s)`, pruneQuery,
+	), keepMin, cutoff); err != nil {
+		return 0, fmt.Errorf("prune findings: %w", err)
+	}
+
+	// Delete the snapshots themselves
 	result, err := tx.Exec(`
 		DELETE FROM snapshots 
 		WHERE id NOT IN (

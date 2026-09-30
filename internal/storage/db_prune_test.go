@@ -166,6 +166,58 @@ func TestPruneSnapshots_RollbackIsolation(t *testing.T) {
 	}
 }
 
+// TestPruneSnapshots_DeletesFindings guards the age-based snapshot prune that
+// failed on long-running installs with "prune snapshots: FOREIGN KEY
+// constraint failed". findings.snapshot_id references snapshots(id) without
+// ON DELETE CASCADE, and PruneSnapshots cleared the history tables but not
+// findings. On the pooled connection that has PRAGMA foreign_keys=ON the
+// snapshot DELETE hit the constraint and the whole prune rolled back; on the
+// other connections it went through and left the findings orphaned.
+func TestPruneSnapshots_DeletesFindings(t *testing.T) {
+	db := newTestDB(t)
+	// Pin the pool to the connection Open ran its pragmas on, so the prune
+	// runs with foreign keys enforced, as it does when it fails in production.
+	db.db.SetMaxOpenConns(1)
+	var fk int
+	if err := db.db.QueryRow("PRAGMA foreign_keys").Scan(&fk); err != nil || fk != 1 {
+		t.Fatalf("precondition: PRAGMA foreign_keys = %d (err %v); want 1", fk, err)
+	}
+
+	seedSnapshotWithHistory(t, db, "snap-old", time.Now().Add(-48*time.Hour))
+	seedSnapshotWithHistory(t, db, "snap-new", time.Now().Add(-5*time.Minute))
+	for _, snapID := range []string{"snap-old", "snap-new"} {
+		if _, err := db.db.Exec(
+			`INSERT INTO findings (id, snapshot_id, severity, category, title, data) VALUES (?,?,?,?,?,?)`,
+			"F001", snapID, "info", "smart", "Worsening SMART Trend", "{}",
+		); err != nil {
+			t.Fatalf("insert finding for %s: %v", snapID, err)
+		}
+	}
+
+	pruned, err := db.PruneSnapshots(1*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("PruneSnapshots: %v", err)
+	}
+	if pruned != 1 {
+		t.Errorf("expected 1 snapshot pruned, got %d", pruned)
+	}
+
+	findingsFor := func(snapID string) int {
+		t.Helper()
+		var n int
+		if err := db.db.QueryRow(`SELECT COUNT(*) FROM findings WHERE snapshot_id = ?`, snapID).Scan(&n); err != nil {
+			t.Fatalf("count findings for %s: %v", snapID, err)
+		}
+		return n
+	}
+	if n := findingsFor("snap-old"); n != 0 {
+		t.Errorf("pruned snapshot still has %d finding(s); want 0 (no orphans)", n)
+	}
+	if n := findingsFor("snap-new"); n != 1 {
+		t.Errorf("kept snapshot has %d finding(s); want 1", n)
+	}
+}
+
 // TestPruneDiskUsageHistory_DeletesOldRowsOnly — the new dedicated prune path.
 func TestPruneDiskUsageHistory_DeletesOldRowsOnly(t *testing.T) {
 	db := newTestDB(t)
