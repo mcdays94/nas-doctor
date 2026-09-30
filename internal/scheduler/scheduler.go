@@ -576,6 +576,19 @@ func (s *Scheduler) SetSpeedTestSchedule(times []string, day string, freq string
 	}
 }
 
+// SpeedTestConfig returns a read-only snapshot of the current speed-test
+// cadence: the interval (or SpeedTestIntervalDisabled), the scheduled HH:MM
+// times, the day selector, and the frequency keyword. Exposed so
+// startup/settings-parity tests can confirm persisted speed-test settings
+// are actually applied at boot rather than left at the New() default
+// (issue #333).
+func (s *Scheduler) SpeedTestConfig() (interval time.Duration, schedule []string, day, freq string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	schedule = append([]string(nil), s.speedTestSchedule...)
+	return s.speedTestInterval, schedule, s.speedTestDay, s.speedTestFreq
+}
+
 func (s *Scheduler) UpdateInterval(d time.Duration) {
 	if d < 1*time.Second {
 		d = 1 * time.Second // minimum 1 second
@@ -676,6 +689,15 @@ func (s *Scheduler) RunOnce() {
 	// Analyze
 	snap.Findings = analyzer.Analyze(snap)
 	snap.Findings = append(snap.Findings, s.buildSMARTTrendFindings(snap)...)
+	// analyzer.Analyze numbers its own findings F001..FNNN, but the SMART
+	// trend findings appended above arrive with no ID. Two ID-less findings
+	// (e.g. two drives trending worse) would collide on the findings-table
+	// primary key (snapshot_id, id) and roll back the ENTIRE SaveSnapshot
+	// transaction — snapshot, SMART, system and disk history all lost — and
+	// because the trend is computed from that (now frozen) history, the
+	// failure latches until the DB is wiped. This is the silent
+	// history-freeze behind #323/#325. Stamp unique IDs before persisting.
+	ensureUniqueFindingIDs(snap.Findings)
 	// Stamp findings with detection timestamp
 	ts := snap.Timestamp.Format(time.RFC3339)
 	for i := range snap.Findings {
@@ -1024,6 +1046,18 @@ func (s *Scheduler) UpdateAlerting(cfg AlertingConfig) {
 	)
 }
 
+// AlertingConfig returns the active alerting configuration. The returned
+// struct is a shallow copy (its slices share backing storage, so callers
+// must treat it as read-only). Exposed so startup/settings-parity tests can
+// confirm notification routing rules are applied at boot — before this they
+// were dropped at startup, silently falling back to the legacy "every
+// finding to every webhook" path until the next settings save.
+func (s *Scheduler) AlertingConfig() AlertingConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.alerting
+}
+
 // UpdateServiceChecks replaces service check configuration used in each run.
 // It also purges service_checks_history rows whose keys are no longer in the
 // config — otherwise stale checks keep appearing on the /service-checks page
@@ -1145,6 +1179,37 @@ func (s *Scheduler) checkBackup() {
 		s.mu.Lock()
 		s.backup.LastBackup = result.Timestamp
 		s.mu.Unlock()
+	}
+}
+
+// ensureUniqueFindingIDs fills any empty finding ID with the next available
+// F%03d identifier, leaving already-numbered findings untouched. It guarantees
+// every finding in the slice carries a distinct, non-empty ID so the persisted
+// rows cannot collide on the findings-table primary key (snapshot_id, id).
+// Findings produced by analyzer.Analyze are already numbered; the SMART trend
+// findings appended afterwards are not, and a duplicate/empty ID there would
+// roll back the whole snapshot save (#323/#325).
+func ensureUniqueFindingIDs(findings []internal.Finding) {
+	used := make(map[string]bool, len(findings))
+	for _, f := range findings {
+		if f.ID != "" {
+			used[f.ID] = true
+		}
+	}
+	next := 1
+	for i := range findings {
+		if findings[i].ID != "" {
+			continue
+		}
+		for {
+			id := fmt.Sprintf("F%03d", next)
+			next++
+			if !used[id] {
+				findings[i].ID = id
+				used[id] = true
+				break
+			}
+		}
 	}
 }
 

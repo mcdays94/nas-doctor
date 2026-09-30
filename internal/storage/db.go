@@ -633,8 +633,31 @@ func (d *DB) SaveSnapshot(snap *internal.Snapshot) error {
 		return fmt.Errorf("insert snapshot: %w", err)
 	}
 
-	// Store findings individually for efficient querying
-	for _, f := range snap.Findings {
+	// Store findings individually for efficient querying.
+	//
+	// The findings table's primary key is (snapshot_id, id), so a duplicate or
+	// empty finding ID within one snapshot would abort this INSERT and roll the
+	// whole transaction back — losing the snapshot AND all of its SMART/system/
+	// disk history for that scan. Callers are expected to hand us unique IDs,
+	// but a single bad row must never be able to silently freeze history
+	// (#323/#325), so we defensively synthesize a unique ID for any finding
+	// that arrives empty or collides, and keep the stored JSON's id in sync
+	// with the column.
+	usedIDs := make(map[string]struct{}, len(snap.Findings))
+	for i := range snap.Findings {
+		f := snap.Findings[i] // copy — do not mutate the caller's slice
+		if f.ID == "" {
+			f.ID = fmt.Sprintf("F%03d", i+1)
+		}
+		base := f.ID
+		for n := 1; ; n++ {
+			if _, dup := usedIDs[f.ID]; !dup {
+				break
+			}
+			f.ID = fmt.Sprintf("%s-%d", base, n)
+		}
+		usedIDs[f.ID] = struct{}{}
+
 		fData, _ := json.Marshal(f)
 		_, err = tx.Exec(
 			"INSERT INTO findings (id, snapshot_id, severity, category, title, data) VALUES (?, ?, ?, ?, ?, ?)",

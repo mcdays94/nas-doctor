@@ -17,7 +17,6 @@ import (
 
 	"github.com/mcdays94/nas-doctor/internal"
 	"github.com/mcdays94/nas-doctor/internal/collector"
-	"github.com/mcdays94/nas-doctor/internal/logfwd"
 	"github.com/mcdays94/nas-doctor/internal/notifier"
 	"github.com/mcdays94/nas-doctor/internal/scheduler"
 	"github.com/mcdays94/nas-doctor/internal/storage"
@@ -30,7 +29,7 @@ type Settings struct {
 	SettingsVersion   int                     `json:"settings_version"`
 	ScanInterval      string                  `json:"scan_interval"`
 	SpeedTestInterval string                  `json:"speedtest_interval,omitempty"` // e.g. "4h", "1h", "30m"
-	SpeedTestSchedule []string                `json:"speedtest_schedule,omitempty"` // specific times: ["03:00"]
+	SpeedTestSchedule []string                `json:"speedtest_schedule"`           // specific times: ["03:00"]; empty = interval mode (must persist, NOT omitempty — see #333)
 	SpeedTestDay      string                  `json:"speedtest_day,omitempty"`      // "monday"-"sunday" or "1","15" for monthly
 	Theme             string                  `json:"theme"`
 	Icon              string                  `json:"icon"`
@@ -1093,142 +1092,42 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dynamically update the scheduler if changed.
+	// Dynamically update the scheduler if changed. All scheduler/collector
+	// wiring flows through ApplyRuntimeSettings (internal/api/runtime_settings.go)
+	// so this save path and the startup path in cmd/nas-doctor stay in
+	// lockstep — the drift between them is what caused speed-test settings,
+	// notification rules and log forwarding to silently revert on restart
+	// (issue #333). The three things ApplyRuntimeSettings intentionally
+	// leaves to the caller (scan interval, notifier, service checks) are
+	// applied here.
 	if s.scheduler != nil {
 		if d, err := time.ParseDuration(settings.ScanInterval); err == nil {
 			s.scheduler.UpdateInterval(d)
 		}
-		// Update speed test interval and schedule. The wire format accepts
-		// real duration strings ("4h", "30m") AND the sentinel "disabled"
-		// for users on metered connections who want the standalone loop
-		// turned off entirely (issue #180). Keyword values ("weekly",
-		// "monthly") are consumed by SetSpeedTestSchedule below, not here.
-		if d, ok := parseSpeedTestInterval(settings.SpeedTestInterval); ok {
-			s.scheduler.SetSpeedTestInterval(d)
-		}
-		s.scheduler.SetSpeedTestSchedule(settings.SpeedTestSchedule, settings.SpeedTestDay, settings.SpeedTestInterval)
-		// Update retention config
-		s.scheduler.UpdateRetention(scheduler.RetentionConfig{
-			SnapshotDays:  settings.Retention.SnapshotDays,
-			MaxDBSizeMB:   settings.Retention.MaxDBSizeMB,
-			NotifyLogDays: settings.Retention.NotifyLogDays,
-		})
-		// Update backup config
-		keepCount := settings.Backup.KeepCount
-		if keepCount <= 0 {
-			keepCount = 4
-		}
-		intervalH := settings.Backup.IntervalH
-		if intervalH <= 0 {
-			intervalH = 168
-		}
-		s.scheduler.UpdateBackup(scheduler.BackupConfig{
-			Enabled:   settings.Backup.Enabled,
-			Path:      settings.Backup.Path,
-			KeepCount: keepCount,
-			IntervalH: intervalH,
-		})
 
-		// Update notifier webhooks at runtime.
+		// Rebuild the notifier from the (possibly changed) webhook list.
 		s.scheduler.UpdateNotifier(s.buildNotifier(settings.Notifications.Webhooks))
-		s.scheduler.UpdateAlerting(scheduler.AlertingConfig{
-			Rules:              settings.Notifications.Rules,
-			Policies:           settings.Notifications.Policies, // legacy compat
-			QuietHours:         settings.Notifications.QuietHours,
-			MaintenanceWindows: settings.Notifications.MaintenanceWindows,
-			DefaultCooldownSec: settings.Notifications.DefaultCooldownSec,
-		})
-		s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
 
-		// Auto-enable Kubernetes dashboard section when K8s integration is turned on
-		if settings.Kubernetes.Enabled && !settings.Sections.Kubernetes {
-			settings.Sections.Kubernetes = true
-		}
-
-		// Auto-enable Proxmox dashboard section when PVE integration is turned on
-		if settings.Proxmox.Enabled && !settings.Sections.Proxmox {
-			settings.Sections.Proxmox = true
-		}
-
-		// Update Proxmox config on the collector
-		s.collector.SetProxmoxConfig(collector.ProxmoxConfig{
-			Enabled:  settings.Proxmox.Enabled,
-			URL:      settings.Proxmox.URL,
-			TokenID:  settings.Proxmox.TokenID,
-			Secret:   settings.Proxmox.Secret,
-			NodeName: settings.Proxmox.NodeName,
-			Alias:    settings.Proxmox.Alias,
-		})
-
-		// Update Kubernetes config on the collector
-		s.collector.SetKubeConfig(collector.KubeConfig{
-			Enabled:   settings.Kubernetes.Enabled,
-			URL:       settings.Kubernetes.URL,
-			Token:     settings.Kubernetes.Token,
-			Alias:     settings.Kubernetes.Alias,
-			InCluster: settings.Kubernetes.InCluster,
-		})
-
-		// Update SMART config on the collector (#198). Moved from
-		// Settings.SMART → Settings.AdvancedScans.SMART in schema v3
-		// (#259); the value meaning is unchanged.
-		s.collector.SetSMARTConfig(collector.SMARTConfig{
-			WakeDrives: settings.AdvancedScans.SMART.WakeDrives,
-		})
-		// Push external Borg repo config onto the collector so the
-		// next backup tick picks up changes without a restart
-		// (issue #279 user stories 2/4/7).
-		s.collector.SetBackupMonitorBorg(apiBorgReposToCollector(settings.BackupMonitor.Borg))
-		// Push Duplicacy entry config onto the collector so the next
-		// backup tick picks up changes without a restart (issue #314 /
-		// PRD #310 V1c). Mirrors the Borg pattern above.
-		s.collector.SetBackupMonitorDuplicacy(apiDuplicacyEntriesToCollector(settings.BackupMonitor.Duplicacy))
-		// Update the max-age safety-net threshold on the scheduler
-		// (#238). The scheduler owns this policy (the collector stays
-		// DB-unaware) and applies it after each scan's Collect().
-		s.scheduler.SetSMARTMaxAgeDays(settings.AdvancedScans.SMART.MaxAgeDays)
-
-		// Push per-subsystem scan intervals into the ScanDispatcher
-		// so the new cadences take effect without a scheduler
-		// restart (issue #260 user stories 1-6). Converts the
-		// api-package AdvancedScansSettings shape to the
-		// scheduler-package DispatcherIntervalsConfig — intentional
-		// layering so scheduler doesn't import internal/api.
-		//
-		// global is re-parsed here rather than read from the
-		// scheduler's cache so dispatcher.UpdateIntervals sees the
-		// same value the user just saved; avoids a race with the
-		// scan_interval UpdateInterval restart signal above.
+		// Re-parse the global interval here rather than reading it back from
+		// the scheduler so the ScanDispatcher sees the value the user just
+		// saved, avoiding a race with the UpdateInterval restart signal above.
 		var dispatchGlobal time.Duration
 		if d, err := time.ParseDuration(settings.ScanInterval); err == nil {
 			dispatchGlobal = d
 		}
-		s.scheduler.SetDispatcherIntervals(scheduler.DispatcherIntervalsConfig{
-			SMARTSec:      settings.AdvancedScans.SMART.IntervalSec,
-			DockerSec:     settings.AdvancedScans.Docker.IntervalSec,
-			ProxmoxSec:    settings.AdvancedScans.Proxmox.IntervalSec,
-			KubernetesSec: settings.AdvancedScans.Kubernetes.IntervalSec,
-			ZFSSec:        settings.AdvancedScans.ZFS.IntervalSec,
-			GPUSec:        settings.AdvancedScans.GPU.IntervalSec,
-		}, dispatchGlobal)
+		ApplyRuntimeSettings(s.scheduler, s.collector, settings, dispatchGlobal)
 
-		// Update log forwarding
-		if settings.LogPush.Enabled && len(settings.LogPush.Destinations) > 0 {
-			var dests []logfwd.Destination
-			for _, d := range settings.LogPush.Destinations {
-				dests = append(dests, logfwd.Destination{
-					Name:    d.Name,
-					Type:    d.Type,
-					URL:     d.URL,
-					Enabled: d.Enabled,
-					Headers: d.Headers,
-					Labels:  d.Labels,
-					Format:  d.Format,
-				})
-			}
-			s.scheduler.UpdateLogForwarder(dests)
-		} else {
-			s.scheduler.UpdateLogForwarder(nil)
+		s.scheduler.UpdateServiceChecks(settings.ServiceChecks.Checks)
+
+		// Auto-enable the Kubernetes/Proxmox dashboard sections when the
+		// integration is turned on. This mutates only the response copy
+		// (the persist above already happened); it reaches disk on the next
+		// save. Preserved from the pre-refactor behaviour.
+		if settings.Kubernetes.Enabled && !settings.Sections.Kubernetes {
+			settings.Sections.Kubernetes = true
+		}
+		if settings.Proxmox.Enabled && !settings.Sections.Proxmox {
+			settings.Sections.Proxmox = true
 		}
 	}
 
