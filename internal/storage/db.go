@@ -633,8 +633,31 @@ func (d *DB) SaveSnapshot(snap *internal.Snapshot) error {
 		return fmt.Errorf("insert snapshot: %w", err)
 	}
 
-	// Store findings individually for efficient querying
-	for _, f := range snap.Findings {
+	// Store findings individually for efficient querying.
+	//
+	// The findings table's primary key is (snapshot_id, id), so a duplicate or
+	// empty finding ID within one snapshot would abort this INSERT and roll the
+	// whole transaction back — losing the snapshot AND all of its SMART/system/
+	// disk history for that scan. Callers are expected to hand us unique IDs,
+	// but a single bad row must never be able to silently freeze history
+	// (#323/#325), so we defensively synthesize a unique ID for any finding
+	// that arrives empty or collides, and keep the stored JSON's id in sync
+	// with the column.
+	usedIDs := make(map[string]struct{}, len(snap.Findings))
+	for i := range snap.Findings {
+		f := snap.Findings[i] // copy — do not mutate the caller's slice
+		if f.ID == "" {
+			f.ID = fmt.Sprintf("F%03d", i+1)
+		}
+		base := f.ID
+		for n := 1; ; n++ {
+			if _, dup := usedIDs[f.ID]; !dup {
+				break
+			}
+			f.ID = fmt.Sprintf("%s-%d", base, n)
+		}
+		usedIDs[f.ID] = struct{}{}
+
 		fData, _ := json.Marshal(f)
 		_, err = tx.Exec(
 			"INSERT INTO findings (id, snapshot_id, severity, category, title, data) VALUES (?, ?, ?, ?, ?, ?)",
@@ -2370,7 +2393,7 @@ func (d *DB) SetConfig(key, value string) error {
 }
 
 // PruneSnapshots deletes snapshots older than the given duration, keeping at least `keepMin`.
-// Associated smart_history and system_history rows are also pruned (via CASCADE or explicit DELETE).
+// Their findings and snapshot-bound history rows are deleted explicitly in the same transaction.
 func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 	cutoff := time.Now().Add(-olderThan)
 
@@ -2405,7 +2428,18 @@ func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 		}
 	}
 
-	// Delete the snapshots themselves (findings cascade via FK or are orphaned)
+	// Findings must go before their snapshots. findings.snapshot_id has no
+	// ON DELETE CASCADE, so on the pooled connection that runs with
+	// foreign_keys=ON the snapshot DELETE below would fail with "FOREIGN KEY
+	// constraint failed" and roll back the whole prune; on the others it would
+	// leave the findings orphaned. PruneToSizeMB does the same.
+	if _, err := tx.Exec(fmt.Sprintf(
+		`DELETE FROM findings WHERE snapshot_id IN (%s)`, pruneQuery,
+	), keepMin, cutoff); err != nil {
+		return 0, fmt.Errorf("prune findings: %w", err)
+	}
+
+	// Delete the snapshots themselves
 	result, err := tx.Exec(`
 		DELETE FROM snapshots 
 		WHERE id NOT IN (
@@ -2827,6 +2861,53 @@ func (d *DB) PruneDiskUsageHistory(cutoff time.Time) (int64, error) {
 	res, err := d.db.Exec(`DELETE FROM disk_usage_history WHERE timestamp < ?`, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("prune disk_usage_history: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// PruneContainerStats deletes container_stats_history rows older than cutoff.
+// The container-stats loop writes this table every 5 minutes with a synthetic
+// snapshot_id ("cstats-<ms>"), so PruneSnapshots — which only deletes rows
+// whose snapshot_id is a real snapshot — never reaches it. Without this
+// dedicated horizon the table grows without bound (the DB-longevity failure
+// behind history-loss reports). Snapshot-independent, like PruneDiskUsageHistory.
+func (d *DB) PruneContainerStats(cutoff time.Time) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM container_stats_history WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune container_stats_history: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// PruneProcessHistory deletes process_history rows older than cutoff. Written
+// every 5 minutes (and on each full scan) with a synthetic snapshot_id, so it
+// shares container_stats_history's unbounded-growth problem and gets the same
+// timestamp-based retention.
+func (d *DB) PruneProcessHistory(cutoff time.Time) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM process_history WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune process_history: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// PruneSpeedTestHistory deletes speedtest_history rows older than cutoff and
+// clears any speedtest_samples orphaned by that delete. Orphans are removed
+// explicitly rather than relying on the ON DELETE CASCADE foreign key, because
+// PRAGMA foreign_keys is set per-connection and is not guaranteed on every
+// pooled connection — a cascade that silently no-ops would leak sample rows.
+func (d *DB) PruneSpeedTestHistory(cutoff time.Time) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM speedtest_history WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune speedtest_history: %w", err)
+	}
+	if _, err := d.db.Exec(
+		`DELETE FROM speedtest_samples WHERE test_id NOT IN (SELECT id FROM speedtest_history)`,
+	); err != nil {
+		return 0, fmt.Errorf("prune orphaned speedtest_samples: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	return n, nil

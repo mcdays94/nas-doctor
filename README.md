@@ -18,6 +18,7 @@
 
 <p align="center">
   <a href="https://nasdoctordemo.mdias.info"><img src="https://img.shields.io/badge/Live%20Demo-nasdoctordemo.mdias.info-6366f1?style=flat-square&logo=cloudflare&logoColor=white" alt="Live Demo"></a>
+  <a href="https://github.com/mcdays94/nas-doctor/pkgs/container/nas-doctor"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fnas-doctor-stats.lusostreams.workers.dev%2Fbadge-monthly.json&style=flat-square&logo=docker&logoColor=white" alt="GHCR pulls/month"></a>
   <a href="https://buymeacoffee.com/miguelcaetanodias"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg?style=flat-square&logo=buy-me-a-coffee" alt="Buy Me A Coffee"></a>
 </p>
 

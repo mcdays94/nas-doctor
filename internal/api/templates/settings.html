@@ -510,6 +510,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         </div>
       </div>
       <div id="sc-speed-wrap" style="display:none">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:8px">This check doesn't run speed tests. It compares the latest result from the Speed Test settings with the speeds below. Disabling it stops its alerts, not the tests. To stop tests, set Speed Test to Disabled.</div>
         <div style="display:flex;gap:8px;margin-bottom:8px">
           <div style="flex:1">
             <label class="form-label">Contracted Download (Mbps)</label>
@@ -1187,7 +1188,7 @@ function updateSpeedTestPreview() {
   if (!el) return;
   if (freq === "disabled") { el.textContent = "Speed tests are disabled. The dashboard widget will stop updating. The Test button on speed-type service checks continues to work on-demand."; return; }
   var labels = {"30m":"every 30 minutes","1h":"every hour","2h":"every 2 hours","4h":"every 4 hours","6h":"every 6 hours","12h":"every 12 hours"};
-  if (labels[freq]) { el.textContent = "Speed tests run " + labels[freq] + ". First test runs 2 minutes after startup."; return; }
+  if (labels[freq]) { el.textContent = "Speed tests run " + labels[freq] + ", counted from the last test, so restarts don't add extra runs. A new install runs its first test 2 minutes after startup."; return; }
   var time = (document.getElementById("st-time").value || "03:00").trim();
   if (freq === "24h") { el.textContent = "Speed test runs once a day at " + time + "."; return; }
   var day = document.getElementById("st-day").value;

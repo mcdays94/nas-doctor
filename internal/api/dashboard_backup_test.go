@@ -62,7 +62,7 @@ func TestDashboardJS_BackupSection_PreservesExistingBehavior(t *testing.T) {
 		name   string
 		substr string
 	}{
-		{"sections.backup defined", "sections.backup = function(sn)"},
+		{"sections.backup defined", "sections.backup = function(sn, st)"},
 		{"data-section attribute", `data-section="backup"`},
 		{"renders backup jobs count", "Backup Jobs ("},
 		// Combined-guard pattern after issue #314 — total row count

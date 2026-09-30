@@ -404,7 +404,13 @@ sections.drives = function(sn, st) {
   h += '<div class="section-block" data-section="drives">';
   var smart = sn ? (sn.smart || []) : [];
   var disks = sn ? (sn.disks || []) : [];
-  if (smart.length > 0 || disks.length > 0) {
+  /* Issue #324: drives that were in standby during the most recent SMART
+     scan are reported in snap.smart_standby_devices but NOT included in
+     snap.smart (since we have no SMART data for them). Render them as
+     placeholder rows below the active drives so the user sees the full
+     drive count and an explanation of why no SMART data is shown. */
+  var standbyDevices = sn ? (sn.smart_standby_devices || []) : [];
+  if (smart.length > 0 || disks.length > 0 || standbyDevices.length > 0) {
     h += '<div>';
     var healthOk = 0, healthWarn = 0, healthCrit = 0;
     for (var hc = 0; hc < smart.length; hc++) {
@@ -413,7 +419,7 @@ sections.drives = function(sn, st) {
       else if ((smart[hc].temperature_c || 0) >= 50 || smart[hc].reallocated_sectors > 0 || smart[hc].pending_sectors > 0) healthWarn++;
       else healthOk++;
     }
-    h += '<div class="section-title" style="display:flex;align-items:center;gap:12px">Drives (' + (smart.length || disks.length) + ')';
+    h += '<div class="section-title" style="display:flex;align-items:center;gap:12px">Drives (' + ((smart.length + standbyDevices.length) || disks.length) + ')';
     h += '<span class="health-summary" style="display:inline-flex;gap:8px;font-size:11px;color:var(--text-quaternary);font-weight:400;text-transform:none;letter-spacing:0">';
     if (healthOk > 0) h += '<span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:var(--green)"></span>' + healthOk + ' ok</span>';
     if (healthWarn > 0) h += '<span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:var(--amber)"></span>' + healthWarn + ' warn</span>';
@@ -490,6 +496,23 @@ sections.drives = function(sn, st) {
 
         h += '</div>';
       }
+    }
+
+    /* Issue #324: render placeholder rows for drives currently in standby.
+       Below the active-drive rows but above the storage list, since
+       standby drives are physical drives without SMART data, not storage
+       mount points. Visually de-emphasised (opacity, no temp/sparkline)
+       so users can scan past them when triaging real-drive issues. */
+    for (var stbI = 0; stbI < standbyDevices.length; stbI++) {
+      var stbDev = standbyDevices[stbI];
+      h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px;margin-bottom:6px;opacity:0.65">';
+      h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
+      h += '<span class="status-dot unknown"></span>';
+      h += '<span style="font-weight:600;font-size:13px;min-width:55px">' + esc(stbDev) + '</span>';
+      h += '<span style="font-size:11px;color:var(--text-quaternary);background:var(--bg-elevated);padding:1px 6px;border-radius:4px">standby</span>';
+      h += '<span style="font-size:12px;color:var(--text-tertiary);flex:1">No SMART data: drive is in standby and <a href="/settings#card-advanced" style="color:var(--accent)">Wake drives for SMART check</a> is off.</span>';
+      h += '</div>';
+      h += '</div>';
     }
 
     var usedInMerge = {};
@@ -751,12 +774,24 @@ sections.ups = function(sn) {
 };
 
 /* ── Section: Backup ─────────────────────────────────────────── */
-sections.backup = function(sn) {
+sections.backup = function(sn, st) {
   var esc = util.esc;
   var fmtBytes = util.fmtBytes;
   var h = '';
   h += '<div class="section-block" data-section="backup">';
   var backup = sn ? sn.backup : null;
+  /* Awaiting-first-scan detection (issue #328). When the user has
+     configured external Borg or Duplicacy repos via Settings →
+     Backup Monitors, but the first scan post-deploy hasn't landed
+     yet, the existing empty-state copy ("No backup provider
+     detected or configured") reads as a failure. Detect this
+     window via st.backup_monitor.{borg_count,duplicacy_count}
+     (set server-side in handleStatus from
+     settings.BackupMonitor.{Borg,Duplicacy}) and render a distinct
+     "Initial scan pending" placeholder. */
+  var borgConfigured = (st && st.backup_monitor && st.backup_monitor.borg_count) || 0;
+  var duplicacyConfigured = (st && st.backup_monitor && st.backup_monitor.duplicacy_count) || 0;
+  var anyConfigured = (borgConfigured + duplicacyConfigured) > 0;
   /* Duplicacy reason → severity mapping (PRD #310 §4 / issue #314).
      Mirrors the dashboard widget contract for the new per-provider
      reason set. ok=success, no_snapshots_yet=info, stale=warning,
@@ -889,6 +924,26 @@ sections.backup = function(sn) {
       h += '</div>';
     }
     h += '</div>';
+  } else if (anyConfigured) {
+    /* Awaiting-first-scan placeholder (#328). Visually distinct from a
+       failure: no red, no error pill, uses the same neutral panel
+       background as the empty state. The SYNCING badge mirrors the
+       Borg/Duplicacy "CONFIGURED" pill family so users see the
+       relationship between the placeholder and the configured-repos
+       state. */
+    var configuredParts = [];
+    if (borgConfigured > 0) configuredParts.push(borgConfigured + ' Borg repo' + (borgConfigured === 1 ? '' : 's'));
+    if (duplicacyConfigured > 0) configuredParts.push(duplicacyConfigured + ' Duplicacy repo' + (duplicacyConfigured === 1 ? '' : 's'));
+    var configuredSummary = configuredParts.join(' + ');
+    h += '<div>';
+    h += '<div class="section-title">Initial scan pending</div>';
+    h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:14px;font-size:12px;color:var(--text-tertiary);line-height:1.5">';
+    h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
+    h += '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(34,211,238,0.15);color:#22d3ee;font-weight:600;letter-spacing:0.5px">SYNCING</span>';
+    h += '<span style="color:var(--text-secondary)">' + esc(configuredSummary) + ' configured</span>';
+    h += '</div>';
+    h += 'First scan in progress. This message will disappear once the initial probe completes — typically within a few seconds. Configure additional repos in <a href="/settings#backup-monitors" style="color:var(--brand)">Settings &rarr; Backup Monitors</a>.';
+    h += '</div></div>';
   } else {
     h += '<div>';
     h += '<div class="section-title">Backup Monitoring</div>';

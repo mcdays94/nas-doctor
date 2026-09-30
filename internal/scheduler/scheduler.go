@@ -228,15 +228,17 @@ func (s *Scheduler) Start() {
 		"global_interval", s.interval,
 		"tick_interval", tickInterval,
 	)
-	// Main diagnostic collection loop
+	// Main diagnostic collection loop. Per-tick work is wrapped in
+	// runWithRecover (#325) so a panic in any sub-collector doesn't
+	// silently kill the goroutine and stop collection forever.
 	go func() {
-		s.RunOnce()
+		s.runWithRecover("main-scan", s.RunOnce)
 		ticker := time.NewTicker(tickInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				s.RunOnce()
+				s.runWithRecover("main-scan", s.RunOnce)
 			case newInterval := <-s.restart:
 				ticker.Stop()
 				// The `restart` channel carries a GLOBAL scan_interval
@@ -269,14 +271,15 @@ func (s *Scheduler) Start() {
 			}
 		}
 	}()
-	// Independent service check loop — ticks every 30s, runs due checks
+	// Independent service check loop — ticks every 30s, runs due checks.
+	// Wrapped in runWithRecover (#325).
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				s.runDueServiceChecks()
+				s.runWithRecover("service-checks", s.runDueServiceChecks)
 			case <-s.stop:
 				return
 			}
@@ -286,6 +289,8 @@ func (s *Scheduler) Start() {
 	// Independent container & process stats loop — collects Docker metrics and
 	// top processes every 5 minutes for chart history (full scans happen at the
 	// configured interval which is too infrequent for granular charts).
+	// Wrapped in runWithRecover (#325); both calls share one recovery so a
+	// panic in either keeps the loop alive for the next tick.
 	go func() {
 		time.Sleep(30 * time.Second) // let first scan finish
 		ticker := time.NewTicker(5 * time.Minute)
@@ -293,58 +298,74 @@ func (s *Scheduler) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				s.collectContainerStats()
-				s.collectProcessStats()
+				s.runWithRecover("container-process-stats", func() {
+					s.collectContainerStats()
+					s.collectProcessStats()
+				})
 			case <-s.stop:
 				return
 			}
 		}
 	}()
 
-	// Independent speed test loop — runs on interval or at scheduled times
+	// Independent speed test loop — runs on interval or at scheduled times.
+	// Wrapped in runWithRecover (#325); the entire tick body (timing logic
+	// plus runSpeedTest invocations) is one recovery unit because any panic
+	// inside is equally fatal to subsequent ticks.
 	go func() {
 		time.Sleep(2 * time.Minute)
-		s.runSpeedTest()
+		// A restart must not add an off-schedule test (#339): decide from the
+		// cadence and the last persisted test. If the plan panics, fall back
+		// to running now, the pre-#339 behaviour.
+		runNow, lastRun := true, time.Now()
+		s.runWithRecover("speed-test-startup-plan", func() {
+			runNow, lastRun = s.speedTestStartupPlan(time.Now())
+		})
+		if runNow {
+			s.runWithRecover("speed-test-initial", s.runSpeedTest)
+			lastRun = time.Now()
+		}
 		ticker := time.NewTicker(1 * time.Minute) // check every minute for schedule hits
 		defer ticker.Stop()
-		lastRun := time.Now()
 		for {
 			select {
 			case <-ticker.C:
-				s.mu.RLock()
-				schedule := s.speedTestSchedule
-				interval := s.speedTestInterval
-				s.mu.RUnlock()
-				now := time.Now()
-				if len(schedule) > 0 {
+				s.runWithRecover("speed-test", func() {
 					s.mu.RLock()
-					day := s.speedTestDay
-					freq := s.speedTestFreq
+					schedule := s.speedTestSchedule
+					interval := s.speedTestInterval
 					s.mu.RUnlock()
-					// Check if today matches the schedule day
-					dayMatch := true
-					if freq == "weekly" && day != "" {
-						dayMatch = strings.EqualFold(now.Weekday().String(), day)
-					} else if freq == "monthly" && day != "" {
-						dayNum, _ := strconv.Atoi(day)
-						dayMatch = dayNum > 0 && now.Day() == dayNum
-					}
-					// Scheduled mode: run at specific HH:MM times on matching days
-					nowHHMM := now.Format("15:04")
-					for _, t := range schedule {
-						if dayMatch && nowHHMM == t && now.Sub(lastRun) > 5*time.Minute {
+					now := time.Now()
+					if len(schedule) > 0 {
+						s.mu.RLock()
+						day := s.speedTestDay
+						freq := s.speedTestFreq
+						s.mu.RUnlock()
+						// Check if today matches the schedule day
+						dayMatch := true
+						if freq == "weekly" && day != "" {
+							dayMatch = strings.EqualFold(now.Weekday().String(), day)
+						} else if freq == "monthly" && day != "" {
+							dayNum, _ := strconv.Atoi(day)
+							dayMatch = dayNum > 0 && now.Day() == dayNum
+						}
+						// Scheduled mode: run at specific HH:MM times on matching days
+						nowHHMM := now.Format("15:04")
+						for _, t := range schedule {
+							if dayMatch && nowHHMM == t && now.Sub(lastRun) > 5*time.Minute {
+								s.runSpeedTest()
+								lastRun = now
+								break
+							}
+						}
+					} else {
+						// Interval mode
+						if now.Sub(lastRun) >= interval {
 							s.runSpeedTest()
 							lastRun = now
-							break
 						}
 					}
-				} else {
-					// Interval mode
-					if now.Sub(lastRun) >= interval {
-						s.runSpeedTest()
-						lastRun = now
-					}
-				}
+				})
 			case <-s.stop:
 				return
 			}
@@ -564,6 +585,19 @@ func (s *Scheduler) SetSpeedTestSchedule(times []string, day string, freq string
 	}
 }
 
+// SpeedTestConfig returns a read-only snapshot of the current speed-test
+// cadence: the interval (or SpeedTestIntervalDisabled), the scheduled HH:MM
+// times, the day selector, and the frequency keyword. Exposed so
+// startup/settings-parity tests can confirm persisted speed-test settings
+// are actually applied at boot rather than left at the New() default
+// (issue #333).
+func (s *Scheduler) SpeedTestConfig() (interval time.Duration, schedule []string, day, freq string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	schedule = append([]string(nil), s.speedTestSchedule...)
+	return s.speedTestInterval, schedule, s.speedTestDay, s.speedTestFreq
+}
+
 func (s *Scheduler) UpdateInterval(d time.Duration) {
 	if d < 1*time.Second {
 		d = 1 * time.Second // minimum 1 second
@@ -664,6 +698,15 @@ func (s *Scheduler) RunOnce() {
 	// Analyze
 	snap.Findings = analyzer.Analyze(snap)
 	snap.Findings = append(snap.Findings, s.buildSMARTTrendFindings(snap)...)
+	// analyzer.Analyze numbers its own findings F001..FNNN, but the SMART
+	// trend findings appended above arrive with no ID. Two ID-less findings
+	// (e.g. two drives trending worse) would collide on the findings-table
+	// primary key (snapshot_id, id) and roll back the ENTIRE SaveSnapshot
+	// transaction — snapshot, SMART, system and disk history all lost — and
+	// because the trend is computed from that (now frozen) history, the
+	// failure latches until the DB is wiped. This is the silent
+	// history-freeze behind #323/#325. Stamp unique IDs before persisting.
+	ensureUniqueFindingIDs(snap.Findings)
 	// Stamp findings with detection timestamp
 	ts := snap.Timestamp.Format(time.RFC3339)
 	for i := range snap.Findings {
@@ -1012,6 +1055,18 @@ func (s *Scheduler) UpdateAlerting(cfg AlertingConfig) {
 	)
 }
 
+// AlertingConfig returns the active alerting configuration. The returned
+// struct is a shallow copy (its slices share backing storage, so callers
+// must treat it as read-only). Exposed so startup/settings-parity tests can
+// confirm notification routing rules are applied at boot — before this they
+// were dropped at startup, silently falling back to the legacy "every
+// finding to every webhook" path until the next settings save.
+func (s *Scheduler) AlertingConfig() AlertingConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.alerting
+}
+
 // UpdateServiceChecks replaces service check configuration used in each run.
 // It also purges service_checks_history rows whose keys are no longer in the
 // config — otherwise stale checks keep appearing on the /service-checks page
@@ -1133,6 +1188,37 @@ func (s *Scheduler) checkBackup() {
 		s.mu.Lock()
 		s.backup.LastBackup = result.Timestamp
 		s.mu.Unlock()
+	}
+}
+
+// ensureUniqueFindingIDs fills any empty finding ID with the next available
+// F%03d identifier, leaving already-numbered findings untouched. It guarantees
+// every finding in the slice carries a distinct, non-empty ID so the persisted
+// rows cannot collide on the findings-table primary key (snapshot_id, id).
+// Findings produced by analyzer.Analyze are already numbered; the SMART trend
+// findings appended afterwards are not, and a duplicate/empty ID there would
+// roll back the whole snapshot save (#323/#325).
+func ensureUniqueFindingIDs(findings []internal.Finding) {
+	used := make(map[string]bool, len(findings))
+	for _, f := range findings {
+		if f.ID != "" {
+			used[f.ID] = true
+		}
+	}
+	next := 1
+	for i := range findings {
+		if findings[i].ID != "" {
+			continue
+		}
+		for {
+			id := fmt.Sprintf("F%03d", next)
+			next++
+			if !used[id] {
+				findings[i].ID = id
+				used[id] = true
+				break
+			}
+		}
 	}
 }
 
@@ -1376,6 +1462,57 @@ func (s *Scheduler) collectProcessStats() {
 		s.latest.System.TopProcesses = procs
 	}
 	s.mu.Unlock()
+}
+
+// speedTestStartupPlan decides whether the speed-test loop runs a test right
+// after startup, and which lastRun it counts the cadence from (#339). It reads
+// the current cadence and the newest persisted result, then applies
+// speedTestStartupRun.
+func (s *Scheduler) speedTestStartupPlan(now time.Time) (runNow bool, lastRun time.Time) {
+	s.mu.RLock()
+	interval := s.speedTestInterval
+	scheduled := len(s.speedTestSchedule) > 0
+	s.mu.RUnlock()
+
+	var lastTest time.Time
+	if res, ok, err := s.store.GetLatestSpeedTestResult(); err != nil {
+		s.logger.Warn("speed test: could not read the last result, treating it as never run", "error", err)
+	} else if ok && res != nil {
+		lastTest = res.Timestamp
+	}
+
+	runNow, lastRun = speedTestStartupRun(now, lastTest, interval, scheduled)
+	if !runNow {
+		s.logger.Info("speed test: skipping the startup run, cadence continues from the last test",
+			"last_test", lastTest, "scheduled", scheduled, "interval", interval)
+	}
+	return runNow, lastRun
+}
+
+// speedTestStartupRun is the decision behind speedTestStartupPlan. A restart
+// must not add an off-schedule test:
+//   - disabled: run, so runSpeedTest records the disabled state (it never
+//     calls the runner);
+//   - no test on record: run once so a new install gets a first reading;
+//   - scheduled (daily, weekly, monthly): wait for the next scheduled time;
+//   - interval: run only if the last test is at least one interval old,
+//     otherwise resume the cadence from it.
+func speedTestStartupRun(now, lastTest time.Time, interval time.Duration, scheduled bool) (runNow bool, lastRun time.Time) {
+	if lastTest.After(now) {
+		lastTest = now // clock moved backwards; don't wait longer than one interval
+	}
+	switch {
+	case interval == SpeedTestIntervalDisabled:
+		return true, now
+	case lastTest.IsZero():
+		return true, now
+	case scheduled:
+		return false, lastTest
+	case now.Sub(lastTest) >= interval:
+		return true, now
+	default:
+		return false, lastTest
+	}
 }
 
 // runSpeedTest executes a network speed test and records the attempt

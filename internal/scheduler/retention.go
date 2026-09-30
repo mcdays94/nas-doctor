@@ -36,6 +36,15 @@ type RetentionManagerConfig struct {
 // advanced setting.
 const defaultDiskUsageMaxAge = 365 * 24 * time.Hour
 
+// defaultHighFreqStatsMaxAge bounds the high-frequency history tables that are
+// written with synthetic snapshot_ids and are therefore never reached by
+// snapshot pruning: container_stats_history and process_history (every 5
+// minutes) and speedtest_history. Without a dedicated horizon they grow
+// without bound until the DB size cap trips and over-deletes real snapshots.
+// 30 days matches the widest window the history/chart API will serve, so the
+// retention costs nothing user-visible.
+const defaultHighFreqStatsMaxAge = 30 * 24 * time.Hour
+
 // RetentionResult summarizes what a single RunRetention call pruned.
 type RetentionResult struct {
 	SnapshotsPruned        int
@@ -44,6 +53,9 @@ type RetentionResult struct {
 	AlertsPruned           int
 	OrphansPruned          int
 	DiskUsageHistoryPruned int64
+	ContainerStatsPruned   int64
+	ProcessHistoryPruned   int64
+	SpeedTestHistoryPruned int64
 	SizePruned             int
 	Vacuumed               bool
 }
@@ -135,6 +147,34 @@ func (rm *RetentionManager) RunRetention(cfg RetentionManagerConfig) RetentionRe
 	} else if pruned > 0 {
 		rm.logger.Info("pruned disk usage history", "count", pruned)
 		result.DiskUsageHistoryPruned = pruned
+		needsVacuum = true
+	}
+
+	// 3d. Prune the high-frequency stat tables (container_stats_history,
+	// process_history) and speedtest_history. These carry synthetic
+	// snapshot_ids, so PruneSnapshots never reaches them; without their own
+	// horizon they grow unbounded and eventually force the size cap to
+	// over-delete real snapshot history.
+	hfCutoff := time.Now().Add(-defaultHighFreqStatsMaxAge)
+	if pruned, err := rm.store.PruneContainerStats(hfCutoff); err != nil {
+		rm.logger.Warn("prune container stats failed", "error", err)
+	} else if pruned > 0 {
+		rm.logger.Info("pruned container stats history", "count", pruned)
+		result.ContainerStatsPruned = pruned
+		needsVacuum = true
+	}
+	if pruned, err := rm.store.PruneProcessHistory(hfCutoff); err != nil {
+		rm.logger.Warn("prune process history failed", "error", err)
+	} else if pruned > 0 {
+		rm.logger.Info("pruned process history", "count", pruned)
+		result.ProcessHistoryPruned = pruned
+		needsVacuum = true
+	}
+	if pruned, err := rm.store.PruneSpeedTestHistory(hfCutoff); err != nil {
+		rm.logger.Warn("prune speedtest history failed", "error", err)
+	} else if pruned > 0 {
+		rm.logger.Info("pruned speedtest history", "count", pruned)
+		result.SpeedTestHistoryPruned = pruned
 		needsVacuum = true
 	}
 

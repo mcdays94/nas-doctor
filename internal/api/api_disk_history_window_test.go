@@ -61,6 +61,10 @@ func newTestServerForDiskHistory(store storage.Store) (*Server, http.Handler) {
 //
 // Issue #166.
 func TestHandleGetDisk_HoursParamUsesTimeWindow(t *testing.T) {
+	rangePoints := []storage.DiskHistoryPoint{
+		{Timestamp: time.Now().Add(-2 * time.Hour), Temperature: 31},
+		{Timestamp: time.Now().Add(-1 * time.Hour), Temperature: 32},
+	}
 	cases := []struct {
 		label string
 		hours int
@@ -73,7 +77,7 @@ func TestHandleGetDisk_HoursParamUsesTimeWindow(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.label, func(t *testing.T) {
-			spy := &spyStore{FakeStore: storage.NewFakeStore()}
+			spy := &spyStore{FakeStore: storage.NewFakeStore(), historyInRangeResp: rangePoints}
 			_, handler := newTestServerForDiskHistory(spy)
 
 			req := httptest.NewRequest("GET", "/api/v1/disks/SN1?hours="+itoa(tc.hours), nil)
@@ -94,6 +98,61 @@ func TestHandleGetDisk_HoursParamUsesTimeWindow(t *testing.T) {
 				t.Errorf("window: expected %v, got %v", wantWindow, spy.lastWindow)
 			}
 		})
+	}
+}
+
+// TestHandleGetDisk_HoursParamFallsBackToLatestSamplesWhenWindowTooSparse pins
+// the /disk/<serial> behaviour after the v0.10.2-rc1 UAT finding: the Stats
+// page showed useful temperature history for a drive via /api/v1/sparklines,
+// but /disk/<serial> defaulted to the 1D window and showed "Not enough history
+// data" because only one SMART row existed in the last 24 hours. If the chosen
+// range has fewer than two points, the API falls back to the legacy latest-N
+// history query so the disk detail page can render the same useful chart shape
+// as /stats instead of a false empty-state.
+func TestHandleGetDisk_HoursParamFallsBackToLatestSamplesWhenWindowTooSparse(t *testing.T) {
+	latestSamples := []storage.DiskHistoryPoint{
+		{Timestamp: time.Now().Add(-72 * time.Hour), Temperature: 34},
+		{Timestamp: time.Now().Add(-48 * time.Hour), Temperature: 33},
+		{Timestamp: time.Now().Add(-1 * time.Hour), Temperature: 30},
+	}
+	spy := &spyStore{
+		FakeStore:          storage.NewFakeStore(),
+		historyInRangeResp: []storage.DiskHistoryPoint{{Timestamp: time.Now().Add(-1 * time.Hour), Temperature: 30}},
+		historyResp:        latestSamples,
+	}
+	_, handler := newTestServerForDiskHistory(spy)
+
+	req := httptest.NewRequest("GET", "/api/v1/disks/5PK9RPTB?hours=24", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if spy.rangeCalls != 1 {
+		t.Errorf("expected GetDiskHistoryInRange called once, got %d", spy.rangeCalls)
+	}
+	if spy.legacyCalls != 1 {
+		t.Errorf("expected fallback GetDiskHistory called once when range has <2 points, got %d", spy.legacyCalls)
+	}
+	if spy.lastLegacyLimit != 500 {
+		t.Errorf("expected fallback latest-samples limit 500, got %d", spy.lastLegacyLimit)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	history, ok := resp["history"].([]any)
+	if !ok {
+		t.Fatalf("response history missing/wrong type: %v", resp["history"])
+	}
+	if len(history) != len(latestSamples) {
+		t.Fatalf("history len = %d; want fallback latest samples len %d", len(history), len(latestSamples))
+	}
+	last := history[len(history)-1].(map[string]any)
+	if got := int(last["temperature"].(float64)); got != 30 {
+		t.Errorf("last fallback temperature = %d; want 30", got)
 	}
 }
 

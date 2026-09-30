@@ -86,3 +86,28 @@ func TestDiskDetailHTMLRangeSelectorDefaultIs1D(t *testing.T) {
 		}
 	}
 }
+
+// TestDiskDetailHTMLRelatedFindingsRendersDetectedAt verifies the Related
+// Findings section on /disk/<serial> surfaces the timestamp already returned by
+// the API as finding.detected_at. UAT for v0.10.2-rc1 showed disk-specific
+// findings rendering without dates even though the JSON payload included
+// detected_at; this pins the template-side reference.
+func TestDiskDetailHTMLRelatedFindingsRendersDetectedAt(t *testing.T) {
+	tmpl := DiskDetailPage
+
+	checks := []struct {
+		name   string
+		substr string
+	}{
+		{"reads detected_at", "f.detected_at"},
+		{"renders Detected label", "Detected:"},
+		{"formats detected_at as local string", "new Date(f.detected_at).toLocaleString()"},
+	}
+	for _, tc := range checks {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(tmpl, tc.substr) {
+				t.Errorf("DiskDetailPage missing %q — expected substring: %q", tc.name, tc.substr)
+			}
+		})
+	}
+}
