@@ -964,6 +964,56 @@ func (f *FakeStore) PruneDiskUsageHistory(cutoff time.Time) (int64, error) {
 	return pruned, nil
 }
 
+// PruneContainerStats mirrors *DB.PruneContainerStats. FakeStore does not
+// record container history (SaveContainerStats is a no-op), so there is
+// nothing to prune.
+func (f *FakeStore) PruneContainerStats(cutoff time.Time) (int64, error) {
+	return 0, nil
+}
+
+// PruneProcessHistory mirrors *DB.PruneProcessHistory, dropping in-memory
+// process_history points older than cutoff.
+func (f *FakeStore) PruneProcessHistory(cutoff time.Time) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var kept []ProcessHistoryPoint
+	var pruned int64
+	for _, p := range f.processHistory {
+		if p.Timestamp.Before(cutoff) {
+			pruned++
+		} else {
+			kept = append(kept, p)
+		}
+	}
+	f.processHistory = kept
+	return pruned, nil
+}
+
+// PruneSpeedTestHistory mirrors *DB.PruneSpeedTestHistory, dropping speed-test
+// history points older than cutoff and the samples orphaned by that delete.
+func (f *FakeStore) PruneSpeedTestHistory(cutoff time.Time) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var kept []SpeedTestHistoryPoint
+	keptIDs := make(map[int64]bool)
+	var pruned int64
+	for _, h := range f.speedTestHistory {
+		if h.Timestamp.Before(cutoff) {
+			pruned++
+		} else {
+			kept = append(kept, h)
+			keptIDs[h.ID] = true
+		}
+	}
+	f.speedTestHistory = kept
+	for id := range f.speedTestSamples {
+		if !keptIDs[id] {
+			delete(f.speedTestSamples, id)
+		}
+	}
+	return pruned, nil
+}
+
 // PruneOrphanedFindings removes orphaned findings and returns the count.
 func (f *FakeStore) PruneOrphanedFindings() (int, error) {
 	f.mu.Lock()

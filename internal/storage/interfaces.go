@@ -133,6 +133,9 @@ type LifecycleStore interface {
 	PruneAlerts(olderThan time.Duration) (int, error)
 	PruneOrphanedFindings() (int, error)
 	PruneDiskUsageHistory(cutoff time.Time) (int64, error)
+	PruneContainerStats(cutoff time.Time) (int64, error)
+	PruneProcessHistory(cutoff time.Time) (int64, error)
+	PruneSpeedTestHistory(cutoff time.Time) (int64, error)
 	PruneToSizeMB(targetMB float64) (int, error)
 	Vacuum() error
 	GetDBStats() (*DBStats, error)
