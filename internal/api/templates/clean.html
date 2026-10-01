@@ -58,9 +58,18 @@ body{min-height:100vh;background:#fff}
    shared.css does on the other pages; one row of links is wider than a
    phone */
 @media(max-width:768px){.nav-links{flex-basis:100%;flex-wrap:wrap}}
-.top-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;margin-top:20px;background:#fff;border-radius:10px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);min-height:52px;max-height:60px;gap:16px;flex-wrap:nowrap;overflow:hidden}
+/* One row while it fits, and the stats wrap under the hostname and badges
+   when it doesn't. How much room one row needs depends on the data
+   (hostname, temperatures, badge counts), so the bar wraps instead of
+   switching at a breakpoint. The 20px sides are a transparent border, not
+   padding, so overflow:hidden clips at the content edge. The divider
+   between the halves gives back its width: on one row it sits where it
+   always did, and when the stats wrap it ends the first row just past that
+   edge, out of sight */
+.top-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;padding:10px 0;border:solid transparent;border-width:0 20px;margin-top:20px;background:#fff;border-radius:10px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);min-height:52px;gap:10px 16px;overflow:hidden}
 .top-bar-left{display:flex;align-items:center;gap:10px;flex-shrink:0}
 .top-bar-divider{width:1px;height:24px;background:rgba(0,0,0,0.1);flex-shrink:0}
+.top-bar > .top-bar-divider{margin:0 -1px}
 .top-bar-right{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;color:#4d4d4d;flex-shrink:0;white-space:nowrap}
 .top-bar-right .stat-item{display:inline-flex;align-items:center;gap:4px}
 .top-bar-right .stat-label{color:#808080;font-size:12px;font-weight:500}
@@ -71,7 +80,6 @@ body{min-height:100vh;background:#fff}
    The dividers and the dots between stats go, so no row starts or ends
    with one, and the hostname keeps its divider's space */
 @media(max-width:900px){
-  .top-bar{flex-wrap:wrap;max-height:none;row-gap:10px}
   .top-bar-divider{display:none}
   .top-bar-host{margin-right:11px}
   .top-bar-left{flex-wrap:wrap;flex-shrink:1;row-gap:6px}
