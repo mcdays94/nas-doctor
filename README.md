@@ -27,8 +27,6 @@
 
 NAS Doctor runs periodic health checks on your server — analyzing SMART data, disk usage, Docker containers, GPU, network speed, process CPU, kernel logs, temperatures, ZFS pools, UPS power, and Unraid parity — then surfaces findings with clear severity ratings, root-cause correlation, and actionable recommendations backed by Backblaze failure rate data.
 
-Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-server-diagnostic-skill) that generates professional PDF server reports, NAS Doctor packages the same intelligence into a self-hosted app anyone can install.
-
 ---
 
 ## Table of Contents
