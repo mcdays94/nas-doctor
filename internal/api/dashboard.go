@@ -24,11 +24,14 @@ var DashboardJS = `
 /* ── Utilities ─────────────────────────────────────────────────── */
 var util = {};
 
+/* Escapes text for element content and for attribute values in either
+   quote style. Sections put text the host reports into attributes, such
+   as a process's command line in title="...". An unescaped quote there
+   would end the value and let the text add attributes of its own. */
 util.esc = function(s) {
   if (!s && s !== 0) return "";
-  var d = document.createElement("div");
-  d.appendChild(document.createTextNode(String(s)));
-  return d.innerHTML;
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 };
 
 util.fmtBytes = function(b) {
@@ -384,7 +387,9 @@ sections.findings = function(sn, st) {
       if (f.priority) h += '<span><strong>Priority:</strong> ' + esc(f.priority) + '</span>';
       if (f.cost) h += '<span><strong>Cost:</strong> ' + esc(f.cost) + '</span>';
       if (f.category) h += '<span><strong>Category:</strong> ' + esc(f.category) + '</span>';
-      h += '<span style="margin-left:auto"><a href="#" onclick="event.stopPropagation();window._dismissFinding(\'' + esc(f.title).replace(/'/g, "\\'") + '\');return false" style="font-size:11px;color:var(--text-quaternary);text-decoration:none">Dismiss</a></span>';
+      /* JSON.stringify makes the title a JS string literal for the
+         onclick, and esc() makes that literal safe in the attribute. */
+      h += '<span style="margin-left:auto"><a href="#" onclick="event.stopPropagation();window._dismissFinding(' + esc(JSON.stringify(f.title || '')) + ');return false" style="font-size:11px;color:var(--text-quaternary);text-decoration:none">Dismiss</a></span>';
       h += '</div>';
       h += '</div>';
       h += '</div>';
@@ -1423,7 +1428,7 @@ sections.kubernetes = function(sn) {
     h += '<div class="section-title">' + k8sTitle + ' Events (' + k8s.events.length + ' warnings)</div>';
     h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:8px;max-height:200px;overflow-y:auto;scrollbar-width:thin">';
     for (var ei = 0; ei < Math.min(k8s.events.length, 15); ei++) { var ev = k8s.events[ei];
-      h += '<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="color:var(--amber);font-weight:600">' + esc(ev.reason) + '</span> <span style="color:var(--text-quaternary)">' + esc(ev.object) + '</span> <span style="color:var(--text-tertiary)">' + esc(ev.message).substring(0, 100) + '</span></div>';
+      h += '<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="color:var(--amber);font-weight:600">' + esc(ev.reason) + '</span> <span style="color:var(--text-quaternary)">' + esc(ev.object) + '</span> <span style="color:var(--text-tertiary)">' + esc((ev.message || '').substring(0, 100)) + '</span></div>';
     }
     h += '</div></div>';
   }
@@ -1462,13 +1467,13 @@ sections.processes = function(sn) {
       } else {
         containerTag = '<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(128,128,128,0.12);color:var(--text-quaternary);white-space:nowrap">host</span>';
       }
-      var cmdDisplay = esc(p.command || '');
+      var cmdDisplay = p.command || '';
       if (cmdDisplay.length > 40) cmdDisplay = cmdDisplay.substring(0, 40) + '\u2026';
       var procName = (p.command || '').split('/').pop().split(' ')[0];
       var statsHref = '/stats?process=' + encodeURIComponent(procName) + '&amp;container=' + encodeURIComponent(p.container_name || '') + '#process-history';
       h += '<tr>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text-quaternary)">' + (pi + 1) + '</td>';
-      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><a href="' + statsHref + '" style="display:block;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit;text-decoration:none" title="' + esc(p.command || '') + '">' + cmdDisplay + '</a></td>';
+      h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)"><a href="' + statsHref + '" style="display:block;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit;text-decoration:none" title="' + esc(p.command || '') + '">' + esc(cmdDisplay) + '</a></td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border)">' + containerTag + '</td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:var(--font-mono);font-size:11px" class="' + cpuClass + '">' + (p.cpu_percent || 0).toFixed(1) + '</td>';
       h += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:var(--font-mono);font-size:11px" class="' + memClass + '">' + (p.mem_percent || 0).toFixed(1) + '</td>';
