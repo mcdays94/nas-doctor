@@ -23,23 +23,25 @@ type DB struct {
 
 // Open creates or opens the SQLite database at the given path.
 func Open(path string, logger *slog.Logger) (*DB, error) {
-	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_timeout=5000", path)
+	// Pragmas are per connection, so they go in the DSN: modernc.org/sqlite
+	// runs every _pragma parameter on each new pooled connection (busy_timeout
+	// first). A one-off sqldb.Exec("PRAGMA ...") only configured whichever
+	// connection ran it, leaving the rest with busy_timeout=0 (instant
+	// SQLITE_BUSY under write contention) and foreign keys off.
+	dsn := "file:" + path +
+		"?_pragma=busy_timeout(5000)" +
+		"&_pragma=journal_mode(WAL)" +
+		"&_pragma=synchronous(NORMAL)" +
+		"&_pragma=cache_size(-20000)" + // 20MB cache
+		"&_pragma=foreign_keys(1)"
 	sqldb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-
-	// Set pragmas for performance
-	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA cache_size=-20000", // 20MB cache
-		"PRAGMA foreign_keys=ON",
-	} {
-		if _, err := sqldb.Exec(pragma); err != nil {
-			return nil, fmt.Errorf("set pragma: %w", err)
-		}
+	// sql.Open is lazy; connect now so a bad path or pragma fails here.
+	if err := sqldb.Ping(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("open database: %w", err)
 	}
 
 	d := &DB{db: sqldb, path: path, logger: logger}
@@ -2429,10 +2431,9 @@ func (d *DB) PruneSnapshots(olderThan time.Duration, keepMin int) (int, error) {
 	}
 
 	// Findings must go before their snapshots. findings.snapshot_id has no
-	// ON DELETE CASCADE, so on the pooled connection that runs with
-	// foreign_keys=ON the snapshot DELETE below would fail with "FOREIGN KEY
-	// constraint failed" and roll back the whole prune; on the others it would
-	// leave the findings orphaned. PruneToSizeMB does the same.
+	// ON DELETE CASCADE, so with foreign keys enforced the snapshot DELETE
+	// below would fail with "FOREIGN KEY constraint failed" and roll back the
+	// whole prune. PruneToSizeMB does the same.
 	if _, err := tx.Exec(fmt.Sprintf(
 		`DELETE FROM findings WHERE snapshot_id IN (%s)`, pruneQuery,
 	), keepMin, cutoff); err != nil {
@@ -2896,9 +2897,8 @@ func (d *DB) PruneProcessHistory(cutoff time.Time) (int64, error) {
 
 // PruneSpeedTestHistory deletes speedtest_history rows older than cutoff and
 // clears any speedtest_samples orphaned by that delete. Orphans are removed
-// explicitly rather than relying on the ON DELETE CASCADE foreign key, because
-// PRAGMA foreign_keys is set per-connection and is not guaranteed on every
-// pooled connection — a cascade that silently no-ops would leak sample rows.
+// explicitly rather than relying only on the ON DELETE CASCADE foreign key, so
+// a cascade that silently no-ops can't leak sample rows.
 func (d *DB) PruneSpeedTestHistory(cutoff time.Time) (int64, error) {
 	res, err := d.db.Exec(`DELETE FROM speedtest_history WHERE timestamp < ?`, cutoff)
 	if err != nil {

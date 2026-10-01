@@ -175,9 +175,8 @@ func TestPruneSnapshots_RollbackIsolation(t *testing.T) {
 // other connections it went through and left the findings orphaned.
 func TestPruneSnapshots_DeletesFindings(t *testing.T) {
 	db := newTestDB(t)
-	// Pin the pool to the connection Open ran its pragmas on, so the prune
-	// runs with foreign keys enforced, as it does when it fails in production.
-	db.db.SetMaxOpenConns(1)
+	// The prune only hits the constraint with foreign keys enforced, which
+	// Open applies to every connection.
 	var fk int
 	if err := db.db.QueryRow("PRAGMA foreign_keys").Scan(&fk); err != nil || fk != 1 {
 		t.Fatalf("precondition: PRAGMA foreign_keys = %d (err %v); want 1", fk, err)
