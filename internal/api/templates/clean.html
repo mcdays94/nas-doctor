@@ -29,10 +29,16 @@ html{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 body{min-height:100vh;background:#fff}
 .container{max-width:1200px;margin:0 auto;padding:0 24px 80px}
 .container.dash-wide{max-width:none;padding:0 24px}
-.header{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,0.08);position:sticky;top:0;z-index:100}
+/* The header row wraps when it doesn't fit. The logo and slogan offer
+   their narrowest width when the row decides where to break, then grow
+   back up to one line. The hostname stays on one line and pushes the nav
+   to the row's end. It moves to a row of its own when it doesn't fit
+   beside the slogan, and ends in an ellipsis only when that row is too
+   narrow too. render() puts the full name in its title attribute */
+.header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;row-gap:12px;padding:16px 24px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,0.08);position:sticky;top:0;z-index:100}
 .header-brand{font-size:16px;font-weight:600;letter-spacing:-0.32px;color:#171717;text-decoration:none}
-.header-left{display:flex;align-items:center;gap:16px}
-.page-title{font-size:20px;font-weight:600;color:#808080}
+.header-left{display:flex;align-items:center;gap:16px;width:min-content;max-width:max-content;flex-grow:1;margin-right:16px}
+.page-title{font-size:20px;font-weight:600;color:#808080;min-width:0;margin-right:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .theme-switcher{display:flex;align-items:center;gap:2px;background:#f5f5f5;border-radius:8px;padding:2px}
 .theme-switcher a{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:500;color:#999;text-decoration:none;transition:all 0.15s;line-height:1.4}
 .theme-switcher a:hover{color:#666}
@@ -41,9 +47,10 @@ body{min-height:100vh;background:#fff}
 .nav-link{font-size:13px;font-weight:500;color:#666;text-decoration:none;padding:4px 10px;border-radius:6px;transition:color 0.15s}
 .nav-link:hover{color:#171717;background:rgba(0,0,0,0.04)}
 .nav-link.active{color:#171717;background:rgba(0,0,0,0.06);border-radius:6px}
-/* Narrow screens stack the header and wrap the nav, like shared.css does
-   on the other pages; one row of links is wider than a phone */
-@media(max-width:768px){.header{flex-direction:column;align-items:flex-start;gap:12px}.nav-links{flex-wrap:wrap}}
+/* Narrow screens give the nav a row of its own and wrap it, like
+   shared.css does on the other pages; one row of links is wider than a
+   phone */
+@media(max-width:768px){.nav-links{flex-basis:100%;flex-wrap:wrap}}
 .top-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;margin-top:20px;background:#fff;border-radius:10px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);min-height:52px;max-height:60px;gap:16px;flex-wrap:nowrap;overflow:hidden}
 .top-bar-left{display:flex;align-items:center;gap:10px;flex-shrink:0}
 .top-bar-divider{width:1px;height:24px;background:rgba(0,0,0,0.1);flex-shrink:0}
@@ -356,8 +363,8 @@ tbody tr:hover{background:rgba(0,0,0,0.03)}
     h += '<div class="header-left">';
     h += '<a href="/" class="header-brand" style="text-decoration:none;color:inherit"><img src="/icon.png" alt="" style="width:22px;height:22px;border-radius:4px;vertical-align:middle;margin-right:6px;">NAS Doctor</a>';
     h += '<span class="logo-slogan">Sleep tight knowing your server never does.</span>';
-    h += '<span class="page-title">' + esc(hostname) + '</span>';
     h += '</div>';
+    h += '<span class="page-title" title="' + esc(hostname).replace(/"/g, "&quot;") + '">' + esc(hostname) + '</span>';
     h += '<div class="nav-links">';
     h += '<a href="/" class="nav-link active">Dashboard</a>';
     h += '<a href="/alerts" class="nav-link">Alerts</a>';
