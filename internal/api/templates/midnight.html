@@ -107,8 +107,9 @@ a:hover{color:var(--hover)}
 /* Section titles */
 .section-title{font-size:13px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:calc(var(--sp)*1.5);margin-top:0}
 
-/* Two-column layout */
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+/* Column layout: distributeSections sets --dash-cols from Settings;
+   900px and below always gets one column */
+.two-col{display:grid;grid-template-columns:repeat(var(--dash-cols,2),1fr);gap:16px}
 @media(max-width:900px){.two-col{grid-template-columns:1fr}}
 .col-left{min-width:0;display:flex;flex-direction:column;min-height:0;gap:calc(var(--sp)*3)}
 .col-right{min-width:0;display:flex;flex-direction:column;gap:calc(var(--sp)*3)}

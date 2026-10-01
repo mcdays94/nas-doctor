@@ -1551,7 +1551,7 @@ charts.loadGPU = function(hours, save) {
         var data = byGPU[idx];
         var usageData = data.map(function(p) { return p.usage_percent; });
         var labels = data.map(function(p) { var d = new Date(p.timestamp); if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (hours <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
-        try { NasChart.area(canvasId, { datasets: [{ data: usageData, color: "#8b5cf6", label: "GPU %" }], labels: labels, yMax: 100, width: el.offsetWidth || 400, height: 60, showDots: false, margins: { top: 4, bottom: 16, left: 30, right: 8 } }); } catch(e) {}
+        try { NasChart.area(canvasId, { datasets: [{ data: usageData, color: "#8b5cf6", label: "GPU %" }], labels: labels, yMax: 100, fluid: true, height: 60, showDots: false, margins: { top: 4, bottom: 16, left: 30, right: 8 } }); } catch(e) {}
       }
     })
     .catch(function() {});
@@ -1583,7 +1583,7 @@ charts.loadContainers = function(hours, save) {
         var cpuData = data.map(function(p) { return p.cpu_percent; });
         var memData = data.map(function(p) { return p.mem_mb; });
         var labels = data.map(function(p) { var d = new Date(p.timestamp); if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (hours <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
-        try { NasChart.area(el.id, { datasets: [{ data: cpuData, color: "#3b82f6", label: "CPU %" }, { data: memData, color: "#8b5cf6", label: "Mem MB" }], labels: labels, width: el.offsetWidth || 400, height: 60, showDots: false, margins: { top: 4, bottom: 16, left: 30, right: 8 } }); } catch(e) {}
+        try { NasChart.area(el.id, { datasets: [{ data: cpuData, color: "#3b82f6", label: "CPU %" }, { data: memData, color: "#8b5cf6", label: "Mem MB" }], labels: labels, fluid: true, height: 60, showDots: false, margins: { top: 4, bottom: 16, left: 30, right: 8 } }); } catch(e) {}
       }
     })
     .catch(function() {});
@@ -1846,7 +1846,7 @@ charts.loadSpeedTest = function(hours, save) {
       var dlData = points.map(function(p) { return p.download_mbps; });
       var ulData = points.map(function(p) { return p.upload_mbps; });
       var labels = points.map(function(p) { var d = new Date(p.timestamp); if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (hours <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
-      try { NasChart.area("speedtest-chart", { datasets: [{ data: dlData, color: "#3b82f6", label: "Download" }, { data: ulData, color: "#8b5cf6", label: "Upload" }], labels: labels, width: document.getElementById("speedtest-chart").offsetWidth || 400, height: 80, showDots: true, margins: { top: 4, bottom: 16, left: 40, right: 8 } }); } catch(e) {}
+      try { NasChart.area("speedtest-chart", { datasets: [{ data: dlData, color: "#3b82f6", label: "Download" }, { data: ulData, color: "#8b5cf6", label: "Upload" }], labels: labels, fluid: true, height: 80, showDots: true, margins: { top: 4, bottom: 16, left: 40, right: 8 } }); } catch(e) {}
     }).catch(function() {});
 };
 
@@ -2024,7 +2024,10 @@ function distributeSections() {
   var twoCol = document.getElementById("two-col");
   if (numCols >= 3 && container) container.classList.add("dash-wide");
   else if (container) container.classList.remove("dash-wide");
-  if (twoCol) twoCol.style.gridTemplateColumns = "repeat(" + numCols + ", 1fr)";
+  // The themes size the grid from --dash-cols and drop to one column at
+  // 900px and below. An inline grid-template-columns would beat that
+  // media query and squeeze every column onto a phone screen.
+  if (twoCol) twoCol.style.setProperty("--dash-cols", String(numCols));
 
   var allCols = [colL, colR];
   for (var ci = 3; ci <= numCols; ci++) {

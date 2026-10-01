@@ -93,7 +93,9 @@ body{min-height:100vh;background:#fff}
 .refresh-dot.pulse{animation:refresh-pulse 0.6s ease}
 @keyframes refresh-pulse{0%{opacity:1;transform:scale(1.6)}100%{opacity:0.5;transform:scale(1)}}
 
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:24px}
+/* distributeSections sets --dash-cols from Settings; the 900px media
+   query below always gets one column */
+.two-col{display:grid;grid-template-columns:repeat(var(--dash-cols,2),1fr);gap:20px;margin-top:24px}
 .col-left,.col-right{display:flex;flex-direction:column;gap:16px;min-width:0;min-height:0}
 .col-left > .section{flex:1;display:flex;flex-direction:column;min-height:0}
 

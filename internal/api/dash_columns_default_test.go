@@ -33,8 +33,8 @@ func TestDashboardJS_AutoModeMapsToThreeColumns(t *testing.T) {
 		t.Errorf("DashboardJS missing %q — the dash_columns `|| 3` fallback controls the auto-mode column count (issue #208)", want)
 	}
 	// Also guard against the fallback-when-negative path rendering 2. Both
-	// branches (falsy-zero and <1) feed into the same `gridTemplateColumns`
-	// expression, so both need to land on 3 for consistency.
+	// branches (falsy-zero and <1) feed into the same `--dash-cols`
+	// value, so both need to land on 3 for consistency.
 	if !strings.Contains(js, "if (numCols < 1) numCols = 3;") {
 		t.Errorf("DashboardJS missing `numCols < 1` fallback to 3 — keeps auto/invalid paths aligned on the new default (issue #208)")
 	}
