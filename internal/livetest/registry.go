@@ -263,9 +263,10 @@ func (m *Manager) RegisterCompletionHandler(fn func(*LiveTest)) {
 //
 // The returned *LiveTest's Done channel closes when the test
 // completes (success or error) AND all final fan-out events have
-// been delivered to existing subscribers. A subscriber that subscribes
-// AFTER Done is closed will still receive the full replay (see
-// LiveTest.Subscribe).
+// been delivered to existing subscribers. By then the registry slot
+// is clear: InProgress() reports false and the next StartTest starts
+// a fresh test. A subscriber that subscribes AFTER Done is closed
+// will still receive the full replay (see LiveTest.Subscribe).
 func (m *Manager) StartTest(ctx context.Context) (*LiveTest, error) {
 	m.mu.Lock()
 	if m.active != nil {
@@ -412,16 +413,17 @@ func WithCaller(ctx context.Context, caller string) context.Context {
 }
 
 // driveTest invokes the runner and broadcasts samples to subscribers.
-// On completion (success or error) it stamps the result, closes the
-// done channel, and clears m.active so the next StartTest can begin
-// a fresh test.
+// On completion (success or error) it stamps the result, clears
+// m.active so the next StartTest can begin a fresh test, and closes
+// the done channel.
 //
 // Cleanup order is critical: m.active must be cleared BEFORE
 // LiveTest.Done is closed. Tests (and production observers) wait on
 // Done then check InProgress; if Done closes first there's a race
 // window where InProgress=true even though the test is over. The
-// finish call (which closes Done) is therefore deferred until AFTER
-// m.active is cleared.
+// closeSubscribersAndDone call (which closes Done) therefore comes
+// AFTER m.active is cleared. TestRegistry_SlotClearedBeforeDone pins
+// this order.
 //
 // Panic recovery: if the runner panics mid-test, the registry must
 // release the singleton lock so subsequent StartTest calls aren't
@@ -463,19 +465,21 @@ func (m *Manager) driveTest(ctx context.Context, t *LiveTest) {
 		// Both cron- and API-triggered tests therefore produce
 		// identical persistence side effects via the SAME callback.
 		m.notifyCompletion(t)
-		// Now broadcast subscriber-channel close + Done close. SSE
-		// clients waiting on the channel get the buffered events +
-		// terminal close; cron callers waiting on Done() unblock
-		// AFTER the persistence handler has returned.
-		t.closeSubscribersAndDone()
 		// Clear the active slot + stash for the grace window so
 		// late SSE clients can still attach. GetLive checks both
-		// active and graceLT.
+		// active and graceLT. This must happen before the Done
+		// close below: whatever wakes on Done (or on a subscriber
+		// channel closing) has to see InProgress()=false.
 		m.mu.Lock()
 		m.active = nil
 		m.graceLT = t
 		m.graceAt = time.Now()
 		m.mu.Unlock()
+		// Now broadcast subscriber-channel close + Done close. SSE
+		// clients waiting on the channel get the buffered events +
+		// terminal close; cron callers waiting on Done() unblock
+		// AFTER the persistence handler has returned.
+		t.closeSubscribersAndDone()
 		// Broadcast running=false. By firing AFTER the slot is
 		// cleared, callers asserting "gauge==0 implies not in
 		// progress" stay correct (Prometheus scrapes during the

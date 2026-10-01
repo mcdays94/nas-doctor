@@ -488,6 +488,47 @@ func TestRegistry_PanicMidTest_RegistrySlotCleared(t *testing.T) {
 	<-lt2.Done()
 }
 
+// TestRegistry_SlotClearedBeforeDone pins driveTest's cleanup order:
+// the registry slot is cleared BEFORE Done closes, so a caller woken
+// by Done sees InProgress()=false and its next StartTest starts a
+// fresh test. Tests that check registry state right after Done only
+// catch the wrong order when the scheduler switches goroutines inside
+// that window, so they flake instead of failing
+// (TestLiveTestRegistry_Cancel_ActiveTest failed main CI that way).
+// Holding mgr.mu parks the slot clear, so with the right order Done
+// stays open until the test releases the lock.
+func TestRegistry_SlotClearedBeforeDone(t *testing.T) {
+	t.Parallel()
+	runner := newFakeRunner()
+	runner.result = &internal.SpeedTestResult{Engine: internal.SpeedTestEngineSpeedTestGo}
+	mgr := NewManager(runner, quietLogger(), counterIDGen())
+	handled := make(chan struct{})
+	mgr.RegisterCompletionHandler(func(*LiveTest) { close(handled) })
+
+	lt, err := mgr.StartTest(context.Background())
+	if err != nil {
+		t.Fatalf("StartTest: %v", err)
+	}
+
+	mgr.mu.Lock()
+	close(runner.done)
+	<-handled // completion handlers run just before the slot clear
+	select {
+	case <-lt.Done():
+		if mgr.active != nil {
+			t.Error("Done closed while the registry slot still held the finished test")
+		}
+	case <-time.After(50 * time.Millisecond):
+		// The slot clear is waiting for mgr.mu, so Done is still open.
+	}
+	mgr.mu.Unlock()
+
+	<-lt.Done()
+	if mgr.InProgress() {
+		t.Error("InProgress()=true after Done closed")
+	}
+}
+
 func TestRegistry_GetLive_Lookup(t *testing.T) {
 	t.Parallel()
 	runner := newFakeRunner()
