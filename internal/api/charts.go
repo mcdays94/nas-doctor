@@ -1012,22 +1012,18 @@ function createSpeedLive(opts){
     if(run) run.frame=0;
   }
 
-  /* settle replaces a finished phase's live readout with the phase
-     average, so the number doesn't jump when the engine's result
-     arrives. Throughput skips the first quarter, where the transfer is
-     still ramping up. */
+  /* settle runs when a phase ends. A finished latency phase shows its
+     average ping, which is what the engine reports. Throughput keeps
+     the phase's last sample: speedtest-go's samples are its moving
+     average (EWMA) and its result is that average's final value, so
+     averaging the samples again reads low because it counts the ramp-up
+     (786 Mbps on screen against an 872 result in a real run). The Ookla
+     CLI fallback sends no live samples. */
   function settle(phase){
-    if(phase==="latency"&&run.lat.length){
-      var sum=0;
-      for(var i=0;i<run.lat.length;i++) sum+=run.lat[i];
-      run.values.latency=sum/run.lat.length;
-      return;
-    }
-    var pts=phase==="download"?run.down:phase==="upload"?run.up:null;
-    if(!pts||!pts.length) return;
-    var from=Math.floor(pts.length/4),total=0;
-    for(var k=from;k<pts.length;k++) total+=pts[k].v;
-    run.values[phase]=total/(pts.length-from);
+    if(phase!=="latency"||!run.lat.length) return;
+    var sum=0;
+    for(var i=0;i<run.lat.length;i++) sum+=run.lat[i];
+    run.values.latency=sum/run.lat.length;
   }
 
   function start(cfg){

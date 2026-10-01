@@ -1850,10 +1850,11 @@ var speedtestLive = (function() {
 window.speedtestLive = speedtestLive;
 
 /* The speed-test history chart follows the dashboard's chart range, but
-   tests usually run a few times a day, so 1H is often empty. When the
-   chosen window has no tests the chart widens to the next one that has
-   some (24 hours, 7 days, then the API's 30-day cap) and says so under
-   the chart. */
+   tests usually run a few times a day or less, so 1H is often empty or
+   holds only the test you just ran. A line needs two points: when the
+   chosen window has fewer than two tests the chart widens to the next
+   one that has two (24 hours, 7 days, then the API's 30-day cap) and
+   says so under the chart. */
 var SPEEDTEST_FALLBACK_HOURS = [24, 168, 720];
 var _speedTestHistorySeq = 0;
 function speedtestWindowLabel(hours) {
@@ -1878,7 +1879,7 @@ charts.loadSpeedTest = function(hours, save) {
   for (var w = 0; w < SPEEDTEST_FALLBACK_HOURS.length; w++) {
     if (SPEEDTEST_FALLBACK_HOURS[w] > hours) windows.push(SPEEDTEST_FALLBACK_HOURS[w]);
   }
-  var seq = ++_speedTestHistorySeq;
+  var seq = ++_speedTestHistorySeq, askedCount = 0;
   function tryWindow(k) {
     return fetch("/api/v1/history/speedtest?hours=" + windows[k])
       .then(function(r) { return r.json(); })
@@ -1887,14 +1888,15 @@ charts.loadSpeedTest = function(hours, save) {
         /* Cancelled tests (#304) are stored as all-zero rows; they
            aren't measurements, so they don't count or plot. */
         points = (points || []).filter(function(p) { return p.download_mbps > 0 || p.upload_mbps > 0; });
-        if (!points.length && k + 1 < windows.length) return tryWindow(k + 1);
-        charts.drawSpeedTestHistory(points, hours, windows[k]);
+        if (k === 0) askedCount = points.length;
+        if (points.length < 2 && k + 1 < windows.length) return tryWindow(k + 1);
+        charts.drawSpeedTestHistory(points, hours, windows[k], askedCount);
       });
   }
   tryWindow(0).catch(function() {});
 };
 
-charts.drawSpeedTestHistory = function(points, asked, shown) {
+charts.drawSpeedTestHistory = function(points, asked, shown, askedCount) {
   var canvas = document.getElementById("speedtest-chart");
   var note = document.getElementById("speedtest-chart-note");
   if (!canvas) return;
@@ -1905,7 +1907,7 @@ charts.drawSpeedTestHistory = function(points, asked, shown) {
   }
   canvas.style.display = "";
   if (note) {
-    note.textContent = shown === asked ? "" : "No tests in the last " + speedtestWindowLabel(asked) + ", showing the last " + speedtestWindowLabel(shown) + ".";
+    note.textContent = shown === asked ? "" : (askedCount === 1 ? "One test" : "No tests") + " in the last " + speedtestWindowLabel(asked) + ", showing the last " + speedtestWindowLabel(shown) + ".";
     note.hidden = shown === asked;
   }
   if (!window.NasChart) return;

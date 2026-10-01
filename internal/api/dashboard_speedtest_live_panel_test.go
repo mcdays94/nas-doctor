@@ -111,6 +111,8 @@ func TestDashboardJS_SpeedtestHistory_FallsBackToAWindowWithTests(t *testing.T) 
 		`"No speed tests in the last "`,
 		`", showing the last "`,
 		`p.download_mbps > 0 || p.upload_mbps > 0`,
+		`points.length < 2 && k + 1 < windows.length`,
+		`"One test"`,
 	}
 	for _, fragment := range required {
 		if !strings.Contains(DashboardJS, fragment) {
