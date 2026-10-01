@@ -259,7 +259,9 @@ func TestNasSpeedLive_DashboardRun(t *testing.T) {
   check(q("stop").textContent === "Cancel" && !q("stop").disabled, "redraw restores the Cancel button");
 
   p.phase("upload");
-  check(q("download").textContent === "550", "download settles to the average without the ramp-up quarter, got " + q("download").textContent);
+  // speedtest-go's samples are its moving average, so the last one is the
+  // best figure; re-averaging them read 786 against an 872 result on UAT.
+  check(q("download").textContent === "800", "a finished download phase keeps its last sample, got " + q("download").textContent);
   for (var j = 0; j < 4; j++) p.sample({ phase: "upload", mbps: 40 + j, ts: iso(now + 5000 + j * 500) });
   p.setStop(false, "Cancelling...");
   check(q("stop").disabled && q("stop").textContent === "Cancelling...", "setStop disables the button and relabels it");
@@ -373,8 +375,8 @@ func TestDashboardJS_SpeedTestSection_EveryBranchHasLivePanel(t *testing.T) {
 `)
 }
 
-// The history chart widens to the first window with real tests and says
-// so; cancelled tests (all-zero rows) don't count.
+// The history chart widens to the first window with at least two real
+// tests and says so; cancelled tests (all-zero rows) don't count.
 func TestDashboardJS_SpeedTestHistory_Fallback(t *testing.T) {
 	runSpeedLiveScenario(t, true, `
   var canvas = new El("canvas"); canvas.id = "speedtest-chart"; body.appendChild(canvas);
@@ -405,11 +407,27 @@ func TestDashboardJS_SpeedTestHistory_Fallback(t *testing.T) {
   check(!note.hidden && note.textContent === "No speed tests in the last 30 days.", "empty note, got " + JSON.stringify(note.textContent));
   check(canvas.style.display === "none" && drawnAreas.length === 0, "nothing to draw hides the chart");
 
-  history = { "168": [pt(900, 400)] }; asked = []; drawnAreas = [];
+  // Right after a manual test on a weekly schedule, 1H holds just that
+  // test: one point isn't a line, so widen past it too.
+  history = { "1": [pt(872, 55)], "24": [pt(872, 55)], "168": [pt(886, 416), pt(872, 55)] }; asked = []; drawnAreas = [];
+  NasDashboard.charts.loadSpeedTest(1);
+  for (var m = 0; m < 10; m++) await tick();
+  check(asked.join(",") === "1,24,168", "a single test doesn't make a chart, asked " + asked.join(","));
+  check(!note.hidden && note.textContent === "One test in the last hour, showing the last 7 days.", "one-test note, got " + JSON.stringify(note.textContent));
+  check(drawnAreas.length === 1 && drawnAreas[0].n === 2, "draws the 7-day points: " + JSON.stringify(drawnAreas));
+
+  history = { "168": [pt(900, 400), pt(880, 410)] }; asked = []; drawnAreas = [];
   NasDashboard.charts.loadSpeedTest(168);
   for (var k = 0; k < 10; k++) await tick();
   check(asked.join(",") === "168", "a window with tests needs one request, asked " + asked.join(","));
   check(note.hidden && canvas.style.display === "" && drawnAreas.length === 1, "no note when the chosen window has tests");
+
+  history = { "720": [pt(900, 400)] }; asked = []; drawnAreas = [];
+  NasDashboard.charts.loadSpeedTest(168);
+  for (var n = 0; n < 10; n++) await tick();
+  check(asked.join(",") === "168,720", "asked " + asked.join(","));
+  check(note.textContent === "No tests in the last 7 days, showing the last 30 days." && drawnAreas.length === 1 && drawnAreas[0].n === 1,
+    "with one test in 30 days the chart still shows it: " + JSON.stringify(note.textContent) + " " + JSON.stringify(drawnAreas));
 `)
 }
 
