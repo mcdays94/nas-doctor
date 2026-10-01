@@ -490,6 +490,25 @@ func (s *Scheduler) SetLiveTestRegistry(reg livetest.Registry) {
 	}
 }
 
+// SyncAlertStates records the snapshot's findings as alert states, which
+// is what the /alerts page lists. Scans call it after saving each
+// snapshot; demo mode calls it for the snapshot it generates, since it
+// saves snapshots without running a scan.
+func (s *Scheduler) SyncAlertStates(snap *internal.Snapshot) {
+	stateFindings := make([]storage.AlertStateFinding, 0, len(snap.Findings))
+	for _, f := range snap.Findings {
+		stateFindings = append(stateFindings, storage.AlertStateFinding{
+			Fingerprint: findingFingerprint(f),
+			FindingID:   f.ID,
+			Severity:    string(f.Severity),
+			Title:       f.Title,
+		})
+	}
+	if err := s.store.SyncAlertStates(snap.ID, stateFindings, snap.Timestamp); err != nil {
+		s.logger.Warn("sync alert states failed", "error", err)
+	}
+}
+
 // LiveTestRegistry returns the wired registry. Used by the API layer
 // to route POST /api/v1/speedtest/run + GET /api/v1/speedtest/stream/{id}
 // requests through the same singleton lock that the scheduler uses.
@@ -749,18 +768,7 @@ func (s *Scheduler) RunOnce() {
 	s.latest = snap
 	s.mu.Unlock()
 
-	stateFindings := make([]storage.AlertStateFinding, 0, len(snap.Findings))
-	for _, f := range snap.Findings {
-		stateFindings = append(stateFindings, storage.AlertStateFinding{
-			Fingerprint: findingFingerprint(f),
-			FindingID:   f.ID,
-			Severity:    string(f.Severity),
-			Title:       f.Title,
-		})
-	}
-	if err := s.store.SyncAlertStates(snap.ID, stateFindings, snap.Timestamp); err != nil {
-		s.logger.Warn("sync alert states failed", "error", err)
-	}
+	s.SyncAlertStates(snap)
 
 	// Notify
 	s.mu.RLock()
