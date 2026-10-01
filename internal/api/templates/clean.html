@@ -34,10 +34,17 @@ body{min-height:100vh;background:#fff}
    back up to one line. The hostname stays on one line and pushes the nav
    to the row's end. It moves to a row of its own when it doesn't fit
    beside the slogan, and ends in an ellipsis only when that row is too
-   narrow too. render() puts the full name in its title attribute */
+   narrow too. render() puts the full name in its title attribute.
+   The slogan gets shared.css's style, which this page doesn't load,
+   without its nowrap. A one-line slogan would be the narrowest the logo
+   and slogan get, and the nav would drop to its own row on much wider
+   screens. .header-left wraps instead. The slogan moves under the logo
+   when the two don't fit side by side, and wraps there when it has to.
+   The logo stays on one line */
 .header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;row-gap:12px;padding:16px 24px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,0.08);position:sticky;top:0;z-index:100}
-.header-brand{font-size:16px;font-weight:600;letter-spacing:-0.32px;color:#171717;text-decoration:none}
-.header-left{display:flex;align-items:center;gap:16px;width:min-content;max-width:max-content;flex-grow:1;margin-right:16px}
+.header-brand{font-size:16px;font-weight:600;letter-spacing:-0.32px;color:#171717;text-decoration:none;white-space:nowrap}
+.header-left{display:flex;flex-wrap:wrap;align-items:center;column-gap:16px;width:min-content;max-width:max-content;flex-grow:1;margin-right:16px}
+.logo-slogan{font-size:11px;font-style:italic;font-weight:400;color:var(--text-quaternary);margin-left:4px;text-wrap:balance}
 .page-title{font-size:20px;font-weight:600;color:#808080;min-width:0;margin-right:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .theme-switcher{display:flex;align-items:center;gap:2px;background:#f5f5f5;border-radius:8px;padding:2px}
 .theme-switcher a{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:500;color:#999;text-decoration:none;transition:all 0.15s;line-height:1.4}
