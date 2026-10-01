@@ -259,13 +259,6 @@ loop:
 	})
 }
 
-// SetStreamingSpeedTestRunner replaces the runner behind the speed check
-// Test stream. Demo mode uses it to simulate a test instead of measuring
-// the host's own connection (#346).
-func (s *Server) SetStreamingSpeedTestRunner(runner collector.StreamingSpeedTestRunner) {
-	s.streamingSpeedTestRunner = runner
-}
-
 // streamSpeedServiceCheck handles type=speed requests on the
 // /test-stream endpoint. Runs the streaming speed-test runner
 // (production composite of speedtest-go primary + Ookla CLI
