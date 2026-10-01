@@ -1000,30 +1000,21 @@ sections.speedtest = function(sn) {
      table-wrap, etc). Without this the speed-test tile has no card
      background and looks visually detached from every other section. */
   var panelStyle = 'background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:12px';
-  /* Live-progress strip placeholder (PRD #283 / issue #285). Always
-     emitted above the historical chart but starts hidden via
-     max-height:0; the speedtestLive module flips data-state="running"
-     to grow the strip in. CSS rules live on every page that loads
-     dashboard.js (shared.css + the two theme templates). */
-  var stripPlaceholder = ''
-    + '<div id="speedtest-live-strip" class="speedtest-live-strip" data-state="idle">'
-    +   '<div class="speedtest-live-inner">'
-    +     '<span class="speedtest-live-phase-pill" data-phase="idle">IDLE</span>'
-    +     '<canvas id="speedtest-live-gauge" width="120" height="80"></canvas>'
-    +     '<div class="speedtest-live-readout">'
-    +       '<div class="speedtest-live-mbps" data-readout="mbps">0</div>'
-    +       '<div class="speedtest-live-mbps-label">Mbps</div>'
-    +     '</div>'
-    +     '<canvas id="speedtest-live-spark" width="80" height="30"></canvas>'
-    +     '<button type="button" id="speedtest-live-cancel" data-action="speedtest-cancel" class="speedtest-live-cancel" disabled>Cancel</button>'
-    +   '</div>'
-    + '</div>';
+  /* Live panel: an empty element that speedtestLive fills with the
+     shared NasSpeedLive panel (phase stepper, readouts and a live
+     download/upload chart) while a test runs and after it ends. It
+     replaced the PRD #283 gauge-and-sparkline strip. Every branch below
+     emits it, because Run now works in all of them. The content marked
+     data-speedtest-summary hides while the panel is open. */
+  var livePanel = '<div id="speedtest-live" hidden></div>';
   /* Run-now button is part of the section title row. The button is
      ALWAYS rendered (even on the disabled-empty-state branch) so user
      story 7 holds — Disabled-cron does not block the manual button. */
   var runButton = '<button type="button" id="speedtest-run-now" data-action="speedtest-run-now" '
     + 'style="margin-left:8px;padding:4px 10px;background:var(--bg-elevated);border:1px solid var(--border);'
     + 'border-radius:6px;color:var(--text-secondary);font-size:11px;cursor:pointer">Run now</button>';
+  var plainTitle = '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">'
+    + '<span>Speed Test' + runButton + '</span></div>';
   if (spd && spd.available && spd.latest) {
     var r = spd.latest;
     h += '<div>';
@@ -1036,8 +1027,9 @@ sections.speedtest = function(sn) {
     h +=   '<span>Speed Test' + runButton + '</span>';
     h +=   sections._rangeButtons("st", "loadSpeedTestChart", _chartRange);
     h += '</div>';
-    h += stripPlaceholder;
     h += '<div style="' + panelStyle + '">';
+    h += livePanel;
+    h += '<div data-speedtest-summary>';
     h += '<div style="display:flex;gap:16px;font-size:13px;color:var(--text-tertiary);flex-wrap:wrap;margin-bottom:12px">';
     h += '<span>Download: <strong style="color:var(--text-primary);font-size:15px">' + r.download_mbps.toFixed(0) + ' Mbps</strong></span>';
     h += '<span>Upload: <strong style="color:var(--text-primary);font-size:15px">' + r.upload_mbps.toFixed(0) + ' Mbps</strong></span>';
@@ -1073,7 +1065,14 @@ sections.speedtest = function(sn) {
       }
     }
     h += '</div>';
+    h += '</div>'; /* close summary */
+    /* While the live panel is open, syncCard() sets this apart from
+       the run's own chart with a rule and a label. */
+    h += '<div data-speedtest-history>';
+    h += '<div data-speedtest-history-label style="margin-bottom:4px;font-size:10px;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-quaternary)" hidden>History</div>';
     h += '<canvas id="speedtest-chart" style="width:100%;height:80px"></canvas>';
+    h += '<div id="speedtest-chart-note" style="margin-top:4px;font-size:11px;color:var(--text-quaternary)" hidden></div>';
+    h += '</div>';
     h += '</div>'; /* close panel */
     h += '</div>';
   } else if (spd && spd.last_attempt && spd.last_attempt.status === 'disabled') {
@@ -1081,34 +1080,34 @@ sections.speedtest = function(sn) {
        Make it explicit that the Run-now button still works for one-off
        tests even though the cron loop is off. */
     h += '<div>';
-    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">';
-    h +=   '<span>Speed Test' + runButton + '</span>';
-    h += '</div>';
-    h += stripPlaceholder;
+    h += plainTitle;
     h += '<div style="' + panelStyle + ';font-size:13px;color:var(--text-tertiary)" data-speedtest-disabled="true">';
-    h +=   'Scheduled speed tests are disabled. Use Run now for a one-off test.';
+    h +=   livePanel;
+    h +=   '<div data-speedtest-summary>Scheduled speed tests are disabled. Use Run now for a one-off test.</div>';
     h += '</div>';
     h += '</div>';
   } else if (spd && spd.last_attempt && spd.last_attempt.status === 'pending') {
     // Fresh-install gap: scheduler has kicked off the first-ever speed
     // test but Ookla hasn't returned yet (~30-60s window). Render the
     // running state so the user knows the feature is actually doing
-    // something, rather than silently rendering an empty tile.
+    // something, rather than silently rendering an empty tile. The
+    // dashboard attaches the live panel to that test once it renders.
     h += '<div>';
-    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">';
-    h +=   '<span>Speed Test' + runButton + '</span>';
+    h += plainTitle;
+    h += '<div style="' + panelStyle + ';font-size:13px;color:var(--text-tertiary)">';
+    h +=   livePanel;
+    h +=   '<div data-speedtest-summary style="font-style:italic">Running initial speed test&hellip;</div>';
     h += '</div>';
-    h += stripPlaceholder;
-    h += '<div style="' + panelStyle + ';font-size:13px;color:var(--text-tertiary);font-style:italic">Running initial speed test&hellip;</div>';
     h += '</div>';
   } else {
-    /* No latest result + no attempt state. Still render the strip
-       placeholder + Run button so the user can kick off the first test. */
+    /* No latest result + no attempt state. Still render the panel +
+       Run button so the user can kick off the first test. */
     h += '<div>';
-    h += '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">';
-    h +=   '<span>Speed Test' + runButton + '</span>';
+    h += plainTitle;
+    h += '<div style="' + panelStyle + ';font-size:13px;color:var(--text-tertiary)">';
+    h +=   livePanel;
+    h +=   '<div data-speedtest-summary>No speed test results yet.</div>';
     h += '</div>';
-    h += stripPlaceholder;
     h += '</div>';
   }
   h += '</div>';
@@ -1589,164 +1588,169 @@ charts.loadContainers = function(hours, save) {
     .catch(function() {});
 };
 
-/* ── Live speed-test progress (PRD #283 / issue #285) ──────────
+/* ── Live speed test (PRD #283, issues #285, #304 and #346) ────
    speedtestLive owns the EventSource lifecycle for live-progress
    streaming. Wire format matches the Go SSE handler verbatim:
-   start -> phase_change -> sample(s) -> result -> end. The strip
-   uses the placeholder rendered by sections.speedtest above; this
-   module just toggles its data-state attribute and updates the
-   readouts inside.
+   start -> phase_change -> sample(s) -> result, cancelled or error
+   -> end. The card shows the run in the shared NasSpeedLive panel
+   from /js/charts.js, the same one the Settings Test button uses:
+   a phase stepper, live readouts and a download/upload chart.
+
+   The panel keeps the run in JS. sections.speedtest only emits an
+   empty #speedtest-live, and redraw() refills it after every render,
+   so a dashboard re-render mid-test doesn't lose the chart. After the
+   test the chart and result stay in the card until Close, the next
+   test or a page reload.
 
    Public surface (for tests + external callers):
      window.speedtestLive.attach(testId)  - attach to existing test
      window.speedtestLive.runNow()        - POST /run + attach
-     window.speedtestLive.detach()        - close stream + hide strip
+     window.speedtestLive.cancel()        - POST /cancel/{id}
+     window.speedtestLive.detach()        - close stream + hide panel
+     window.speedtestLive.redraw()        - refill the panel after a render
 */
 var speedtestLive = (function() {
   var state = {
     es: null,
     testId: null,
-    samples: [],
-    phase: 'idle',
-    gaugeMax: 100,
-    pendingFrame: null
+    result: null,
+    error: '',
+    cancelled: false,
+    seconds: 0,
+    autoAttachedFor: null
   };
+  var panel = window.NasSpeedLive ? window.NasSpeedLive.create({
+    id: 'speedtest-live',
+    compact: true,
+    stopLabel: 'Cancel',
+    onStop: function() { cancel(); },
+    onClose: function() { detach(); }
+  }) : null;
 
-  function $(id) { return document.getElementById(id); }
-
-  function setStripState(s) {
-    var strip = $('speedtest-live-strip');
-    if (strip) strip.setAttribute('data-state', s);
+  function closeStream() {
+    if (state.es) { try { state.es.close(); } catch (e) {} state.es = null; }
+  }
+  /* The card's figures (or empty-state copy) hide while the panel is
+     open: the panel shows the same numbers for the newest test. The
+     history chart stays, set apart so it doesn't read as part of the
+     run. */
+  function syncCard() {
+    var open = !!(panel && panel.isOpen());
+    var nodes = document.querySelectorAll('[data-speedtest-summary]');
+    for (var i = 0; i < nodes.length; i++) nodes[i].hidden = open;
+    var hist = document.querySelectorAll('[data-speedtest-history]');
+    for (var j = 0; j < hist.length; j++) {
+      hist[j].style.borderTop = open ? '1px solid var(--border)' : '';
+      hist[j].style.paddingTop = open ? '10px' : '';
+      var label = hist[j].querySelector('[data-speedtest-history-label]');
+      if (label) label.hidden = !open;
+    }
   }
   function setCancelEnabled(enabled, label) {
     /* Cancel button (issue #304) — enabled while a test is in flight,
        disabled when idle/completed. The label flips to "Cancelling..."
        between the click and the SSE cancelled event so the user sees
        immediate feedback even if the server takes a beat to abort. */
-    var btn = $('speedtest-live-cancel');
-    if (!btn) return;
-    btn.disabled = !enabled;
-    if (typeof label === 'string') btn.textContent = label;
+    if (panel) panel.setStop(enabled, label);
   }
-  function setPhasePill(phase) {
-    var pill = document.querySelector('.speedtest-live-phase-pill');
-    if (!pill) return;
-    pill.setAttribute('data-phase', phase);
-    pill.textContent = (phase || '').toUpperCase();
-  }
-  function setReadout(mbps) {
-    var el = document.querySelector('[data-readout="mbps"]');
-    if (el) el.textContent = mbps.toFixed(1);
-  }
-  function roundUpToNiceNumber(v) {
-    if (v <= 10) return 10;
-    if (v <= 100) return Math.ceil(v / 10) * 10;
-    if (v <= 1000) return Math.ceil(v / 50) * 50;
-    return Math.ceil(v / 100) * 100;
-  }
-  function autoScaleGauge() {
-    if (state.samples.length < 1) return;
-    var max = 0;
-    for (var i = 0; i < state.samples.length; i++) {
-      if (state.samples[i].mbps > max) max = state.samples[i].mbps;
-    }
-    state.gaugeMax = roundUpToNiceNumber(max * 1.2);
-  }
-  function renderGauge(mbps) {
-    if (!window.NasChart || !window.NasChart.gauge) return;
-    try {
-      NasChart.gauge('speedtest-live-gauge', {
-        value: mbps,
-        max: state.gaugeMax,
-        width: 120,
-        height: 80,
-        animate: false,
-        label: ''
-      });
-    } catch (e) {}
-  }
-  function renderSparkline() {
-    if (!window.NasChart || !window.NasChart.sparkline) return;
-    var recent = state.samples.slice(-30).map(function(s) { return s.mbps; });
-    if (recent.length < 2) return;
-    try {
-      NasChart.sparkline('speedtest-live-spark', {
-        data: recent,
-        color: '#3b82f6',
-        width: 80,
-        height: 30
-      });
-    } catch (e) {}
-  }
-  function scheduleRender() {
-    if (state.pendingFrame) return;
-    state.pendingFrame = (window.requestAnimationFrame || function(cb) { return setTimeout(cb, 16); })(function() {
-      state.pendingFrame = null;
-      var last = state.samples[state.samples.length - 1];
-      if (last) {
-        setReadout(last.mbps);
-        renderGauge(last.mbps);
-      }
-      renderSparkline();
-    });
+  function begin(startedAt) {
+    state.result = null;
+    state.error = '';
+    state.cancelled = false;
+    state.seconds = 0;
+    if (panel) panel.start({ startedAt: startedAt });
+    syncCard();
   }
 
   function onStart(data) {
     state.testId = data.test_id;
-    state.samples = [];
-    state.phase = 'idle';
-    state.gaugeMax = 100;
-    setStripState('running');
-    setPhasePill('latency');
+    begin(data.started_at);
     /* Issue #304 — Cancel button is enabled the moment a test starts
        streaming; it returns to disabled on end/error/cancelled. */
     setCancelEnabled(true, 'Cancel');
   }
   function onPhaseChange(data) {
-    state.phase = data.phase;
-    setPhasePill(data.phase);
-    // Re-derive gauge max for upload phase if upload differs from
-    // download — pin to current sample tail so we don't spike on
-    // residual download samples.
-    if (data.phase === 'upload') {
-      state.gaugeMax = 100;
-    }
+    if (panel) panel.phase(data.phase);
   }
   function onSample(data) {
-    state.samples.push(data);
-    if (state.samples.length <= 3) autoScaleGauge();
-    scheduleRender();
+    if (panel) panel.sample(data);
   }
   function onResult(data) {
-    setStripState('completing');
+    state.result = data;
   }
-  function onEnd() {
-    setStripState('idle');
-    state.testId = null;
-    setCancelEnabled(false, 'Cancel');
-    if (state.es) { state.es.close(); state.es = null; }
-    // Refresh the historical chart so the new point lands.
-    if (window.charts && window.charts.loadSpeedTest) {
-      window.charts.loadSpeedTest(_chartRange);
-    } else if (window.loadSpeedTestChart) {
-      window.loadSpeedTestChart(_chartRange);
-    }
+  function onEnd(data) {
+    if (data && data.duration_seconds > 0) state.seconds = data.duration_seconds;
+    finish();
   }
   function onError(data) {
-    setStripState('idle');
-    setCancelEnabled(false, 'Cancel');
-    if (state.es) { state.es.close(); state.es = null; }
+    state.error = (data && data.message) ? data.message : 'Lost the connection to the speed test.';
+    finish();
   }
-  /* Issue #304 — server confirmed the cancel; the strip transitions
-     to idle and the historical chart is refreshed so the cancelled
-     row (if any was persisted) is visible. */
+  /* Issue #304 — server confirmed the cancel; the end event that
+     follows settles the panel as stopped. */
   function onCancelled(data) {
-    setStripState('idle');
+    state.cancelled = true;
     setCancelEnabled(false, 'Cancel');
   }
 
+  function finish() {
+    closeStream();
+    state.testId = null;
+    setCancelEnabled(false, 'Cancel');
+    if (!panel || !panel.isRunning()) return;
+    var r = state.result;
+    panel.finish({
+      outcome: r ? 'complete' : (state.cancelled ? 'stopped' : 'failed'),
+      seconds: state.seconds,
+      download: r ? r.download_mbps : null,
+      upload: r ? r.upload_mbps : null,
+      latency: r ? r.latency_ms : null
+    });
+    panel.result(resultSummary(r));
+    if (r) refreshCard();
+  }
+  /* The scheduler has saved the result before the stream ends, so a
+     fresh snapshot already has it. Rebuild only this card's title row
+     and body from it, which brings the figures and history chart up to
+     date behind the panel. A full dashboard render would fade every
+     section in again and reset the scroll position. The title row's
+     drag handle (added by NasDrag) stays. */
+  function refreshCard() {
+    util.fetchJSON('/api/v1/snapshot/latest').then(function(snap) {
+      _snapshotData = snap;
+      var card = document.querySelector('.section-block[data-section="speedtest"]');
+      var oldTitle = card && card.querySelector('.section-title');
+      if (!oldTitle) return;
+      var fresh = document.createElement('div');
+      fresh.innerHTML = sections.speedtest(snap);
+      var newTitle = fresh.querySelector('.section-title');
+      if (!newTitle) return;
+      var newBody = newTitle.nextElementSibling;
+      var titleBox = oldTitle.parentNode.classList.contains('section-title-row') ? oldTitle.parentNode : oldTitle;
+      var oldBody = titleBox.nextElementSibling;
+      oldTitle.parentNode.replaceChild(newTitle, oldTitle);
+      if (oldBody && newBody) oldBody.parentNode.replaceChild(newBody, oldBody);
+      redraw();
+      charts.loadSpeedTest(_chartRange);
+    }).catch(function() {});
+  }
+  function resultSummary(r) {
+    var lines = [];
+    if (r) {
+      var meta = [];
+      if (r.jitter_ms > 0) meta.push('Jitter ' + r.jitter_ms.toFixed(1) + ' ms');
+      if (r.server_name) meta.push(r.server_name);
+      if (r.isp) meta.push(r.isp);
+      if (r.engine) meta.push(r.engine === 'speedtest_go' ? 'speedtest-go' : 'Ookla CLI');
+      if (meta.length) lines.push({ text: meta.join(' · ') });
+    } else if (!state.cancelled) {
+      lines.push({ tone: 'warn', text: state.error || 'The speed test failed.' });
+    }
+    return { lines: lines };
+  }
+
   function attach(testId) {
-    if (state.es) { try { state.es.close(); } catch (e) {} state.es = null; }
+    closeStream();
     state.testId = testId;
     if (typeof EventSource === 'undefined') return;
     var es = new EventSource('/api/v1/speedtest/stream/' + testId);
@@ -1755,19 +1759,20 @@ var speedtestLive = (function() {
     es.addEventListener('phase_change', function(e) { try { onPhaseChange(JSON.parse(e.data)); } catch (err) {} });
     es.addEventListener('sample', function(e) { try { onSample(JSON.parse(e.data)); } catch (err) {} });
     es.addEventListener('result', function(e) { try { onResult(JSON.parse(e.data)); } catch (err) {} });
-    es.addEventListener('end', function(e) { onEnd(); });
+    es.addEventListener('end', function(e) { var d = null; try { d = JSON.parse(e.data); } catch (err) {} onEnd(d); });
     es.addEventListener('cancelled', function(e) { try { onCancelled(JSON.parse(e.data)); } catch (err) { onCancelled({}); } });
-    es.addEventListener('error', function(e) { try { onError(e.data ? JSON.parse(e.data) : {}); } catch (err) { onError({}); } });
-    setStripState('running');
+    /* The server's error event carries a message; the browser's own
+       error event (connection lost) has no data. */
+    es.addEventListener('error', function(e) { if (es !== state.es) return; try { onError(e.data ? JSON.parse(e.data) : {}); } catch (err) { onError({}); } });
+    if (panel && !panel.isRunning()) begin();
     /* Issue #304 — attach() may be called for a test that is already
-       in flight (auto-attach on dashboard load); the strip is in the
-       running state so the Cancel button must be live immediately,
-       not wait for the next start event (which won't fire mid-test). */
+       in flight (auto-attach on dashboard load); the Cancel button
+       must be live immediately, not wait for the start event. */
     setCancelEnabled(true, 'Cancel');
   }
   /* Issue #304 — fire-and-forget cancel. The SSE stream's cancelled
-     event is the authoritative signal that finalises the strip state;
-     this just sends the request and flips the button to a transient
+     event is the authoritative signal that finalises the panel; this
+     just sends the request and flips the button to a transient
      "Cancelling..." label so the user sees immediate feedback. */
   function cancel() {
     if (!state.testId) return;
@@ -1780,18 +1785,33 @@ var speedtestLive = (function() {
         setCancelEnabled(true, 'Cancel');
       });
   }
+  /* The panel opens on the click, before the server answers, and shows
+     why when the test can't start. */
   function runNow() {
+    if (state.testId && panel && panel.isRunning()) return;
+    begin();
+    setCancelEnabled(false, 'Cancel');
     fetch('/api/v1/speedtest/run', { method: 'POST' })
-      .then(function(r) { return r.json(); })
-      .then(function(body) {
-        if (body && body.test_id) attach(body.test_id);
+      .then(function(r) {
+        return r.json().catch(function() { return {}; }).then(function(body) {
+          if (!r.ok || !body || !body.test_id) throw new Error((body && body.error) || ('HTTP ' + r.status));
+          attach(body.test_id);
+        });
       })
-      .catch(function() {});
+      .catch(function(e) {
+        state.error = 'Could not start the speed test: ' + ((e && e.message) || 'network error');
+        finish();
+      });
   }
   function detach() {
-    if (state.es) { try { state.es.close(); } catch (e) {} state.es = null; }
-    setStripState('idle');
+    closeStream();
     state.testId = null;
+    if (panel) panel.hide();
+    syncCard();
+  }
+  function redraw() {
+    if (panel) panel.redraw();
+    syncCard();
   }
 
   // Auto-attach on dashboard load: if the latest snapshot indicates a
@@ -1799,34 +1819,49 @@ var speedtestLive = (function() {
   // EventSource using the most recent test_id. We don't know the
   // test_id from the snapshot — POST /run is idempotent, so we call
   // it: it returns the in-flight test's id without starting a new
-  // one.
+  // one. Only once per pending attempt, though: a later render of the
+  // same cached snapshot must not POST again, because by then the test
+  // may have finished and the POST would start a new one.
   function autoAttachIfRunning(snapshot) {
     var spd = snapshot && snapshot.speed_test;
     var att = spd && spd.last_attempt;
-    if (att && att.status === 'pending') {
-      runNow();
-    }
+    if (!att || att.status !== 'pending') return;
+    if (state.es || (panel && panel.isRunning())) return;
+    var key = att.timestamp || 'pending';
+    if (state.autoAttachedFor === key) return;
+    state.autoAttachedFor = key;
+    runNow();
   }
 
   // Wire up the Run-now button. Uses event delegation on body so a
   // re-render (which destroys the in-place button) doesn't lose the
-  // listener. Issue #304 piggybacks Cancel on the same delegation.
+  // listener. The panel's own Cancel/Close button calls onStop and
+  // onClose above.
   if (typeof document !== 'undefined' && document.body) {
     document.body.addEventListener('click', function(e) {
       var t = e.target;
       if (!t || !t.getAttribute) return;
-      var action = t.getAttribute('data-action');
-      if (action === 'speedtest-run-now') {
-        runNow();
-      } else if (action === 'speedtest-cancel') {
-        cancel();
-      }
+      if (t.getAttribute('data-action') === 'speedtest-run-now') runNow();
     });
   }
 
-  return { attach: attach, runNow: runNow, cancel: cancel, detach: detach, autoAttachIfRunning: autoAttachIfRunning };
+  return { attach: attach, runNow: runNow, cancel: cancel, detach: detach, redraw: redraw, autoAttachIfRunning: autoAttachIfRunning };
 })();
 window.speedtestLive = speedtestLive;
+
+/* The speed-test history chart follows the dashboard's chart range, but
+   tests usually run a few times a day, so 1H is often empty. When the
+   chosen window has no tests the chart widens to the next one that has
+   some (24 hours, 7 days, then the API's 30-day cap) and says so under
+   the chart. */
+var SPEEDTEST_FALLBACK_HOURS = [24, 168, 720];
+var _speedTestHistorySeq = 0;
+function speedtestWindowLabel(hours) {
+  if (hours <= 1) return 'hour';
+  if (hours <= 24) return '24 hours';
+  if (hours <= 168) return '7 days';
+  return '30 days';
+}
 
 charts.loadSpeedTest = function(hours, save) {
   if (save) { polling.saveChartRange(hours); charts.loadGPU(hours); charts.loadContainers(hours); }
@@ -1839,15 +1874,45 @@ charts.loadSpeedTest = function(hours, save) {
       btn.style.background = "transparent"; btn.style.color = "var(--text-tertiary)";
     }
   }
-  fetch("/api/v1/history/speedtest?hours=" + hours)
-    .then(function(r) { return r.json(); })
-    .then(function(points) {
-      if (!points || !points.length || !window.NasChart) return;
-      var dlData = points.map(function(p) { return p.download_mbps; });
-      var ulData = points.map(function(p) { return p.upload_mbps; });
-      var labels = points.map(function(p) { var d = new Date(p.timestamp); if (hours <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (hours <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
-      try { NasChart.area("speedtest-chart", { datasets: [{ data: dlData, color: "#3b82f6", label: "Download" }, { data: ulData, color: "#8b5cf6", label: "Upload" }], labels: labels, width: document.getElementById("speedtest-chart").offsetWidth || 400, height: 80, showDots: true, margins: { top: 4, bottom: 16, left: 40, right: 8 } }); } catch(e) {}
-    }).catch(function() {});
+  var windows = [hours];
+  for (var w = 0; w < SPEEDTEST_FALLBACK_HOURS.length; w++) {
+    if (SPEEDTEST_FALLBACK_HOURS[w] > hours) windows.push(SPEEDTEST_FALLBACK_HOURS[w]);
+  }
+  var seq = ++_speedTestHistorySeq;
+  function tryWindow(k) {
+    return fetch("/api/v1/history/speedtest?hours=" + windows[k])
+      .then(function(r) { return r.json(); })
+      .then(function(points) {
+        if (seq !== _speedTestHistorySeq) return;
+        /* Cancelled tests (#304) are stored as all-zero rows; they
+           aren't measurements, so they don't count or plot. */
+        points = (points || []).filter(function(p) { return p.download_mbps > 0 || p.upload_mbps > 0; });
+        if (!points.length && k + 1 < windows.length) return tryWindow(k + 1);
+        charts.drawSpeedTestHistory(points, hours, windows[k]);
+      });
+  }
+  tryWindow(0).catch(function() {});
+};
+
+charts.drawSpeedTestHistory = function(points, asked, shown) {
+  var canvas = document.getElementById("speedtest-chart");
+  var note = document.getElementById("speedtest-chart-note");
+  if (!canvas) return;
+  if (!points.length) {
+    canvas.style.display = "none";
+    if (note) { note.textContent = "No speed tests in the last " + speedtestWindowLabel(shown) + "."; note.hidden = false; }
+    return;
+  }
+  canvas.style.display = "";
+  if (note) {
+    note.textContent = shown === asked ? "" : "No tests in the last " + speedtestWindowLabel(asked) + ", showing the last " + speedtestWindowLabel(shown) + ".";
+    note.hidden = shown === asked;
+  }
+  if (!window.NasChart) return;
+  var dlData = points.map(function(p) { return p.download_mbps; });
+  var ulData = points.map(function(p) { return p.upload_mbps; });
+  var labels = points.map(function(p) { var d = new Date(p.timestamp); if (shown <= 1) return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2); if (shown <= 24) return d.getHours() + ":00"; return (d.getMonth()+1) + "/" + d.getDate(); });
+  try { NasChart.area("speedtest-chart", { datasets: [{ data: dlData, color: "#3b82f6", label: "Download" }, { data: ulData, color: "#8b5cf6", label: "Upload" }], labels: labels, width: canvas.offsetWidth || 400, height: 80, showDots: true, margins: { top: 4, bottom: 16, left: 40, right: 8 } }); } catch(e) {}
 };
 
 charts.loadSparklines = function(snapshot) {
@@ -1884,10 +1949,13 @@ charts.loadSparklines = function(snapshot) {
   charts.loadGPU(_chartRange);
   charts.loadContainers(_chartRange);
   charts.loadSpeedTest(_chartRange);
-  // PRD #283 / issue #285: auto-attach the live-progress strip on
-  // dashboard load if a test is in flight (status === 'pending' on
-  // the cached snapshot). idempotent /run returns the existing
-  // test_id without starting a new run.
+  // The render just replaced the speed-test card's markup; refill its
+  // live panel from the run kept in JS (issue #346 follow-up).
+  try { speedtestLive.redraw(); } catch(e) {}
+  // PRD #283 / issue #285: auto-attach the live panel on dashboard
+  // load if a test is in flight (status === 'pending' on the cached
+  // snapshot). idempotent /run returns the existing test_id without
+  // starting a new run.
   try { speedtestLive.autoAttachIfRunning(snapshot); } catch(e) {}
 };
 

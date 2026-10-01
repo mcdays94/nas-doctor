@@ -101,11 +101,18 @@ func TestServiceChecksHTML_SpeedTestRendersInCard(t *testing.T) {
 		t.Fatalf("read settings.html: %v", err)
 	}
 	page := string(raw)
-	// speedSampleTime places samples by their own timestamp (#348), so the
-	// chart keeps its shape when samples arrive in a burst.
-	for _, want := range []string{`id="sc-speed-live"`, `id="sc-speed-chart"`, `"engine_result"`, "function drawSpeedTestChart", "function speedSampleTime", "speedSampleTime(d.ts)"} {
+	// The panel is the shared NasSpeedLive from charts.js, the same one
+	// the dashboard card uses.
+	for _, want := range []string{`id="sc-speed-live"`, `"engine_result"`, `NasSpeedLive.create({ id: "sc-speed-live"`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("settings.html missing %s", want)
+		}
+	}
+	// speedSampleTime places samples by their own timestamp (#348), so the
+	// chart keeps its shape when samples arrive in a burst.
+	for _, want := range []string{"function drawSpeedTest(", "function speedSampleTime", "speedSampleTime(d.ts)"} {
+		if !strings.Contains(ChartJS, want) {
+			t.Errorf("ChartJS missing %s", want)
 		}
 	}
 	for _, fn := range []string{"function runSpeedTestStream", "function handleSpeedEvent"} {

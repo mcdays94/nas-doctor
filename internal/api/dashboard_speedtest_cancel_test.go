@@ -1,36 +1,36 @@
 package api
 
-// Issue #304 — pin the dashboard's Cancel button wiring + theme
-// CSS parity.
+// Issue #304 — pin the dashboard's Cancel button wiring.
 //
 // Three properties matter:
 //
-//  1. The button is rendered with data-action="speedtest-cancel" so
-//     the body-level click delegation routes to the cancel handler
-//     (mirrors the speedtest-run-now pattern).
+//  1. The live panel's Cancel button routes to the cancel handler.
+//     The button belongs to the shared NasSpeedLive panel, which calls
+//     onStop while a test runs.
 //  2. DashboardJS attaches a listener on the `cancelled` SSE event so
-//     the strip's terminal state is finalised cleanly when the
+//     the panel's terminal state is finalised cleanly when the
 //     server confirms the abort. Without this, a Cancel that races
-//     against the runner's natural completion would leave the strip
+//     against the runner's natural completion would leave the panel
 //     in an indeterminate state.
-//  3. The CSS rule that flips the button from cursor:not-allowed to
-//     cursor:pointer must exist verbatim in BOTH midnight.html AND
-//     clean.html (theme-template parity per v0.9.7 lesson — themes
-//     don't link shared.css). Defense-in-depth against a future
-//     refactor that drops one theme's CSS.
+//  3. The button's base rule uses cursor:pointer, and only its
+//     :disabled rule uses cursor:not-allowed. The rules ship in
+//     ChartJS with the panel, which injects them on every page, so
+//     the theme-parity problem (themes don't link shared.css) is gone.
 
 import (
 	"strings"
 	"testing"
 )
 
-// TestDashboardJS_SpeedtestCancelButton_HasDataAction pins the
-// data-action attribute so the body-level click listener picks up
-// the click. Without it, the button is inert (gone back to the
-// pre-#304 behaviour).
-func TestDashboardJS_SpeedtestCancelButton_HasDataAction(t *testing.T) {
-	if !strings.Contains(DashboardJS, `data-action="speedtest-cancel"`) {
-		t.Error("DashboardJS missing data-action='speedtest-cancel' on the cancel button")
+// TestDashboardJS_SpeedtestCancel_WiredToPanelStop pins the route from
+// the live panel's Cancel button to the cancel handler. The panel calls
+// onStop while a test runs; without this wiring the button is inert
+// (the pre-#304 behaviour).
+func TestDashboardJS_SpeedtestCancel_WiredToPanelStop(t *testing.T) {
+	for _, fragment := range []string{`stopLabel: 'Cancel'`, `onStop: function() { cancel(); }`} {
+		if !strings.Contains(DashboardJS, fragment) {
+			t.Errorf("DashboardJS missing Cancel wiring: %q", fragment)
+		}
 	}
 }
 
@@ -74,74 +74,29 @@ func TestDashboardJS_SpeedtestCancel_EnableStateOnStart(t *testing.T) {
 	}
 }
 
-// TestThemes_SpeedtestCancelButton_PointerCursorParity asserts the
-// `cursor:pointer` rule (which makes the button click-able from a
-// UX standpoint) is present in BOTH theme templates with consistent
-// values. Without this, a refactor that drops one theme's update
-// reintroduces the v0.9.11 deferred-stub bug on that theme.
-func TestThemes_SpeedtestCancelButton_PointerCursorParity(t *testing.T) {
-	// Both themes should have:
-	//   1. A .speedtest-live-cancel rule with cursor:pointer (the
-	//      enabled-default state).
-	//   2. A :hover:not(:disabled) rule (so the user gets feedback
-	//      that hovering is meaningful).
-	//   3. A :disabled rule that sets cursor:not-allowed (so the
-	//      button still has the pre-test "you can't click me yet"
-	//      feedback when phase=idle).
-	for themeName, themeBody := range map[string]string{
-		"midnight.html": DashboardMidnight,
-		"clean.html":    DashboardClean,
-	} {
-		if !strings.Contains(themeBody, ".speedtest-live-cancel") {
-			t.Errorf("%s: missing .speedtest-live-cancel rule", themeName)
-		}
-		if !strings.Contains(themeBody, "cursor:pointer") && !strings.Contains(themeBody, "cursor: pointer") {
-			t.Errorf("%s: cancel button missing cursor:pointer (still cursor:not-allowed?)", themeName)
-		}
-		if !strings.Contains(themeBody, ".speedtest-live-cancel:hover:not(:disabled)") {
-			t.Errorf("%s: cancel button missing :hover:not(:disabled) rule (no hover feedback)", themeName)
-		}
-		if !strings.Contains(themeBody, ".speedtest-live-cancel:disabled") {
-			t.Errorf("%s: cancel button missing :disabled rule (idle state still needs not-allowed cursor)", themeName)
-		}
+// TestChartJS_SpeedLiveStopButton_Cursor asserts the panel's Cancel/Stop
+// button reads as clickable while a test runs and as unavailable while
+// it is disabled (between a click and the server's cancelled event).
+// The button's styles ship with NasSpeedLive, so they hold on both
+// dashboard themes and in Settings.
+func TestChartJS_SpeedLiveStopButton_Cursor(t *testing.T) {
+	idx := strings.Index(ChartJS, ".speed-live-stop{")
+	if idx == -1 {
+		t.Fatal("ChartJS: could not locate the base .speed-live-stop rule")
 	}
-}
-
-// TestThemes_SpeedtestCancelButton_NoLingeringNotAllowedOnDefault is
-// the defensive check that no theme template carries the literal
-// `.speedtest-live-cancel{...cursor:not-allowed}` (or its spaced
-// variant) in the BASE rule. The :disabled state is allowed to keep
-// not-allowed; the base rule must not.
-func TestThemes_SpeedtestCancelButton_NoLingeringNotAllowedOnDefault(t *testing.T) {
-	for themeName, themeBody := range map[string]string{
-		"midnight.html": DashboardMidnight,
-		"clean.html":    DashboardClean,
-	} {
-		// Find the base rule's text and verify cursor:not-allowed
-		// is NOT in it. We anchor on `.speedtest-live-cancel{` /
-		// `.speedtest-live-cancel ` (the base rule's selector
-		// without a pseudo-class) followed by the rule body up to
-		// the next `}`.
-		body := themeBody
-		idx := strings.Index(body, ".speedtest-live-cancel{")
-		if idx == -1 {
-			idx = strings.Index(body, ".speedtest-live-cancel ")
-		}
-		if idx == -1 {
-			t.Errorf("%s: could not locate base .speedtest-live-cancel rule", themeName)
-			continue
-		}
-		// Slice up to the next `}` to scope the assertion to the base rule.
-		tail := body[idx:]
-		end := strings.Index(tail, "}")
-		if end == -1 {
-			continue
-		}
-		baseRule := tail[:end]
-		// Base rule must not carry not-allowed (the :disabled rule
-		// later in the file may, and that's correct).
-		if strings.Contains(baseRule, "not-allowed") {
-			t.Errorf("%s: base .speedtest-live-cancel rule still has cursor:not-allowed (issue #304 regression). Rule: %q", themeName, baseRule)
-		}
+	base := ChartJS[idx:]
+	base = base[:strings.Index(base, "}")]
+	if !strings.Contains(base, "cursor:pointer") {
+		t.Errorf("base .speed-live-stop rule lacks cursor:pointer: %q", base)
+	}
+	// Issue #304 regression: not-allowed belongs on :disabled only.
+	if strings.Contains(base, "not-allowed") {
+		t.Errorf("base .speed-live-stop rule has cursor:not-allowed: %q", base)
+	}
+	if !strings.Contains(ChartJS, ".speed-live-stop:hover:not(:disabled){") {
+		t.Error("ChartJS missing .speed-live-stop:hover:not(:disabled) rule (no hover feedback)")
+	}
+	if !strings.Contains(ChartJS, ".speed-live-stop:disabled{cursor:not-allowed") {
+		t.Error("ChartJS missing .speed-live-stop:disabled rule with cursor:not-allowed")
 	}
 }
