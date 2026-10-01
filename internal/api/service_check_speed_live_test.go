@@ -101,7 +101,9 @@ func TestServiceChecksHTML_SpeedTestRendersInCard(t *testing.T) {
 		t.Fatalf("read settings.html: %v", err)
 	}
 	page := string(raw)
-	for _, want := range []string{`id="sc-speed-live"`, `id="sc-speed-chart"`, `"engine_result"`, "function drawSpeedTestChart"} {
+	// speedSampleTime places samples by their own timestamp (#348), so the
+	// chart keeps its shape when samples arrive in a burst.
+	for _, want := range []string{`id="sc-speed-live"`, `id="sc-speed-chart"`, `"engine_result"`, "function drawSpeedTestChart", "function speedSampleTime", "speedSampleTime(d.ts)"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("settings.html missing %s", want)
 		}

@@ -504,23 +504,14 @@ func (m *Manager) driveTest(ctx context.Context, t *LiveTest) {
 		"runner_type", fmt.Sprintf("%T", m.runner),
 	)
 
-	var samples <-chan Sample
-	res, samples, err = m.runner.Run(ctx)
-	if err != nil {
-		return
-	}
-	if samples == nil {
-		// Runner contract violation — but defend gracefully so the
-		// registry doesn't block forever waiting for a nil channel.
-		return
-	}
-	// Drain samples + broadcast each to subscribers. The runner is
-	// responsible for closing the channel; this loop returns when
-	// it does.
-	for s := range samples {
+	// Broadcast each sample as the engine measures it (issue #348).
+	// Run only returns after the whole test, so draining its channel
+	// afterwards replayed every sample at the end. RunWithLiveSamples
+	// calls back from this goroutine, so emit keeps a single caller.
+	res, err = collector.RunWithLiveSamples(ctx, m.runner, func(s Sample) {
 		t.emit(s)
 		samplesSeen++
-	}
+	})
 }
 
 // GetLive returns the current in-flight LiveTest if its ID matches.
