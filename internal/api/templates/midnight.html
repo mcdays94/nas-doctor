@@ -44,6 +44,9 @@ a:hover{color:var(--hover)}
 .nav-link{padding:6px 12px;border-radius:var(--radius);font-size:12px;font-weight:500;color:var(--text-tertiary);border:1px solid transparent;transition:all 0.15s ease;text-decoration:none}
 .nav-link:hover{color:var(--text-secondary);background:var(--btn-bg-hover);border-color:var(--border-hover)}
 .nav-link.active{color:var(--text-primary);background:var(--btn-bg-hover);border-color:var(--border-hover)}
+/* Narrow screens stack the header and wrap the nav, like shared.css does
+   on the other pages; one row of links is wider than a phone */
+@media(max-width:768px){.header{flex-direction:column;align-items:flex-start;gap:12px}.nav-links{flex-wrap:wrap}}
 
 /* Top bar — compact health + stats */
 .top-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);gap:calc(var(--sp)*2);min-height:48px;max-height:48px}
@@ -91,7 +94,9 @@ a:hover{color:var(--hover)}
 .stat-item{display:flex;align-items:baseline;gap:6px;font-size:13px;white-space:nowrap}
 .stat-item-label{color:var(--text-quaternary);font-weight:500;font-size:12px}
 .stat-item-value{font-weight:600;font-size:14px;letter-spacing:-0.3px}
-@media(max-width:700px){
+/* 900px like the column layout: the stats row is wider than a
+   one-column dashboard up to about 850px */
+@media(max-width:900px){
   .top-bar{flex-wrap:wrap;max-height:none;padding:8px 0}
   .top-bar-stats{flex-wrap:wrap;gap:calc(var(--sp)*2)}
 }
@@ -107,9 +112,11 @@ a:hover{color:var(--hover)}
 /* Section titles */
 .section-title{font-size:13px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:calc(var(--sp)*1.5);margin-top:0}
 
-/* Two-column layout */
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:900px){.two-col{grid-template-columns:1fr}}
+/* Column layout: distributeSections sets --dash-cols from Settings;
+   900px and below always gets one column, without the wide-layout
+   side padding */
+.two-col{display:grid;grid-template-columns:repeat(var(--dash-cols,2),1fr);gap:16px}
+@media(max-width:900px){.two-col{grid-template-columns:1fr}.container.dash-wide{padding:0}}
 .col-left{min-width:0;display:flex;flex-direction:column;min-height:0;gap:calc(var(--sp)*3)}
 .col-right{min-width:0;display:flex;flex-direction:column;gap:calc(var(--sp)*3)}
 

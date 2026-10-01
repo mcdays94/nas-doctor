@@ -34,14 +34,61 @@ function prepCanvas(id,opts){
   var pw=parent.clientWidth||300;
   var cs=getComputedStyle(parent);
   pw-=(parseFloat(cs.paddingLeft)||0)+(parseFloat(cs.paddingRight)||0);
-  var w=opts&&opts.width?opts.width:pw;
+  var fluid=!!(opts&&opts.fluid);
+  var w=opts&&opts.width&&!fluid?opts.width:pw;
   var h=opts&&opts.height?opts.height:el.getAttribute("height")?parseInt(el.getAttribute("height"),10):200;
   var dpr=window.devicePixelRatio||1;
   el.width=w*dpr; el.height=h*dpr;
-  el.style.width=w+"px"; el.style.height=h+"px";
+  el.style.width=fluid?"100%":w+"px"; el.style.height=h+"px";
   var ctx=el.getContext("2d");
   ctx.scale(dpr,dpr);
-  return {el:el,ctx:ctx,w:w,h:h,dpr:dpr};
+  el._nasDraw=(el._nasDraw||0)+1;
+  return {el:el,ctx:ctx,w:w,h:h,dpr:dpr,draw:el._nasDraw};
+}
+
+/* ── fluid charts ────────────────────────────────────────────────
+   opts.fluid sizes a chart to its parent's content box and redraws it,
+   without the intro animation, whenever that box changes width: a
+   window resize, or a dashboard card that drops to one column on a
+   narrow screen or moves to another column. The canvas stays at 100%
+   width so it never holds its card open at the old size. */
+var fluidWatch=null, fluidEls=[];
+function keepFluid(c,draw,opts){
+  var el=c.el;
+  if(!opts||!opts.fluid||typeof ResizeObserver==="undefined"){
+    /* A fixed-size redraw must not be resized back to old data. */
+    if(el._nasFluid) el._nasFluid=null;
+    return;
+  }
+  el._nasFluid={w:Math.round(c.w),redraw:function(){
+    var o={}; for(var k in opts) o[k]=opts[k];
+    o.animate=false;
+    draw(el,o);
+  }};
+  if(!fluidWatch) fluidWatch=new ResizeObserver(function(entries){
+    for(var i=0;i<entries.length;i++){
+      var f=entries[i].target._nasFluid;
+      var w=Math.round(entries[i].contentRect.width);
+      if(f&&w>0&&w!==f.w) f.redraw();
+    }
+  });
+  if(fluidEls.indexOf(el)>=0) return;
+  /* Let go of canvases a dashboard re-render has replaced. */
+  fluidEls=fluidEls.filter(function(x){
+    if(x.isConnected) return true;
+    fluidWatch.unobserve(x);
+    return false;
+  });
+  fluidEls.push(el);
+  fluidWatch.observe(el);
+}
+
+/* Plays the intro animation, or draws once when opts.animate is false.
+   A newer draw on the same canvas (a resize, a range button) stops an
+   older animation so it can't paint over the new chart. */
+function play(c,render,opts){
+  if(opts&&opts.animate===false){render(1);return;}
+  animate(500,function(t){if(c.el._nasDraw===c.draw) render(t);});
 }
 
 function clamp(v,lo,hi){return v<lo?lo:v>hi?hi:v;}
@@ -77,15 +124,19 @@ function animate(dur,fn,done){
 
 /* ── tooltip helper ──────────────────────────────────────────────── */
 function attachTooltip(el,hitTest){
+  /* A redraw on the same canvas swaps in its hit test. Another tooltip
+     and listener pair would leave the old chart answering hovers. */
+  if(el._nasTip){el._nasTip.hitTest=hitTest;return el._nasTip.cross;}
   var tip=document.createElement("div");
   tip.style.cssText="position:fixed;padding:6px 10px;border-radius:6px;font:11px/1.4 -apple-system,system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .15s;z-index:9999;max-width:220px;white-space:nowrap;";
   document.body.appendChild(tip);
   var cross={x:-1,active:false};
+  var state=el._nasTip={hitTest:hitTest,cross:cross};
 
   el.addEventListener("mousemove",function(e){
     var r=el.getBoundingClientRect();
     var x=e.clientX-r.left, y=e.clientY-r.top;
-    var info=hitTest(x,y,cross);
+    var info=state.hitTest(x,y,cross);
     if(!info){tip.style.opacity="0";cross.active=false;return;}
     var th=theme();
     tip.style.background=th.tooltip;
@@ -106,7 +157,7 @@ function attachTooltip(el,hitTest){
   el.addEventListener("mouseleave",function(){
     tip.style.opacity="0";
     cross.active=false;
-    var info=hitTest(-1,-1,cross);
+    var info=state.hitTest(-1,-1,cross);
     if(info&&info.redraw) info.redraw();
   });
   return cross;
@@ -329,7 +380,8 @@ function drawLine(id,opts){
     });
   }
 
-  animate(500,function(t){render(t);});
+  play(c,render,opts);
+  keepFluid(c,drawLine,opts);
 
   attachTooltip(c.el,function(mx,my,cr){
     cross.active=cr.active; cross.x=cr.x;
@@ -394,7 +446,8 @@ function drawArea(id,opts){
     });
   }
 
-  animate(500,function(t){render(t);});
+  play(c,render,opts);
+  keepFluid(c,drawArea,opts);
 
   attachTooltip(c.el,function(mx,my,cr){
     cross.active=cr.active; cross.x=cr.x;
@@ -458,7 +511,8 @@ function drawBar(id,opts){
     }
   }
 
-  animate(500,function(t){render(t);});
+  play(c,render,opts);
+  keepFluid(c,drawBar,opts);
 
   attachTooltip(c.el,function(mx,my,cr){
     cross.active=cr.active; cross.x=cr.x;
