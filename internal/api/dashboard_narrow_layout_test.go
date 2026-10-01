@@ -427,3 +427,34 @@ func TestDashboardThemes_NarrowScreensGetOneColumn(t *testing.T) {
 		})
 	}
 }
+
+// One-column cards aren't enough on a phone: the header's nav row is
+// about 500px wide, midnight's stats row overflowed up to about 850px, and
+// midnight's three-column side padding cost 48px. These rules keep a
+// 320-900px screen from scrolling sideways.
+func TestDashboardThemes_NarrowScreensDontScrollSideways(t *testing.T) {
+	cases := []struct {
+		theme string
+		tpl   string
+		query string
+		want  []string
+	}{
+		{"midnight", DashboardMidnight, "max-width:768px", []string{".header{flex-direction:column;", ".nav-links{flex-wrap:wrap}"}},
+		{"clean", DashboardClean, "max-width:768px", []string{".header{flex-direction:column;", ".nav-links{flex-wrap:wrap}"}},
+		{"midnight", DashboardMidnight, "max-width:900px", []string{".top-bar{flex-wrap:wrap;", ".container.dash-wide{padding:0}"}},
+		{"clean", DashboardClean, "max-width:900px", []string{".top-bar{flex-wrap:wrap;"}},
+	}
+	for _, c := range cases {
+		css := themeCSS(t, c.tpl)
+		var bodies []string
+		for _, b := range mediaBlocks(css, c.query) {
+			bodies = append(bodies, b.body)
+		}
+		joined := strings.Join(bodies, "")
+		for _, w := range c.want {
+			if !strings.Contains(joined, w) {
+				t.Errorf("%s: no @media(%s) rule contains %s", c.theme, c.query, w)
+			}
+		}
+	}
+}
