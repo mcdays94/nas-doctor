@@ -17,7 +17,6 @@
 > **Beta** — NAS Doctor is in active development. Core features are stable and tested on Unraid. Other platforms may have edge cases. [Report issues here.](https://github.com/mcdays94/nas-doctor/issues)
 
 <p align="center">
-  <a href="https://nasdoctordemo.mdias.info"><img src="https://img.shields.io/badge/Live%20Demo-nasdoctordemo.mdias.info-6366f1?style=flat-square&logo=cloudflare&logoColor=white" alt="Live Demo"></a>
   <a href="https://github.com/mcdays94/nas-doctor/pkgs/container/nas-doctor"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fnas-doctor-stats.lusostreams.workers.dev%2Fbadge-monthly.json&style=flat-square&logo=docker&logoColor=white" alt="GHCR pulls/month"></a>
   <a href="https://buymeacoffee.com/miguelcaetanodias"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg?style=flat-square&logo=buy-me-a-coffee" alt="Buy Me A Coffee"></a>
 </p>
@@ -41,15 +40,17 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
   - [Synology DSM](#synology-dsm--container-manager)
   - [TrueNAS SCALE](#truenas-scale)
   - [Kubernetes](#kubernetes-k3s--k8s)
-  - [Proxmox](#proxmox-ve)
-- [Demo](#demo)
-- [Configuration](#configuration)
+  - [Proxmox](#proxmox-via-ubuntu-vm--lxc)
+  - [Build from Source](#build-from-source)
+- [Screenshots](#screenshots)
+- [Settings](#settings)
 - [API Reference](#api-reference)
-- [Project Structure](#project-structure)
-- [Platform Support](#platform-support)
+- [Prometheus Metrics](#prometheus-metrics)
+- [Supported Platforms](#supported-platforms)
+- [File Structure & Data Locations](#file-structure--data-locations)
+- [Resource Usage](#resource-usage)
 - [Diagnostic Report](#diagnostic-report)
 - [Agentic Setup](#agentic-setup)
-- [Contributing](#contributing)
 
 ---
 
@@ -97,8 +98,10 @@ Dedicated `/alerts` page with:
 ### Service Checks
 
 Dedicated `/service-checks` page with uptime monitoring:
-- **HTTP/HTTPS**, **TCP**, **DNS**, **Ping/ICMP**, **SMB**, **NFS**, **Speed Test** check types
+- **HTTP/HTTPS**, **TCP**, **DNS**, **Ping/ICMP**, **SMB**, **NFS**, **Traceroute** and **Speed Test** check types
+- **Traceroute checks**: the hop-by-hop path to a target via `mtr` (bundled in the image), with latency and packet loss per hop
 - **Speed checks**: compare download/upload against contracted speeds with configurable margin of error. Three-state result: green (both pass), orange (degraded), red (both fail)
+- **Test before saving**: the editor's **Test** button runs a check once. Traceroute shows hops as they're probed; a speed check shows the same live chart as the dashboard's speed test card, then the verdict and what the engine measured
 - **Per-check configurable intervals** (30s to 1h) with independent scheduling loop
 - **Heartbeat badge cards** — colored dots showing recent check status per service, with favicon for HTTP targets
 - **Paginated log table** with filters (check name, status, time range)
@@ -245,14 +248,16 @@ code, 0 for the others — same convention as
 
 ### Network Speed Test
 
-- **Live-progress streaming during a test** — when a manual or scheduled test runs, the dashboard speed-test card grows a strip showing the active phase (`LATENCY → DOWNLOAD → UPLOAD`), a sweeping gauge with current Mbps, a big numeric readout, and a mini sparkline of recent samples. Streamed via Server-Sent Events; multi-tab and reconnect-mid-test work transparently (full sample replay on reconnect). The strip's **Cancel** button (since v0.9.14) aborts the in-flight test promptly — kills the speedtest subprocess, closes the SSE stream, and resets the in-progress Prometheus gauge. **Best-effort through reverse proxies**: some configurations (notably Cloudflare Access / Tunnel) buffer SSE event lines until the response completes, so the strip may stay frozen on `0 MBPS` until the test ends and the final result lands. Direct-LAN access streams smoothly; the final result + per-sample history work correctly in both cases.
-- **"Run now" button** on the speedtest card — idempotent. Kicks off a one-off test or attaches to one already in flight. Bypasses the "Disabled" cron setting (Disabled governs *scheduled* tests, not manual runs).
+<p><img src="screenshots/speedtest-live.jpg" alt="Speed test card during a test: the Latency, Download and Upload steps, live readouts, and a chart of download and upload Mbps with the history chart below" width="380"></p>
+
+- **Live progress during a test**: the dashboard's speed test card shows a `LATENCY → DOWNLOAD → UPLOAD` stepper, live readouts for download, upload and latency, and a chart of download and upload Mbps as the test runs. When it finishes, the result and that run's chart stay in the card until you close them, and the card's figures and history update behind them. A speed check's **Test** button in Settings uses the same panel. Progress streams over Server-Sent Events, so several tabs can watch the same test, and a page opened mid-test replays the samples so far. **Cancel** stops the engine promptly, closes the stream and resets the in-progress Prometheus gauge. **Best-effort through reverse proxies**: some setups (notably Cloudflare Access / Tunnel) buffer the stream until the test ends, so the chart only fills in at the end. Direct LAN access streams smoothly, and the final result and per-sample history are the same either way.
+- **"Run now" button** on the speed test card — idempotent. Kicks off a one-off test or attaches to one already in flight. Bypasses the "Disabled" schedule setting (Disabled governs *scheduled* tests, not manual runs).
 - **Engine**: bundled `showwin/speedtest-go` (pure Go, primary). Falls back to bundled Ookla CLI if the primary engine errors. Each historical row records which engine produced it; the dashboard caption next to the latest result shows `via {engine}`, and a per-row engine column is exported via Prometheus + the snapshot API so you can correlate cross-engine measurements yourself.
 - **Per-sample history** — every test's per-sample throughput is persisted in a `speedtest_samples` table. Expand any past type=speed entry on `/service-checks` to see how throughput evolved during that test window.
 - **Empty-state from history** — fresh installs and cold-starts render the most-recent successful test from history with a "Last test: X ago" relative-time caption rather than waiting for the next cron tick.
-- Download, upload, latency, jitter with historical charts (1H/1D/1W).
-- Independent 4-hour schedule (configurable, or "Disabled" for metered connections).
-- Server name, ISP, and external IP reported.
+- **History chart** of download and upload with 1H/1D/1W ranges. When the chosen range holds fewer than two tests, the chart widens to 24 hours, 7 days or 30 days and says so underneath.
+- **Schedule**: once a day at 03:00 by default. Settings → Speed Test offers intervals from 30 minutes to once a month, with a time of day for daily, weekly and monthly runs, or **Disabled** for metered connections. Fresh installs also get an **Internet Speed** service check that reports the latest result and can compare it against your contracted speeds.
+- Download, upload, latency and jitter, plus the server name, ISP and external IP.
 
 ### Tunnel Monitoring
 
@@ -583,30 +588,36 @@ go build -o nas-doctor ./cmd/nas-doctor
 ./nas-doctor -listen :8060 -data ./data -interval 30m
 ```
 
+For UI work without a NAS, `./nas-doctor -demo -listen :8060` serves the app with generated data. The screenshots below come from it.
+
 ---
 
+## Screenshots
+
+Captured from demo mode, which renders the UI with generated data.
+
 <p>
-  <img src="screenshots/service-checks-page.jpg" alt="Service Checks — every type (HTTP / TCP / DNS / SMB / NFS / PING / TRACEROUTE / SPEED) on one page with the v0.9.7 perceptual-distinct pill palette" width="380">
-  <img src="screenshots/alerts-page.jpg" alt="Alerts" width="380">
+  <img src="screenshots/service-checks-page.jpg" alt="Service Checks — uptime cards per check (ping, HTTP, DNS, NFS, SMB, speed) and the check log" width="380">
+  <img src="screenshots/alerts-page.jpg" alt="Alerts — severity counts and active alerts with acknowledge, snooze, timeline and correlation actions" width="380">
 </p>
 <p>
-  <img src="screenshots/fleet-page.jpg" alt="Fleet — multi-server aggregation" width="380">
-  <img src="screenshots/stats-page.jpg" alt="Stats — system metric charts" width="380">
+  <img src="screenshots/fleet-page.jpg" alt="Fleet — network topology and health matrix across NAS Doctor instances" width="380">
+  <img src="screenshots/stats-page.jpg" alt="Stats — drive summary and CPU, memory, I/O wait and load charts" width="380">
 </p>
 <p>
-  <img src="screenshots/settings-page.jpg" alt="Settings" width="380">
-  <img src="screenshots/settings-advanced-scans.jpg" alt="Advanced Scan Settings — per-subsystem cadence (SMART / Docker / Proxmox / Kubernetes / ZFS / GPU) with humanised &quot;Use global&quot; presets, shipped in v0.9.9" width="380">
+  <img src="screenshots/settings-page.jpg" alt="Settings — section tabs, scan interval, theme and app icon" width="380">
+  <img src="screenshots/settings-advanced-scans.jpg" alt="Settings → Advanced — SMART and per-subsystem scan intervals (Docker, Proxmox, Kubernetes, ZFS, GPU), each defaulting to the global interval" width="380">
 </p>
 <p>
-  <img src="screenshots/parity-page.jpg" alt="Parity" width="380">
-  <img src="screenshots/disk-detail.jpg" alt="Per-drive detail — Health Score gauge, drive identity badges, SMART attributes table; the maintenance log section (v0.9.7) lives further down with manual notes and auto-detected events from SMART history" width="380">
+  <img src="screenshots/parity-page.jpg" alt="Parity — speed trend across checks and per-check history" width="380">
+  <img src="screenshots/disk-detail.jpg" alt="Drive detail — health score, identity badges and SMART attributes with trends" width="380">
 </p>
 <p>
-  <img src="screenshots/dashboard-processes.jpg" alt="Top Processes on Dashboard" width="380">
-  <img src="screenshots/stats-process-history.jpg" alt="Process CPU History Chart" width="380">
+  <img src="screenshots/dashboard-processes.jpg" alt="Dashboard — Top Processes with container attribution, next to service checks, tunnels and parity history" width="380">
+  <img src="screenshots/stats-process-history.jpg" alt="Stats — per-process CPU history and capacity forecast" width="380">
 </p>
 <p>
-  <img src="screenshots/planner-page.jpg" alt="Replacement Planner — Backblaze-derived urgency rules with v0.9.x cost-per-TB modelling" width="380">
+  <img src="screenshots/planner-page.jpg" alt="Replacement Planner — urgency per drive with risk factors, life used and estimated time remaining" width="380">
 </p>
 
 ---
@@ -616,14 +627,19 @@ go build -o nas-doctor ./cmd/nas-doctor
 All configurable from the web UI at `/settings`, organized with a sticky section nav:
 
 - **General**: Scan interval (preset or custom with cron preview), theme selection, app icon
+- **API Key**: Generate, copy or revoke the key that protects `/api/v1/*`
 - **Webhooks**: Add/remove/test Discord, Slack, Gotify, Ntfy, or generic HTTP webhooks with optional custom headers and HMAC signing
 - **Notification Rules**: Dropdown-driven rule builder with 13 categories, live target selection, threshold inputs, one-click presets, quiet hours, and maintenance windows
-- **Service Checks**: HTTP, TCP, DNS, Ping/ICMP, SMB/NFS uptime monitoring with per-check configurable intervals (30s–1h)
+- **Service Checks**: HTTP, TCP, DNS, Ping/ICMP, SMB, NFS, Traceroute and Speed Test checks with per-check configurable intervals (30s–1h) and a **Test** button
+- **Proxmox VE** and **Kubernetes**: API connection details with a connection test
+- **Log Forwarding**: Forward scan results to **Loki**, **syslog** (UDP/TCP), or any **HTTP JSON** endpoint after each scan — with custom headers, labels, and payload format (full, findings only, summary)
+- **Data Lifecycle**: Snapshot retention days, max DB size cap, notification log retention
+- **Drive Replacement Cost**: Cost per TB used by the Replacement Planner's estimates
 - **Fleet**: Add/remove remote NAS Doctor instances with optional API key auth
 - **Dashboard Sections**: Toggle visibility of individual sections (SMART, Docker, ZFS, UPS, Parity, Network, Tunnels, etc.)
-- **Data & Retention**: Snapshot retention days, max DB size cap, notification log retention
-- **Backup**: Scheduled DB backups with configurable location, interval, and retention count
-- **Log Forwarding**: Forward scan results to **Loki**, **syslog** (UDP/TCP), or any **HTTP JSON** endpoint after each scan — with custom headers, labels, and payload format (full, findings only, summary)
+- **Speed Test**: When scheduled speed tests run (once a day at 03:00 by default), or Disabled
+- **Automatic Backup**: Scheduled DB backups with configurable location, interval, and retention count
+- **Advanced**: SMART scan controls (wake drives, max days without a SMART read), per-subsystem scan intervals, hidden Docker containers, and Borg / Duplicacy backup monitors
 
 ### Environment Variables
 
@@ -635,6 +651,13 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `NAS_DOCTOR_UPS_NAME` | (auto-detect) | NUT UPS name (skip auto-detect from `upsc -l`) |
 | `NAS_DOCTOR_NUT_HOST` | (local) | Remote NUT server host (queries `upsname@host`) |
 | `NAS_DOCTOR_APCUPSD_HOST` | (local) | Remote apcupsd daemon `host:port` |
+| `NAS_DOCTOR_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock` | Path to the Tailscale daemon socket inside the container |
+| `NAS_DOCTOR_TAILSCALE_CONTAINER_NAMES` | (none) | Extra container names to treat as Tailscale, comma-separated, case-insensitive substring match (e.g. `ts-sidecar,vpn`) |
+| `NAS_DOCTOR_HOST_LOG` | `/host/log` | Where the host's `/var/log` is mounted in the container |
+| `NAS_DOCTOR_HOST_BOOT` | `/host/boot` | Where the host's `/boot` is mounted in the container (Unraid) |
+| `NAS_DOCTOR_WEBHOOK_URL` | (none) | Adds a webhook at startup, alongside any configured in Settings |
+| `NAS_DOCTOR_WEBHOOK_TYPE` | `generic` | Type for that webhook: `discord`, `slack`, `gotify`, `ntfy` or `generic` |
+| `NAS_DOCTOR_CONFIG` | (none) | Optional JSON config file loaded at startup (same as `-config`) |
 | `TZ` | `UTC` | Timezone |
 
 ---
@@ -655,10 +678,21 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `/api/v1/history/gpu` | GET | GPU metrics history (query: `?hours=N`) |
 | `/api/v1/settings` | GET/PUT | Read/write application settings |
 | `/api/v1/settings/test-webhook` | POST | Send test notification to a webhook |
+| `/api/v1/settings/chart-range` | PUT | Save the dashboard chart range (1, 24 or 168 hours) |
+| `/api/v1/settings/section-order` | PUT | Save the dashboard section layout |
+| `/api/v1/settings/section-heights` | PUT | Save dashboard section heights |
+| `/api/v1/proxmox/test` | POST | Test a Proxmox VE API connection |
+| `/api/v1/kubernetes/test` | POST | Test a Kubernetes API connection |
+| `/api/v1/backup-monitor/borg/test` | POST | Probe a Borg repo config |
+| `/api/v1/backup-monitor/duplicacy/test` | POST | Probe a Duplicacy repo or cache config |
+| `/api/v1/icons` | GET | Available app icons and the default |
 | `/api/v1/sparklines` | GET | Condensed system + SMART history for charts |
 | `/api/v1/history/system` | GET | System metrics history (CPU, memory, I/O) |
 | `/api/v1/disks` | GET | List all drives with SMART data |
 | `/api/v1/disks/{serial}` | GET | Per-drive detail with full SMART history |
+| `/api/v1/disk-usage-history` | GET | Disk usage history per mount |
+| `/api/v1/capacity-forecast` | GET | Fill-rate forecast per mount |
+| `/api/v1/replacement-plan` | GET | Drive replacement plan (urgency, risk factors, cost) |
 | `/api/v1/alerts` | GET | List alerts (filterable by status) |
 | `/api/v1/alerts/{id}` | GET | Get single alert detail |
 | `/api/v1/alerts/{id}/events` | GET | Alert lifecycle timeline events |
@@ -673,8 +707,12 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `/api/v1/service-checks` | GET | Latest service check results |
 | `/api/v1/service-checks/history` | GET | Service check result history |
 | `/api/v1/service-checks/run` | POST | Trigger service checks immediately |
+| `/api/v1/service-checks/test` | POST | Run a check config once without saving it |
+| `/api/v1/service-checks/test-stream` | POST | Same as `/test`, streamed as Server-Sent Events for traceroute and speed checks (live hops or samples, then the result) |
+| `/api/v1/service-checks/{key}` | DELETE | Remove a check's stored history |
 | `/api/v1/speedtest/run` | POST | Start a speed test (or attach to one in flight). Idempotent — returns `{test_id, started_at, engine}` |
-| `/api/v1/speedtest/stream/{test_id}` | GET | Server-Sent Events stream of a live test's progress. Event types: `start`, `phase_change`, `sample`, `result`, `error`, `end` |
+| `/api/v1/speedtest/stream/{test_id}` | GET | Server-Sent Events stream of a live test's progress. Event types: `start`, `phase_change`, `sample`, `result`, `cancelled`, `error`, `end` |
+| `/api/v1/speedtest/cancel/{test_id}` | POST | Cancel a running speed test |
 | `/api/v1/speedtest/samples/{test_id}` | GET | JSON array of per-sample throughput readings for a completed test (used by the expanded-log mini-chart on `/service-checks`) |
 | `/api/v1/findings/dismiss` | POST | Dismiss a finding from the dashboard |
 | `/api/v1/findings/restore` | POST | Restore a dismissed finding |
@@ -879,32 +917,9 @@ NAS Doctor is designed to be invisible on your system:
 
 ---
 
-## Demo
-
-**[Live demo: nasdoctordemo.mdias.info](https://nasdoctordemo.mdias.info)** — switch between Unraid, Synology, TrueNAS, Proxmox, and Kubernetes via the toolbar at the top. Read-only, no login. See [demo-worker/README.md](demo-worker/README.md) for how it works.
-
-Each platform renders realistic per-platform telemetry:
-
-- **Drives** — 2–8 SMART drives per platform with Backblaze-informed findings, 30-day temperature sparklines, replacement planner with health scoring, capacity forecast
-- **Compute** — 3–11 Docker containers per platform, Top Processes with container attribution, GPU monitoring (Unraid RTX A2000, Proxmox Tesla P4), CPU + mainboard temperature gauges in the header (Unraid, TrueNAS, Proxmox; gracefully hidden on Synology / Kubernetes to showcase the empty-sensor fallback)
-- **Storage health** — ZFS pools where applicable (TrueNAS raidz2, Proxmox mirror), UPS power monitoring, parity history (Unraid)
-- **Network** — 8 service checks (one per check type: http/tcp/dns/ping/smb/nfs/speed/traceroute) with 7 days of history, 24h speed-test history with `via {engine}` caption on the latest result and per-row engine annotation, expand any speed entry on `/service-checks` for the per-sample throughput chart, Cloudflared + Tailscale tunnels (Unraid + Proxmox)
-- **Backups** — Borg / Restic / PBS / Duplicati / rclone repos with healthy + warning + error states, v0.9.10's external-Borg "CONFIGURED" pill + error-card reason codes, **and v0.10.0's Duplicacy rows** showing both `cli-repo` + `web-cache` layouts on Unraid (one healthy + one stale-with-RUNNING-badge to demonstrate the V1c severity rendering and orthogonal aux flag)
-- **Alerts & incidents** — Active + resolved + snoozed alerts, 10-event incident timeline with system-metric correlation, webhook delivery history
-- **Fleet** — 4 remote servers with topology view and tunnel-type detection
-
-To run locally with mock data (single-platform Unraid baseline, no NAS needed):
-
-```bash
-go build -o nas-doctor ./cmd/nas-doctor
-./nas-doctor -demo -listen :8060
-```
-
----
-
 ## Diagnostic Report
 
-Click **Export Report** on the dashboard to generate a print-ready diagnostic report. Open in your browser and use Print > Save as PDF. [View demo report (PDF)](docs/nas-doctor-demo-report.pdf).
+Click **Export Report** on the dashboard to generate a print-ready diagnostic report. Open in your browser and use Print > Save as PDF. [View a sample report (PDF)](docs/nas-doctor-demo-report.pdf).
 
 16 sections: System Overview, Findings, Drive Health & SMART, Docker, GPU, Backup, Speed Test, ZFS, UPS, Network, Service Checks, Proxmox, Kubernetes, Tunnels, Parity, Recommended Actions.
 

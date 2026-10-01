@@ -278,6 +278,9 @@ func main() {
 		// Inject the demo snapshot into the scheduler's in-memory cache
 		// so that Latest() returns it for the report and status endpoints.
 		sched.SetLatest(snap)
+		// Scans turn findings into alerts; the demo saves its snapshot
+		// directly, so do it here or /alerts stays empty.
+		sched.SyncAlertStates(snap)
 
 		// Wire a synthetic LiveTestRegistry so the live-progress strip
 		// + SSE flow can be demoed against a -demo build without

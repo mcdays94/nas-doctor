@@ -285,6 +285,8 @@ func demoSystem() internal.SystemInfo {
 		IOWait:      18.3,
 		UptimeSecs:  2592000, // 30 days
 		Motherboard: "ASRock Z490M-ITX/ac",
+		CPUTempC:    58,
+		MoboTempC:   43,
 		TopProcesses: []internal.ProcessInfo{
 			{PID: 1842, User: "root", CPU: 12.3, Mem: 4.1, Command: "/usr/bin/plex-media-server", ContainerName: "plex", ContainerID: "a1b2c3d4e5f6"},
 			{PID: 2901, User: "root", CPU: 8.7, Mem: 6.2, Command: "emby-server --ffmpeg /usr/bin/ffmpeg", ContainerName: "emby", ContainerID: "b2c3d4e5f6a1"},
@@ -312,7 +314,19 @@ func demoDisks() []internal.DiskInfo {
 	}
 }
 
+// demoSMART returns drives whose SMART attributes were read. Real scans
+// derive DataAvailable from smartctl's output (collector/smart.go); left
+// false, every demo drive renders as "NO DATA" with a "SMART data
+// unavailable" warning.
 func demoSMART() []internal.SMARTInfo {
+	drives := demoSMARTDrives()
+	for i := range drives {
+		drives[i].DataAvailable = true
+	}
+	return drives
+}
+
+func demoSMARTDrives() []internal.SMARTInfo {
 	return []internal.SMARTInfo{
 		{
 			Device: "/dev/sdb", Model: "WDC WD140EDGZ-11B1PA0", Serial: "9LHWA2JC",

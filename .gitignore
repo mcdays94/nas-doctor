@@ -42,10 +42,6 @@ AGENTS.md
 docs/alerts-2.0-design.md
 skill-observations/
 
-# Wrangler config (contains account IDs — use wrangler.toml.example)
-demo-worker/wrangler.toml
-demo-worker/feeder/wrangler.toml
-
 # Reference files
 unraid-diagnostic-report.pdf
 
@@ -55,17 +51,6 @@ unraid-diagnostic-report.pdf
 /package-lock.json
 take-screenshots.mjs
 
-# Keep demo-worker package files tracked
-!demo-worker/package.json
-!demo-worker/package-lock.json
-!demo-worker/feeder/package.json
-!demo-worker/feeder/package-lock.json
-
 # Empty dirs
 web/
-demo-worker/node_modules/
-demo-worker/captured/api/
-demo-worker/.wrangler/
-demo-worker/feeder/node_modules/
-demo-worker/feeder/.wrangler/
 test-results/
