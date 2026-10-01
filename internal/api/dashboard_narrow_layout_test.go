@@ -70,6 +70,7 @@ El.prototype.getAttribute = function(k) {
 };
 El.prototype.appendChild = function(c) { if (c.parentNode) c.parentNode.removeChild(c); c.parentNode = this; this.childNodes.push(c); return c; };
 El.prototype.removeChild = function(c) { this.childNodes = this.childNodes.filter(function(x) { return x !== c; }); c.parentNode = null; return c; };
+El.prototype.remove = function() { if (this.parentNode) this.parentNode.removeChild(this); };
 El.prototype.addEventListener = function(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); };
 El.prototype.getBoundingClientRect = function() { return { left: 0, top: 0, width: this.clientWidth, height: 0 }; };
 El.prototype.querySelectorAll = function(sel) { var out = []; walk(this, function(n) { if (matches(n, sel)) out.push(n); }); return out; };
