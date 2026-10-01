@@ -402,6 +402,21 @@ loop:
 		})
 	}
 
+	// engine_result carries what the engine measured beyond the check
+	// verdict, so the editor card can show the whole result (#346). Only
+	// display fields are sent; the external IP stays server-side.
+	if resultPtr != nil {
+		_ = writeSSEEvent(w, flusher, "engine_result", map[string]any{
+			"download_mbps": resultPtr.DownloadMbps,
+			"upload_mbps":   resultPtr.UploadMbps,
+			"latency_ms":    resultPtr.LatencyMs,
+			"jitter_ms":     resultPtr.JitterMs,
+			"server_name":   resultPtr.ServerName,
+			"isp":           resultPtr.ISP,
+			"engine":        resultPtr.Engine,
+		})
+	}
+
 	// Build the canonical ServiceCheckResult so the terminal
 	// `result` event matches the sync endpoint's shape exactly.
 	// We re-use scheduler.RunCheck via runSpeedCheckViaRunner —
