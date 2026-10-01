@@ -259,6 +259,13 @@ loop:
 	})
 }
 
+// SetStreamingSpeedTestRunner replaces the runner behind the speed check
+// Test stream. Demo mode uses it to simulate a test instead of measuring
+// the host's own connection (#346).
+func (s *Server) SetStreamingSpeedTestRunner(runner collector.StreamingSpeedTestRunner) {
+	s.streamingSpeedTestRunner = runner
+}
+
 // streamSpeedServiceCheck handles type=speed requests on the
 // /test-stream endpoint. Runs the streaming speed-test runner
 // (production composite of speedtest-go primary + Ookla CLI
@@ -399,6 +406,21 @@ loop:
 	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, context.DeadlineExceeded) {
 		_ = writeSSEEvent(w, flusher, "error", map[string]any{
 			"message": runErr.Error(),
+		})
+	}
+
+	// engine_result carries what the engine measured beyond the check
+	// verdict, so the editor card can show the whole result (#346). Only
+	// display fields are sent; the external IP stays server-side.
+	if resultPtr != nil {
+		_ = writeSSEEvent(w, flusher, "engine_result", map[string]any{
+			"download_mbps": resultPtr.DownloadMbps,
+			"upload_mbps":   resultPtr.UploadMbps,
+			"latency_ms":    resultPtr.LatencyMs,
+			"jitter_ms":     resultPtr.JitterMs,
+			"server_name":   resultPtr.ServerName,
+			"isp":           resultPtr.ISP,
+			"engine":        resultPtr.Engine,
 		})
 	}
 

@@ -394,6 +394,11 @@ func main() {
 	// Create API server
 	apiServer := api.New(store, sched, coll, metrics, fleetMgr, logger, version)
 	apiServer.SetDataPersistent(dataPersistent)
+	if *demoMode {
+		// The speed check Test button runs a simulated test in demo mode
+		// rather than measuring the host's real connection.
+		apiServer.SetStreamingSpeedTestRunner(demo.StreamingSpeedTest)
+	}
 
 	// HTTP server
 	srv := &http.Server{
