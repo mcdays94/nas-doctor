@@ -540,3 +540,58 @@ func TestDashboardThemes_LongHostnameWrapsTheHeader(t *testing.T) {
 		})
 	}
 }
+
+// The dashboards don't load shared.css, so their slogan took the body
+// text style, 16px in Clean and 14px in Midnight, in the main text colour.
+// Beside the logo it wrapped over up to seven lines, split the logo over
+// three and made the one-row header up to 200px tall. Each theme now gives
+// it shared.css's 11px italic in its own --text-quaternary.
+//
+// shared.css also keeps the slogan on one line. Here that would hold the
+// logo and slogan at their full width when the header row decides where
+// to break, so the nav would drop to its own row on a much wider screen.
+// .header-left wraps instead. The slogan moves under the logo when the two
+// don't fit side by side, and wraps there only when that's too narrow too.
+// The logo itself stays on one line.
+func TestDashboardThemes_SloganMatchesOtherPages(t *testing.T) {
+	decls := func(rule string) map[string]bool {
+		out := map[string]bool{}
+		for _, d := range strings.Split(rule[strings.Index(rule, "{")+1:], ";") {
+			out[d] = true
+		}
+		return out
+	}
+	_, shared := topLevelRule(themeCSS(t, "<style>"+SharedCSS+"</style>"), ".logo-slogan")
+	if shared == "" {
+		t.Fatal("shared.css has no .logo-slogan rule")
+	}
+	for name, tpl := range map[string]string{"midnight": DashboardMidnight, "clean": DashboardClean} {
+		t.Run(name, func(t *testing.T) {
+			css := themeCSS(t, tpl)
+			at, rule := topLevelRule(css, ".logo-slogan")
+			if at < 0 {
+				t.Fatal("no top-level .logo-slogan rule")
+			}
+			got := decls(rule)
+			for d := range decls(shared) {
+				if d != "" && d != "white-space:nowrap" && !strings.HasPrefix(d, "color:") && !got[d] {
+					t.Errorf(".logo-slogan should set %s like shared.css, got %s}", d, rule)
+				}
+			}
+			if !got["color:var(--text-quaternary)"] {
+				t.Errorf(".logo-slogan should take the theme's --text-quaternary, got %s}", rule)
+			}
+			if got["white-space:nowrap"] {
+				t.Error(".logo-slogan shouldn't be nowrap, or the header row breaks at its full width")
+			}
+
+			if _, left := topLevelRule(css, ".header-left"); !decls(left)["flex-wrap:wrap"] {
+				t.Errorf(".header-left should wrap, so the slogan can move under the logo, got %s}", left)
+			}
+			logo := map[string]string{"midnight": ".logo", "clean": ".header-brand"}[name]
+			if _, brand := topLevelRule(css, logo); !decls(brand)["white-space:nowrap"] {
+				t.Errorf("%s should stay on one line, got %s}", logo, brand)
+			}
+		})
+	}
+}
