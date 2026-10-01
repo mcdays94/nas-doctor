@@ -719,13 +719,13 @@ func (sc *ServiceChecker) runSpeedCheck(check internal.ServiceCheckConfig, resul
 		result.Status = "up"
 	case dlOK || ulOK:
 		result.Status = "degraded"
-		which := "upload"
+		which, threshold := "upload", check.ContractedUpMbps
 		if !dlOK {
-			which = "download"
+			which, threshold = "download", check.ContractedDownMbps
 		}
 		result.Error = fmt.Sprintf("%s below contracted speed (%.0f/%.0f Mbps, threshold %.0f with %.0f%% margin)",
 			which, latest.DownloadMbps, latest.UploadMbps,
-			check.ContractedDownMbps, margin)
+			threshold, margin)
 	default:
 		result.Error = fmt.Sprintf("both download and upload below contracted speed (%.0f/%.0f Mbps, contracted %.0f/%.0f with %.0f%% margin)",
 			latest.DownloadMbps, latest.UploadMbps,
@@ -790,13 +790,13 @@ func (sc *ServiceChecker) runSpeedCheckViaRunner(runner SpeedTestRunner, check i
 		result.Status = "up"
 	case dlOK || ulOK:
 		result.Status = "degraded"
-		which := "upload"
+		which, threshold := "upload", check.ContractedUpMbps
 		if !dlOK {
-			which = "download"
+			which, threshold = "download", check.ContractedDownMbps
 		}
 		result.Error = fmt.Sprintf("%s below contracted speed (%.0f/%.0f Mbps, threshold %.0f with %.0f%% margin)",
 			which, stResult.DownloadMbps, stResult.UploadMbps,
-			check.ContractedDownMbps, margin)
+			threshold, margin)
 	default:
 		result.Error = fmt.Sprintf("both download and upload below contracted speed (%.0f/%.0f Mbps, contracted %.0f/%.0f with %.0f%% margin)",
 			stResult.DownloadMbps, stResult.UploadMbps,
