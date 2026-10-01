@@ -52,6 +52,18 @@ body{min-height:100vh;background:#fff}
 .top-bar-right .stat-label{color:#808080;font-size:12px;font-weight:500}
 .top-bar-right .stat-val{color:#171717;font-size:13px;font-weight:600}
 .top-bar-right .dot-sep{color:#d4d4d4;margin:0 4px;font-size:10px}
+/* 900px like the column layout. Both halves shrink and wrap inside the
+   bar; at their one-line width a phone cut off the last badges and stats.
+   The dividers and the dots between stats go, so no row starts or ends
+   with one, and the hostname keeps its divider's space */
+@media(max-width:900px){
+  .top-bar{flex-wrap:wrap;max-height:none;row-gap:10px}
+  .top-bar-divider{display:none}
+  .top-bar-host{margin-right:11px}
+  .top-bar-left{flex-wrap:wrap;flex-shrink:1;row-gap:6px}
+  .top-bar-right{flex-wrap:wrap;flex-shrink:1;white-space:normal;column-gap:16px;row-gap:6px}
+  .top-bar-right > .dot-sep{display:none}
+}
 .pill{display:inline-flex;align-items:center;padding:3px 10px;border-radius:9999px;font-size:12px;font-weight:600;line-height:1.4;white-space:nowrap}
 .pill-healthy{background:#f0fdf4;color:#16a34a}
 .pill-warning{background:#fffbeb;color:#d97706}
@@ -132,7 +144,7 @@ body{min-height:100vh;background:#fff}
 .sb-handle:hover::after{background:rgba(0,0,0,0.3)}
 .sb-handle:active::after{background:#171717}
 
-@media(max-width:900px){.two-col{grid-template-columns:1fr}.top-bar{flex-wrap:wrap;max-height:none}.col-left > .section{max-height:600px}.top-bar-right{flex-wrap:wrap;white-space:normal;row-gap:4px}}
+@media(max-width:900px){.two-col{grid-template-columns:1fr}.col-left > .section{max-height:600px}}
 .section{margin-top:28px}
 .section:first-child{margin-top:0}
 .section-title{font-size:12px;font-weight:500;color:#808080;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px}
@@ -362,7 +374,7 @@ tbody tr:hover{background:rgba(0,0,0,0.03)}
     h += '<div class="top-bar fade-in">';
     h += '<div class="top-bar-left">';
     if (hostname) {
-      h += '<span style="font-size:13px;font-weight:600;color:#171717;letter-spacing:-0.2px">' + esc(hostname) + '</span>';
+      h += '<span class="top-bar-host" style="font-size:13px;font-weight:600;color:#171717;letter-spacing:-0.2px">' + esc(hostname) + '</span>';
       h += '<div class="top-bar-divider"></div>';
     }
     h += '<span class="pill pill-' + (health === "critical" ? "critical" : health === "warning" ? "warning" : "healthy") + '">' + healthLabel + '</span>';
