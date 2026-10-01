@@ -62,8 +62,12 @@ a:hover{color:var(--hover)}
    phone */
 @media(max-width:768px){.nav-links{flex-basis:100%;flex-wrap:wrap}}
 
-/* Top bar — compact health + stats */
-.top-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);gap:calc(var(--sp)*2);min-height:48px;max-height:48px}
+/* Top bar — compact health + stats. One row while it fits, and the stats
+   wrap under the health pill when it doesn't. How much room one row needs
+   depends on the data (temperatures, badge counts), so the bar wraps
+   instead of switching at a breakpoint. With the 27.5px health pill and
+   the 1px border, 9.75px padding keeps a one-row bar 48px tall */
+.top-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;padding:9.75px 0;border-bottom:1px solid var(--border);gap:calc(var(--sp)*2);min-height:48px}
 .top-bar-health{display:flex;align-items:center;gap:calc(var(--sp)*1.5);flex-shrink:0}
 .health-pill{display:flex;align-items:center;gap:8px;padding:4px 14px;border-radius:20px;font-size:13px;font-weight:600}
 .health-pill.healthy{background:var(--green-bg);color:var(--green)}
@@ -104,15 +108,14 @@ a:hover{color:var(--hover)}
 .ephemeral-data-banner code{background:rgba(255,255,255,0.05);padding:1px 6px;border-radius:4px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:var(--text-primary)}
 .ephemeral-data-banner a{color:var(--accent);text-decoration:underline;font-weight:600;margin-left:4px}
 .ephemeral-data-banner a:hover{color:var(--hover)}
-.top-bar-stats{display:flex;align-items:center;gap:calc(var(--sp)*3)}
+.top-bar-stats{display:flex;flex-wrap:wrap;align-items:center;gap:calc(var(--sp)*3)}
 .stat-item{display:flex;align-items:baseline;gap:6px;font-size:13px;white-space:nowrap}
 .stat-item-label{color:var(--text-quaternary);font-weight:500;font-size:12px}
 .stat-item-value{font-weight:600;font-size:14px;letter-spacing:-0.3px}
-/* 900px like the column layout: the stats row is wider than a
-   one-column dashboard up to about 850px */
+/* 900px like the column layout: less padding and closer stats */
 @media(max-width:900px){
-  .top-bar{flex-wrap:wrap;max-height:none;padding:8px 0}
-  .top-bar-stats{flex-wrap:wrap;gap:calc(var(--sp)*2)}
+  .top-bar{padding:8px 0}
+  .top-bar-stats{gap:calc(var(--sp)*2)}
 }
 
 /* Scan bar — compact */

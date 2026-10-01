@@ -339,8 +339,9 @@ type cssBlock struct {
 	body       string
 }
 
-// themeCSS returns a theme's <style> contents without comments or
-// whitespace, so the checks don't depend on formatting.
+// themeCSS returns a theme's <style> contents without comments, and with
+// whitespace only between the words of a value ("10px 0") or a descendant
+// selector, so the checks don't depend on formatting.
 func themeCSS(t *testing.T, tpl string) string {
 	t.Helper()
 	start := strings.Index(tpl, "<style>")
@@ -349,7 +350,8 @@ func themeCSS(t *testing.T, tpl string) string {
 		t.Fatal("theme template has no <style> block")
 	}
 	css := regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(tpl[start+len("<style>"):end], "")
-	return regexp.MustCompile(`\s+`).ReplaceAllString(css, "")
+	css = regexp.MustCompile(`\s+`).ReplaceAllString(css, " ")
+	return strings.TrimSpace(regexp.MustCompile(` ?([{};:,>()]) ?`).ReplaceAllString(css, "$1"))
 }
 
 // mediaBlocks returns the @media blocks in compacted css whose query is
@@ -408,6 +410,22 @@ func topLevelRule(css, selector string) (int, string) {
 	}
 }
 
+// topLevelDecls returns topLevelRule's rule as a map of its declarations.
+// ok is false when there's no such rule.
+func topLevelDecls(css, selector string) (decls map[string]string, ok bool) {
+	at, rule := topLevelRule(css, selector)
+	if at < 0 {
+		return nil, false
+	}
+	decls = map[string]string{}
+	for _, d := range strings.Split(rule[len(selector)+1:], ";") {
+		if k, v, found := strings.Cut(d, ":"); found {
+			decls[k] = v
+		}
+	}
+	return decls, true
+}
+
 // The base .two-col rule takes its column count from --dash-cols, and a
 // later 900px media query sets one column. With nothing inline, the media
 // query wins on narrow screens and the Settings count applies above it.
@@ -437,8 +455,9 @@ func TestDashboardThemes_NarrowScreensGetOneColumn(t *testing.T) {
 
 // One-column cards aren't enough on a phone: the header's nav row is
 // about 500px wide, midnight's stats row overflowed up to about 850px, and
-// midnight's three-column side padding cost 48px. These rules keep a
-// 320-900px screen from scrolling sideways.
+// midnight's three-column side padding cost 48px. These rules, and a top
+// bar that wraps at any width (TestDashboardThemes_TopBarWrapsWhenItDoesntFit),
+// keep a 320-900px screen from scrolling sideways.
 //
 // Clean's top bar hides its overflow, so it never scrolled the page. Its
 // two halves kept their one-line width, though. A phone lost the last
@@ -456,9 +475,8 @@ func TestDashboardThemes_NarrowScreensDontScrollSideways(t *testing.T) {
 	}{
 		{"midnight", DashboardMidnight, "max-width:768px", []string{".nav-links{flex-basis:100%;flex-wrap:wrap}"}},
 		{"clean", DashboardClean, "max-width:768px", []string{".nav-links{flex-basis:100%;flex-wrap:wrap}"}},
-		{"midnight", DashboardMidnight, "max-width:900px", []string{".top-bar{flex-wrap:wrap;", ".container.dash-wide{padding:0}"}},
+		{"midnight", DashboardMidnight, "max-width:900px", []string{".container.dash-wide{padding:0}"}},
 		{"clean", DashboardClean, "max-width:900px", []string{
-			".top-bar{flex-wrap:wrap;",
 			".top-bar-left{flex-wrap:wrap;flex-shrink:1;",
 			".top-bar-right{flex-wrap:wrap;flex-shrink:1;",
 			".top-bar-divider{display:none}",
@@ -593,5 +611,53 @@ func TestDashboardThemes_SloganMatchesOtherPages(t *testing.T) {
 				t.Errorf("%s should stay on one line, got %s}", logo, brand)
 			}
 		})
+	}
+}
+
+// How much room the top bar's one row needs depends on the data. With the
+// demo data it fits from about 900px. CPU and board temperatures need
+// about 1100px, a long hostname or four-digit counts up to 1400px, and
+// with 1 or 2 columns Clean's bar stops at 1152px wide, so some hosts never
+// fit. No breakpoint covers that, so both bars wrap at any width: one row
+// while it fits, the stats on a second row when it doesn't. Above 900px
+// Midnight's stats used to run past its 48px bar and scroll the page
+// sideways, and Clean cut off its last stats.
+//
+// Clean's divider between the halves would end the first row. It gives
+// back its width, so on one row it stays where it was, and when the stats
+// wrap it lands just past the content edge. The bar's side padding is a
+// transparent border, so overflow:hidden clips at that edge.
+func TestDashboardThemes_TopBarWrapsWhenItDoesntFit(t *testing.T) {
+	cases := []struct {
+		theme string
+		tpl   string
+		want  map[string]map[string]string // selector: declarations
+	}{
+		{"midnight", DashboardMidnight, map[string]map[string]string{
+			".top-bar":       {"flex-wrap": "wrap"},
+			".top-bar-stats": {"flex-wrap": "wrap"},
+		}},
+		{"clean", DashboardClean, map[string]map[string]string{
+			".top-bar":                  {"flex-wrap": "wrap", "padding": "10px 0", "border": "solid transparent", "border-width": "0 20px", "overflow": "hidden"},
+			".top-bar>.top-bar-divider": {"margin": "0 -1px"},
+		}},
+	}
+	for _, c := range cases {
+		css := themeCSS(t, c.tpl)
+		for sel, want := range c.want {
+			got, ok := topLevelDecls(css, sel)
+			if !ok {
+				t.Errorf("%s: no %s rule outside @media", c.theme, sel)
+				continue
+			}
+			for prop, v := range want {
+				if got[prop] != v {
+					t.Errorf("%s: %s should have %s:%s, got %q", c.theme, sel, prop, v, got[prop])
+				}
+			}
+		}
+		if bar, ok := topLevelDecls(css, ".top-bar"); ok && bar["max-height"] != "" && bar["max-height"] != "none" {
+			t.Errorf("%s: .top-bar has max-height:%s, a wrapped bar spills out of it", c.theme, bar["max-height"])
+		}
 	}
 }
