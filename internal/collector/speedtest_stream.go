@@ -117,45 +117,25 @@ func runStreamingSpeedTestWithRunner(ctx context.Context, runner SpeedTestRunner
 			return
 		}
 
-		res, samples, err := runner.Run(ctx)
+		// RunWithLiveSamples hands over each sample as the engine
+		// measures it (issue #348); before, Run returned only after
+		// the whole test, so every "live" sample was a replay at the
+		// end. Forwarding waits for the consumer or the request to end.
+		res, err := RunWithLiveSamples(ctx, runner, func(s SpeedTestSample) {
+			select {
+			case updates <- s:
+			case <-ctx.Done():
+			}
+		})
 		if err != nil {
 			final <- StreamingSpeedFinal{RunErr: err}
 			return
 		}
-
-		// Forward samples until the engine closes the channel.
-		// Defensive against a runner that returns nil samples
-		// despite the contract — treat as "no live samples,
-		// straight to final" rather than blocking forever.
-		if samples != nil {
-			for {
-				select {
-				case s, ok := <-samples:
-					if !ok {
-						samples = nil
-						break
-					}
-					select {
-					case updates <- s:
-					case <-ctx.Done():
-						// Best-effort emit final with
-						// ctx.Err() so SSE consumers see
-						// a clean error event. We still
-						// drain the engine's samples
-						// channel implicitly when this
-						// goroutine returns and the GC
-						// reclaims it.
-						final <- StreamingSpeedFinal{RunErr: ctx.Err()}
-						return
-					}
-				case <-ctx.Done():
-					final <- StreamingSpeedFinal{RunErr: ctx.Err()}
-					return
-				}
-				if samples == nil {
-					break
-				}
-			}
+		if ctx.Err() != nil {
+			// Cancelled while forwarding: report it so SSE
+			// consumers see a clean error event.
+			final <- StreamingSpeedFinal{RunErr: ctx.Err()}
+			return
 		}
 
 		final <- StreamingSpeedFinal{Result: res}

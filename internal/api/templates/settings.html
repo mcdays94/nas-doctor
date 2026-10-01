@@ -3188,8 +3188,9 @@ function handleSpeedEvent(ev, data, st) {
         setSpeedReadout("sc-speed-lat", d.latency_ms, 1);
       }
     } else if (typeof d.mbps === "number") {
-      if (!st.t0) st.t0 = Date.now();
-      var point = { t: (Date.now() - st.t0) / 1000, v: d.mbps };
+      var at = speedSampleTime(d.ts);
+      if (!st.t0) st.t0 = at;
+      var point = { t: Math.max(0, (at - st.t0) / 1000), v: d.mbps };
       if (d.phase === "upload") {
         st.up.push(point);
         setSpeedReadout("sc-speed-up", d.mbps, 0);
@@ -3209,6 +3210,15 @@ function handleSpeedEvent(ev, data, st) {
     st.durationS = d.duration_seconds || 0;
     finishSpeedTest(st);
   }
+}
+
+// speedSampleTime turns a sample's RFC 3339 timestamp into milliseconds,
+// so the chart places each sample where the engine measured it even when
+// samples arrive in a burst (#348). The server sends nanoseconds; trimming
+// to milliseconds keeps Date.parse happy everywhere. Falls back to now.
+function speedSampleTime(ts) {
+  var t = (typeof ts === "string") ? Date.parse(ts.replace(/(\.\d{3})\d+/, "$1")) : NaN;
+  return isFinite(t) ? t : Date.now();
 }
 
 function stopSpeedTest() {

@@ -104,10 +104,13 @@ func runSpeedtestGoLibrary(ctx context.Context) (*internal.SpeedTestResult, <-ch
 
 	// Buffered samples channel. Showwin's callbacks fire from the
 	// upload/download data goroutines — we don't want them to
-	// block. Sized to comfortably hold a 60-second test's worth of
-	// per-second samples plus headroom; if the registry's broadcast
-	// fan-out lags, samples back up here briefly and then catch up.
+	// block. Run only returns after the whole test, so nothing reads
+	// this buffer while the test runs: when the caller set a sample
+	// sink (RunWithLiveSamples, issue #348) samples go straight to it
+	// instead, and the buffer stays empty. Without a sink, samples
+	// past 256 are dropped.
 	samples := make(chan SpeedTestSample, 256)
+	sink := SampleSinkFrom(ctx)
 
 	// Per-phase emitted-sample counters. Atomic since callbacks fire
 	// from showwin's internal goroutines. Issue #296 B1 — these counts
@@ -120,21 +123,20 @@ func runSpeedtestGoLibrary(ctx context.Context) (*internal.SpeedTestResult, <-ch
 		droppedEmitted  atomic.Int64
 	)
 	emit := func(s SpeedTestSample) {
-		select {
-		case samples <- s:
-			switch s.Phase {
-			case SpeedTestPhaseLatency:
-				latencyEmitted.Add(1)
-			case SpeedTestPhaseDownload:
-				downloadEmitted.Add(1)
-			case SpeedTestPhaseUpload:
-				uploadEmitted.Add(1)
-			}
-		default:
+		if !emitSpeedSample(sink, samples, s) {
 			// Drop — registry's slow-client policy applies at
 			// the broadcast layer; here we just don't block
 			// the showwin internal goroutine.
 			droppedEmitted.Add(1)
+			return
+		}
+		switch s.Phase {
+		case SpeedTestPhaseLatency:
+			latencyEmitted.Add(1)
+		case SpeedTestPhaseDownload:
+			downloadEmitted.Add(1)
+		case SpeedTestPhaseUpload:
+			uploadEmitted.Add(1)
 		}
 	}
 
