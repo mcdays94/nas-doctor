@@ -383,6 +383,31 @@ func mediaBlocks(css, query string) []cssBlock {
 	}
 }
 
+// topLevelRule finds the first rule for selector in compacted css that
+// isn't inside an @media block. It returns the rule's offset and its text
+// up to the closing brace, or -1 and "" when there's none.
+func topLevelRule(css, selector string) (int, string) {
+	all := mediaBlocks(css, "")
+	for i := 0; ; {
+		j := strings.Index(css[i:], selector+"{")
+		if j < 0 {
+			return -1, ""
+		}
+		at, nested := i+j, false
+		for _, b := range all {
+			if at > b.start && at < b.end {
+				nested = true
+			}
+		}
+		// A rule starts the stylesheet or follows another rule's "}", so
+		// ".header{" doesn't match the end of ".page-header{".
+		if !nested && (at == 0 || css[at-1] == '}') {
+			return at, css[at : at+strings.Index(css[at:], "}")]
+		}
+		i = at + 1
+	}
+}
+
 // The base .two-col rule takes its column count from --dash-cols, and a
 // later 900px media query sets one column. With nothing inline, the media
 // query wins on narrow screens and the Settings count applies above it.
@@ -390,29 +415,10 @@ func TestDashboardThemes_NarrowScreensGetOneColumn(t *testing.T) {
 	for name, tpl := range map[string]string{"midnight": DashboardMidnight, "clean": DashboardClean} {
 		t.Run(name, func(t *testing.T) {
 			css := themeCSS(t, tpl)
-			all := mediaBlocks(css, "")
-			base := -1
-			for i := 0; ; {
-				j := strings.Index(css[i:], ".two-col{")
-				if j < 0 {
-					break
-				}
-				at, nested := i+j, false
-				for _, b := range all {
-					if at > b.start && at < b.end {
-						nested = true
-					}
-				}
-				if !nested {
-					base = at
-					break
-				}
-				i = at + 1
-			}
+			base, rule := topLevelRule(css, ".two-col")
 			if base < 0 {
 				t.Fatal("no top-level .two-col rule")
 			}
-			rule := css[base : base+strings.Index(css[base:], "}")]
 			if !strings.Contains(rule, "grid-template-columns:repeat(var(--dash-cols") {
 				t.Errorf(".two-col should take its column count from --dash-cols, got %s}", rule)
 			}
@@ -448,8 +454,8 @@ func TestDashboardThemes_NarrowScreensDontScrollSideways(t *testing.T) {
 		query string
 		want  []string
 	}{
-		{"midnight", DashboardMidnight, "max-width:768px", []string{".header{flex-direction:column;", ".nav-links{flex-wrap:wrap}"}},
-		{"clean", DashboardClean, "max-width:768px", []string{".header{flex-direction:column;", ".nav-links{flex-wrap:wrap}"}},
+		{"midnight", DashboardMidnight, "max-width:768px", []string{".nav-links{flex-basis:100%;flex-wrap:wrap}"}},
+		{"clean", DashboardClean, "max-width:768px", []string{".nav-links{flex-basis:100%;flex-wrap:wrap}"}},
 		{"midnight", DashboardMidnight, "max-width:900px", []string{".top-bar{flex-wrap:wrap;", ".container.dash-wide{padding:0}"}},
 		{"clean", DashboardClean, "max-width:900px", []string{
 			".top-bar{flex-wrap:wrap;",
@@ -471,5 +477,66 @@ func TestDashboardThemes_NarrowScreensDontScrollSideways(t *testing.T) {
 				t.Errorf("%s: no @media(%s) rule contains %s", c.theme, c.query, w)
 			}
 		}
+	}
+}
+
+// Above 768px the header kept the logo, slogan, hostname and nav on one
+// row, so a long hostname pushed the nav off the screen: a 33-character
+// name scrolled the page sideways by up to 30px from 769px to about
+// 800px. At 768px and below the stacked header broke the same name over
+// five lines at its hyphens.
+//
+// The header row now wraps. The logo and slogan offer their narrowest
+// width when the row decides where to break, then grow back up to one
+// line, so a short hostname like "Tower" keeps its one-row header wherever
+// that row fits. The hostname sits after .header-left, on one line. It
+// gets a row of its own when it doesn't fit beside the slogan, and an
+// ellipsis only when that row is too narrow too. The full name is in its
+// title attribute.
+func TestDashboardThemes_LongHostnameWrapsTheHeader(t *testing.T) {
+	rules := []struct {
+		selector string
+		want     []string
+	}{
+		{".header", []string{"display:flex", "flex-wrap:wrap"}},
+		{".header-left", []string{"width:min-content", "max-width:max-content", "flex-grow:1"}},
+		{".page-title", []string{"min-width:0", "white-space:nowrap", "overflow:hidden", "text-overflow:ellipsis"}},
+	}
+	for name, tpl := range map[string]string{"midnight": DashboardMidnight, "clean": DashboardClean} {
+		t.Run(name, func(t *testing.T) {
+			css := themeCSS(t, tpl)
+			for _, r := range rules {
+				at, rule := topLevelRule(css, r.selector)
+				if at < 0 {
+					t.Errorf("no top-level %s rule", r.selector)
+					continue
+				}
+				decls := map[string]bool{}
+				for _, d := range strings.Split(rule[len(r.selector)+1:], ";") {
+					decls[d] = true
+				}
+				for _, w := range r.want {
+					if !decls[w] {
+						t.Errorf("%s should set %s, got %s}", r.selector, w, rule)
+					}
+				}
+			}
+			// A column would give the hostname its own row on every phone.
+			if strings.Contains(css, ".header{flex-direction:column") {
+				t.Error("the header should wrap as a row, not stack as a column")
+			}
+
+			left := strings.Index(tpl, `class="header-left"`)
+			title := strings.Index(tpl, `<span class="page-title"`)
+			if left < 0 || title < 0 {
+				t.Fatal("render() should write .header-left and .page-title")
+			}
+			if closeLeft := strings.Index(tpl[left:], "</div>"); closeLeft < 0 || left+closeLeft > title {
+				t.Error(".page-title should come after .header-left closes, so it can take a row of its own")
+			}
+			if !strings.HasPrefix(tpl[title:], `<span class="page-title" title="' + esc(hostname)`) {
+				t.Errorf(".page-title should carry the full hostname in its title attribute, got %.80s", tpl[title:])
+			}
+		})
 	}
 }
