@@ -432,6 +432,14 @@ func TestDashboardThemes_NarrowScreensGetOneColumn(t *testing.T) {
 // about 500px wide, midnight's stats row overflowed up to about 850px, and
 // midnight's three-column side padding cost 48px. These rules keep a
 // 320-900px screen from scrolling sideways.
+//
+// Clean's top bar hides its overflow, so it never scrolled the page. Its
+// two halves kept their one-line width, though. A phone lost the last
+// badges and stats past the bar's edge, and the divider between the
+// halves got a row of its own. On narrow screens both halves now shrink
+// and wrap. The dividers and the dots between stats go, so no row starts
+// or ends with one. A long hostname would otherwise leave its own divider
+// at a row's edge.
 func TestDashboardThemes_NarrowScreensDontScrollSideways(t *testing.T) {
 	cases := []struct {
 		theme string
@@ -442,7 +450,13 @@ func TestDashboardThemes_NarrowScreensDontScrollSideways(t *testing.T) {
 		{"midnight", DashboardMidnight, "max-width:768px", []string{".header{flex-direction:column;", ".nav-links{flex-wrap:wrap}"}},
 		{"clean", DashboardClean, "max-width:768px", []string{".header{flex-direction:column;", ".nav-links{flex-wrap:wrap}"}},
 		{"midnight", DashboardMidnight, "max-width:900px", []string{".top-bar{flex-wrap:wrap;", ".container.dash-wide{padding:0}"}},
-		{"clean", DashboardClean, "max-width:900px", []string{".top-bar{flex-wrap:wrap;"}},
+		{"clean", DashboardClean, "max-width:900px", []string{
+			".top-bar{flex-wrap:wrap;",
+			".top-bar-left{flex-wrap:wrap;flex-shrink:1;",
+			".top-bar-right{flex-wrap:wrap;flex-shrink:1;",
+			".top-bar-divider{display:none}",
+			".top-bar-right>.dot-sep{display:none}",
+		}},
 	}
 	for _, c := range cases {
 		css := themeCSS(t, c.tpl)
