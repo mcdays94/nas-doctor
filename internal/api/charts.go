@@ -123,13 +123,25 @@ function animate(dur,fn,done){
 }
 
 /* ── tooltip helper ──────────────────────────────────────────────── */
+var tips=[]; /* {el, tip}: each canvas and its tooltip div in <body> */
 function attachTooltip(el,hitTest){
   /* A redraw on the same canvas swaps in its hit test. Another tooltip
      and listener pair would leave the old chart answering hovers. */
   if(el._nasTip){el._nasTip.hitTest=hitTest;return el._nasTip.cross;}
+  /* Remove the tooltips of canvases a rebuild has replaced (the disk
+     page on a range button, the dashboard on a new scan), or <body>
+     gains a set each time. That also clears a tooltip left showing,
+     since a canvas taken out from under the pointer never gets its
+     mouseleave. */
+  tips=tips.filter(function(t){
+    if(t.el.isConnected) return true;
+    t.tip.remove();
+    return false;
+  });
   var tip=document.createElement("div");
   tip.style.cssText="position:fixed;padding:6px 10px;border-radius:6px;font:11px/1.4 -apple-system,system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .15s;z-index:9999;max-width:220px;white-space:nowrap;";
   document.body.appendChild(tip);
+  tips.push({el:el,tip:tip});
   var cross={x:-1,active:false};
   var state=el._nasTip={hitTest:hitTest,cross:cross};
 
