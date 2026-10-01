@@ -634,6 +634,558 @@ function drawSparkline(id,opts){
   animate(500,function(t){render(t);});
 }
 
+/* ── SPEED TEST ──────────────────────────────────────────────────────
+   drawSpeedTest plots one speed test: download and upload Mbps against
+   seconds since the first throughput sample, as smoothed lines over a
+   fading fill, with a glowing head on the series being measured and
+   dashed lines at the contracted speeds when they are set. The canvas
+   fills its parent.
+   data: {down, up: [{t, v}], phase, contractedDown, contractedUp}
+   o:    {live, compact, font, colors: {down, up, grid, text}} */
+function drawSpeedTest(canvas,data,o){
+  if(!canvas||!canvas.getContext) return;
+  o=o||{};
+  var wrap=canvas.parentNode;
+  var w=wrap.clientWidth,h=wrap.clientHeight;
+  if(!w||!h) return;
+  var dpr=window.devicePixelRatio||1;
+  if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){
+    canvas.width=Math.round(w*dpr);
+    canvas.height=Math.round(h*dpr);
+  }
+  var ctx=canvas.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+
+  var col=o.colors||{};
+  var colDown=col.down||"#60a5fa",colUp=col.up||"#a78bfa";
+  var colGrid=col.grid||"rgba(127,127,127,0.2)",colText=col.text||"#62666d";
+  var font=o.font||"system-ui, sans-serif";
+  var compact=!!o.compact,live=!!o.live;
+  var down=data.down||[],up=data.up||[];
+  var cDown=data.contractedDown||0,cUp=data.contractedUp||0;
+
+  var padL=compact?36:44,padR=compact?8:12,padT=compact?8:12,padB=compact?18:22;
+  var cw=w-padL-padR,ch=h-padT-padB;
+  var all=down.concat(up);
+  var lastT=0,peak=0;
+  for(var i=0;i<all.length;i++){
+    if(all[i].t>lastT) lastT=all[i].t;
+    if(all[i].v>peak) peak=all[i].v;
+  }
+  var xMax=Math.max(15,lastT+(live?1.5:0.2));
+  var yMax=niceSpeedMax(Math.max(peak,cDown,cUp,10)*1.12);
+  function X(t){return padL+(t/xMax)*cw;}
+  function Y(v){return padT+ch-(Math.max(0,v)/yMax)*ch;}
+
+  ctx.font=(compact?10:11)+"px "+font;
+  ctx.lineWidth=1;
+  ctx.strokeStyle=colGrid;
+  ctx.fillStyle=colText;
+  ctx.textAlign="right";
+  ctx.textBaseline="middle";
+  for(var g=0;g<=4;g++){
+    var gv=yMax*g/4,gy=Math.round(Y(gv))+0.5;
+    ctx.beginPath();ctx.moveTo(padL,gy);ctx.lineTo(w-padR,gy);ctx.stroke();
+    ctx.fillText(String(Math.round(gv)),padL-(compact?6:8),gy);
+  }
+  ctx.textAlign="center";
+  ctx.textBaseline="top";
+  var step=xMax>45?10:5;
+  for(var s=0;s<=xMax;s+=step) ctx.fillText(s+"s",X(s),padT+ch+(compact?4:6));
+
+  drawRef(cDown,colDown);
+  drawRef(cUp,colUp);
+  if(cDown>0||cUp>0){
+    /* Legend for the dashed lines, in the headroom above the data. */
+    ctx.save();
+    ctx.font=(compact?9:10)+"px "+font;
+    ctx.textAlign="right";
+    ctx.textBaseline="middle";
+    ctx.fillStyle=colText;
+    var lx=w-padR,ly=padT+7;
+    ctx.fillText("contracted",lx,ly);
+    var tw=ctx.measureText("contracted").width;
+    ctx.setLineDash([3,3]);
+    ctx.strokeStyle=colText;
+    ctx.beginPath();ctx.moveTo(lx-tw-22,ly+0.5);ctx.lineTo(lx-tw-6,ly+0.5);ctx.stroke();
+    ctx.restore();
+  }
+  drawSeries(down,colDown,live&&data.phase==="download");
+  drawSeries(up,colUp,live&&data.phase==="upload");
+
+  if(!all.length){
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+    ctx.fillStyle=colText;
+    ctx.fillText(live?"Waiting for the first throughput sample…":"No throughput samples",padL+cw/2,padT+ch/2);
+  }
+
+  function drawRef(v,c){
+    if(!(v>0)) return;
+    var y=Math.round(Y(v))+0.5;
+    ctx.save();
+    ctx.setLineDash([4,4]);
+    ctx.strokeStyle=alphaHex(c,0.55);
+    ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(w-padR,y);ctx.stroke();
+    ctx.restore();
+  }
+  function trace(pts){
+    ctx.moveTo(X(pts[0].t),Y(pts[0].v));
+    for(var k=1;k<pts.length-1;k++){
+      var mx=(X(pts[k].t)+X(pts[k+1].t))/2,my=(Y(pts[k].v)+Y(pts[k+1].v))/2;
+      ctx.quadraticCurveTo(X(pts[k].t),Y(pts[k].v),mx,my);
+    }
+    var end=pts[pts.length-1];
+    ctx.lineTo(X(end.t),Y(end.v));
+  }
+  function drawSeries(pts,c,head){
+    if(!pts.length) return;
+    var last=pts[pts.length-1];
+    if(pts.length>1){
+      var fill=ctx.createLinearGradient(0,padT,0,padT+ch);
+      fill.addColorStop(0,alphaHex(c,0.30));
+      fill.addColorStop(1,alphaHex(c,0));
+      ctx.beginPath();trace(pts);
+      ctx.lineTo(X(last.t),Y(0));ctx.lineTo(X(pts[0].t),Y(0));ctx.closePath();
+      ctx.fillStyle=fill;
+      ctx.fill();
+      ctx.beginPath();trace(pts);
+      ctx.strokeStyle=c;
+      ctx.lineWidth=2;
+      ctx.lineJoin="round";
+      ctx.lineCap="round";
+      ctx.stroke();
+    }
+    if(head){
+      ctx.save();
+      ctx.shadowColor=c;
+      ctx.shadowBlur=12;
+      ctx.fillStyle=c;
+      ctx.beginPath();ctx.arc(X(last.t),Y(last.v),compact?3.5:4,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
+/* niceSpeedMax rounds the chart ceiling up to a value whose quarters
+   make readable gridline labels (300, 600, 900, 1200 and so on). */
+function niceSpeedMax(v){
+  var mult=[1,1.2,1.6,2,2.4,3,4,6,8,10];
+  var p=Math.pow(10,Math.floor(Math.log(v)/Math.LN10));
+  for(var i=0;i<mult.length;i++) if(mult[i]*p>=v) return mult[i]*p;
+  return 10*p;
+}
+
+function alphaHex(hex,a){
+  var m=/^#([0-9a-f]{6})$/i.exec(hex);
+  if(!m) return hex;
+  var n=parseInt(m[1],16);
+  return "rgba("+(n>>16)+","+((n>>8)&255)+","+(n&255)+","+a+")";
+}
+
+/* speedSampleTime turns a sample's RFC 3339 timestamp into milliseconds,
+   so the chart places each sample where the engine measured it even
+   when samples arrive in a burst (#348). The server sends nanoseconds;
+   trimming to milliseconds keeps Date.parse happy everywhere. NaN when
+   the timestamp is missing or unreadable. */
+function speedSampleTime(ts){
+  return (typeof ts==="string")?Date.parse(ts.replace(/(\.\d{3})\d+/,"$1")):NaN;
+}
+
+/* ── NasSpeedLive ────────────────────────────────────────────────────
+   The live speed-test panel shared by the Settings Test button (#346)
+   and the dashboard card: a Latency/Download/Upload stepper, live
+   readouts, drawSpeedTest's chart and a result area.
+
+   The panel keeps the whole run in JS and fills the element with the
+   given id from that state, rebuilding its markup when the element is
+   empty. A page that re-renders its HTML mid-test (the dashboard) only
+   has to call redraw() afterwards.
+
+   It injects its own stylesheet because the dashboard themes don't
+   load /css/shared.css. Colours resolve from whichever page variables
+   exist (dashboard --text-primary, settings --text), and data-tone
+   switches the series to darker shades on a light background.
+
+   NasSpeedLive.create(opts) -> panel
+     opts: {id, compact, stopLabel, closeLabel, onStop, onClose}
+     panel.start({startedAt, contractedDown, contractedUp})
+     panel.phase(name), panel.sample(sseSample)
+     panel.finish({outcome: "complete"|"stopped"|"failed", seconds,
+                   download, upload, latency})
+     panel.result({badge: {status, label}, summary, lines: [{tone, text}]})
+     panel.setStop(enabled, label), panel.hide(), panel.redraw()
+     panel.isOpen(), panel.isRunning() */
+var SPEED_PHASES=["latency","download","upload"];
+var SPEED_PHASE_LABELS={latency:"Measuring latency",download:"Measuring download",upload:"Measuring upload"};
+var SPEED_LIVE_CSS=[
+  ".speed-live{--sl-down:#60a5fa;--sl-up:#a78bfa;--sl-lat:#4ade80;--sl-text:var(--text-primary,var(--text,#f7f8f8));--sl-muted:var(--text-tertiary,var(--text2,#8a8f98));--sl-faint:var(--text-quaternary,var(--text3,#62666d));--sl-line:var(--border,rgba(127,127,127,0.2));margin-top:14px;padding:14px 16px 12px;border:1px solid var(--sl-line);border-radius:var(--radius,8px);background:var(--elevated,var(--bg-elevated,transparent));color:var(--sl-text);animation:speed-live-open .22s ease-out}",
+  ".speed-live[data-tone=light]{--sl-down:#2563eb;--sl-up:#7c3aed;--sl-lat:#16a34a}",
+  ".speed-live[hidden],.speed-live [hidden]{display:none}",
+  "@keyframes speed-live-open{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}",
+  "@media (prefers-reduced-motion:reduce){.speed-live{animation:none}}",
+  ".speed-live-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}",
+  ".speed-live-steps{display:flex;gap:6px}",
+  ".speed-live-step{padding:3px 10px;border:1px solid var(--sl-line);border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;color:var(--sl-faint);transition:color .2s,border-color .2s}",
+  ".speed-live-step[data-state=active][data-step=latency]{color:var(--sl-lat);border-color:var(--sl-lat)}",
+  ".speed-live-step[data-state=active][data-step=download]{color:var(--sl-down);border-color:var(--sl-down)}",
+  ".speed-live-step[data-state=active][data-step=upload]{color:var(--sl-up);border-color:var(--sl-up)}",
+  ".speed-live-step[data-state=done]{color:var(--sl-muted)}",
+  ".speed-live-step[data-state=done]::before{content:'✓ '}",
+  ".speed-live-actions{display:flex;align-items:center;gap:10px;margin-left:auto}",
+  ".speed-live-status{font-size:12px;color:var(--sl-muted);font-variant-numeric:tabular-nums;white-space:nowrap}",
+  ".speed-live-stop{padding:4px 10px;border:1px solid var(--sl-line);border-radius:6px;background:transparent;color:var(--sl-muted);font:inherit;font-size:12px;line-height:1.4;cursor:pointer;transition:color .15s,border-color .15s}",
+  ".speed-live-stop:hover:not(:disabled){color:var(--sl-text);border-color:var(--sl-muted)}",
+  ".speed-live-stop:disabled{cursor:not-allowed;opacity:.6}",
+  ".speed-live-readouts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0 8px}",
+  ".speed-live-readout{--sl-c:var(--sl-muted);min-width:0}",
+  ".speed-live-readout[data-kind=download]{--sl-c:var(--sl-down)}",
+  ".speed-live-readout[data-kind=upload]{--sl-c:var(--sl-up)}",
+  ".speed-live-readout[data-kind=latency]{--sl-c:var(--sl-lat)}",
+  ".speed-live-label{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--sl-muted)}",
+  ".speed-live-label::before{content:'';flex:none;width:8px;height:8px;border-radius:50%;background:var(--sl-c)}",
+  ".speed-live-num{font-size:28px;font-weight:600;line-height:1.25;color:var(--sl-text);font-variant-numeric:tabular-nums;white-space:nowrap}",
+  ".speed-live-num small{margin-left:4px;font-size:12px;font-weight:500;color:var(--sl-muted)}",
+  ".speed-live-readout[data-live='1'] .speed-live-num{color:var(--sl-c)}",
+  ".speed-live-chart{position:relative;height:190px}",
+  ".speed-live-chart canvas{display:block;width:100%;height:100%}",
+  ".speed-live-result{display:flex;flex-direction:column;gap:6px;margin-top:10px;padding-top:12px;border-top:1px solid var(--sl-line);font-size:13px;color:var(--sl-text)}",
+  ".speed-live-result-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-variant-numeric:tabular-nums}",
+  ".speed-live-badge{padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}",
+  ".speed-live-badge[data-status=up]{background:rgba(39,166,68,.15);color:var(--green,#27a644)}",
+  ".speed-live-badge[data-status=degraded]{background:rgba(217,119,6,.15);color:var(--amber,#d97706)}",
+  ".speed-live-badge[data-status=down]{background:rgba(220,38,38,.15);color:var(--red,#dc2626)}",
+  ".speed-live-badge[data-status=stopped]{background:rgba(127,127,127,.15);color:var(--sl-muted)}",
+  ".speed-live-meta{font-size:12px;color:var(--sl-muted)}",
+  ".speed-live-warn{font-size:12px;color:var(--amber,#d97706)}",
+  "@media (max-width:600px){.speed-live-readouts{gap:8px}.speed-live-num{font-size:20px}}",
+  /* compact: the dashboard card, where the panel sits inside the card's own box */
+  ".speed-live-compact{margin:0 0 12px;padding:0;border:0;border-radius:0;background:none}",
+  ".speed-live-compact .speed-live-head{gap:8px}",
+  ".speed-live-compact .speed-live-steps{gap:4px}",
+  ".speed-live-compact .speed-live-step{padding:2px 6px;font-size:10px;letter-spacing:.02em}",
+  ".speed-live-compact .speed-live-actions{gap:8px}",
+  ".speed-live-compact .speed-live-status{font-size:11px}",
+  ".speed-live-compact .speed-live-stop{padding:3px 9px;font-size:11px}",
+  ".speed-live-compact .speed-live-readouts{gap:8px;margin:10px 0 6px}",
+  ".speed-live-compact .speed-live-label{font-size:10px}",
+  ".speed-live-compact .speed-live-num{font-size:20px}",
+  ".speed-live-compact .speed-live-num small{font-size:11px}",
+  ".speed-live-compact .speed-live-chart{height:120px}",
+  ".speed-live-compact .speed-live-result{margin-top:4px;padding-top:0;border-top:0;font-size:12px}"
+].join("\n");
+
+function injectSpeedLiveCSS(){
+  if(document.getElementById("speed-live-css")) return;
+  var el=document.createElement("style");
+  el.id="speed-live-css";
+  el.textContent=SPEED_LIVE_CSS;
+  (document.head||document.documentElement).appendChild(el);
+}
+
+/* surfaceIsLight reports whether the first opaque background behind el
+   is light, so the panel can pick series colours that read on it. */
+function surfaceIsLight(el){
+  for(var n=el;n&&n.nodeType===1;n=n.parentNode){
+    var m=/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s\/]+([\d.]+))?/.exec(getComputedStyle(n).backgroundColor||"");
+    if(m&&(m[4]===undefined||parseFloat(m[4])>0.5)){
+      return 0.299*m[1]+0.587*m[2]+0.114*m[3]>150;
+    }
+  }
+  return false;
+}
+
+function createSpeedLive(opts){
+  opts=opts||{};
+  var run=null,ticker=0,sizeWatch=null,watched=null;
+
+  function root(){return document.getElementById(opts.id);}
+  function part(r,role){return r.querySelector('[data-role="'+role+'"]');}
+
+  function readoutHTML(kind,label,unit){
+    return '<div class="speed-live-readout" data-kind="'+kind+'"><div class="speed-live-label">'+label+'</div>'+
+      '<div class="speed-live-num"><span data-role="'+kind+'">–</span><small>'+unit+'</small></div></div>';
+  }
+  function skeleton(){
+    return '<div class="speed-live-head"><div class="speed-live-steps">'+
+      '<span class="speed-live-step" data-step="latency">Latency</span>'+
+      '<span class="speed-live-step" data-step="download">Download</span>'+
+      '<span class="speed-live-step" data-step="upload">Upload</span></div>'+
+      '<div class="speed-live-actions"><span class="speed-live-status" data-role="status"></span>'+
+      '<button type="button" class="speed-live-stop" data-role="stop"></button></div></div>'+
+      '<div class="speed-live-readouts">'+readoutHTML("download","Download","Mbps")+readoutHTML("upload","Upload","Mbps")+readoutHTML("latency","Latency","ms")+'</div>'+
+      '<div class="speed-live-chart"><canvas data-role="chart" role="img" aria-label="Download and upload speed over time"></canvas></div>'+
+      '<div class="speed-live-result" data-role="result" hidden></div>';
+  }
+
+  /* elapsed uses the server's start time when the stream sent one, so
+     a panel that attaches mid-test shows the test's real age. lag, the
+     smallest gap seen between a sample's server timestamp and its
+     arrival, absorbs any clock difference between NAS and browser. */
+  function elapsed(){
+    if(!run) return 0;
+    if(run.serverStart&&run.lag!==null) return Math.max(0,(Date.now()-run.lag-run.serverStart)/1000);
+    return (Date.now()-run.started)/1000;
+  }
+  function statusText(){
+    var secs=(run.running?elapsed():run.seconds).toFixed(1)+" s";
+    if(run.running){
+      if(!run.phase) return "Connecting…";
+      return opts.compact?secs:SPEED_PHASE_LABELS[run.phase]+" · "+secs;
+    }
+    if(run.outcome==="complete") return (opts.compact?"Done in ":"Finished in ")+secs;
+    if(run.outcome==="stopped") return opts.compact?"Stopped":"Stopped after "+secs;
+    return "Failed";
+  }
+  function fmt(v,digits){return (typeof v==="number"&&isFinite(v)&&v>=0)?v.toFixed(digits):"–";}
+
+  function renderSteps(r){
+    var idx=run.outcome==="complete"?SPEED_PHASES.length:SPEED_PHASES.indexOf(run.phase);
+    var steps=r.querySelectorAll(".speed-live-step");
+    for(var i=0;i<steps.length;i++){
+      var k=SPEED_PHASES.indexOf(steps[i].getAttribute("data-step"));
+      var state="";
+      if(k<idx) state="done";
+      else if(k===idx&&run.running) state="active";
+      steps[i].setAttribute("data-state",state);
+    }
+    var readouts=r.querySelectorAll(".speed-live-readout");
+    for(var j=0;j<readouts.length;j++){
+      var live=run.running&&readouts[j].getAttribute("data-kind")===run.phase;
+      readouts[j].setAttribute("data-live",live?"1":"0");
+    }
+  }
+  function renderValues(r){
+    var digits={download:0,upload:0,latency:1};
+    for(var kind in digits){
+      var el=part(r,kind);
+      if(el) el.textContent=fmt(run.values[kind],digits[kind]);
+    }
+  }
+  function renderStatus(r){
+    var el=part(r,"status");
+    if(el) el.textContent=statusText();
+  }
+  function renderStop(r){
+    var b=part(r,"stop");
+    if(!b) return;
+    if(run.running){
+      b.hidden=false;b.disabled=!run.stopEnabled;b.textContent=run.stopLabel;
+    }else if(opts.onClose){
+      b.hidden=false;b.disabled=false;b.textContent=opts.closeLabel||"Close";
+    }else{
+      b.hidden=true;
+    }
+  }
+  /* Text nodes only: the server name and ISP come from the engine. */
+  function renderResult(r){
+    var box=part(r,"result");
+    if(!box) return;
+    box.textContent="";
+    var res=run.result;
+    if(res&&(res.badge||res.summary)){
+      var head=document.createElement("div");
+      head.className="speed-live-result-head";
+      if(res.badge){
+        var badge=document.createElement("span");
+        badge.className="speed-live-badge";
+        badge.setAttribute("data-status",res.badge.status);
+        badge.textContent=res.badge.label;
+        head.appendChild(badge);
+      }
+      if(res.summary){
+        var sum=document.createElement("span");
+        sum.textContent=res.summary;
+        head.appendChild(sum);
+      }
+      box.appendChild(head);
+    }
+    var lines=(res&&res.lines)||[];
+    for(var i=0;i<lines.length;i++){
+      if(!lines[i]||!lines[i].text) continue;
+      var line=document.createElement("div");
+      line.className=lines[i].tone==="warn"?"speed-live-warn":"speed-live-meta";
+      line.textContent=lines[i].text;
+      box.appendChild(line);
+    }
+    box.hidden=!box.firstChild;
+  }
+
+  function draw(){
+    var r=root();
+    if(!r||!run||r.hidden) return;
+    var cs=getComputedStyle(r);
+    function cssVar(name,fallback){var v=cs.getPropertyValue(name).trim();return v||fallback;}
+    drawSpeedTest(part(r,"chart"),run,{
+      live:run.running,
+      compact:!!opts.compact,
+      font:cs.fontFamily,
+      colors:{down:cssVar("--sl-down","#60a5fa"),up:cssVar("--sl-up","#a78bfa"),grid:cssVar("--sl-line","rgba(127,127,127,0.2)"),text:cssVar("--sl-faint","#62666d")}
+    });
+  }
+  /* The chart also has to redraw when its box changes size without a
+     window resize: a dashboard re-layout, or the card dragged to a
+     column of another width. */
+  function watchSize(r){
+    if(typeof ResizeObserver==="undefined") return;
+    var wrap=r.querySelector(".speed-live-chart");
+    if(!wrap||wrap===watched) return;
+    if(!sizeWatch) sizeWatch=new ResizeObserver(function(){if(run) scheduleDraw();});
+    if(watched) sizeWatch.unobserve(watched);
+    sizeWatch.observe(wrap);
+    watched=wrap;
+  }
+  function scheduleDraw(){
+    if(!run||run.frame) return;
+    if(typeof requestAnimationFrame==="undefined"){draw();return;}
+    var mine=run;
+    mine.frame=requestAnimationFrame(function(){mine.frame=0;if(run===mine) draw();});
+  }
+  function render(){
+    var r=root();
+    if(!r) return;
+    if(!run){r.hidden=true;return;}
+    injectSpeedLiveCSS();
+    if(!part(r,"chart")) r.innerHTML=skeleton();
+    watchSize(r);
+    r.classList.add("speed-live");
+    if(opts.compact) r.classList.add("speed-live-compact");
+    r.hidden=false;
+    r.setAttribute("data-tone",surfaceIsLight(r)?"light":"dark");
+    renderSteps(r);
+    renderValues(r);
+    renderStatus(r);
+    renderStop(r);
+    renderResult(r);
+    draw();
+  }
+  function clearTimers(){
+    if(ticker){clearInterval(ticker);ticker=0;}
+    if(run&&run.frame&&typeof cancelAnimationFrame!=="undefined") cancelAnimationFrame(run.frame);
+    if(run) run.frame=0;
+  }
+
+  /* settle replaces a finished phase's live readout with the phase
+     average, so the number doesn't jump when the engine's result
+     arrives. Throughput skips the first quarter, where the transfer is
+     still ramping up. */
+  function settle(phase){
+    if(phase==="latency"&&run.lat.length){
+      var sum=0;
+      for(var i=0;i<run.lat.length;i++) sum+=run.lat[i];
+      run.values.latency=sum/run.lat.length;
+      return;
+    }
+    var pts=phase==="download"?run.down:phase==="upload"?run.up:null;
+    if(!pts||!pts.length) return;
+    var from=Math.floor(pts.length/4),total=0;
+    for(var k=from;k<pts.length;k++) total+=pts[k].v;
+    run.values[phase]=total/(pts.length-from);
+  }
+
+  function start(cfg){
+    cfg=cfg||{};
+    clearTimers();
+    var serverStart=speedSampleTime(cfg.startedAt);
+    run={
+      started:Date.now(),serverStart:isFinite(serverStart)?serverStart:0,lag:null,
+      t0:0,phase:"",lat:[],down:[],up:[],
+      contractedDown:Number(cfg.contractedDown)||0,contractedUp:Number(cfg.contractedUp)||0,
+      values:{download:null,upload:null,latency:null},
+      running:true,outcome:"",seconds:0,
+      stopEnabled:true,stopLabel:opts.stopLabel||"Stop",
+      result:null,frame:0
+    };
+    ticker=setInterval(function(){var r=root();if(r&&run&&run.running) renderStatus(r);},500);
+    render();
+  }
+  function phase(name){
+    if(!run||!run.running) return;
+    settle(run.phase);
+    run.phase=name||"";
+    var r=root();
+    if(r){renderSteps(r);renderValues(r);renderStatus(r);}
+  }
+  function sample(d){
+    if(!run||!run.running||!d) return;
+    var at=speedSampleTime(d.ts);
+    if(isFinite(at)){
+      var lag=Date.now()-at;
+      if(run.lag===null||lag<run.lag) run.lag=lag;
+    }else{
+      at=Date.now();
+    }
+    if(d.phase==="latency"){
+      if(typeof d.latency_ms==="number"&&d.latency_ms>0){
+        run.lat.push(d.latency_ms);
+        run.values.latency=d.latency_ms;
+      }
+    }else if(typeof d.mbps==="number"){
+      if(!run.t0) run.t0=at;
+      var point={t:Math.max(0,(at-run.t0)/1000),v:d.mbps};
+      if(d.phase==="upload"){run.up.push(point);run.values.upload=d.mbps;}
+      else{run.down.push(point);run.values.download=d.mbps;}
+      scheduleDraw();
+    }
+    var r=root();
+    if(r){renderValues(r);renderStatus(r);}
+  }
+  function finish(f){
+    if(!run||!run.running) return;
+    f=f||{};
+    var secs=f.seconds>0?f.seconds:elapsed();
+    clearTimers();
+    run.running=false;
+    run.seconds=secs;
+    run.outcome=f.outcome||"complete";
+    if(run.outcome==="complete"){
+      settle(run.phase);
+      if(typeof f.download==="number") run.values.download=f.download;
+      if(typeof f.upload==="number") run.values.upload=f.upload;
+      if(typeof f.latency==="number") run.values.latency=f.latency;
+    }
+    render();
+  }
+  function setStop(enabled,label){
+    if(!run) return;
+    run.stopEnabled=!!enabled;
+    if(typeof label==="string") run.stopLabel=label;
+    var r=root();
+    if(r) renderStop(r);
+  }
+  function setResult(res){
+    if(!run) return;
+    run.result=res||null;
+    var r=root();
+    if(r) renderResult(r);
+  }
+  function hide(){
+    clearTimers();
+    run=null;
+    render();
+  }
+
+  if(opts.onStop||opts.onClose){
+    document.addEventListener("click",function(e){
+      var t=e.target,r=root();
+      if(!r||!t||!t.closest) return;
+      var b=t.closest('[data-role="stop"]');
+      if(!b||!r.contains(b)) return;
+      if(run&&run.running){if(opts.onStop) opts.onStop();}
+      else if(opts.onClose) opts.onClose();
+    });
+  }
+  window.addEventListener("resize",function(){if(run) scheduleDraw();});
+
+  return {
+    start:start,phase:phase,sample:sample,finish:finish,
+    setStop:setStop,result:setResult,hide:hide,redraw:render,
+    isOpen:function(){return !!run;},
+    isRunning:function(){return !!run&&run.running;}
+  };
+}
+
 /* ── public API ──────────────────────────────────────────────────── */
 var NasChart={
   line:      drawLine,
@@ -641,6 +1193,7 @@ var NasChart={
   bar:       drawBar,
   gauge:     drawGauge,
   sparkline: drawSparkline,
+  speedTest: drawSpeedTest,
   /* _decimateLabels is exposed for unit tests only. It is not part of
      the public API — name is prefixed with an underscore to signal
      "internal / subject to change". See issue #165 and
@@ -649,6 +1202,7 @@ var NasChart={
 };
 
 window.NasChart=NasChart;
+window.NasSpeedLive={create:createSpeedLive};
 })();
 
 /* ================================================================
