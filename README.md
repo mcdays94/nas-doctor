@@ -50,7 +50,6 @@ Born from an [OpenCode diagnostic skill](https://github.com/mcdays94/opencode-se
 - [File Structure & Data Locations](#file-structure--data-locations)
 - [Resource Usage](#resource-usage)
 - [Diagnostic Report](#diagnostic-report)
-- [Agentic Setup](#agentic-setup)
 
 ---
 
@@ -929,14 +928,6 @@ Click **Export Report** on the dashboard to generate a print-ready diagnostic re
   <img src="screenshots/report-drives.jpg" alt="Report — Drives" width="240">
   <img src="screenshots/report-actions.jpg" alt="Report — Actions" width="240">
 </p>
-
----
-
-## Agentic Setup
-
-NAS Doctor is also an experiment in how far agentic coding can carry a production-shaped project. The whole thing is written through [opencode](https://opencode.ai), mostly by a mix of Claude Opus 4.7 / 4.6 and GPT Codex 5.3, directed by hand.
-
-In the same spirit, the issue tracker itself is partly automated — an opencode agent triages open issues, posts replies, and drafts PRs. The orchestration uses dedicated agents and sub-agents inspired by [Matt Pocock's](https://www.mattpocock.com/) workflow: a top-level orchestrator that breaks features into independently-shippable pieces and dispatches worker agents to execute them on isolated branches. I wrote up how the setup works in [Cloning Matt Pocock with opencode](https://mdias.info/posts/cloning-matt-pocock-opencode/).
 
 ---
 
