@@ -64,9 +64,9 @@ NAS Doctor runs periodic health checks on your server — analyzing SMART data, 
 - **Network**: Interface speed negotiation, state, MTU
 - **Logs**: Filtered dmesg and syslog errors (ATA errors, I/O errors, medium errors)
 - **Parity** (Unraid): Historical parity check speed trend analysis, error tracking
-- **Tunnels**: Cloudflared tunnel status (connections, routes) and Tailscale peer graph (IPs, online/offline, relay, exit nodes) — Tailscale detects both host binary (bundled in the image) and Docker containers; Cloudflared detects Docker containers, with host-binary detection requiring a custom image that bundles the `cloudflared` CLI
+- **Tunnels**: Cloudflared tunnel status (up/down; connector count on the host-binary path) and Tailscale peer graph (IPs, online/offline, relay, exit nodes) — Tailscale detects both host binary (bundled in the image) and Docker containers; Cloudflared detects Docker containers, with host-binary detection requiring a custom image that bundles the `cloudflared` CLI
 - **Proxmox VE**: Cluster status, nodes (CPU/mem/uptime), VMs + LXCs (status, resources), storage pools, HA services, recent tasks/backups — via PVE REST API with test connection
-- **Kubernetes**: Cluster monitoring for k8s, k3s, EKS, GKE, AKS — nodes (status, disk usage, pod capacity), pods grouped by node with namespace breakdown, deployments, services, PVCs, warning events. In-cluster auto-detection + external token auth. *Tailscale detection in Kubernetes requires a sidecar pod sharing `/var/run/tailscale` via emptyDir — see [docs/tailscale-install-methods.md](docs/tailscale-install-methods.md).*
+- **Kubernetes**: Cluster monitoring through the Kubernetes API (tested on k3s; other distributions should work but are untested) — nodes (status, ephemeral-storage reservation, pod capacity), pods grouped by node with namespace breakdown, deployments, warning events, plus findings for node pressure and Pending/Lost PVCs. In-cluster auto-detection + external token auth. *Tailscale detection in Kubernetes requires a sidecar pod sharing `/var/run/tailscale` via emptyDir — see [docs/tailscale-install-methods.md](docs/tailscale-install-methods.md).*
 - **OS Update Check**: Compares installed version against latest GitHub release for Unraid and TrueNAS
 
 ### Analysis Engine
@@ -259,7 +259,7 @@ code, 0 for the others — same convention as
 ### Tunnel Monitoring
 
 Automatic detection and monitoring of remote access tunnels:
-- **Cloudflared**: Tunnel status, connection count, ingress routes — detects Docker containers out of the box. Host-binary detection requires a custom image that bundles the `cloudflared` CLI (the default image bundles `tailscale` but not `cloudflared`).
+- **Cloudflared**: Tunnel status — detects Docker containers out of the box. A Docker-detected tunnel is up or down based on the container state (its connection count is just 1 or 0). With the `cloudflared` CLI available and logged in, NAS Doctor reads `cloudflared tunnel list` and reports the real number of active connectors per tunnel. Ingress routes are not collected. Host-binary detection requires a custom image that bundles the `cloudflared` CLI (the default image bundles `tailscale` but not `cloudflared`).
 - **Tailscale**: Full peer graph (online status, IPs, OS, relay regions, TX/RX bytes, exit node status) **when the host daemon socket `/var/run/tailscale` is accessible via bind-mount**. A plain-text `tailscale status` fallback captures a reduced subset (IPs, hostnames, OS, online state) when JSON output is unavailable due to CLI-daemon version skew. When the daemon is unreachable the dashboard surfaces an actionable hint explaining what to mount.
 - Docker-container detection matches `tailscale` by default; opt-in env var `NAS_DOCTOR_TAILSCALE_CONTAINER_NAMES=ts-sidecar,mullvad-ts,vpn` (comma-separated, case-insensitive substring match) extends detection to custom-named sidecars.
 - Dashboard section in all themes with status dots per tunnel/peer
@@ -310,7 +310,7 @@ Per-instance API key system for securing fleet communication:
 Monitor all your NAS Doctor instances from a visual topology view at `/fleet`:
 - **Visual topology** with central primary node and connected remote servers
 - Per-server: platform icon, hostname, IP, NAS Doctor version, uptime, health status, finding counts
-- **Auto-detect connection type**: LAN (private IP) vs public hostname with tunnel detection (Cloudflare, Tailscale)
+- **Connection type in the topology view**: the `/fleet` map groups each remote server by its configured URL: RFC 1918 IPv4 and `localhost` as LAN (grouped by /24), raw Tailscale `100.64.0.0/10` IPs as Tailscale, hostnames containing `cloudflare` as Cloudflare Tunnel, anything else as WAN. MagicDNS names (`*.ts.net`) and custom domains behind a tunnel show as WAN. This is a display heuristic only; adding a server in Settings doesn't detect anything, and the local node is always placed in a `192.168.1.x` group whatever its real address
 - **Custom auth headers** per server for Cloudflare Access, Authelia, etc.
 - **Test Connection** validates NAS Doctor signature + API key end-to-end
 - **Auto-create service check** when adding a fleet server
@@ -541,7 +541,8 @@ You'll also need a ServiceAccount + ClusterRole with read access to nodes, pods,
 > - The `view` ClusterRole is NOT sufficient — nodes are cluster-scoped. Use a custom ClusterRole
 > - Multi-arch image: runs on amd64 and arm64 (Raspberry Pi) nodes
 > - No Docker socket needed — K8s integration uses the API directly
-> - Disk usage per node comes from `ephemeral-storage` capacity
+> - The per-node **Disk** bar shows the share of `ephemeral-storage` capacity the kubelet reserves (capacity minus allocatable), not how full the disk is; it doesn't move as the disk fills. Real disk trouble surfaces as a `DiskPressure` node finding
+> - Services and PVCs are read but not listed on the dashboard; PVCs only appear as findings when Pending or Lost
 
 ### Proxmox (via Ubuntu VM / LXC)
 

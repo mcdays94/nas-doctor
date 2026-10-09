@@ -53,6 +53,33 @@ func TestReadme_CloudflaredClaimQualified(t *testing.T) {
 	}
 }
 
+// TestReadme_Issue244ClaimsQualified keeps three README overstatements
+// from #244 from coming back: Cloudflared ingress routes (no collector
+// sets Routes), Kubernetes "disk usage" (the node bar is ephemeral-storage
+// capacity minus allocatable) with untested managed distros listed as
+// supported, and fleet "auto-detect" of tunnels (only a /fleet display
+// heuristic in fleet.html parseSubnet).
+func TestReadme_Issue244ClaimsQualified(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	readme := string(data)
+	bannedPhrases := []string{
+		"connection count, ingress routes",
+		"(connections, routes)",
+		"k8s, k3s, EKS, GKE, AKS",
+		"disk usage, pod capacity",
+		"Disk usage per node comes from",
+		"Auto-detect connection type",
+	}
+	for _, phrase := range bannedPhrases {
+		if strings.Contains(readme, phrase) {
+			t.Errorf("README still contains %q, which overstates shipped behaviour; see issue #244", phrase)
+		}
+	}
+}
+
 // ── Tailscale status --json parser ──
 
 func TestParseTailscaleStatusJSON(t *testing.T) {
