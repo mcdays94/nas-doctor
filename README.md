@@ -66,7 +66,7 @@ NAS Doctor runs periodic health checks on your server — analyzing SMART data, 
 - **Parity** (Unraid): Historical parity check speed trend analysis, error tracking
 - **Tunnels**: Cloudflared tunnel status (up/down; connector count on the host-binary path) and Tailscale peer graph (IPs, online/offline, relay, exit nodes) — Tailscale detects both host binary (bundled in the image) and Docker containers; Cloudflared detects Docker containers, with host-binary detection requiring a custom image that bundles the `cloudflared` CLI
 - **Proxmox VE**: Cluster status, nodes (CPU/mem/uptime), VMs + LXCs (status, resources), storage pools, HA services, recent tasks/backups — via PVE REST API with test connection
-- **Kubernetes**: Cluster monitoring through the Kubernetes API (tested on k3s; other distributions should work but are untested) — nodes (status, ephemeral-storage reservation, pod capacity), pods grouped by node with namespace breakdown, deployments, warning events, plus findings for node pressure and Pending/Lost PVCs. In-cluster auto-detection + external token auth. *Tailscale detection in Kubernetes requires a sidecar pod sharing `/var/run/tailscale` via emptyDir — see [docs/tailscale-install-methods.md](docs/tailscale-install-methods.md).*
+- **Kubernetes**: Cluster monitoring through the Kubernetes API (tested on k3s; other distributions should work but are untested) — nodes (status, ephemeral-storage capacity, pod capacity), pods grouped by node with namespace breakdown, deployments, warning events, plus findings for node pressure and Pending/Lost PVCs. In-cluster auto-detection + external token auth. *Tailscale detection in Kubernetes requires a sidecar pod sharing `/var/run/tailscale` via emptyDir — see [docs/tailscale-install-methods.md](docs/tailscale-install-methods.md).*
 - **OS Update Check**: Compares installed version against latest GitHub release for Unraid and TrueNAS
 
 ### Analysis Engine
@@ -541,7 +541,7 @@ You'll also need a ServiceAccount + ClusterRole with read access to nodes, pods,
 > - The `view` ClusterRole is NOT sufficient — nodes are cluster-scoped. Use a custom ClusterRole
 > - Multi-arch image: runs on amd64 and arm64 (Raspberry Pi) nodes
 > - No Docker socket needed — K8s integration uses the API directly
-> - The per-node **Disk** bar shows the share of `ephemeral-storage` capacity the kubelet reserves (capacity minus allocatable), not how full the disk is; it doesn't move as the disk fills. Real disk trouble surfaces as a `DiskPressure` node finding
+> - Each node shows its `ephemeral-storage` capacity and allocatable amount from the node spec. NAS Doctor doesn't measure how full a node's disk is; real disk trouble surfaces as a `DiskPressure` node finding
 > - Services and PVCs are read but not listed on the dashboard; PVCs only appear as findings when Pending or Lost
 
 ### Proxmox (via Ubuntu VM / LXC)

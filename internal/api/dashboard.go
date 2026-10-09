@@ -1336,6 +1336,11 @@ sections.proxmox = function(sn) {
 /* ── Section: Kubernetes ─────────────────────────────────────── */
 sections.kubernetes = function(sn) {
   var esc = util.esc;
+  function k8sEphemeralText(n) {
+    var t = 'Ephemeral storage ' + util.fmtBytes(n.disk_total);
+    if (n.disk_allocatable > 0) t += ' &middot; ' + util.fmtBytes(n.disk_allocatable) + ' allocatable';
+    return t;
+  }
   var h = '';
   var k8s = sn ? sn.kubernetes : null;
   var k8sConnected = k8s && k8s.connected && !k8s.error;
@@ -1355,7 +1360,9 @@ sections.kubernetes = function(sn) {
       if (kn.roles) h += '<span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">' + esc(kn.roles) + '</span>';
       h += '</div>';
       h += '<div style="font-size:11px;color:var(--text-tertiary)">' + kn.cpu_cores + ' cores &middot; ' + (kn.mem_total > 0 ? (kn.mem_total/1073741824).toFixed(0) + ' GB RAM' : '?') + ' &middot; ' + kn.pod_count + '/' + kn.pod_capacity + ' pods</div>';
-      if (kn.disk_total > 0) { var du=kn.disk_total-kn.disk_allocatable,dp=du/kn.disk_total*100,dc=dp>=90?'var(--red)':dp>=75?'var(--amber)':'var(--green)',ds=kn.disk_total>=1073741824?(kn.disk_total/1073741824).toFixed(0)+' GB':(kn.disk_total/1048576).toFixed(0)+' MB'; h += '<div style="margin-top:4px"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-quaternary);margin-bottom:2px"><span>Disk</span><span>'+dp.toFixed(0)+'% of '+ds+'</span></div><div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+dp.toFixed(1)+'%;background:'+dc+'"></div></div></div>'; }
+      // Ephemeral storage is capacity and allocatable from the node spec, not
+      // usage, so it's shown as plain text rather than a fill bar (#244).
+      if (kn.disk_total > 0) h += '<div style="font-size:10px;color:var(--text-quaternary);margin-top:4px">' + k8sEphemeralText(kn) + '</div>';
       if (kn.conditions && kn.conditions.length > 0) h += '<div style="font-size:10px;color:var(--amber);margin-top:4px">' + esc(kn.conditions.join(', ')) + '</div>';
       h += '</div>';
     }
@@ -1394,7 +1401,7 @@ sections.kubernetes = function(sn) {
     if (nodeInfo&&nodeInfo.roles) h+=' <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(94,106,210,0.1);color:var(--accent)">'+esc(nodeInfo.roles)+'</span>';
     h += '</div>';
     h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px">';
-    if (nodeInfo&&nodeInfo.disk_total>0){var ndu=nodeInfo.disk_total-nodeInfo.disk_allocatable,ndp=ndu/nodeInfo.disk_total*100,ndc=ndp>=90?'var(--red)':ndp>=75?'var(--amber)':'var(--green)';h+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:10px;color:var(--text-quaternary)"><span>Disk '+ndp.toFixed(0)+'%</span><div style="flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+ndp.toFixed(1)+'%;background:'+ndc+'"></div></div><span>'+(nodeInfo.disk_total>=1073741824?(nodeInfo.disk_total/1073741824).toFixed(0)+'G':(nodeInfo.disk_total/1048576).toFixed(0)+'M')+'</span></div>';}
+    if (nodeInfo&&nodeInfo.disk_total>0) h+='<div style="margin-bottom:8px;font-size:10px;color:var(--text-quaternary)">'+k8sEphemeralText(nodeInfo)+'</div>';
     var nsPods = {}; for (var npi = 0; npi < nodePods.length; npi++) { var ns = nodePods[npi].namespace; if (!nsPods[ns]) nsPods[ns] = []; nsPods[ns].push(nodePods[npi]); }
     var nsKeys = Object.keys(nsPods).sort();
     for (var nsk = 0; nsk < nsKeys.length; nsk++) {
