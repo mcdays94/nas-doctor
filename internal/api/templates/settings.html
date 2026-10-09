@@ -591,7 +591,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
   <!-- 5. Kubernetes Cluster -->
   <div class="card" id="card-kubernetes">
     <div class="card-title">Kubernetes</div>
-    <div class="card-desc">Connect to a Kubernetes cluster (k8s, k3s, EKS, GKE, AKS) to monitor nodes, pods, deployments, services, and PVCs.</div>
+    <div class="card-desc">Connect to a Kubernetes cluster to monitor nodes, pods, deployments and warning events, with findings for node pressure and Pending/Lost PVCs. Tested on k3s; other distributions should work but are untested.</div>
     <div class="toggle-wrap" style="margin-bottom:16px">
       <div class="toggle" id="k8s-toggle" onclick="this.classList.toggle('on');saveSettings()"><div class="toggle-knob"></div></div>
       <span class="toggle-label">Enable Kubernetes Integration</span>
