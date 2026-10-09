@@ -120,7 +120,7 @@ body.theme-clean .life-bar{background:rgba(0,0,0,0.06)}
   function barColor(pct){return pct>100?"var(--red)":pct>80?"var(--amber)":"var(--green)";}
   function fmtSize(gb){return gb>=1000?(gb/1000).toFixed(1)+" TB":gb.toFixed(0)+" GB";}
   function fmtYears(y){return y<0.1?"< 1 month":y<1?(y*12).toFixed(0)+" months":y.toFixed(1)+" years";}
-  function fmtCost(c){return c>0?"$"+c.toFixed(0):"\u2014";}
+  function fmtCost(c){return c>0?c.toFixed(0):"\u2014";}
   function fmtHours(h){
     if(!h)return"0h";
     var d=h/24;
@@ -144,7 +144,7 @@ body.theme-clean .life-bar{background:rgba(0,0,0,0.06)}
     if(plan.replace_soon>0)h+='<div class="rp-stat"><div class="rp-stat-val" style="color:var(--amber)">'+plan.replace_soon+'</div><div class="rp-stat-label">Replace Soon</div></div>';
     if(plan.monitor>0)h+='<div class="rp-stat"><div class="rp-stat-val" style="color:var(--accent)">'+plan.monitor+'</div><div class="rp-stat-label">Monitor</div></div>';
     h+='<div class="rp-stat"><div class="rp-stat-val" style="color:var(--green)">'+plan.healthy+'</div><div class="rp-stat-label">Healthy</div></div>';
-    if(plan.cost_configured&&plan.total_cost>0)h+='<div class="rp-stat"><div class="rp-stat-val" style="color:var(--amber)">$'+plan.total_cost.toFixed(0)+'</div><div class="rp-stat-label">Est. Replacement Cost</div></div>';
+    if(plan.cost_configured&&plan.total_cost>0)h+='<div class="rp-stat"><div class="rp-stat-val" style="color:var(--amber)">'+fmtCost(plan.total_cost)+'</div><div class="rp-stat-label">Est. Replacement Cost</div></div>';
     h+='</div>';
 
     // Timeline bar
@@ -170,13 +170,13 @@ body.theme-clean .life-bar{background:rgba(0,0,0,0.06)}
       h+='<div class="cost-title">Estimated Replacement Costs</div>';
       if(plan.replace_now>0){h+='<div class="cost-row"><span class="label">Replace Now ('+plan.replace_now+' drives)</span><span class="val" style="color:var(--red)">';
         var rnCost=0;plan.drives.forEach(function(d){if(d.urgency==="replace_now")rnCost+=d.cost_estimate;});
-        h+='$'+rnCost.toFixed(0)+'</span></div>';}
+        h+=fmtCost(rnCost)+'</span></div>';}
       if(plan.replace_soon>0){h+='<div class="cost-row"><span class="label">Replace Soon ('+plan.replace_soon+' drives)</span><span class="val" style="color:var(--amber)">';
         var rsCost=0;plan.drives.forEach(function(d){if(d.urgency==="replace_soon")rsCost+=d.cost_estimate;});
-        h+='$'+rsCost.toFixed(0)+'</span></div>';}
+        h+=fmtCost(rsCost)+'</span></div>';}
       h+='<div class="cost-divider"></div>';
-      h+='<div class="cost-row"><span class="label">Total Urgent Replacements</span><span class="val">$'+plan.total_cost.toFixed(0)+'</span></div>';
-      h+='<div class="cost-row"><span class="label">Full Fleet Replacement (all drives)</span><span class="val" style="color:var(--text3)">$'+plan.total_cost_all.toFixed(0)+'</span></div>';
+      h+='<div class="cost-row"><span class="label">Total Urgent Replacements</span><span class="val">'+fmtCost(plan.total_cost)+'</span></div>';
+      h+='<div class="cost-row"><span class="label">Full Fleet Replacement (all drives)</span><span class="val" style="color:var(--text3)">'+fmtCost(plan.total_cost_all)+'</span></div>';
       h+='</div>';
     }
 
