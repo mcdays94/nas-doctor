@@ -1,3 +1,5 @@
+**English** | [简体中文](README.zh-CN.md)
+
 <p align="center">
   <img src="icons/icon3.png" alt="NAS Doctor" width="128" height="128">
 </p>
@@ -512,6 +514,9 @@ spec:
     matchLabels:
       app: nas-doctor
   template:
+    metadata:
+      labels:
+        app: nas-doctor
     spec:
       serviceAccountName: nas-doctor
       containers:
