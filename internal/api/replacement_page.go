@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -17,15 +16,7 @@ func (s *Server) handleReplacementPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get cost_per_tb from settings
-	var costPerTB float64
-	raw, err := s.store.GetConfig("settings")
-	if err == nil && raw != "" {
-		var settings Settings
-		if json.Unmarshal([]byte(raw), &settings) == nil {
-			costPerTB = settings.CostPerTB
-		}
-	}
+	costPerTB := s.getSettings().CostPerTB
 
 	plan := analyzer.BuildReplacementPlan(snap.SMART, costPerTB)
 	writeJSON(w, http.StatusOK, plan)

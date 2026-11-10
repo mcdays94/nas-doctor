@@ -275,9 +275,15 @@ type DashboardSections struct {
 	MergedContainers bool `json:"merged_containers"` // Combine Docker list + container metrics into one section
 	MergedDrives     bool `json:"merged_drives"`     // Combine SMART + storage into one card per drive
 	Backup           bool `json:"backup"`
-	SpeedTest        bool `json:"speed_test"`
-	Processes        bool `json:"processes"`
-	DashColumns      int  `json:"dash_columns"` // Dashboard column count: 0=auto (default 3), 1, 2, 3, 4
+	// SpeedTest is serialised as "speedtest" because that is the key the
+	// settings page sends and the dashboard reads. It used to be tagged
+	// "speed_test", so the toggle was silently dropped on save and the
+	// section could not be hidden. Old blobs carry a meaningless
+	// "speed_test": false, which is now ignored — the default (shown)
+	// applies until the user actually switches it off.
+	SpeedTest   bool `json:"speedtest"`
+	Processes   bool `json:"processes"`
+	DashColumns int  `json:"dash_columns"` // Dashboard column count: 0=auto (default 3), 1, 2, 3, 4
 }
 
 // BackupSettings controls automatic backup of the application database.
@@ -522,7 +528,6 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	r.Get("/api/v1/fleet", s.handleFleetStatus)
 	r.Get("/api/v1/fleet/servers", s.handleFleetServers)
 	r.Put("/api/v1/fleet/servers", s.handleFleetUpdateServers)
-	r.Post("/api/v1/fleet/test", s.handleFleetTestServer)
 	r.Post("/api/v1/findings/dismiss", s.handleDismissFinding)
 	r.Post("/api/v1/findings/restore", s.handleRestoreFinding)
 
@@ -531,10 +536,9 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 	// External Duplicacy backup monitor test button — issue #313.
 	// Mirrors the Borg test endpoint shape; the runner is disk-read
 	// (no subprocess) so the wiring is simpler. API-key middleware
-	// is applied explicitly (acceptance criterion 5) — borg's
-	// existing endpoint is registered the same way but predates the
-	// 401 contract; we make ours explicit so a future router refactor
-	// doesn't strip the protection silently.
+	// is applied explicitly (acceptance criterion 5). The whole router
+	// now sits behind the same middleware (see Router in api.go), so
+	// this wrapper is belt and braces.
 	r.With(s.apiKeyMiddleware).Post("/api/v1/backup-monitor/duplicacy/test", s.handleTestDuplicacyMonitor)
 
 	// Fleet dashboard page
@@ -583,24 +587,25 @@ func (s *Server) RegisterExtendedRoutes(r chi.Router) {
 
 // ---------- Settings handlers ----------
 
-// handleGetSettings returns the full settings JSON from the config table.
+// handleGetSettings returns the current settings: the stored blob with
+// defaults filled in for anything it does not mention.
 // GET /api/v1/settings
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	raw, err := s.store.GetConfig(settingsConfigKey)
+	settings, err := s.loadSettings()
 	if err != nil {
-		// No settings stored yet — return defaults.
-		writeJSON(w, http.StatusOK, defaultSettings())
+		// Do not answer with defaults here. The settings page saves what
+		// it loaded, so serving defaults on a failed read would lead it
+		// to overwrite the real configuration.
+		s.logger.Error("failed to read settings", "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "settings unavailable: " + err.Error()})
 		return
 	}
+	writeJSON(w, http.StatusOK, settingsForResponse(settings))
+}
 
-	var settings Settings
-	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
-		s.logger.Error("failed to parse stored settings", "error", err)
-		writeJSON(w, http.StatusOK, defaultSettings())
-		return
-	}
-
-	// Ensure slice fields are never null in JSON output.
+// settingsForResponse normalises a settings value for JSON output: slices
+// are never null and legacy-invalid service checks carry their warning.
+func settingsForResponse(settings Settings) Settings {
 	if settings.Notifications.Webhooks == nil {
 		settings.Notifications.Webhooks = []internal.WebhookConfig{}
 	}
@@ -632,7 +637,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	if settings.LogPush.Destinations == nil {
 		settings.LogPush.Destinations = []LogForwardDestination{}
 	}
-	// Apply retention defaults for settings that predate this field.
+	// Retention defaults for blobs that predate these fields.
 	if settings.Retention.SnapshotDays == 0 {
 		settings.Retention.SnapshotDays = 90
 	}
@@ -642,17 +647,11 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	if settings.Retention.NotifyLogDays == 0 {
 		settings.Retention.NotifyLogDays = 30
 	}
-	// Section defaults: if all are false (zero-value from old settings), set all to true
-	s_sec := settings.Sections
-	if !s_sec.Findings && !s_sec.DiskSpace && !s_sec.SMART && !s_sec.Docker && !s_sec.ZFS && !s_sec.UPS {
-		settings.Sections = DashboardSections{
-			Findings: true, DiskSpace: true, SMART: true, Docker: true,
-			ZFS: true, UPS: true, Parity: true, Network: true,
-			Tunnels: true, MergedDrives: true, Processes: true,
-		}
-	}
-
-	writeJSON(w, http.StatusOK, settings)
+	// Section visibility needs no fix-up here. A blob without a "sections"
+	// object keeps the defaults it was decoded on top of; one that has it
+	// is taken at its word. This used to reset every section to visible
+	// whenever six core sections happened to be hidden.
+	return settings
 }
 
 // normalizeServiceCheckConfig validates and applies default values to a
@@ -671,6 +670,11 @@ func normalizeServiceCheckConfig(check *internal.ServiceCheckConfig) error {
 	}
 	if check.Target == "" {
 		return fmt.Errorf("service_checks.checks target is required")
+	}
+	// Ping, traceroute and DNS targets are passed to command-line tools.
+	// A value starting with '-' would be read as an option.
+	if strings.HasPrefix(check.Target, "-") || strings.HasPrefix(strings.TrimSpace(check.DNSServer), "-") {
+		return fmt.Errorf("service_checks.checks target must not start with '-'")
 	}
 	switch check.Type {
 	case internal.ServiceCheckHTTP, internal.ServiceCheckTCP, internal.ServiceCheckDNS, internal.ServiceCheckSMB, internal.ServiceCheckNFS, internal.ServiceCheckPing, internal.ServiceCheckSpeed, internal.ServiceCheckTraceroute:
@@ -865,24 +869,30 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	var settings Settings
-	if err := json.Unmarshal(body, &settings); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+	// Read-modify-write under settingsMu: the request is merged onto the
+	// stored settings, so a field the client does not send keeps its
+	// value, and no concurrent writer can slip in between the read and
+	// the write. See settings_store.go.
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+
+	current, _, err := s.readSettings()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "settings unavailable: " + err.Error()})
+		return
+	}
+	settings, err := mergeSettingsPatch(current, body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	// Preserve server-authoritative settings_version. The client must
-	// never be able to downgrade or omit this field. If the stored blob
-	// has a higher version, keep it. Guards against issue #268: a v0.9.8
-	// frontend that omitted settings_version persisted version=0, which
-	// re-triggered the v1→v2 migration on next getSettings() and
-	// silently clobbered smart.max_age_days=0 back to 7 and
-	// smart.wake_drives=true back to false.
-	if raw, err := s.store.GetConfig(settingsConfigKey); err == nil && raw != "" {
-		var existing Settings
-		if json.Unmarshal([]byte(raw), &existing) == nil && existing.SettingsVersion > settings.SettingsVersion {
-			settings.SettingsVersion = existing.SettingsVersion
-		}
+	// settings_version is server-authoritative. The client must never be
+	// able to downgrade or omit it (issue #268: a frontend that omitted
+	// it persisted version=0, which re-ran the v1→v2 migration and
+	// clobbered smart.max_age_days=0 back to 7).
+	if current.SettingsVersion > settings.SettingsVersion {
+		settings.SettingsVersion = current.SettingsVersion
 	}
 	if settings.SettingsVersion < currentSettingsVersion {
 		settings.SettingsVersion = currentSettingsVersion
@@ -890,10 +900,20 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Basic validation
 	if settings.ScanInterval == "" {
-		settings.ScanInterval = "30m"
+		settings.ScanInterval = s.defaultSettings().ScanInterval
 	}
-	if _, err := time.ParseDuration(settings.ScanInterval); err != nil {
+	scanInterval, err := time.ParseDuration(settings.ScanInterval)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid scan_interval: " + err.Error()})
+		return
+	}
+	// A floor on the global interval, matching the per-subsystem one. The
+	// settings page auto-saves, and without this a half-typed custom
+	// interval of one second was persisted and run.
+	if scanInterval < ScanIntervalMin {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("scan_interval %s is too short (minimum %s)", settings.ScanInterval, FormatScanInterval(ScanIntervalMin)),
+		})
 		return
 	}
 	if settings.Theme == "" {
@@ -1070,26 +1090,29 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Retention defaults and bounds
-	if settings.Retention.SnapshotDays < 7 {
-		settings.Retention.SnapshotDays = 90
-	}
-	if settings.Retention.MaxDBSizeMB < 50 {
-		settings.Retention.MaxDBSizeMB = 500
-	}
-	if settings.Retention.NotifyLogDays < 1 {
-		settings.Retention.NotifyLogDays = 30
-	}
+	// Retention defaults and bounds. Zero means "not set" and takes the
+	// default; a value below the floor is raised to the floor. (It used
+	// to jump to the default, so asking for 5 days silently gave 90.)
+	settings.Retention.SnapshotDays = clampRetention(settings.Retention.SnapshotDays, 7, 90)
+	settings.Retention.MaxDBSizeMB = clampRetention(settings.Retention.MaxDBSizeMB, 50, 500)
+	settings.Retention.NotifyLogDays = clampRetention(settings.Retention.NotifyLogDays, 1, 30)
 
 	// Persist
-	data, err := json.Marshal(settings)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to marshal settings"})
-		return
-	}
-	if err := s.store.SetConfig(settingsConfigKey, string(data)); err != nil {
+	if err := s.persistSettingsLocked(settings); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save settings: " + err.Error()})
 		return
+	}
+
+	// Keep the browser that changed the key signed in: it proved it was
+	// allowed to (no key was set, or it held a valid session), and
+	// without this it would be bounced to the sign-in page by its own
+	// save.
+	if settings.APIKey != current.APIKey {
+		if settings.APIKey != "" {
+			setSessionCookie(w, r, settings.APIKey)
+		} else {
+			clearSessionCookie(w, r)
+		}
 	}
 
 	// Dynamically update the scheduler if changed. All scheduler/collector
@@ -1105,8 +1128,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			s.scheduler.UpdateInterval(d)
 		}
 
-		// Rebuild the notifier from the (possibly changed) webhook list.
-		s.scheduler.UpdateNotifier(s.buildNotifier(settings.Notifications.Webhooks))
+		// Rebuild the notifier from the (possibly changed) webhook list,
+		// plus any webhooks configured through the environment.
+		s.scheduler.UpdateNotifier(s.buildNotifier(MergeWebhooks(settings.Notifications.Webhooks, s.staticWebhooks)))
 
 		// Re-parse the global interval here rather than reading it back from
 		// the scheduler so the ScanDispatcher sees the value the user just
@@ -1131,7 +1155,19 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, settings)
+	writeJSON(w, http.StatusOK, settingsForResponse(settings))
+}
+
+// clampRetention returns def when v is unset (zero or negative), min when
+// v is below the floor, and v otherwise.
+func clampRetention(v, min, def int) int {
+	switch {
+	case v <= 0:
+		return def
+	case v < min:
+		return min
+	}
+	return v
 }
 
 // handleSparklines returns condensed history data for dashboard sparklines.
@@ -1165,7 +1201,18 @@ func (s *Server) handleFleetStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []internal.RemoteServerStatus{})
 		return
 	}
-	writeJSON(w, http.StatusOK, s.fleet.GetStatuses())
+	// The status feed is what the fleet page renders; it has no use for
+	// the credentials used to poll each peer. Returning the full server
+	// record handed every peer's API key and auth headers to any reader.
+	// The editable list (with credentials) is GET /api/v1/fleet/servers.
+	statuses := s.fleet.GetStatuses()
+	out := make([]internal.RemoteServerStatus, len(statuses))
+	for i, st := range statuses {
+		st.Server.APIKey = ""
+		st.Server.Headers = nil
+		out[i] = st
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleFleetServers returns the configured remote servers.
@@ -1198,10 +1245,13 @@ func (s *Server) handleFleetUpdateServers(w http.ResponseWriter, r *http.Request
 	}
 
 	// Persist in settings
-	settings := s.getSettings()
-	settings.Fleet = servers
-	data, _ := json.Marshal(settings)
-	s.store.SetConfig(settingsConfigKey, string(data))
+	if _, err := s.updateSettings(func(st *Settings) error {
+		st.Fleet = servers
+		return nil
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save: " + err.Error()})
+		return
+	}
 
 	// Update fleet manager
 	if s.fleet != nil {
@@ -1210,26 +1260,6 @@ func (s *Server) handleFleetUpdateServers(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, servers)
-}
-
-// handleFleetTestServer tests connectivity to a single server.
-func (s *Server) handleFleetTestServer(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
-		return
-	}
-	var srv internal.RemoteServer
-	if err := json.Unmarshal(body, &srv); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
-		return
-	}
-	if s.fleet == nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "fleet not initialized"})
-		return
-	}
-	result := s.fleet.TestServer(srv)
-	writeJSON(w, http.StatusOK, result)
 }
 
 // handleDismissFinding adds a finding title to the dismissed list.
@@ -1242,17 +1272,24 @@ func (s *Server) handleDismissFinding(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title required"})
 		return
 	}
-	settings := s.getSettings()
-	// Check if already dismissed
-	for _, d := range settings.DismissedFindings {
-		if d == req.Title {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "already dismissed"})
-			return
+	already := false
+	if _, err := s.updateSettings(func(st *Settings) error {
+		for _, d := range st.DismissedFindings {
+			if d == req.Title {
+				already = true
+				return nil
+			}
 		}
+		st.DismissedFindings = append(st.DismissedFindings, req.Title)
+		return nil
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save: " + err.Error()})
+		return
 	}
-	settings.DismissedFindings = append(settings.DismissedFindings, req.Title)
-	data, _ := json.Marshal(settings)
-	s.store.SetConfig(settingsConfigKey, string(data))
+	if already {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "already dismissed"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
 }
 
@@ -1266,16 +1303,19 @@ func (s *Server) handleRestoreFinding(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title required"})
 		return
 	}
-	settings := s.getSettings()
-	var updated []string
-	for _, d := range settings.DismissedFindings {
-		if d != req.Title {
-			updated = append(updated, d)
+	if _, err := s.updateSettings(func(st *Settings) error {
+		var updated []string
+		for _, d := range st.DismissedFindings {
+			if d != req.Title {
+				updated = append(updated, d)
+			}
 		}
+		st.DismissedFindings = updated
+		return nil
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save: " + err.Error()})
+		return
 	}
-	settings.DismissedFindings = updated
-	data, _ := json.Marshal(settings)
-	s.store.SetConfig(settingsConfigKey, string(data))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
 }
 
@@ -1317,25 +1357,6 @@ func (s *Server) handleListBackups(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, storage.BackupInfo{Backups: backups})
 }
 
-// getSettings loads and returns the current settings with defaults applied.
-// Runs one-time migrations when settings_version is behind currentSettingsVersion.
-func (s *Server) getSettings() Settings {
-	settings := defaultSettings()
-	if raw, err := s.store.GetConfig(settingsConfigKey); err == nil && raw != "" {
-		settings = migrateSettings([]byte(raw), settings)
-		if settings.SettingsVersion < currentSettingsVersion {
-			settings.SettingsVersion = currentSettingsVersion
-		}
-		// Persist the migrated blob so downstream reads skip the
-		// migration path. Only write if we actually had to migrate
-		// (cheap no-op when raw was already v2-shaped).
-		if data, err := json.Marshal(settings); err == nil {
-			s.store.SetConfig(settingsConfigKey, string(data))
-		}
-	}
-	return settings
-}
-
 // migrateSettings unmarshals a stored settings blob on top of the given
 // defaults struct and applies any one-time migrations required to reach
 // currentSettingsVersion. It does NOT persist — the caller owns that.
@@ -1370,6 +1391,17 @@ func migrateSettings(raw []byte, base Settings) Settings {
 	// when the incoming JSON omits them — critical for
 	// AdvancedScans.SMART.MaxAgeDays since old blobs will not contain
 	// the nested path at all.
+	//
+	// Slices are the exception. encoding/json decodes an array into the
+	// existing slice's backing array and reuses its elements, so fields
+	// the stored entry omits (omitempty zeros) would keep the value of
+	// the default entry in the same position. The seeded "Internet Speed"
+	// check is the one non-empty default list; drop it before decoding
+	// whenever the blob carries its own list, or the user's first check
+	// inherits the seed's interval and margin.
+	if jsonHasPath(raw, "service_checks", "checks") {
+		base.ServiceChecks.Checks = nil
+	}
 	_ = json.Unmarshal(raw, &base)
 
 	// Shape sentinels. Decode the raw JSON once into a loose map to
@@ -1519,13 +1551,18 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("failed to save notification log", "error", err)
 		}
 	})
-	n.NotifyFindings(testFindings, "nas-doctor-test")
-
-	// NotifyFindings does not return an error (it logs internally).
-	// We optimistically report success; the user should check the target.
+	if err := n.NotifyWebhook(wh, testFindings, "nas-doctor-test"); err != nil {
+		// Report what actually happened. This used to answer "sent"
+		// whether or not the webhook accepted the request.
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"status": "failed",
+			"error":  "Test notification failed: " + err.Error(),
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "sent",
-		"message": "Test notification dispatched. Check your webhook destination to confirm delivery.",
+		"message": "Test notification delivered. The webhook accepted it.",
 	})
 }
 
@@ -1768,14 +1805,10 @@ func (s *Server) handleSetChartRange(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hours must be 1, 24, or 168"})
 		return
 	}
-	settings := s.getSettings()
-	settings.ChartRangeHours = body.Hours
-	data, err := json.Marshal(settings)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to marshal settings"})
-		return
-	}
-	if err := s.store.SetConfig(settingsConfigKey, string(data)); err != nil {
+	if _, err := s.updateSettings(func(st *Settings) error {
+		st.ChartRangeHours = body.Hours
+		return nil
+	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save: " + err.Error()})
 		return
 	}
@@ -1793,18 +1826,14 @@ func (s *Server) handleSetSectionHeights(w http.ResponseWriter, r *http.Request)
 	// Sanitize: only keep positive heights, cap at 2000px
 	clean := make(map[string]int, len(body))
 	for k, v := range body {
-		if v > 0 && v < 2000 && len(k) < 64 {
+		if v > 0 && v < 2000 && validSectionID(k) && len(clean) < maxLayoutSections {
 			clean[k] = v
 		}
 	}
-	settings := s.getSettings()
-	settings.SectionHeights = clean
-	data, err := json.Marshal(settings)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to marshal settings"})
-		return
-	}
-	if err := s.store.SetConfig(settingsConfigKey, string(data)); err != nil {
+	if _, err := s.updateSettings(func(st *Settings) error {
+		st.SectionHeights = clean
+		return nil
+	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save: " + err.Error()})
 		return
 	}
@@ -1819,18 +1848,54 @@ func (s *Server) handleSetSectionOrder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	settings := s.getSettings()
-	settings.SectionOrder = body
-	data, err := json.Marshal(settings)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to marshal settings"})
+	// The layout is a handful of columns of section ids. Anything else is
+	// rejected rather than stored: this blob is re-read on every request.
+	if len(body) > maxLayoutColumns {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many layout columns"})
 		return
 	}
-	if err := s.store.SetConfig(settingsConfigKey, string(data)); err != nil {
+	for name, ids := range body {
+		if !validSectionID(name) || len(ids) > maxLayoutSections {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid section layout"})
+			return
+		}
+		for _, id := range ids {
+			if !validSectionID(id) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid section id in layout"})
+				return
+			}
+		}
+	}
+	if _, err := s.updateSettings(func(st *Settings) error {
+		st.SectionOrder = body
+		return nil
+	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save: " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// Bounds on the persisted dashboard layout.
+const (
+	maxLayoutColumns  = 16
+	maxLayoutSections = 64
+)
+
+// validSectionID reports whether id looks like a dashboard section or
+// column name: short, and made of letters, digits, '-' and '_'.
+func validSectionID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // ---------- Notification log handler ----------

@@ -786,7 +786,7 @@ func (f *FakeStore) GetConfig(key string) (string, error) {
 	defer f.mu.RUnlock()
 	v, ok := f.config[key]
 	if !ok {
-		return "", fmt.Errorf("config key %q not found", key)
+		return "", fmt.Errorf("config key %q: %w", key, ErrConfigNotFound)
 	}
 	return v, nil
 }

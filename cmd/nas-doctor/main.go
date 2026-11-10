@@ -76,6 +76,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	bootInterval := interval
+
 	// Load config
 	cfg := defaultConfig(*listenAddr, *dataDir)
 	if *configPath != "" {
@@ -109,7 +111,11 @@ func main() {
 	}
 	defer store.Close()
 
-	persistedSettings := loadPersistedSettings(store, logger)
+	// One read of the persisted settings, with defaults and migrations
+	// applied — the same view the API serves. On a fresh install nothing
+	// is stored yet and this is the defaults, with the scan interval taken
+	// from NAS_DOCTOR_INTERVAL / -interval.
+	runtimeSettings, settingsStored := loadRuntimeSettings(store, interval, logger)
 
 	// Create Prometheus metrics
 	metrics := notifier.NewMetrics()
@@ -339,12 +345,13 @@ func main() {
 		)
 	} else {
 		// Production mode: real collectors
-		interval = intervalFromSettings(persistedSettings, interval, logger)
+		interval = intervalFromSettings(&runtimeSettings, interval, logger)
 
-		webhooks := cfg.Notifications.Webhooks
-		if persistedSettings != nil && persistedSettings.Notifications.Webhooks != nil {
-			webhooks = persistedSettings.Notifications.Webhooks
-		}
+		// Webhooks from the environment or config file are delivered to
+		// alongside the ones saved in Settings. They used to be replaced
+		// by the saved list as soon as any settings existed, so
+		// NAS_DOCTOR_WEBHOOK_URL stopped working after the first save.
+		webhooks := api.MergeWebhooks(runtimeSettings.Notifications.Webhooks, cfg.Notifications.Webhooks)
 		notif := buildNotifier(webhooks, logger, store)
 
 		sched = scheduler.New(coll, store, notif, metrics, logger, interval)
@@ -355,7 +362,13 @@ func main() {
 		// no longer drift. This is the fix for issue #333: previously the
 		// speed-test schedule, notification rules and log forwarding were only
 		// applied on save and silently reverted on every restart.
-		applySchedulerSettingsFromStore(sched, coll, persistedSettings, interval)
+		//
+		// This runs on a fresh install too, with the defaults. Before, an
+		// install that had never saved settings ran without the default
+		// speed-test schedule and Internet Speed check that its own
+		// Settings page showed (settingsStored is only logged).
+		logger.Info("runtime settings applied", "stored", settingsStored, "scan_interval", interval.String())
+		applySchedulerSettingsFromStore(sched, coll, &runtimeSettings, interval)
 		// Defense-in-depth: guarantee the scheduler's in-memory service check
 		// set matches whatever history the DB carries, even when the settings
 		// payload failed to load or was nil (empty DB, corrupt JSON). Without
@@ -386,9 +399,9 @@ func main() {
 		logger.Info("demo fleet data loaded", "servers", len(demo.DemoFleetServers()))
 		// Don't start polling in demo mode — injected statuses are static
 	} else {
-		if persistedSettings != nil && len(persistedSettings.Fleet) > 0 {
-			fleetMgr.SetServers(persistedSettings.Fleet)
-			logger.Info("fleet monitoring loaded", "servers", len(persistedSettings.Fleet))
+		if len(runtimeSettings.Fleet) > 0 {
+			fleetMgr.SetServers(runtimeSettings.Fleet)
+			logger.Info("fleet monitoring loaded", "servers", len(runtimeSettings.Fleet))
 		}
 		fleetMgr.Start(60 * time.Second)
 		defer fleetMgr.Stop()
@@ -397,6 +410,13 @@ func main() {
 	// Create API server
 	apiServer := api.New(store, sched, coll, metrics, fleetMgr, logger, version)
 	apiServer.SetDataPersistent(dataPersistent)
+	if !*demoMode {
+		// What the process was started with: the default scan interval
+		// until the user saves another, and the webhooks that live in the
+		// environment rather than in Settings.
+		apiServer.SetBootScanInterval(bootInterval)
+		apiServer.SetStaticWebhooks(cfg.Notifications.Webhooks)
+	}
 
 	// HTTP server
 	srv := &http.Server{
@@ -526,17 +546,17 @@ func countSev(findings []internal.Finding, sev internal.Severity) int {
 	return n
 }
 
-func loadPersistedSettings(store *storage.DB, logger *slog.Logger) *api.Settings {
-	raw, err := store.GetConfig("settings")
-	if err != nil || raw == "" {
-		return nil
+// loadRuntimeSettings reads the persisted settings through the same loader
+// the API uses, so startup and the settings endpoints cannot disagree about
+// defaults or migrations. stored is false on a fresh install. A corrupt or
+// unreadable row is logged and treated as defaults rather than aborting
+// startup.
+func loadRuntimeSettings(store *storage.DB, bootInterval time.Duration, logger *slog.Logger) (settings api.Settings, stored bool) {
+	settings, stored, err := api.LoadSettings(store, bootInterval)
+	if err != nil {
+		logger.Warn("failed to read stored settings, starting with defaults", "error", err)
 	}
-	var settings api.Settings
-	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
-		logger.Warn("failed to parse stored settings", "error", err)
-		return nil
-	}
-	return &settings
+	return settings, stored
 }
 
 func intervalFromSettings(settings *api.Settings, fallback time.Duration, logger *slog.Logger) time.Duration {

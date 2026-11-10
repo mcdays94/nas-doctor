@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in — NAS Doctor</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="stylesheet" href="/css/shared.css?v=__VERSION__">
+<style>
+body{display:flex;align-items:center;justify-content:center}
+.signin{width:100%;max-width:380px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;box-shadow:var(--card-shadow);padding:32px 28px}
+.signin-brand{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:700;margin-bottom:20px}
+.signin-brand img{width:28px;height:28px;border-radius:6px}
+.signin h1{font-size:16px;font-weight:600;margin-bottom:6px}
+.signin p{font-size:13px;color:var(--text2);margin-bottom:18px}
+.signin label{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text2);margin-bottom:6px}
+.signin input{width:100%;font-family:var(--font-mono);font-size:13px}
+.signin-row{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:var(--text2)}
+.signin-row input{width:auto}
+.signin button{width:100%;margin-top:18px;justify-content:center}
+.signin-error{display:none;margin-top:14px;padding:10px 12px;border-radius:var(--radius);background:rgba(220,38,38,0.1);color:var(--red);font-size:13px}
+.signin-error.visible{display:block}
+.signin-hint{margin-top:18px;font-size:12px;color:var(--text3)}
+</style>
+</head>
+<body>
+<main class="signin">
+  <div class="signin-brand"><img src="/icon.png" alt="">NAS Doctor</div>
+  <h1>Sign in</h1>
+  <p>This instance is protected by an API key. Enter it to continue.</p>
+  <form id="signin-form" autocomplete="on">
+    <label for="api-key">API key</label>
+    <input type="password" id="api-key" name="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" required autofocus>
+    <div class="signin-row"><input type="checkbox" id="show-key"><label for="show-key" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400;font-size:12px">Show key</label></div>
+    <button type="submit" class="btn btn-primary" id="signin-btn">Sign in</button>
+    <div class="signin-error" id="signin-error" role="alert"></div>
+  </form>
+  <div class="signin-hint">The key is shown in Settings on a signed-in browser. If it is lost, remove <code>api_key</code> from the settings stored in the data volume, or restore a backup.</div>
+</main>
+<script>
+(function(){
+  try{var t=localStorage.getItem("nas-doctor-theme");if(t)document.body.classList.add("theme-"+t);}catch(e){}
+
+  // Only ever continue to a path on this origin.
+  function nextPath(){
+    var n=new URLSearchParams(location.search).get("next")||"/";
+    if(n.charAt(0)!=="/"||n.charAt(1)==="/"||n.charAt(1)==="\\"||n.indexOf("/login")===0)return"/";
+    return n;
+  }
+  var form=document.getElementById("signin-form");
+  var input=document.getElementById("api-key");
+  var btn=document.getElementById("signin-btn");
+  var err=document.getElementById("signin-error");
+  document.getElementById("show-key").addEventListener("change",function(e){input.type=e.target.checked?"text":"password";});
+  function fail(msg){err.textContent=msg;err.classList.add("visible");btn.disabled=false;btn.textContent="Sign in";input.focus();input.select();}
+  form.addEventListener("submit",function(e){
+    e.preventDefault();
+    err.classList.remove("visible");
+    btn.disabled=true;btn.textContent="Signing in…";
+    fetch("/api/v1/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({api_key:input.value})})
+      .then(function(r){return r.json().catch(function(){return{};}).then(function(d){return{ok:r.ok,status:r.status,data:d};});})
+      .then(function(res){
+        if(res.ok){location.replace(nextPath());return;}
+        fail(res.data.error?res.data.error.charAt(0).toUpperCase()+res.data.error.slice(1)+".":"Sign-in failed ("+res.status+").");
+      })
+      .catch(function(){fail("Could not reach NAS Doctor. Check the connection and try again.");});
+  });
+})();
+</script>
+</body>
+</html>

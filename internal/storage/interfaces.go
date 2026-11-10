@@ -7,11 +7,18 @@
 package storage
 
 import (
+	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/mcdays94/nas-doctor/internal"
 )
+
+// ErrConfigNotFound is returned by Store.GetConfig when the key has never
+// been written. Callers use it to tell "nothing stored yet" (fall back to
+// defaults) apart from a real read failure (which must not be mistaken for
+// an empty configuration — see the fail-open auth bug this guards against).
+var ErrConfigNotFound = errors.New("config key not found")
 
 // SnapshotStore handles snapshot persistence and retrieval.
 type SnapshotStore interface {

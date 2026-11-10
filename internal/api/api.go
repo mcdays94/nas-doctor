@@ -10,11 +10,11 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/mcdays94/nas-doctor/internal/collector"
@@ -120,6 +120,24 @@ type Server struct {
 	// #305 for the post-restart silent-window class of bug this
 	// helper closes.
 	ensureLatestMu sync.Mutex
+	// settingsMu serialises every read-modify-write of the persisted
+	// settings blob. See settings_store.go.
+	settingsMu sync.Mutex
+	// loginLimiter throttles failed sign-in attempts. See auth.go.
+	loginLimiter loginLimiter
+	// staticWebhooks are webhooks from the environment or config file
+	// (NAS_DOCTOR_WEBHOOK_URL). They are delivered to alongside the ones
+	// saved in Settings and never written to the settings blob.
+	staticWebhooks []internal.WebhookConfig
+	// bootScanInterval is the interval the process was started with
+	// (NAS_DOCTOR_INTERVAL / -interval), formatted like a settings value.
+	// It is the default scan interval until the user saves another.
+	bootScanInterval string
+	// adHocSpeedTestBusy is 1 while a Test-button speed test is running.
+	// The streaming test endpoint runs its own speed test outside the
+	// dashboard's singleton, so without a cap each request would start
+	// another full-bandwidth test.
+	adHocSpeedTestBusy atomic.Bool
 }
 
 // SetDataPersistent records whether /data resolved to a real bind-mount
@@ -158,14 +176,21 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Content-Type"},
-		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: false,
-		MaxAge:           300,
-	}))
+	// No CORS headers are sent. The UI is same-origin, and API clients
+	// (fleet polling, Prometheus, scripts) are not browsers. The previous
+	// wildcard policy let any web page read and rewrite settings through
+	// a visitor's browser.
+	r.Use(s.securityHeaders)
+	r.Use(s.limitRequestBody)
+	r.Use(s.sameOriginGuard)
+	// One gate for everything. When an API key is set, every route below
+	// requires it except the allow-list in isPublicPath (auth.go).
+	r.Use(s.authMiddleware)
+
+	// Sign-in for the browser UI.
+	r.Get("/login", s.handleLoginPage)
+	r.Post("/api/v1/auth/login", s.handleLogin)
+	r.Post("/api/v1/auth/logout", s.handleLogout)
 
 	// Long-running test endpoints — registered BEFORE the Timeout group.
 	// Speed-type service-check tests invoke the Ookla CLI, which can take
@@ -183,24 +208,22 @@ func (s *Server) Router() http.Handler {
 	// test and waits for the start handle (idempotent — almost always
 	// returns immediately, but the runner's lazy-init may briefly
 	// delay), GET /stream/{id} keeps the EventSource connection open
-	// for the full test lifetime. The api-key middleware exempts
-	// same-origin requests via the Referer check, which is what makes
-	// browser EventSource (no custom-headers support) work without
-	// extra wiring.
-	r.With(s.apiKeyMiddleware).Post("/api/v1/speedtest/run", s.handleSpeedtestRun)
-	r.With(s.apiKeyMiddleware).Get("/api/v1/speedtest/stream/{test_id}", s.handleSpeedtestStream)
+	// for the full test lifetime. Browser EventSource cannot set an
+	// Authorization header; it authenticates with the session cookie.
+	r.Post("/api/v1/speedtest/run", s.handleSpeedtestRun)
+	r.Get("/api/v1/speedtest/stream/{test_id}", s.handleSpeedtestStream)
 	// Cancel an in-flight test (issue #304). POST chosen over DELETE
 	// to keep the verb consistent with /run (both produce side-effects
 	// on the registry's singleton state) and to avoid the dashboard
 	// having to special-case fetch() for DELETE on older browsers.
-	r.With(s.apiKeyMiddleware).Post("/api/v1/speedtest/cancel/{test_id}", s.handleSpeedtestCancel)
+	r.Post("/api/v1/speedtest/cancel/{test_id}", s.handleSpeedtestCancel)
 	// Per-sample JSON for COMPLETED tests (PRD #283 slice 3 / #286).
 	// Strict separation from /stream/{id}: in-flight tests get a 404
 	// here with a hint pointing at /stream/{id}. Lives outside the
 	// 30s timeout group because the samples query is fast (single
 	// indexed read) but kept on the same line as run/stream for the
 	// route-grouping reader's mental model.
-	r.With(s.apiKeyMiddleware).Get("/api/v1/speedtest/samples/{test_id}", s.handleSpeedtestSamples)
+	r.Get("/api/v1/speedtest/samples/{test_id}", s.handleSpeedtestSamples)
 
 	// Standard-latency routes — 30s soft timeout via a Group so we don't
 	// apply it to the long-running route above.
@@ -210,9 +233,8 @@ func (s *Server) Router() http.Handler {
 		// Health endpoint — always public (Docker HEALTHCHECK, K8s probes, load balancers)
 		r.Get("/api/v1/health", s.handleHealth)
 
-		// API routes — protected by API key when set
+		// Core API routes.
 		r.Route("/api/v1", func(r chi.Router) {
-			r.Use(s.apiKeyMiddleware)
 			r.Get("/status", s.handleStatus)
 			r.Get("/snapshot/latest", s.handleLatestSnapshot)
 			r.Get("/snapshot/{id}", s.handleGetSnapshot)
@@ -292,37 +314,6 @@ func (s *Server) Router() http.Handler {
 }
 
 // ---------- Handlers ----------
-
-// apiKeyMiddleware checks for a valid API key when one is configured.
-// Requests from the same origin (HTML pages) are exempt — only external
-// API calls need the key. When no key is set, all requests pass through.
-func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		settings := s.getSettings()
-		if settings.APIKey == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		// Check Authorization header
-		auth := r.Header.Get("Authorization")
-		if auth == "" {
-			// Also check query param for convenience (e.g. browser testing)
-			auth = "Bearer " + r.URL.Query().Get("api_key")
-		}
-		expected := "Bearer " + settings.APIKey
-		if auth != expected {
-			// Allow requests from same origin (Referer contains our host)
-			referer := r.Header.Get("Referer")
-			if referer != "" && (strings.Contains(referer, r.Host) || strings.Contains(referer, "localhost")) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing API key"})
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-NAS-Doctor", "true")
@@ -754,16 +745,17 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.serveDashboard(w, settings.Theme)
 }
 
+// handleDashboardTheme previews the dashboard in the named theme without
+// changing the saved one. It used to persist the theme, which made a plain
+// GET (a link, an image tag on any page) a state-changing request. The
+// theme is saved from Settings.
 func (s *Server) handleDashboardTheme(w http.ResponseWriter, r *http.Request) {
 	theme := chi.URLParam(r, "theme")
-	if theme == ThemeMidnight || theme == ThemeClean {
-		settings := s.getSettings()
-		settings.Theme = theme
-		if data, err := json.Marshal(settings); err == nil {
-			s.store.SetConfig(settingsConfigKey, string(data))
-		}
+	if theme != ThemeMidnight && theme != ThemeClean {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
 	}
-	http.Redirect(w, r, "/", http.StatusFound)
+	s.serveDashboard(w, theme)
 }
 
 func (s *Server) serveDashboard(w http.ResponseWriter, theme string) {
