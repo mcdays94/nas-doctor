@@ -340,7 +340,10 @@ func buildBorgEnv(r BorgExternalRepo, readEnv func(string) string) map[string]st
 	env["BORG_RELOCATED_REPO_ACCESS_IS_OK"] = "yes"
 	env["BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK"] = "yes"
 	if keyPath := strings.TrimSpace(r.SSHKeyPath); keyPath != "" {
-		env["BORG_RSH"] = fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=accept-new", keyPath)
+		// Borg splits BORG_RSH like a shell (shlex). Quote the path so a
+		// value containing spaces stays one argument and cannot smuggle
+		// in extra ssh options such as -o ProxyCommand=...
+		env["BORG_RSH"] = fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=accept-new", shellQuote(keyPath))
 	}
 	if len(env) == 0 {
 		return nil
@@ -617,4 +620,22 @@ func formatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// shellQuote returns s as a single POSIX-shell word. Strings made only of
+// characters that need no quoting are returned unchanged.
+func shellQuote(s string) string {
+	safe := s != ""
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case strings.ContainsRune("_@%+=:,./-", c):
+		default:
+			safe = false
+		}
+	}
+	if safe {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

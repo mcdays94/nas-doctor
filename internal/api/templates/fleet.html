@@ -153,7 +153,15 @@ body.theme-clean .mini-stat{background:rgba(0,0,0,0.04)}
 })();
 (function(){
   "use strict";
-  function esc(s){var d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
+  // esc is used in both text and attribute positions, so it escapes quotes
+  // as well as markup.
+  function esc(s){var d=document.createElement("div");d.textContent=(s===null||s===undefined)?"":String(s);return d.innerHTML.replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+  // healthName maps a health string onto the closed set the stylesheet
+  // knows. Peer status comes from other machines; it is never written into
+  // the page as-is.
+  function healthName(h){return(h==="healthy"||h==="warning"||h==="critical")?h:"unknown";}
+  // safeHref only lets http(s) URLs become links.
+  function safeHref(u){return /^https?:\/\//i.test(u||"")?u:"#";}
 
   function platformIcon(p){
     p=(p||"").toLowerCase();
@@ -249,14 +257,14 @@ body.theme-clean .mini-stat{background:rgba(0,0,0,0.04)}
     for(var i=0;i<group.nodes.length;i++){
       var n=group.nodes[i];
       var p=platformIcon(n.platform||"");
-      var healthClass=n.online?(n.overall_health||"healthy"):"offline";
+      var healthClass=n.online?healthName(n.overall_health):"offline";
       h+='<div class="topo-node'+(n.online?'':' offline')+'">';
       h+='<div class="topo-node-icon node-icon '+p.cls+'">'+p.icon+'</div>';
       h+='<div class="topo-node-info">';
       h+='<div class="topo-node-name">'+esc(n.server.name||n.hostname||"?")+'</div>';
       h+='<div class="topo-node-sub">';
       h+='<span class="health-dot '+healthClass+'" style="width:7px;height:7px"></span>';
-      h+=n.online?esc(n.overall_health||"healthy"):'<span style="color:var(--red)">offline</span>';
+      h+=n.online?healthName(n.overall_health):'<span style="color:var(--red)">offline</span>';
       if(n.isSelf)h+=' <span class="topo-ctrl-badge">CTRL</span>';
       h+='</div>';
       h+='</div>';
@@ -338,7 +346,7 @@ body.theme-clean .mini-stat{background:rgba(0,0,0,0.04)}
       h+='<td>'+(online?'<span class="dot g"></span><span class="dot-label">Online</span>':'<span class="dot x"></span><span class="dot-label" style="color:var(--red)">Offline</span>')+'</td>';
       if(!online){h+='<td colspan="8" style="color:var(--text3);font-style:italic">'+esc(n.error||"Unreachable")+'</td></tr>';continue;}
       // Health
-      h+='<td>'+healthDot(n.overall_health)+'<span class="dot-label">'+(n.overall_health||"?")+'</span></td>';
+      h+='<td>'+healthDot(n.overall_health)+'<span class="dot-label">'+healthName(n.overall_health)+'</span></td>';
       // CPU
       if(s&&s.cpu_usage>0){h+='<td><span style="font-family:var(--font-mono);font-size:11px;color:'+barColor(s.cpu_usage)+'">'+s.cpu_usage.toFixed(0)+'%</span></td>';}
       else{h+='<td style="color:var(--text3)">&mdash;</td>';}
@@ -380,9 +388,9 @@ body.theme-clean .mini-stat{background:rgba(0,0,0,0.04)}
   /* ── Render node card ── */
   function renderNodeCard(n){
     var p=platformIcon(n.platform||"");
-    var healthClass=n.online?(n.overall_health||"healthy"):"offline";
+    var healthClass=n.online?healthName(n.overall_health):"offline";
     var s=n.summary;
-    var url=n.isSelf?"/":n.server.url||"#";
+    var url=n.isSelf?"/":safeHref(n.server.url);
     var h='<div class="node-card'+(n.online?'':' offline')+'">';
     h+='<div class="node-header">';
     h+='<div class="node-icon '+p.cls+'">'+p.icon+'</div>';
@@ -477,7 +485,7 @@ body.theme-clean .mini-stat{background:rgba(0,0,0,0.04)}
     for(var k=0;k<all.length;k++){
       var f=all[k];
       h+='<div class="finding-row">';
-      h+='<span class="finding-sev '+esc(f.severity)+'"></span>';
+      h+='<span class="finding-sev '+(sevOrder[f.severity]!==undefined?f.severity:"")+'"></span>';
       h+='<span class="finding-server">'+esc(f.server)+'</span>';
       h+='<span class="finding-title">'+esc(f.title)+'</span>';
       h+='<span class="finding-cat">'+esc(f.category)+'</span>';

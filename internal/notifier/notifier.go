@@ -7,10 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -31,6 +33,10 @@ func New(webhooks []internal.WebhookConfig, logger *slog.Logger) *Notifier {
 		webhooks: webhooks,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
+			// See deliver: a redirect is reported, never followed.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 		logger: logger,
 	}
@@ -259,16 +265,7 @@ func (n *Notifier) sendNtfy(wh internal.WebhookConfig, findings []internal.Findi
 		req.Header.Set(k, v)
 	}
 
-	resp, err := n.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("ntfy returned %d: %s", resp.StatusCode, string(body))
-	}
-	return nil
+	return n.deliver(req, "ntfy")
 }
 
 // ---------- Generic Webhook ----------
@@ -328,17 +325,58 @@ func (n *Notifier) postJSON(wh internal.WebhookConfig, payload any) error {
 		req.Header.Set("X-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
 
+	return n.deliver(req, "webhook")
+}
+
+// deliver sends req and turns anything but a 2xx reply into an error.
+//
+// The error text ends up in the notification log and the container log,
+// both of which are readable through the API, so it must not carry the
+// webhook URL (for Discord, Slack and Gotify the URL is the credential)
+// or an unbounded copy of whatever the far end answered.
+func (n *Notifier) deliver(req *http.Request, label string) error {
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return err
+		return redactURLError(err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		// Redirects are not followed: net/http would replay a POST as a
+		// body-less GET on 301/302/303, the service would receive an
+		// empty request, and the delivery would be logged as sent.
+		return fmt.Errorf("%s returned %d (redirect): update the URL to the final address", label, resp.StatusCode)
+	}
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("webhook returned %d: %s", resp.StatusCode, string(body))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		return fmt.Errorf("%s returned %d: %s", label, resp.StatusCode, summarizeBody(body))
 	}
 	return nil
+}
+
+const (
+	maxErrorBodyBytes = 2048
+	maxErrorBodyChars = 200
+)
+
+// summarizeBody collapses whitespace in an error response and truncates it.
+func summarizeBody(body []byte) string {
+	text := strings.Join(strings.Fields(string(body)), " ")
+	if len(text) > maxErrorBodyChars {
+		text = text[:maxErrorBodyChars] + "…"
+	}
+	return text
+}
+
+// redactURLError drops the request URL from a transport error. *url.Error
+// formats as `Post "https://host/secret-path": cause`; only the operation
+// and the cause are kept.
+func redactURLError(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return fmt.Errorf("%s request failed: %w", strings.ToLower(uerr.Op), uerr.Err)
+	}
+	return err
 }
 
 func countBySeverity(findings []internal.Finding) (critical, warnings, infos int) {

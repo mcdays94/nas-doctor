@@ -174,7 +174,7 @@ func (m *Manager) pollServer(srv internal.RemoteServer) *internal.RemoteServerSt
 	result.Platform = statusResp.Platform
 	result.Version = statusResp.Version
 	result.Uptime = statusResp.Uptime
-	result.OverallHealth = statusResp.OverallHealth
+	result.OverallHealth = normalizeHealth(statusResp.OverallHealth)
 	result.CriticalCount = statusResp.CriticalCount
 	result.WarningCount = statusResp.WarningCount
 	result.InfoCount = statusResp.InfoCount
@@ -335,4 +335,20 @@ func (m *Manager) GetServers() []internal.RemoteServer {
 // TestServer polls a single server and returns the result immediately.
 func (m *Manager) TestServer(srv internal.RemoteServer) *internal.RemoteServerStatus {
 	return m.pollServer(srv)
+}
+
+// normalizeHealth maps a peer-reported health string onto the closed set
+// the UI knows. The value comes from another machine and is rendered by
+// the fleet page, so anything unexpected becomes "unknown" rather than
+// being passed through.
+func normalizeHealth(h string) string {
+	switch strings.ToLower(strings.TrimSpace(h)) {
+	case "healthy":
+		return "healthy"
+	case "warning":
+		return "warning"
+	case "critical":
+		return "critical"
+	}
+	return "unknown"
 }
