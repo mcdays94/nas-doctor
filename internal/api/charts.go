@@ -124,6 +124,12 @@ function animate(dur,fn,done){
 
 /* ── tooltip helper ──────────────────────────────────────────────── */
 var tips=[]; /* {el, tip}: each canvas and its tooltip div in <body> */
+// tipEsc escapes text placed in a tooltip. Series labels and axis labels
+// are data (process names, device names), and the tooltip is built as HTML.
+function tipEsc(v){
+  if(v===null||v===undefined) return "";
+  return String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
 function attachTooltip(el,hitTest){
   /* A redraw on the same canvas swaps in its hit test. Another tooltip
      and listener pair would leave the old chart answering hovers. */
@@ -405,9 +411,9 @@ function drawLine(id,opts){
     var rows=ds.map(function(d,di){
       var v=d.data[idx];
       return "<div style='margin:2px 0'><span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:"+(d.color||"#55b3ff")+";margin-right:6px'></span>"+
-        (d.label||"Series "+(di+1))+": <b>"+v+"</b></div>";
+        tipEsc(d.label||"Series "+(di+1))+": <b>"+tipEsc(v)+"</b></div>";
     }).join("");
-    var html="<div style='font-weight:600;margin-bottom:4px'>"+(labels[idx]||"")+"</div>"+rows;
+    var html="<div style='font-weight:600;margin-bottom:4px'>"+tipEsc(labels[idx]||"")+"</div>"+rows;
     return {html:html,cx:cx,redraw:function(){render(1);}};
   });
 }
@@ -471,9 +477,9 @@ function drawArea(id,opts){
     var rows=ds.map(function(d,di){
       var v=d.data[idx]; var col=d.color||"#55b3ff";
       return "<div style='margin:2px 0'><span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:"+col+";margin-right:6px'></span>"+
-        (d.label||"Series "+(di+1))+": <b>"+v+"</b></div>";
+        tipEsc(d.label||"Series "+(di+1))+": <b>"+tipEsc(v)+"</b></div>";
     }).join("");
-    var html="<div style='font-weight:600;margin-bottom:4px'>"+(labels[idx]||"")+"</div>"+rows;
+    var html="<div style='font-weight:600;margin-bottom:4px'>"+tipEsc(labels[idx]||"")+"</div>"+rows;
     return {html:html,cx:cx,redraw:function(){render(1);}};
   });
 }
@@ -542,8 +548,8 @@ function drawBar(id,opts){
     cross.idx=idx;
     if(idx<0) return null;
     var col=colors[idx]||defCol;
-    var html="<div style='font-weight:600;margin-bottom:2px'>"+(labels[idx]||"Bar "+(idx+1))+"</div>"+
-      "<div><span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:"+col+";margin-right:6px'></span><b>"+data[idx]+"</b></div>";
+    var html="<div style='font-weight:600;margin-bottom:2px'>"+tipEsc(labels[idx]||"Bar "+(idx+1))+"</div>"+
+      "<div><span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:"+col+";margin-right:6px'></span><b>"+tipEsc(data[idx])+"</b></div>";
     return {html:html,cx:startX+idx*(bw+gap)+bw/2,redraw:function(){render(1);}};
   });
 }

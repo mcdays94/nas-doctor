@@ -473,7 +473,7 @@ sections.drives = function(sn, st) {
         var ageStr = noData ? '\u2014' : (s.power_on_hours > 8766 ? (s.power_on_hours / 8766).toFixed(1) + 'y' : (s.power_on_hours || 0).toLocaleString() + 'h');
         var slotLabel = s.array_slot || '';
 
-        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px;margin-bottom:6px;cursor:pointer" onclick="window.location=\'/disk/' + encodeURIComponent(s.serial || '') + '\'">';
+        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px;margin-bottom:6px;cursor:pointer" data-href="' + esc('/disk/' + encodeURIComponent(s.serial || '')) + '" onclick="window.location=this.dataset.href">';
         h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
         h += '<span class="status-dot ' + healthDot + '"></span>';
         h += '<span style="font-weight:600;font-size:13px;min-width:55px">' + esc(s.device) + '</span>';
@@ -530,7 +530,7 @@ sections.drives = function(sn, st) {
       for (var di = 0; di < unmatchedDisks.length; di++) {
         var dk = unmatchedDisks[di];
         var pct = dk.used_percent || 0;
-        var storageLabel = dk.label || dk.mount_point;
+        var storageLabel = esc(dk.label || dk.mount_point);
         var mp = dk.mount_point || "";
         if (mp.indexOf("/mnt/disk") === 0) {
           var slotNum = mp.replace("/mnt/disk", "");
