@@ -297,3 +297,34 @@ func jsonHasPath(raw []byte, path ...string) bool {
 	}
 	return true
 }
+
+// ResetAPIKey removes the API key from the stored settings, leaving
+// everything else untouched. It backs the -reset-api-key command-line
+// flag: now that the web UI is behind the key too, a lost key can no
+// longer be read off the Settings page, so there has to be a way back in
+// for whoever controls the host. removed is false when no key was set.
+func ResetAPIKey(store storage.ConfigStore) (removed bool, err error) {
+	raw, err := store.GetConfig(settingsConfigKey)
+	if err != nil {
+		if errors.Is(err, storage.ErrConfigNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	// Edit the raw document rather than round-tripping the struct, so the
+	// command cannot change anything but the one key.
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return false, fmt.Errorf("stored settings are not valid JSON: %w", err)
+	}
+	cur, ok := doc["api_key"]
+	if !ok || string(cur) == `""` || string(cur) == "null" {
+		return false, nil
+	}
+	delete(doc, "api_key")
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return false, err
+	}
+	return true, store.SetConfig(settingsConfigKey, string(out))
+}

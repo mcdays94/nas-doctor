@@ -298,12 +298,27 @@ Dropdown-driven notification builder with full granularity — no YAML, no compl
 
 ### API Key Authentication
 
-Per-instance API key system for securing fleet communication:
-- **Generate/Copy/Revoke** from Settings — key format `nd-{uuid}`
-- All `/api/v1/*` endpoints protected when key is set (including `/health`)
-- Dashboard UI exempt (same-origin requests pass through)
+An optional per-instance key. With no key set the instance is open, as before. With a key set, everything requires it:
+
+- **Generate/Copy/Revoke** from Settings — key format `nd-{hex}`
+- Every route is protected: all of `/api/v1/*`, `/metrics`, and the web pages. Only `/api/v1/health` (Docker HEALTHCHECK, Kubernetes probes, fleet discovery) and the sign-in page stay public
+- **API clients** send `Authorization: Bearer <key>` (or `?api_key=<key>`)
+- **Browsers** sign in once at `/login` with the key and keep an HttpOnly session cookie for 30 days. Rotating or revoking the key ends every session. The browser that sets the key stays signed in
+- **Prometheus** needs the key too once one is set:
+  ```yaml
+  scrape_configs:
+    - job_name: nas-doctor
+      authorization:
+        credentials: nd-your-key
+      static_configs:
+        - targets: ["nas:8060"]
+  ```
+- **Lost the key?** Remove it from the host and set a new one in Settings:
+  ```bash
+  docker exec nas-doctor /app/nas-doctor -reset-api-key
+  ```
+- No CORS headers are sent, and state-changing requests from another origin are refused, so a web page open in your browser cannot drive the API. Scripts and other servers are unaffected
 - Fleet test validates end-to-end with API key before saving
-- Docker HEALTHCHECK and K8s probes use TCP port check (no auth needed)
 
 ### Multi-Server Fleet Monitoring
 
@@ -316,7 +331,7 @@ Monitor all your NAS Doctor instances from a visual topology view at `/fleet`:
 - **Auto-create service check** when adding a fleet server
 - **Edit/Remove** per server with collapsible form
 - **Open Dashboard** link to view remote instance directly
-- API key required for fleet polling
+- If a remote instance has an API key, enter it when you add the server; it is sent as a Bearer token on every poll
 
 ### Integrations
 
@@ -625,7 +640,7 @@ Captured from demo mode, which renders the UI with generated data.
 All configurable from the web UI at `/settings`, organized with a sticky section nav:
 
 - **General**: Scan interval (preset or custom with cron preview), theme selection, app icon
-- **API Key**: Generate, copy or revoke the key that protects `/api/v1/*`
+- **API Key**: Generate, copy or revoke the key that protects the API, `/metrics` and the web UI; sign out of the current browser
 - **Webhooks**: Add/remove/test Discord, Slack, Gotify, Ntfy, or generic HTTP webhooks with optional custom headers and HMAC signing
 - **Notification Rules**: Dropdown-driven rule builder with 13 categories, live target selection, threshold inputs, one-click presets, quiet hours, and maintenance windows
 - **Service Checks**: HTTP, TCP, DNS, Ping/ICMP, SMB, NFS, Traceroute and Speed Test checks with per-check configurable intervals (30s–1h) and a **Test** button
@@ -644,8 +659,8 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | Variable | Default | Description |
 |---|---|---|
 | `NAS_DOCTOR_LISTEN` | `:8060` | HTTP listen address. Accepts `:port`, `host:port`, or bare `port` (normalized). |
-| `NAS_DOCTOR_DATA` | `/data` | SQLite database directory |
-| `NAS_DOCTOR_INTERVAL` | `30m` | Diagnostic scan interval |
+| `NAS_DOCTOR_DATA` | `/data` | SQLite database directory. `/data` is the Docker image's setting; the bare binary defaults to `/tmp/nas-doctor-data` |
+| `NAS_DOCTOR_INTERVAL` | `30m` | Diagnostic scan interval. This is the default: it applies until a scan interval is saved in Settings, and the saved value is used from then on |
 | `NAS_DOCTOR_UPS_NAME` | (auto-detect) | NUT UPS name (skip auto-detect from `upsc -l`) |
 | `NAS_DOCTOR_NUT_HOST` | (local) | Remote NUT server host (queries `upsname@host`) |
 | `NAS_DOCTOR_APCUPSD_HOST` | (local) | Remote apcupsd daemon `host:port` |
@@ -653,7 +668,7 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `NAS_DOCTOR_TAILSCALE_CONTAINER_NAMES` | (none) | Extra container names to treat as Tailscale, comma-separated, case-insensitive substring match (e.g. `ts-sidecar,vpn`) |
 | `NAS_DOCTOR_HOST_LOG` | `/host/log` | Where the host's `/var/log` is mounted in the container |
 | `NAS_DOCTOR_HOST_BOOT` | `/host/boot` | Where the host's `/boot` is mounted in the container (Unraid) |
-| `NAS_DOCTOR_WEBHOOK_URL` | (none) | Adds a webhook at startup, alongside any configured in Settings |
+| `NAS_DOCTOR_WEBHOOK_URL` | (none) | Adds a webhook that is delivered to alongside any configured in Settings. It is not listed in Settings and is not affected by saving them |
 | `NAS_DOCTOR_WEBHOOK_TYPE` | `generic` | Type for that webhook: `discord`, `slack`, `gotify`, `ntfy` or `generic` |
 | `NAS_DOCTOR_CONFIG` | (none) | Optional JSON config file loaded at startup (same as `-config`) |
 | `TZ` | `UTC` | Timezone |
@@ -674,7 +689,7 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `/api/v1/history/processes` | GET | Process CPU/memory history (query: `?hours=N`) |
 | `/api/v1/history/containers` | GET | Container stats history (query: `?hours=N`) |
 | `/api/v1/history/gpu` | GET | GPU metrics history (query: `?hours=N`) |
-| `/api/v1/settings` | GET/PUT | Read/write application settings |
+| `/api/v1/settings` | GET/PUT | Read/write application settings. PUT merges: objects are merged key by key, arrays and scalars replace, and anything the request leaves out keeps its value |
 | `/api/v1/settings/test-webhook` | POST | Send test notification to a webhook |
 | `/api/v1/settings/chart-range` | PUT | Save the dashboard chart range (1, 24 or 168 hours) |
 | `/api/v1/settings/section-order` | PUT | Save the dashboard section layout |
@@ -721,13 +736,16 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `/parity` | GET | Parity history detail page (HTML) |
 | `/api/v1/fleet/servers` | GET/PUT | Manage remote server list |
 | `/api/v1/fleet/test` | POST | Test connectivity to a remote server |
-| `/metrics` | GET | Prometheus metrics endpoint |
+| `/metrics` | GET | Prometheus metrics endpoint (requires the API key when one is set) |
+| `/login` | GET | Sign-in page, shown when an API key is set |
+| `/api/v1/auth/login` | POST | Exchange `{"api_key": "…"}` for a session cookie |
+| `/api/v1/auth/logout` | POST | Clear the session cookie |
 
 ---
 
 ## Prometheus Metrics
 
-All metrics prefixed with `nasdoctor_`. Full list:
+All metrics prefixed with `nasdoctor_`. When an API key is set, the scrape must send it as a Bearer token (see [API Key Authentication](#api-key-authentication)). Full list:
 
 <details>
 <summary>Expand metric list (120+ metrics)</summary>

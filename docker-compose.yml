@@ -25,7 +25,6 @@ services:
       # Optional: Webhook notifications
       # - NAS_DOCTOR_WEBHOOK_URL=https://discord.com/api/webhooks/xxx/yyy
       # - NAS_DOCTOR_WEBHOOK_TYPE=discord
-      # - NAS_DOCTOR_WEBHOOK_MIN_LEVEL=warning
     ports:
       - "8060:8060"
     restart: unless-stopped

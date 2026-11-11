@@ -6,11 +6,16 @@
 //
 // Flags:
 //
-//	-listen     HTTP listen address (default ":8080")
-//	-data       Data directory for SQLite database (default "/data")
-//	-interval   Diagnostic scan interval (default "30m")
-//	-config     Path to JSON config file (optional)
-//	-demo       Run with realistic mock data (for previewing themes)
+//	-listen         HTTP listen address (default ":8060", or NAS_DOCTOR_LISTEN)
+//	-data           Data directory for the SQLite database (default
+//	                "/tmp/nas-doctor-data", or NAS_DOCTOR_DATA; the Docker
+//	                image sets it to "/data")
+//	-interval       Diagnostic scan interval (default "30m", or
+//	                NAS_DOCTOR_INTERVAL); the default until one is saved in
+//	                Settings
+//	-config         Path to JSON config file (optional)
+//	-demo           Run with realistic mock data (for previewing themes)
+//	-reset-api-key  Remove the API key from the stored settings and exit
 package main
 
 import (
@@ -50,6 +55,7 @@ func main() {
 	intervalStr := flag.String("interval", envOr("NAS_DOCTOR_INTERVAL", "30m"), "Diagnostic scan interval")
 	configPath := flag.String("config", envOr("NAS_DOCTOR_CONFIG", ""), "Path to JSON config file")
 	demoMode := flag.Bool("demo", false, "Run with realistic mock data (for previewing themes)")
+	resetAPIKey := flag.Bool("reset-api-key", false, "Remove the API key from the stored settings and exit (use when the key is lost)")
 	flag.Parse()
 
 	// Logger
@@ -98,7 +104,7 @@ func main() {
 	// Runs only in production (demo mode writes to a tmpfs path by default
 	// and we don't want to scold users previewing the dashboard).
 	dataPersistent := true
-	if !*demoMode {
+	if !*demoMode && !*resetAPIKey {
 		dataPersistent = warnIfDataEphemeral(logger, cfg.DataDir)
 	}
 
@@ -110,6 +116,26 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
+
+	// Recovery for a lost API key. The web UI requires the key, so the
+	// way back in is from the host:
+	//   docker exec nas-doctor /app/nas-doctor -reset-api-key
+	// It edits the same database a running instance uses; the change is
+	// picked up on the next request.
+	if *resetAPIKey {
+		removed, err := api.ResetAPIKey(store)
+		if err != nil {
+			logger.Error("failed to reset the API key", "error", err)
+			store.Close()
+			os.Exit(1)
+		}
+		if removed {
+			fmt.Println("API key removed. The instance is open until a new key is generated in Settings.")
+		} else {
+			fmt.Println("No API key was set. Nothing changed.")
+		}
+		return
+	}
 
 	// One read of the persisted settings, with defaults and migrations
 	// applied — the same view the API serves. On a fresh install nothing

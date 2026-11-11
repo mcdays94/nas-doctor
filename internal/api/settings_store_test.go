@@ -564,3 +564,42 @@ func TestFleetStatus_DoesNotExposePeerCredentials(t *testing.T) {
 		t.Error("sanitising the response altered the manager's stored status")
 	}
 }
+
+// TestResetAPIKey: the recovery path for a lost key removes only the key.
+func TestResetAPIKey(t *testing.T) {
+	store := storage.NewFakeStore()
+
+	if removed, err := ResetAPIKey(store); err != nil || removed {
+		t.Fatalf("empty store: removed=%v err=%v", removed, err)
+	}
+
+	srv := newSettingsTestServer()
+	srv.store = store
+	putSettingsJSON(t, srv, `{"api_key":"nd-lost","scan_interval":"6h","cost_per_tb":12.5,"notifications":{"webhooks":[{"name":"h","url":"http://127.0.0.1:9/","type":"generic","enabled":true}]}}`)
+	before, _ := store.GetConfig(settingsConfigKey)
+
+	removed, err := ResetAPIKey(store)
+	if err != nil || !removed {
+		t.Fatalf("removed=%v err=%v", removed, err)
+	}
+	got := srv.getSettings()
+	if got.APIKey != "" {
+		t.Errorf("api key still set: %q", got.APIKey)
+	}
+	if got.ScanInterval != "6h" || got.CostPerTB != 12.5 || len(got.Notifications.Webhooks) != 1 {
+		t.Errorf("reset changed other settings: %+v", got)
+	}
+	after, _ := store.GetConfig(settingsConfigKey)
+	if len(after) >= len(before) {
+		t.Error("stored blob did not shrink by the removed key")
+	}
+	// The instance is open again.
+	rr := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/status", nil))
+	if rr.Code != http.StatusOK {
+		t.Errorf("status after reset = %d, want 200", rr.Code)
+	}
+	if removed, _ := ResetAPIKey(store); removed {
+		t.Error("second reset reported a key removed")
+	}
+}
