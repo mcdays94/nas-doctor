@@ -264,7 +264,7 @@ polling.triggerScan = function() {
   if (_scanInProgress) return;
   _scanInProgress = true;
   if (_renderFn) _renderFn();
-  fetch("/api/v1/scan", { method: "POST" })
+  fetch("/api/v1/scan", { method: "POST", headers: { "X-Requested-With": "nas-doctor" } })
     .then(function(r) { return r.json(); })
     .then(function() {
       setTimeout(function() {
@@ -1789,7 +1789,7 @@ var speedtestLive = (function() {
   function cancel() {
     if (!state.testId) return;
     setCancelEnabled(false, 'Cancelling...');
-    fetch('/api/v1/speedtest/cancel/' + state.testId, { method: 'POST' })
+    fetch('/api/v1/speedtest/cancel/' + state.testId, { method: 'POST', headers: { 'X-Requested-With': 'nas-doctor' } })
       .catch(function() {
         /* If the request itself fails (offline, etc.) re-enable the
            button so the user can retry. The SSE stream's terminal
@@ -1803,7 +1803,7 @@ var speedtestLive = (function() {
     if (state.testId && panel && panel.isRunning()) return;
     begin();
     setCancelEnabled(false, 'Cancel');
-    fetch('/api/v1/speedtest/run', { method: 'POST' })
+    fetch('/api/v1/speedtest/run', { method: 'POST', headers: { 'X-Requested-With': 'nas-doctor' } })
       .then(function(r) {
         return r.json().catch(function() { return {}; }).then(function(body) {
           if (!r.ok || !body || !body.test_id) throw new Error((body && body.error) || ('HTTP ' + r.status));

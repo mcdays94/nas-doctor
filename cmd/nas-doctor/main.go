@@ -393,8 +393,18 @@ func main() {
 		// install that had never saved settings ran without the default
 		// speed-test schedule and Internet Speed check that its own
 		// Settings page showed (settingsStored is only logged).
-		logger.Info("runtime settings applied", "stored", settingsStored, "scan_interval", interval.String())
-		applySchedulerSettingsFromStore(sched, coll, &runtimeSettings, interval)
+		//
+		// The one case left alone is an install that already has scan
+		// history but has never saved a setting. It has been running on
+		// the scheduler's built-in defaults; applying the settings
+		// defaults to it now would add a service check and change its
+		// speed-test and backup cadence on upgrade.
+		if applySettingsAtBoot(settingsStored, hasScanHistory(store)) {
+			logger.Info("runtime settings applied", "stored", settingsStored, "scan_interval", interval.String())
+			applySchedulerSettingsFromStore(sched, coll, &runtimeSettings, interval)
+		} else {
+			logger.Info("existing install with no saved settings: keeping scheduler defaults until settings are saved")
+		}
 		// Defense-in-depth: guarantee the scheduler's in-memory service check
 		// set matches whatever history the DB carries, even when the settings
 		// payload failed to load or was nil (empty DB, corrupt JSON). Without
@@ -570,6 +580,21 @@ func countSev(findings []internal.Finding, sev internal.Severity) int {
 		}
 	}
 	return n
+}
+
+// applySettingsAtBoot decides whether the loaded settings are pushed into
+// the scheduler at startup: always when settings have been saved, and on a
+// brand-new data directory (so a fresh install runs what its Settings page
+// shows). An existing install that never saved settings is left as it was.
+func applySettingsAtBoot(settingsStored, hasHistory bool) bool {
+	return settingsStored || !hasHistory
+}
+
+// hasScanHistory reports whether the database already holds a snapshot,
+// i.e. this data directory has been used by an earlier run.
+func hasScanHistory(store *storage.DB) bool {
+	snap, err := store.GetLatestSnapshot()
+	return err == nil && snap != nil
 }
 
 // loadRuntimeSettings reads the persisted settings through the same loader

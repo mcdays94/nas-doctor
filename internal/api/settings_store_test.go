@@ -189,6 +189,24 @@ func TestUpdateSettings_ScanIntervalFloor(t *testing.T) {
 	if rr := putSettingsJSON(t, srv, `{"scan_interval":"30s"}`); rr.Code != http.StatusOK {
 		t.Errorf("scan_interval 30s = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
+
+	// An install that already runs a shorter interval keeps it and can
+	// still save other settings; only a change to a too-short value is
+	// refused.
+	old := newSettingsTestServer()
+	_ = old.store.SetConfig(settingsConfigKey, `{"settings_version":3,"scan_interval":"10s"}`)
+	if rr := putSettingsJSON(t, old, `{"theme":"clean"}`); rr.Code != http.StatusOK {
+		t.Errorf("unrelated save on an install with a 10s interval = %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr := putSettingsJSON(t, old, `{"scan_interval":"10s","theme":"midnight"}`); rr.Code != http.StatusOK {
+		t.Errorf("re-sending the stored 10s interval = %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := old.getSettings().ScanInterval; got != "10s" {
+		t.Errorf("stored interval changed to %q", got)
+	}
+	if rr := putSettingsJSON(t, old, `{"scan_interval":"5s"}`); rr.Code != http.StatusBadRequest {
+		t.Errorf("changing to 5s = %d, want 400", rr.Code)
+	}
 }
 
 func TestUpdateSettings_RetentionClampsToFloor(t *testing.T) {
@@ -467,6 +485,12 @@ func TestMergeWebhooks(t *testing.T) {
 	}
 	if got := MergeWebhooks(nil, static[:1]); len(got) != 1 {
 		t.Errorf("static webhook dropped when nothing is saved: %+v", got)
+	}
+	// The same destination configured in Settings and in the environment
+	// is notified once.
+	sameURL := []internal.WebhookConfig{{Name: "env-webhook", URL: "http://a"}}
+	if got := MergeWebhooks(saved, sameURL); len(got) != 1 {
+		t.Errorf("a static webhook with a saved webhook's URL was added again: %+v", got)
 	}
 	if got := MergeWebhooks(saved, nil); len(got) != 1 {
 		t.Errorf("saved webhooks changed with no static ones: %+v", got)

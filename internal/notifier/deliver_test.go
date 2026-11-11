@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -112,5 +113,55 @@ func TestDeliver_2xxIsSuccess(t *testing.T) {
 	}
 	if gotBody.Load() != 1 {
 		t.Error("the webhook did not receive a POST with a body")
+	}
+}
+
+// TestDeliver_SameHostRedirectKeepsMethodAndBody: a redirect that stays on
+// the same host (a moved path, http to https) is followed as a POST with
+// the original body, so notifications that used to arrive empty now
+// arrive.
+func TestDeliver_SameHostRedirectKeepsMethodAndBody(t *testing.T) {
+	var method string
+	var bodyLen int
+	var hdr string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/old", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/new", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("/new", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		method, bodyLen, hdr = r.Method, len(b), r.Header.Get("X-Token")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	up := httptest.NewServer(mux)
+	defer up.Close()
+
+	n := New(nil, quietLogger())
+	wh := internal.WebhookConfig{Name: "w", Type: "generic", URL: up.URL + "/old", Enabled: true, Headers: map[string]string{"X-Token": "t1"}}
+	if err := n.NotifyWebhook(wh, testFindings(), "host"); err != nil {
+		t.Fatalf("same-host redirect not followed: %v", err)
+	}
+	if method != http.MethodPost || bodyLen == 0 || hdr != "t1" {
+		t.Errorf("after redirect: method=%s body=%d bytes header=%q; want POST with the body and headers", method, bodyLen, hdr)
+	}
+}
+
+func TestSameWebhookHost(t *testing.T) {
+	mk := func(s string) *url.URL { u, _ := url.Parse(s); return u }
+	cases := []struct {
+		from, to string
+		want     bool
+	}{
+		{"http://nas.lan/hook", "https://nas.lan/hook", true},
+		{"http://nas.lan/a", "http://nas.lan/b", true},
+		{"https://nas.lan:8443/a", "https://nas.lan:8443/b", true},
+		{"http://nas.lan/a", "http://other.lan/a", false},
+		{"http://nas.lan:8080/a", "http://nas.lan:9090/a", false},
+		{"http://nas.lan:8080/a", "https://nas.lan/a", false},
+	}
+	for _, c := range cases {
+		if got := sameWebhookHost(mk(c.from), mk(c.to)); got != c.want {
+			t.Errorf("sameWebhookHost(%s, %s) = %v, want %v", c.from, c.to, got, c.want)
+		}
 	}
 }

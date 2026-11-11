@@ -410,6 +410,38 @@ func TestSameOriginGuard(t *testing.T) {
 		t.Errorf("Origin matching X-Forwarded-Host = %d, want 200", c)
 	}
 
+	// Requests a foreign page cannot send without a CORS preflight (which is
+	// never granted) are not inspected. This is what keeps the UI working
+	// behind a plain-HTTP reverse proxy that rewrites the Host header: its
+	// Origin no longer matches, but its requests are not "simple" POSTs.
+	if c := post(func(r *http.Request) {
+		r.Header.Set("Origin", "http://nas.example.com")
+		r.Header.Set("Content-Type", "application/json")
+	}); c != http.StatusOK {
+		t.Errorf("JSON POST with a non-matching Origin = %d, want 200", c)
+	}
+	if c := post(func(r *http.Request) {
+		r.Header.Set("Origin", "http://nas.example.com")
+		r.Header.Set("X-Requested-With", "nas-doctor")
+	}); c != http.StatusOK {
+		t.Errorf("POST with a custom header and a non-matching Origin = %d, want 200", c)
+	}
+	put := httptest.NewRequest(http.MethodPut, "/api/v1/settings/chart-range", strings.NewReader(`{"hours":24}`))
+	put.Host = "10.0.0.5:8060"
+	put.Header.Set("Origin", "http://nas.example.com")
+	prr := httptest.NewRecorder()
+	router.ServeHTTP(prr, put)
+	if prr.Code != http.StatusOK {
+		t.Errorf("PUT with a non-matching Origin = %d, want 200 (PUT is never a simple request)", prr.Code)
+	}
+	// A cross-site form post is exactly what is refused.
+	if c := post(func(r *http.Request) {
+		r.Header.Set("Origin", "https://evil.example")
+		r.Header.Set("Content-Type", "text/plain")
+	}); c != http.StatusForbidden {
+		t.Errorf("text/plain POST from a foreign Origin = %d, want 403", c)
+	}
+
 	// Reads are not blocked by the guard (the browser's same-origin policy
 	// already keeps the response from a foreign page).
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
@@ -456,9 +488,17 @@ func TestSecurityHeaders(t *testing.T) {
 		t.Error("missing X-Content-Type-Options: nosniff")
 	}
 	csp := rr.Header().Get("Content-Security-Policy")
-	for _, want := range []string{"default-src 'self'", "connect-src 'self'", "object-src 'none'"} {
+	for _, want := range []string{"object-src 'none'", "base-uri 'self'"} {
 		if !strings.Contains(csp, want) {
 			t.Errorf("CSP %q missing %q", csp, want)
+		}
+	}
+	// The policy must not restrict scripts, styles or connections: a
+	// proxy in front of NAS Doctor may inject its own (Cloudflare Rocket
+	// Loader, Web Analytics), and a stricter policy would break the page.
+	for _, bad := range []string{"script-src", "connect-src", "default-src", "img-src"} {
+		if strings.Contains(csp, bad) {
+			t.Errorf("CSP %q restricts %s", csp, bad)
 		}
 	}
 }
@@ -519,16 +559,22 @@ func TestRequestBodyLimit(t *testing.T) {
 	}
 }
 
-// TestThemeURLDoesNotChangeSettings: GET /theme/{theme} is a preview only.
-func TestThemeURLDoesNotChangeSettings(t *testing.T) {
+// TestThemeURL_StillSwitchesTheSavedTheme: /theme/{theme} has always saved
+// the theme and returned to the dashboard; the startup banner advertises
+// it. That behaviour is kept.
+func TestThemeURL_StillSwitchesTheSavedTheme(t *testing.T) {
 	srv := newAuthTestServer(t, "")
-	before := srv.getSettings().Theme
 	rr := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/theme/clean", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /theme/clean = %d, want 200", rr.Code)
+	if rr.Code != http.StatusFound || rr.Header().Get("Location") != "/" {
+		t.Fatalf("GET /theme/clean = %d -> %q, want 302 -> /", rr.Code, rr.Header().Get("Location"))
 	}
-	if after := srv.getSettings().Theme; after != before {
-		t.Errorf("GET /theme/clean changed the saved theme from %q to %q", before, after)
+	if got := srv.getSettings().Theme; got != ThemeClean {
+		t.Errorf("saved theme = %q, want clean", got)
+	}
+	rr = httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/theme/nonsense", nil))
+	if got := srv.getSettings().Theme; got != ThemeClean {
+		t.Errorf("an unknown theme name changed the saved theme to %q", got)
 	}
 }

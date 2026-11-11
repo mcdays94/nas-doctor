@@ -56,20 +56,27 @@ func (s *Server) SetStaticWebhooks(webhooks []internal.WebhookConfig) {
 	s.staticWebhooks = append([]internal.WebhookConfig(nil), webhooks...)
 }
 
-// MergeWebhooks returns the saved webhooks followed by any static ones
-// whose name is not already taken by a saved webhook.
+// MergeWebhooks returns the saved webhooks followed by any static ones that
+// are not already covered: a static webhook is skipped when a saved one has
+// the same name or points at the same URL, so a destination configured both
+// ways is not notified twice.
 func MergeWebhooks(saved, static []internal.WebhookConfig) []internal.WebhookConfig {
 	if len(static) == 0 {
 		return saved
 	}
-	seen := make(map[string]struct{}, len(saved))
+	names := make(map[string]struct{}, len(saved))
+	urls := make(map[string]struct{}, len(saved))
 	out := make([]internal.WebhookConfig, 0, len(saved)+len(static))
 	for _, wh := range saved {
-		seen[strings.ToLower(strings.TrimSpace(wh.Name))] = struct{}{}
+		names[strings.ToLower(strings.TrimSpace(wh.Name))] = struct{}{}
+		urls[strings.TrimSpace(wh.URL)] = struct{}{}
 		out = append(out, wh)
 	}
 	for _, wh := range static {
-		if _, dup := seen[strings.ToLower(strings.TrimSpace(wh.Name))]; dup {
+		if _, dup := names[strings.ToLower(strings.TrimSpace(wh.Name))]; dup {
+			continue
+		}
+		if _, dup := urls[strings.TrimSpace(wh.URL)]; dup {
 			continue
 		}
 		out = append(out, wh)

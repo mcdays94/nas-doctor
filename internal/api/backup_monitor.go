@@ -45,6 +45,69 @@ func validateBackupMonitorBorg(repos []BorgExternalRepo) error {
 	return nil
 }
 
+// validateBackupMonitorBorgChange validates a saved list against the one it
+// replaces. An entry that is already stored unchanged is held only to the
+// checks it was saved under; the stricter rules apply to entries that are
+// new or edited. Without this, an install with a custom binary whose name
+// does not start with "borg" could no longer save any setting.
+func validateBackupMonitorBorgChange(repos, existing []BorgExternalRepo) error {
+	for i, r := range repos {
+		label := strings.TrimSpace(r.Label)
+		if label == "" {
+			label = fmt.Sprintf("entry %d", i+1)
+		}
+		check := validateBorgRepo
+		if borgRepoStored(r, existing) {
+			check = validateBorgRepoStored
+		}
+		if err := check(r); err != nil {
+			return fmt.Errorf("backup_monitor.borg[%s]: %v", label, err)
+		}
+	}
+	return nil
+}
+
+// borgRepoStored reports whether r matches a stored entry in every field
+// that ends up on a command line or in the environment.
+func borgRepoStored(r BorgExternalRepo, existing []BorgExternalRepo) bool {
+	for _, e := range existing {
+		if strings.TrimSpace(e.RepoPath) == strings.TrimSpace(r.RepoPath) &&
+			strings.TrimSpace(e.BinaryPath) == strings.TrimSpace(r.BinaryPath) &&
+			strings.TrimSpace(e.PassphraseEnv) == strings.TrimSpace(r.PassphraseEnv) &&
+			strings.TrimSpace(e.SSHKeyPath) == strings.TrimSpace(r.SSHKeyPath) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateBorgRepoStored is the validation every entry passed before the
+// stricter rules existed: a repo path when enabled, a well-formed env var
+// name, and paths that exist.
+func validateBorgRepoStored(r BorgExternalRepo) error {
+	repoPath := strings.TrimSpace(r.RepoPath)
+	binaryPath := strings.TrimSpace(r.BinaryPath)
+	passEnv := strings.TrimSpace(r.PassphraseEnv)
+	sshKeyPath := strings.TrimSpace(r.SSHKeyPath)
+	if r.Enabled && repoPath == "" {
+		return fmt.Errorf("repo_path is required when enabled")
+	}
+	if binaryPath != "" {
+		if _, err := os.Stat(binaryPath); err != nil {
+			return fmt.Errorf("binary_path %q not accessible: %v", binaryPath, err)
+		}
+	}
+	if passEnv != "" && !envVarPattern.MatchString(passEnv) {
+		return fmt.Errorf("passphrase_env %q must match ^[A-Z_][A-Z0-9_]*$", passEnv)
+	}
+	if sshKeyPath != "" {
+		if _, err := os.Stat(sshKeyPath); err != nil {
+			return fmt.Errorf("ssh_key_path %q not accessible: %v", sshKeyPath, err)
+		}
+	}
+	return nil
+}
+
 // validateBorgRepo checks one external-Borg entry. It is shared by the
 // settings save and the Test endpoint: both end in exec'ing BinaryPath
 // with RepoPath on its command line and SSHKeyPath in BORG_RSH, so both

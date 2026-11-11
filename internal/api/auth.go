@@ -222,14 +222,16 @@ func sameHost(a, b string) bool {
 // API key as a Bearer token is an explicit API client and also passes.
 func (s *Server) sameOriginGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet, http.MethodHead, http.MethodOptions:
-			next.ServeHTTP(w, r)
-			return
-		}
-		if bearerToken(r) != "" {
-			// Browsers cannot attach an Authorization header cross-site
-			// without a CORS preflight, which this server never grants.
+		// Only a POST can reach us from another site without the browser
+		// asking permission first. PUT, PATCH and DELETE always trigger a
+		// CORS preflight, and so does a POST that carries a JSON body, an
+		// Authorization header or any custom header; this server never
+		// grants a preflight, so those requests cannot come from a foreign
+		// page. That leaves "simple" POSTs (form posts, bodyless fetches)
+		// as the only ones worth inspecting — and means a reverse proxy
+		// that rewrites the Host header cannot make the UI's own JSON
+		// requests look foreign.
+		if r.Method != http.MethodPost || bearerToken(r) != "" || isJSONRequest(r) || r.Header.Get("X-Requested-With") != "" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -258,17 +260,19 @@ func (s *Server) sameOriginGuard(next http.Handler) http.Handler {
 	})
 }
 
-// contentSecurityPolicy allows what the embedded UI actually loads: its own
-// scripts and styles (inline handlers included — the templates rely on
-// them), Google Fonts, and same-origin API calls. It gives injected markup
-// nowhere to send data with fetch or image requests.
-const contentSecurityPolicy = "default-src 'self'; " +
-	"script-src 'self' 'unsafe-inline'; " +
-	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-	"font-src 'self' data: https://fonts.gstatic.com; " +
-	"img-src 'self' data: blob:; " +
-	"connect-src 'self'; " +
-	"object-src 'none'; base-uri 'self'; form-action 'self'"
+// contentSecurityPolicy is deliberately minimal: no plugins, no <base>
+// hijacking. It does not restrict scripts, styles, images or connections.
+// A stricter policy was tried and dropped, because it would break installs
+// that sit behind a proxy which injects its own script (Cloudflare Rocket
+// Loader or Web Analytics, for example), and with inline handlers allowed
+// it bought little.
+const contentSecurityPolicy = "object-src 'none'; base-uri 'self'"
+
+// isJSONRequest reports whether the request declares a JSON body.
+func isJSONRequest(r *http.Request) bool {
+	ct := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
+	return strings.HasPrefix(ct, "application/json")
+}
 
 // securityHeaders sets response headers that apply to every route.
 func (s *Server) securityHeaders(next http.Handler) http.Handler {

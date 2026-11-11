@@ -745,17 +745,20 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.serveDashboard(w, settings.Theme)
 }
 
-// handleDashboardTheme previews the dashboard in the named theme without
-// changing the saved one. It used to persist the theme, which made a plain
-// GET (a link, an image tag on any page) a state-changing request. The
-// theme is saved from Settings.
+// handleDashboardTheme switches the saved theme and returns to the
+// dashboard, as it always has (the startup banner advertises these URLs).
+// The write goes through updateSettings so it cannot race a settings save.
 func (s *Server) handleDashboardTheme(w http.ResponseWriter, r *http.Request) {
 	theme := chi.URLParam(r, "theme")
-	if theme != ThemeMidnight && theme != ThemeClean {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
+	if theme == ThemeMidnight || theme == ThemeClean {
+		if _, err := s.updateSettings(func(st *Settings) error {
+			st.Theme = theme
+			return nil
+		}); err != nil {
+			s.logger.Warn("failed to save theme", "error", err)
+		}
 	}
-	s.serveDashboard(w, theme)
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func (s *Server) serveDashboard(w http.ResponseWriter, theme string) {

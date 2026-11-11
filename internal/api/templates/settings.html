@@ -3352,7 +3352,7 @@ function removeServiceCheck(idx) {
 
 function runServiceChecksNow() {
   showToast("Running service checks...", "info");
-  fetch("/api/v1/service-checks/run", { method: "POST" })
+  fetch("/api/v1/service-checks/run", { method: "POST", headers: { "X-Requested-With": "nas-doctor" } })
     .then(function(r) {
       if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || "Run failed"); });
       return r.json();
@@ -3780,7 +3780,7 @@ function loadBackupInfo() {
 
 function triggerBackup() {
   showToast("Creating backup...", "success");
-  fetch("/api/v1/backup", { method: "POST" })
+  fetch("/api/v1/backup", { method: "POST", headers: { "X-Requested-With": "nas-doctor" } })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.error) { showToast("Backup failed: " + d.error, "error"); return; }
@@ -4350,7 +4350,7 @@ function fallbackCopyAPIKey(el) {
   }
 }
 function signOut() {
-  fetch("/api/v1/auth/logout", { method: "POST" })
+  fetch("/api/v1/auth/logout", { method: "POST", headers: { "X-Requested-With": "nas-doctor" } })
     .then(function() { window.location.href = "/login"; })
     .catch(function() { window.location.href = "/login"; });
 }

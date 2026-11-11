@@ -47,3 +47,23 @@ func TestApplySchedulerSettingsFromStore_NilSettingsIsNoop(t *testing.T) {
 		t.Fatalf("nil settings should leave the New() default in place: interval = %v, want 4h", iv)
 	}
 }
+
+// TestApplySettingsAtBoot: saved settings are always applied; a brand-new
+// data directory gets the defaults its Settings page shows; an install
+// that already has scan history but never saved a setting is left on the
+// scheduler defaults it has been running with.
+func TestApplySettingsAtBoot(t *testing.T) {
+	cases := []struct {
+		stored, history, want bool
+	}{
+		{stored: true, history: true, want: true},
+		{stored: true, history: false, want: true},
+		{stored: false, history: false, want: true},
+		{stored: false, history: true, want: false},
+	}
+	for _, c := range cases {
+		if got := applySettingsAtBoot(c.stored, c.history); got != c.want {
+			t.Errorf("applySettingsAtBoot(stored=%v, history=%v) = %v, want %v", c.stored, c.history, got, c.want)
+		}
+	}
+}

@@ -33,7 +33,8 @@ func New(webhooks []internal.WebhookConfig, logger *slog.Logger) *Notifier {
 		webhooks: webhooks,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
-			// See deliver: a redirect is reported, never followed.
+			// Redirects are handled in deliver, which keeps the method
+			// and body; net/http would turn the POST into an empty GET.
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
@@ -334,24 +335,106 @@ func (n *Notifier) postJSON(wh internal.WebhookConfig, payload any) error {
 // both of which are readable through the API, so it must not carry the
 // webhook URL (for Discord, Slack and Gotify the URL is the credential)
 // or an unbounded copy of whatever the far end answered.
+//
+// Redirects are handled here rather than by net/http, which replays a
+// redirected POST as a body-less GET on 301/302: the service then receives
+// an empty request and the delivery used to be logged as sent. A redirect
+// that stays on the same host (http to https, a moved path) is followed
+// with the original method and body. One that points at another host is
+// reported instead, since the request may carry credentials meant for the
+// first host only.
 func (n *Notifier) deliver(req *http.Request, label string) error {
-	resp, err := n.client.Do(req)
-	if err != nil {
-		return redactURLError(err)
+	for hop := 0; ; hop++ {
+		resp, err := n.client.Do(req)
+		if err != nil {
+			return redactURLError(err)
+		}
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			next, rerr := redirectedRequest(req, resp)
+			io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorBodyBytes))
+			resp.Body.Close()
+			if rerr != nil {
+				return fmt.Errorf("%s returned %d (redirect): %w", label, resp.StatusCode, rerr)
+			}
+			if hop >= maxWebhookRedirects {
+				return fmt.Errorf("%s redirected more than %d times", label, maxWebhookRedirects)
+			}
+			req = next
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+			return fmt.Errorf("%s returned %d: %s", label, resp.StatusCode, summarizeBody(body))
+		}
+		return nil
 	}
-	defer resp.Body.Close()
+}
 
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		// Redirects are not followed: net/http would replay a POST as a
-		// body-less GET on 301/302/303, the service would receive an
-		// empty request, and the delivery would be logged as sent.
-		return fmt.Errorf("%s returned %d (redirect): update the URL to the final address", label, resp.StatusCode)
+const maxWebhookRedirects = 3
+
+// sameWebhookHost reports whether a redirect stays with the same service:
+// the same host name and port, or the same host name moving from http to
+// https on the default ports.
+func sameWebhookHost(from, to *url.URL) bool {
+	if !strings.EqualFold(from.Hostname(), to.Hostname()) {
+		return false
 	}
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		return fmt.Errorf("%s returned %d: %s", label, resp.StatusCode, summarizeBody(body))
+	if from.Port() == to.Port() && from.Scheme == to.Scheme {
+		return true
 	}
-	return nil
+	defaultPort := func(u *url.URL) string {
+		if p := u.Port(); p != "" {
+			return p
+		}
+		if u.Scheme == "https" {
+			return "443"
+		}
+		return "80"
+	}
+	if from.Scheme == to.Scheme {
+		return defaultPort(from) == defaultPort(to)
+	}
+	return from.Scheme == "http" && to.Scheme == "https" && defaultPort(from) == "80" && defaultPort(to) == "443"
+}
+
+// redirectedRequest builds the request to send after a redirect response,
+// keeping the method, headers and body. It refuses redirects that cannot
+// be followed safely or faithfully.
+func redirectedRequest(req *http.Request, resp *http.Response) (*http.Request, error) {
+	switch resp.StatusCode {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+	default:
+		// 303 See Other asks for a GET of a different resource; that is
+		// not a delivery.
+		return nil, errors.New("update the URL to the final address")
+	}
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return nil, errors.New("no Location header")
+	}
+	target, err := req.URL.Parse(loc)
+	if err != nil {
+		return nil, errors.New("unparseable Location header")
+	}
+	if req.URL.Scheme == "https" && target.Scheme != "https" {
+		return nil, errors.New("it downgrades from https to http")
+	}
+	if !sameWebhookHost(req.URL, target) {
+		return nil, fmt.Errorf("it points at a different host (%s); update the URL to the final address", target.Host)
+	}
+	if req.GetBody == nil {
+		return nil, errors.New("the request body cannot be replayed")
+	}
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, errors.New("the request body cannot be replayed")
+	}
+	next := req.Clone(req.Context())
+	next.URL = target
+	next.Host = ""
+	next.Body = body
+	return next, nil
 }
 
 const (

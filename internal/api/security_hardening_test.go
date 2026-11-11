@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -174,5 +175,59 @@ func TestReport_EscapesZFSAndUPSStrings(t *testing.T) {
 	}
 	if !strings.Contains(html, "&lt;script&gt;alert(1)&lt;/script&gt;") {
 		t.Error("expected the escaped form of the test string in the report (did the fields stop rendering?)")
+	}
+}
+
+// countingBorgRunner records that the Test endpoint reached the runner.
+type countingBorgRunner struct{ calls int }
+
+func (c *countingBorgRunner) Info(_ context.Context, _, _ string, _ map[string]string) (collector.BorgInfoJSON, error) {
+	c.calls++
+	return collector.BorgInfoJSON{}, nil
+}
+
+// TestBorg_EntriesAlreadySavedKeepWorking: the stricter rules apply to new
+// and edited entries. An entry saved before them (a custom binary whose
+// name does not start with "borg") must not stop the install from saving
+// settings, and its Test button must keep working.
+func TestBorg_EntriesAlreadySavedKeepWorking(t *testing.T) {
+	dir := t.TempDir()
+	oddBinary := filepath.Join(dir, "my-backup-tool")
+	if err := os.WriteFile(oddBinary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stored := BorgExternalRepo{Enabled: true, Label: "Main", RepoPath: "/mnt/repo", BinaryPath: oddBinary}
+
+	srv := newTestServer(t)
+	if _, err := srv.updateSettings(func(s *Settings) error {
+		s.BackupMonitor.Borg = []BorgExternalRepo{stored}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// An unrelated save still works.
+	if rr := putSettingsJSON(t, srv, `{"theme":"clean"}`); rr.Code != http.StatusOK {
+		t.Fatalf("unrelated save with a pre-existing entry = %d: %s", rr.Code, rr.Body.String())
+	}
+	// Changing the entry brings the new rules in.
+	body, _ := json.Marshal(map[string]any{"backup_monitor": map[string]any{"borg": []BorgExternalRepo{
+		{Enabled: true, Label: "Main", RepoPath: "/mnt/other", BinaryPath: oddBinary},
+	}}})
+	if rr := putSettingsJSON(t, srv, string(body)); rr.Code != http.StatusBadRequest {
+		t.Errorf("edited entry with a non-borg binary = %d, want 400", rr.Code)
+	}
+
+	// The Test button runs the saved entry...
+	runner := &countingBorgRunner{}
+	srv.borgRunner = runner
+	rr := postBorgTest(t, srv, map[string]any{"repo_path": "/mnt/repo", "binary_path": oddBinary})
+	if rr.Code != http.StatusOK || runner.calls != 1 {
+		t.Errorf("Test of a saved entry: status %d, runner calls %d (%s)", rr.Code, runner.calls, rr.Body.String())
+	}
+	// ...but not the same binary against anything that is not saved.
+	rr = postBorgTest(t, srv, map[string]any{"repo_path": "/somewhere/else", "binary_path": oddBinary})
+	if rr.Code != http.StatusBadRequest || runner.calls != 1 {
+		t.Errorf("Test of an unsaved entry with that binary: status %d, runner calls %d", rr.Code, runner.calls)
 	}
 }

@@ -910,7 +910,11 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// A floor on the global interval, matching the per-subsystem one. The
 	// settings page auto-saves, and without this a half-typed custom
 	// interval of one second was persisted and run.
-	if scanInterval < ScanIntervalMin {
+	//
+	// The floor is only enforced when the interval changes. An install
+	// that already runs a shorter interval keeps it, and can still save
+	// its other settings.
+	if scanInterval < ScanIntervalMin && settings.ScanInterval != current.ScanInterval {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": fmt.Sprintf("scan_interval %s is too short (minimum %s)", settings.ScanInterval, FormatScanInterval(ScanIntervalMin)),
 		})
@@ -1085,7 +1089,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// when non-empty. Server-side filesystem stat() is deliberate
 	// — catches obvious typos / mis-mounts at Save time rather than
 	// the next scan tick.
-	if err := validateBackupMonitorBorg(settings.BackupMonitor.Borg); err != nil {
+	if err := validateBackupMonitorBorgChange(settings.BackupMonitor.Borg, current.BackupMonitor.Borg); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
