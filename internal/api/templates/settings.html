@@ -206,7 +206,7 @@ body.theme-clean .access-tag{background:rgba(0,0,0,0.06)}
     </div>
     <p class="access-hint">Other NAS Doctor instances, scripts and Prometheus send the key as <code>Authorization: Bearer &lt;key&gt;</code>. Lost it? On the host: <code>docker exec nas-doctor /app/nas-doctor -show-api-key</code></p>
 
-    <div class="access-block">
+    <div class="access-block" data-saves-itself>
       <div class="access-row" id="access-signin-row">
         <div>
           <div class="access-row-title">Require sign-in</div>
@@ -4864,14 +4864,23 @@ function markSaved() {
   if (bar) bar.classList.remove("visible");
 }
 
-// Attach change listeners to all inputs, selects, and toggles
+// Attach change listeners to all inputs, selects, and toggles.
+// Controls inside [data-saves-itself] are left out: they save on their
+// own once a choice is confirmed, and some clicks there (opening the
+// sign-in confirmation, ticking its checkbox) change nothing at all.
+function savesItself(e) {
+  return !!(e.target.closest && e.target.closest("[data-saves-itself]"));
+}
 document.addEventListener("input", function(e) {
+  if (savesItself(e)) return;
   if (e.target.closest(".card")) markChanged();
 });
 document.addEventListener("change", function(e) {
+  if (savesItself(e)) return;
   if (e.target.closest(".card")) markChanged();
 });
 document.addEventListener("click", function(e) {
+  if (savesItself(e)) return;
   if (e.target.closest(".toggle")) markChanged();
   if (e.target.closest(".theme-option")) markChanged();
 });
