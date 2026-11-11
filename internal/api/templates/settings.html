@@ -28,11 +28,19 @@ body.theme-clean .theme-option:hover{border-color:rgba(0,0,0,0.2)}
 body.theme-clean .theme-option.active{border-color:var(--accent);background:rgba(0,0,0,0.03)}
 body.theme-clean .swatch{border-color:rgba(0,0,0,0.1)}
 body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,0.02)}
+/* Until the stored settings are in the form, the form is inert: a click
+   here would otherwise save defaults over the real configuration. */
+.settings-loading .card{opacity:.55;pointer-events:none}
+.load-error{display:none;align-items:center;justify-content:space-between;gap:12px;margin:0 0 16px;padding:12px 16px;border:1px solid var(--red);border-radius:var(--radius);background:rgba(220,38,38,0.08);font-size:13px}
 </style>
 </head>
-<body>
+<body class="settings-loading">
 <div class="toast-container" id="toasts"></div>
 <div class="container">
+  <div class="load-error" id="settings-load-error" role="alert">
+    <span id="settings-load-error-text"></span>
+    <button class="btn btn-secondary btn-sm" onclick="loadSettings()">Retry</button>
+  </div>
 
   <!-- Header -->
   <div class="header">
@@ -146,7 +154,7 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
   <!-- 1b. API Key -->
   <div class="card" id="card-apikey">
     <div class="card-title">API Key</div>
-    <div class="card-desc">Protect this instance's API. When set, all API requests (fleet polling, service checks, etc.) require this key in the Authorization header. The dashboard UI is not affected.</div>
+    <div class="card-desc">Protect this instance. When a key is set, every API request and this web UI require it. API clients, fleet polling and Prometheus send it as <code>Authorization: Bearer &lt;key&gt;</code>; a browser signs in with it once.</div>
     <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
       <input type="password" id="api-key-display" readonly style="flex:1;font-family:var(--font-mono);font-size:12px;letter-spacing:0.5px" placeholder="No API key set — instance is open">
       <button class="btn btn-secondary btn-sm" onclick="toggleAPIKeyVisibility()" title="Show/Hide">
@@ -155,8 +163,9 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <button class="btn btn-secondary btn-sm" onclick="generateAPIKey()">Generate</button>
       <button class="btn btn-secondary btn-sm" onclick="copyAPIKey()">Copy</button>
       <button class="btn btn-danger btn-sm" onclick="revokeAPIKey()">Revoke</button>
+      <button class="btn btn-secondary btn-sm" id="api-key-signout" onclick="signOut()" style="display:none">Sign out</button>
     </div>
-    <p style="font-size:11px;color:var(--text2);margin-top:8px">Share this key with other NAS Doctor instances that need to connect to this one via fleet monitoring.</p>
+    <p style="font-size:11px;color:var(--text2);margin-top:8px">Copy the key somewhere safe before you leave this page: other browsers and other NAS Doctor instances polling this one will need it. This browser stays signed in.</p>
   </div>
 
   <!-- 2. Notifications — Webhooks -->
@@ -216,9 +225,9 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     <div class="form-group">
       <label for="notif-cooldown">Default notification cooldown (minutes)</label>
       <div style="display:flex;gap:8px;align-items:center;max-width:200px">
-        <input type="number" id="notif-cooldown" min="0" max="1440" value="15" style="text-align:center">
+        <input type="number" id="notif-cooldown" min="1" max="1440" value="15" style="text-align:center">
       </div>
-      <p style="font-size:11px;color:var(--text2);margin-top:4px">Minimum time between repeated notifications for the same alert. Set 0 to disable.</p>
+      <p style="font-size:11px;color:var(--text2);margin-top:4px">Minimum time between repeated notifications for the same alert (at least 1 minute).</p>
     </div>
 
     <!-- Quiet Hours -->
@@ -252,11 +261,11 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         <div style="display:flex;gap:8px">
           <div style="flex:1">
             <label for="qh-start">Start</label>
-            <input type="text" id="qh-start" placeholder="22:00" value="22:00" style="text-align:center">
+            <input type="time" id="qh-start" value="22:00" style="text-align:center">
           </div>
           <div style="flex:1">
             <label for="qh-end">End</label>
-            <input type="text" id="qh-end" placeholder="07:00" value="07:00" style="text-align:center">
+            <input type="time" id="qh-end" value="07:00" style="text-align:center">
           </div>
         </div>
       </div>
@@ -287,12 +296,12 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
         </div>
         <div class="form-row">
           <div>
-            <label for="mw-start">Start (ISO 8601)</label>
-            <input type="text" id="mw-start" placeholder="2026-04-10T02:00:00Z">
+            <label for="mw-start">Start</label>
+            <input type="datetime-local" id="mw-start">
           </div>
           <div>
-            <label for="mw-end">End (ISO 8601)</label>
-            <input type="text" id="mw-end" placeholder="2026-04-10T06:00:00Z">
+            <label for="mw-end">End</label>
+            <input type="datetime-local" id="mw-end">
           </div>
         </div>
         <div class="form-group">
@@ -1115,9 +1124,25 @@ function fieldsToDuration() {
   return parts.join("");
 }
 
+var SCAN_INTERVAL_MIN_SEC = 30;
+
+function customIntervalSeconds() {
+  var d = parseInt(document.getElementById("scan-days").value, 10) || 0;
+  var h = parseInt(document.getElementById("scan-hours").value, 10) || 0;
+  var m = parseInt(document.getElementById("scan-minutes").value, 10) || 0;
+  var s = parseInt(document.getElementById("scan-seconds").value, 10) || 0;
+  return d * 86400 + h * 3600 + m * 60 + s;
+}
+
 function getScanInterval() {
   var preset = document.getElementById("scan-preset").value;
   if (preset !== "custom") return preset;
+  // The page auto-saves, so a custom interval can be read while it is
+  // still being typed. Anything under the floor is not a value to store:
+  // keep what is saved until the fields hold a usable interval.
+  if (customIntervalSeconds() < SCAN_INTERVAL_MIN_SEC) {
+    return (settings && settings.scan_interval) || "30m";
+  }
   return fieldsToDuration();
 }
 
@@ -1229,9 +1254,9 @@ function updateIntervalPreview() {
   if (s > 0) parts.push(s + (s === 1 ? " second" : " seconds"));
   var el = document.getElementById("scan-interval-preview");
   var cronEl = document.getElementById("scan-cron-preview");
-  if (parts.length === 0) {
-    el.textContent = "Invalid: set at least 1 second";
-    el.style.color = "var(--error)";
+  if (customIntervalSeconds() < SCAN_INTERVAL_MIN_SEC) {
+    el.textContent = "Minimum is 30 seconds \u2014 not saved yet";
+    el.style.color = "var(--red)";
     cronEl.textContent = "";
   } else {
     el.textContent = "Scans every " + parts.join(", ");
@@ -1727,9 +1752,55 @@ function renderAdvancedScanPickers(advScans) {
 }
 
 /* ---------- Load settings ---------- */
+/* settingsLoaded gates every save. The form starts out holding defaults
+   and empty lists; saving before the stored settings have been loaded
+   into it (a slow connection, a failed request) used to write those
+   defaults and empty lists over the real configuration. */
+var settingsLoaded = false;
+
+function setSettingsLoadState(state, message) {
+  document.body.classList.toggle("settings-loading", state !== "ready");
+  var banner = document.getElementById("settings-load-error");
+  if (!banner) return;
+  if (state === "error") {
+    document.getElementById("settings-load-error-text").textContent = message;
+    banner.style.display = "flex";
+  } else {
+    banner.style.display = "none";
+  }
+}
+
+function ensureSelectOption(sel, value) {
+  if (!sel || !value) return;
+  for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === value) return; }
+  sel.appendChild(new Option(value, value));
+}
+
+function setQuietHoursEnabledUI(on) {
+  document.getElementById("qh-enabled").checked = !!on;
+  document.getElementById("qh-toggle").classList.toggle("on", !!on);
+}
+
+/* cooldownSecForPayload returns the stored cooldown unchanged unless the
+   minutes field was actually edited, so a value set through the API that
+   is not a whole number of minutes survives an unrelated save. */
+function cooldownSecForPayload() {
+  var loaded = (settings && settings.notifications && settings.notifications.default_cooldown_sec) || 900;
+  var minutes = parseInt(document.getElementById("notif-cooldown").value, 10);
+  if (!(minutes >= 1)) return loaded;
+  if (Math.max(1, Math.round(loaded / 60)) === minutes) return loaded;
+  return minutes * 60;
+}
+
 function loadSettings() {
+  settingsLoaded = false;
+  setSettingsLoadState("loading");
   fetch("/api/v1/settings")
-    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r.status === 401) { window.location.href = "/login?next=" + encodeURIComponent("/settings"); throw new Error("sign-in required"); }
+      if (!r.ok) return r.json().catch(function() { return {}; }).then(function(e) { throw new Error(e.error || ("HTTP " + r.status)); });
+      return r.json();
+    })
     .then(function(data) {
       settings = data;
       /* Speed test settings */
@@ -1836,7 +1907,7 @@ function loadSettings() {
       if (pve.node_name) {
         var found = false;
         for (var ni = 0; ni < nodeSel.options.length; ni++) { if (nodeSel.options[ni].value === pve.node_name) { found = true; break; } }
-        if (!found) nodeSel.innerHTML += '<option value="' + pve.node_name + '">' + pve.node_name + '</option>';
+        if (!found) nodeSel.appendChild(new Option(pve.node_name, pve.node_name));
         nodeSel.value = pve.node_name;
       }
       /* Kubernetes */
@@ -1854,25 +1925,60 @@ function loadSettings() {
       /* Notification Rules */
       notifRules = (data.notifications && data.notifications.rules) ? data.notifications.rules : [];
       renderRules();
+      /* Notification behaviour: cooldown, quiet hours, maintenance windows.
+         None of these used to be loaded, so every save wrote the form's
+         defaults back over the stored values. */
+      var notif = data.notifications || {};
+      var cooldownSec = parseInt(notif.default_cooldown_sec, 10);
+      document.getElementById("notif-cooldown").value = (cooldownSec > 0) ? Math.max(1, Math.round(cooldownSec / 60)) : 15;
+      var qh = notif.quiet_hours || {};
+      var tzSel = document.getElementById("qh-timezone");
+      try { ensureSelectOption(tzSel, Intl.DateTimeFormat().resolvedOptions().timeZone); } catch (e) {}
+      ensureSelectOption(tzSel, qh.timezone);
+      tzSel.value = qh.timezone || "UTC";
+      setQuietHoursEnabledUI(!!qh.enabled);
+      document.getElementById("qh-start").value = qh.start_hhmm || "22:00";
+      document.getElementById("qh-end").value = qh.end_hhmm || "07:00";
+      maintenanceWindows = Array.isArray(notif.maintenance_windows) ? notif.maintenance_windows.slice() : [];
+      renderMaintenanceWindows();
+      /* Data lifecycle */
+      var ret = data.retention || {};
+      if (ret.snapshot_days > 0) document.getElementById("ret-snapshot-days").value = ret.snapshot_days;
+      if (ret.max_db_size_mb > 0) document.getElementById("ret-max-db").value = ret.max_db_size_mb;
+      if (ret.notify_log_days > 0) document.getElementById("ret-notify-days").value = ret.notify_log_days;
+      /* Automatic backup */
+      var bk = data.backup || {};
+      document.getElementById("backup-toggle").classList.toggle("on", !!bk.enabled);
+      document.getElementById("backup-path").value = bk.path || "";
+      document.getElementById("backup-keep").value = bk.keep_count > 0 ? bk.keep_count : 4;
+      setBackupIntervalUI(bk.interval_hours > 0 ? bk.interval_hours : 168);
+      /* Sign-out is only meaningful when a key protects the instance. */
+      var so = document.getElementById("api-key-signout");
+      if (so) so.style.display = data.api_key ? "" : "none";
+
+      settingsLoaded = true;
+      setSettingsLoadState("ready");
+      markSaved();
     })
-    .catch(function(e) { showToast("Failed to load settings: " + e, "error"); });
+    .catch(function(e) {
+      setSettingsLoadState("error", "Settings could not be loaded (" + (e && e.message ? e.message : e) + "). Nothing can be saved until they are.");
+    });
 }
 
 /* ---------- Save settings ---------- */
 function buildSettingsPayload() {
   var base = settings || {};
-  var cooldownMin = parseInt(document.getElementById("notif-cooldown").value, 10) || 0;
   var notifications = {
     webhooks: webhooks,
     rules: notifRules,
     quiet_hours: {
       enabled: document.getElementById("qh-enabled").checked,
       timezone: document.getElementById("qh-timezone").value,
-      start: document.getElementById("qh-start").value.trim() || "22:00",
-      end: document.getElementById("qh-end").value.trim() || "07:00"
+      start_hhmm: document.getElementById("qh-start").value.trim() || "22:00",
+      end_hhmm: document.getElementById("qh-end").value.trim() || "07:00"
     },
     maintenance_windows: maintenanceWindows,
-    default_cooldown_sec: cooldownMin * 60
+    default_cooldown_sec: cooldownSecForPayload()
   };
 
   return {
@@ -1945,8 +2051,10 @@ function buildSettingsPayload() {
       interval_hours: getBackupIntervalH()
     },
     api_key: document.getElementById("api-key-display").value.trim(),
-    fleet: fleetServers || base.fleet || [],
-    dismissed_findings: base.dismissed_findings || [],
+    // fleet and dismissed_findings are deliberately not sent. They are
+    // owned by their own endpoints, and the server keeps whatever a save
+    // does not mention; echoing this page's copy back used to undo
+    // changes made elsewhere since the page was loaded.
     cost_per_tb: parseFloat(document.getElementById("cost-per-tb") && document.getElementById("cost-per-tb").value) || 0,
     /* Advanced Scan Settings v3 (PRD #239 / issue #259). The SMART
        sub-struct carries the slice-1 wake-drives / max-age knobs
@@ -2129,6 +2237,10 @@ function saveSettingsImmediate() {
     clearTimeout(saveSettingsDebounceTimer);
     saveSettingsDebounceTimer = null;
   }
+  if (!settingsLoaded) {
+    showToast("Settings have not loaded yet \u2014 nothing was saved", "error");
+    return;
+  }
   var payload = buildSettingsPayload();
   if (!smartMaxAgeConflictConfirm(payload)) {
     showToast("Save aborted", "info");
@@ -2145,6 +2257,8 @@ function saveSettingsImmediate() {
   })
   .then(function(saved) {
     settings = saved;
+    var so = document.getElementById("api-key-signout");
+    if (so) so.style.display = saved.api_key ? "" : "none";
     webhooks = (saved.notifications && saved.notifications.webhooks) ? saved.notifications.webhooks : webhooks;
     notifRules = (saved.notifications && saved.notifications.rules) ? saved.notifications.rules : notifRules;
     maintenanceWindows = (saved.notifications && saved.notifications.maintenance_windows) ? saved.notifications.maintenance_windows : maintenanceWindows;
@@ -2175,6 +2289,10 @@ var SAVE_SETTINGS_DEBOUNCE_MS = 300;
 var saveSettingsDebounceTimer = null;
 
 function saveSettings() {
+  if (!settingsLoaded) {
+    showToast("Settings have not loaded yet \u2014 nothing was saved", "error");
+    return;
+  }
   if (saveSettingsDebounceTimer !== null) {
     clearTimeout(saveSettingsDebounceTimer);
   }
@@ -2244,6 +2362,8 @@ function toggleWebhookForm() {
   document.getElementById("wh-url").value = "";
   document.getElementById("wh-type").value = "discord";
   document.getElementById("wh-secret").value = "";
+  webhookHeaders = {};
+  renderWebhookHeaders();
   form.classList.add("visible");
 }
 
@@ -2254,6 +2374,12 @@ function editWebhook(idx) {
   document.getElementById("wh-url").value = wh.url || "";
   document.getElementById("wh-type").value = wh.type || "generic";
   document.getElementById("wh-secret").value = wh.secret || "";
+  // Load the entry's custom headers into the editor; they used to be left
+  // out here and dropped by saveWebhook.
+  webhookHeaders = {};
+  var hk = wh.headers || {};
+  for (var k in hk) { if (Object.prototype.hasOwnProperty.call(hk, k)) webhookHeaders[k] = hk[k]; }
+  renderWebhookHeaders();
   document.getElementById("webhook-form").classList.add("visible");
 }
 
@@ -2268,16 +2394,19 @@ function saveWebhook() {
     showToast("Name and URL are required", "error");
     return;
   }
-  var wh = {
-    name: name,
-    url: url,
-    type: document.getElementById("wh-type").value,
-    enabled: true,
-    secret: document.getElementById("wh-secret").value.trim() || ""
-  };
   var editIdx = parseInt(document.getElementById("wh-edit-index").value, 10);
-  if (editIdx >= 0 && editIdx < webhooks.length) {
-    wh.enabled = webhooks[editIdx].enabled;
+  var editing = editIdx >= 0 && editIdx < webhooks.length;
+  // Start from the stored entry so fields this form does not show survive.
+  var wh = {};
+  if (editing) { var prev = webhooks[editIdx]; for (var pk in prev) { if (Object.prototype.hasOwnProperty.call(prev, pk)) wh[pk] = prev[pk]; } }
+  wh.name = name;
+  wh.url = url;
+  wh.type = document.getElementById("wh-type").value;
+  wh.enabled = editing ? webhooks[editIdx].enabled : true;
+  wh.secret = document.getElementById("wh-secret").value.trim() || "";
+  var headers = cleanWebhookHeaders();
+  if (Object.keys(headers).length > 0) wh.headers = headers; else delete wh.headers;
+  if (editing) {
     webhooks[editIdx] = wh;
   } else {
     webhooks.push(wh);
@@ -2306,7 +2435,8 @@ function testWebhook() {
     url: url,
     type: (document.getElementById("wh-type") || {}).value || "generic",
     enabled: true,
-    secret: ((document.getElementById("wh-secret") || {}).value || "").trim()
+    secret: ((document.getElementById("wh-secret") || {}).value || "").trim(),
+    headers: cleanWebhookHeaders()
   };
   showToast("Sending test notification...", "info");
   fetch("/api/v1/settings/test-webhook", {
@@ -2394,7 +2524,7 @@ function testRule() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       name: wh.name, url: wh.url, type: wh.type || "generic",
-      enabled: true, secret: wh.secret || "",
+      enabled: true, secret: wh.secret || "", headers: wh.headers || {},
       finding: {
         severity: severity,
         category: findingCat,
@@ -2417,22 +2547,26 @@ function testRule() {
 
 /* ---------- Service checks ---------- */
 function normalizeServiceCheck(sc) {
-  var out = {
-    name: (sc && sc.name) ? sc.name : "",
-    type: (sc && sc.type) ? String(sc.type).toLowerCase() : "http",
-    target: (sc && sc.target) ? sc.target : "",
-    enabled: !(sc && sc.enabled === false),
-    interval_sec: (sc && sc.interval_sec > 0) ? sc.interval_sec : 300,
-    timeout_sec: (sc && sc.timeout_sec) ? sc.timeout_sec : 5,
-    port: (sc && sc.port) ? sc.port : 0,
-    failure_threshold: (sc && sc.failure_threshold) ? sc.failure_threshold : 1,
-    failure_severity: (sc && sc.failure_severity) ? sc.failure_severity : "warning",
-    expected_status_min: (sc && sc.expected_status_min) ? sc.expected_status_min : 200,
-    expected_status_max: (sc && sc.expected_status_max) ? sc.expected_status_max : 399,
-    contracted_down_mbps: (sc && sc.contracted_down_mbps) ? sc.contracted_down_mbps : 0,
-    contracted_up_mbps: (sc && sc.contracted_up_mbps) ? sc.contracted_up_mbps : 0,
-    margin_pct: (sc && sc.margin_pct) ? sc.margin_pct : 0
-  };
+  // Start from a copy of the stored check. This used to build a new object
+  // from a fixed list of fields, so anything outside the list (request
+  // headers, DNS server, loss threshold, fleet instance) was dropped the
+  // moment a check was edited or its toggle was clicked.
+  var out = {};
+  if (sc) { for (var key in sc) { if (Object.prototype.hasOwnProperty.call(sc, key)) out[key] = sc[key]; } }
+  out.name = (sc && sc.name) ? sc.name : "";
+  out.type = (sc && sc.type) ? String(sc.type).toLowerCase() : "http";
+  out.target = (sc && sc.target) ? sc.target : "";
+  out.enabled = !(sc && sc.enabled === false);
+  out.interval_sec = (sc && sc.interval_sec > 0) ? sc.interval_sec : 300;
+  out.timeout_sec = (sc && sc.timeout_sec) ? sc.timeout_sec : 5;
+  out.port = (sc && sc.port) ? sc.port : 0;
+  out.failure_threshold = (sc && sc.failure_threshold) ? sc.failure_threshold : 1;
+  out.failure_severity = (sc && sc.failure_severity) ? sc.failure_severity : "warning";
+  out.expected_status_min = (sc && sc.expected_status_min) ? sc.expected_status_min : 200;
+  out.expected_status_max = (sc && sc.expected_status_max) ? sc.expected_status_max : 399;
+  out.contracted_down_mbps = (sc && sc.contracted_down_mbps) ? sc.contracted_down_mbps : 0;
+  out.contracted_up_mbps = (sc && sc.contracted_up_mbps) ? sc.contracted_up_mbps : 0;
+  out.margin_pct = (sc && sc.margin_pct) ? sc.margin_pct : 0;
   if (out.timeout_sec < 1) out.timeout_sec = 5;
   if (out.failure_threshold < 1) out.failure_threshold = 1;
   return out;
@@ -3659,6 +3793,17 @@ function triggerBackup() {
 /* ---------- Webhook Custom Headers ---------- */
 var webhookHeaders = {};
 
+/* cleanWebhookHeaders returns the editor's headers without blank names. */
+function cleanWebhookHeaders() {
+  var out = {};
+  for (var k in webhookHeaders) {
+    if (!Object.prototype.hasOwnProperty.call(webhookHeaders, k)) continue;
+    var name = String(k).trim();
+    if (name) out[name] = String(webhookHeaders[k] == null ? "" : webhookHeaders[k]);
+  }
+  return out;
+}
+
 function renderWebhookHeaders() {
   var container = document.getElementById("wh-headers-list");
   if (!container) return;
@@ -3706,6 +3851,28 @@ function updateWebhookHeaderValue(key, val) {
 /* ---------- Maintenance Windows ---------- */
 var maintenanceWindows = [];
 
+/* The server's field names are start_iso / end_iso (RFC 3339). This page
+   used to send start / end, which the server rejected, and the rejected
+   window then blocked every later save from the page. */
+function localInputToISO(v) {
+  var d = new Date(v);
+  if (isNaN(d.getTime())) return "";
+  return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+function isoToLocalInput(iso) {
+  if (!iso) return "";
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  var p = function(n) { return String(n).padStart(2, "0"); };
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+function formatMaintenanceTime(iso) {
+  if (!iso) return "\u2014";
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 function renderMaintenanceWindows() {
   var container = document.getElementById("maintenance-list");
   if (!container) return;
@@ -3716,8 +3883,8 @@ function renderMaintenanceWindows() {
   var html = "";
   for (var i = 0; i < maintenanceWindows.length; i++) {
     var mw = maintenanceWindows[i];
-    var start = mw.start ? mw.start.substring(0, 16).replace("T", " ") : "—";
-    var end = mw.end ? mw.end.substring(0, 16).replace("T", " ") : "—";
+    var start = formatMaintenanceTime(mw.start_iso);
+    var end = formatMaintenanceTime(mw.end_iso);
     var hosts = mw.hostnames && mw.hostnames.length ? mw.hostnames.join(", ") : "all";
     html += '<div class="webhook-item">';
     html += '  <div class="webhook-info">';
@@ -3753,8 +3920,8 @@ function editMaintenanceWindow(idx) {
   var mw = maintenanceWindows[idx];
   document.getElementById("mw-edit-index").value = String(idx);
   document.getElementById("mw-name").value = mw.name || "";
-  document.getElementById("mw-start").value = mw.start || "";
-  document.getElementById("mw-end").value = mw.end || "";
+  document.getElementById("mw-start").value = isoToLocalInput(mw.start_iso);
+  document.getElementById("mw-end").value = isoToLocalInput(mw.end_iso);
   document.getElementById("mw-hostnames").value = (mw.hostnames || []).join(", ");
   document.getElementById("mw-enabled").checked = mw.enabled !== false;
   var toggle = document.getElementById("maintenance-form").querySelector(".toggle");
@@ -3767,13 +3934,17 @@ function saveMaintenanceWindow() {
   var start = document.getElementById("mw-start").value.trim();
   var end = document.getElementById("mw-end").value.trim();
   if (!name || !start || !end) { showToast("Name, start, and end are required", "error"); return; }
+  // The inputs hold local wall-clock time; the server stores RFC 3339.
+  var startISO = localInputToISO(start), endISO = localInputToISO(end);
+  if (!startISO || !endISO) { showToast("Start and end must be valid dates", "error"); return; }
+  if (new Date(endISO) <= new Date(startISO)) { showToast("End must be after start", "error"); return; }
   var hostnames = document.getElementById("mw-hostnames").value.trim();
   var hostnameArr = hostnames ? hostnames.split(",").map(function(h) { return h.trim(); }).filter(Boolean) : [];
   var mw = {
     name: name,
     enabled: document.getElementById("mw-enabled").checked,
-    start: start,
-    end: end,
+    start_iso: startISO,
+    end_iso: endISO,
     hostnames: hostnameArr
   };
   var editIdx = parseInt(document.getElementById("mw-edit-index").value, 10);
@@ -3935,11 +4106,13 @@ function updateRulePreview() {
   var valText = val && val.value && NEEDS_VALUE[cond.value] ? " " + val.value : "";
   var webhookName = webhook && webhook.value ? webhook.value : "(no webhook selected)";
   var cooldownText = cooldown ? cooldown.options[cooldown.selectedIndex].text : "15 minutes";
-  var sentence = 'When <strong>' + condLabel.toLowerCase() + '</strong>';
-  if (valText) sentence += ' <strong>' + valText.trim() + '</strong>';
-  sentence += ' on <strong>' + targetLabel + '</strong>';
+  // Every piece is text from the snapshot or the form (drive models,
+  // container and check names, typed values), so each is escaped.
+  var sentence = 'When <strong>' + escapeHtml(condLabel.toLowerCase()) + '</strong>';
+  if (valText) sentence += ' <strong>' + escapeHtml(valText.trim()) + '</strong>';
+  sentence += ' on <strong>' + escapeHtml(targetLabel) + '</strong>';
   sentence += ', send a notification to <strong>' + escapeHtml(webhookName) + '</strong>';
-  sentence += '. Don\u2019t repeat for <strong>' + cooldownText + '</strong>.';
+  sentence += '. Don\u2019t repeat for <strong>' + escapeHtml(cooldownText) + '</strong>.';
   text.innerHTML = sentence;
   prev.style.display = "block";
 }
@@ -3973,7 +4146,7 @@ function populateTargetDropdown(cat) {
       sel.innerHTML += '<option value="' + escapeHtml(sn.zfs.pools[i].name) + '">' + escapeHtml(sn.zfs.pools[i].name) + '</option>';
     }
   } else if (cat === "tunnels" && sn.tunnels) {
-    if (sn.tunnels.cloudflared) { for (var i = 0; i < sn.tunnels.cloudflared.tunnels.length; i++) { var t = sn.tunnels.cloudflared.tunnels[i]; sel.innerHTML += '<option value="' + escapeHtml(t.name) + '">' + escapeHtml("CF: " + t.name) + '</option>'; } }
+    if (sn.tunnels.cloudflared) { var cfTunnels = sn.tunnels.cloudflared.tunnels || []; for (var i = 0; i < cfTunnels.length; i++) { var t = cfTunnels[i]; sel.innerHTML += '<option value="' + escapeHtml(t.name) + '">' + escapeHtml("CF: " + t.name) + '</option>'; } }
     if (sn.tunnels.tailscale && sn.tunnels.tailscale.peers) { for (var i = 0; i < sn.tunnels.tailscale.peers.length; i++) { var nd = sn.tunnels.tailscale.peers[i]; sel.innerHTML += '<option value="' + escapeHtml(nd.name) + '">' + escapeHtml("TS: " + nd.name) + '</option>'; } }
   } else if (cat === "process" && sn.system && sn.system.top_processes) {
     var seen = {};
@@ -4140,7 +4313,7 @@ function generateAPIKey() {
   }
   document.getElementById("api-key-display").value = key;
   saveSettings();
-  showToast("API key generated — save it somewhere safe", "success");
+  showToast("API key generated — copy it now; other browsers and API clients will need it", "success");
 }
 function copyAPIKey() {
   var el = document.getElementById("api-key-display");
@@ -4176,6 +4349,12 @@ function fallbackCopyAPIKey(el) {
     if (typeof el.blur === "function") el.blur();
   }
 }
+function signOut() {
+  fetch("/api/v1/auth/logout", { method: "POST" })
+    .then(function() { window.location.href = "/login"; })
+    .catch(function() { window.location.href = "/login"; });
+}
+
 function revokeAPIKey() {
   if (!confirm("Revoke the API key? All fleet instances using this key will lose access.")) return;
   document.getElementById("api-key-display").value = "";
@@ -4219,7 +4398,7 @@ function testProxmoxConnection() {
       sel.innerHTML = '<option value="">All nodes (poll entire cluster)</option>';
       if (d.node_names) {
         for (var i = 0; i < d.node_names.length; i++) {
-          sel.innerHTML += '<option value="' + d.node_names[i] + '">' + d.node_names[i] + '</option>';
+          sel.appendChild(new Option(d.node_names[i], d.node_names[i]));
         }
       }
       if (current) sel.value = current;
