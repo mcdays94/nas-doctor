@@ -307,9 +307,10 @@ func jsonHasPath(raw []byte, path ...string) bool {
 
 // ResetAPIKey removes the API key from the stored settings, leaving
 // everything else untouched. It backs the -reset-api-key command-line
-// flag: now that the web UI is behind the key too, a lost key can no
-// longer be read off the Settings page, so there has to be a way back in
-// for whoever controls the host. removed is false when no key was set.
+// flag: with sign-in on, the web UI is behind the key too and a lost key
+// can no longer be read off the Settings page, so there has to be a way
+// back in for whoever controls the host (see also ShowAPIKey). removed is
+// false when no key was set.
 func ResetAPIKey(store storage.ConfigStore) (removed bool, err error) {
 	raw, err := store.GetConfig(settingsConfigKey)
 	if err != nil {

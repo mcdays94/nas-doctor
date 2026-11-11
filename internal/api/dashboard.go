@@ -181,6 +181,37 @@ util.ephemeralDataBanner = function(st) {
   return h;
 };
 
+/* Sign-in notice. /api/v1/status sets access_notice=true on an install
+   whose API key predates sign-in: the key still guards only the status
+   API, exactly as before, and the dashboard stays open. Upgrading changes
+   nothing for such an install, so this is how its owner learns that the
+   option exists. Shown until dismissed; the choice is stored server-side.
+
+   Like the banner above, the CSS (class=access-notice-banner) is inlined
+   in both theme templates; TestThemeTemplates_StyleAccessNotice pins it. */
+util.accessNoticeBanner = function(st) {
+  if (!st || !st.access_notice) return "";
+  var h = "";
+  h += '<div class="access-notice-banner fade-in" data-access-notice role="status">';
+  h += '<div><strong>Sign-in is now available.</strong> ';
+  h += 'Nothing has changed for this NAS Doctor: its API key is still only asked of scripts and other instances reading the status API, ';
+  h += 'and the dashboard and Settings are open to anyone who can reach this address. ';
+  h += 'You can choose to ask for the key everywhere.</div>';
+  h += '<div class="access-notice-actions">';
+  h += '<a href="/settings#card-apikey">Review in Settings</a>';
+  h += '<button type="button" onclick="NasDashboard.util.dismissAccessNotice(this)">Dismiss</button>';
+  h += '</div></div>';
+  return h;
+};
+
+util.dismissAccessNotice = function(btn) {
+  if (_statusData) _statusData.access_notice = false;
+  var el = btn;
+  while (el && !(el.getAttribute && el.getAttribute("data-access-notice") !== null)) el = el.parentNode;
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+  fetch("/api/v1/access/dismiss-notice", { method: "POST", headers: { "X-Requested-With": "nas-doctor" } }).catch(function() {});
+};
+
 /* ── Polling ───────────────────────────────────────────────────── */
 var polling = {};
 var _pollTimer = null;

@@ -16,6 +16,7 @@
 //	-config         Path to JSON config file (optional)
 //	-demo           Run with realistic mock data (for previewing themes)
 //	-reset-api-key  Remove the API key from the stored settings and exit
+//	-show-api-key   Print the stored API key and exit
 package main
 
 import (
@@ -55,11 +56,18 @@ func main() {
 	intervalStr := flag.String("interval", envOr("NAS_DOCTOR_INTERVAL", "30m"), "Diagnostic scan interval")
 	configPath := flag.String("config", envOr("NAS_DOCTOR_CONFIG", ""), "Path to JSON config file")
 	demoMode := flag.Bool("demo", false, "Run with realistic mock data (for previewing themes)")
-	resetAPIKey := flag.Bool("reset-api-key", false, "Remove the API key from the stored settings and exit (use when the key is lost)")
+	resetAPIKey := flag.Bool("reset-api-key", false, "Remove the API key from the stored settings and exit")
+	showAPIKey := flag.Bool("show-api-key", false, "Print the stored API key and exit (use when the key is lost)")
 	flag.Parse()
 
 	// Logger
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	// The one-shot key commands print their answer on stdout; keep the
+	// log lines out of it.
+	logOut := os.Stdout
+	if *resetAPIKey || *showAPIKey {
+		logOut = os.Stderr
+	}
+	logger := slog.New(slog.NewJSONHandler(logOut, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
@@ -104,7 +112,7 @@ func main() {
 	// Runs only in production (demo mode writes to a tmpfs path by default
 	// and we don't want to scold users previewing the dashboard).
 	dataPersistent := true
-	if !*demoMode && !*resetAPIKey {
+	if !*demoMode && !*resetAPIKey && !*showAPIKey {
 		dataPersistent = warnIfDataEphemeral(logger, cfg.DataDir)
 	}
 
@@ -117,11 +125,26 @@ func main() {
 	}
 	defer store.Close()
 
-	// Recovery for a lost API key. The web UI requires the key, so the
-	// way back in is from the host:
+	// Recovery for a lost API key. With sign-in on, the web UI asks for
+	// the key, so the way back in is from the host:
+	//   docker exec nas-doctor /app/nas-doctor -show-api-key
 	//   docker exec nas-doctor /app/nas-doctor -reset-api-key
-	// It edits the same database a running instance uses; the change is
+	// Both use the same database a running instance uses; a reset is
 	// picked up on the next request.
+	if *showAPIKey {
+		key, err := api.ShowAPIKey(store)
+		if err != nil {
+			logger.Error("failed to read the API key", "error", err)
+			store.Close()
+			os.Exit(1)
+		}
+		if key == "" {
+			fmt.Println("No API key is set. The instance is open.")
+		} else {
+			fmt.Println(key)
+		}
+		return
+	}
 	if *resetAPIKey {
 		removed, err := api.ResetAPIKey(store)
 		if err != nil {

@@ -31,6 +31,43 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
 /* Until the stored settings are in the form, the form is inert: a click
    here would otherwise save defaults over the real configuration. */
 .settings-loading .card{opacity:.55;pointer-events:none}
+/* Access card */
+.access-pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.2px;vertical-align:middle;background:rgba(255,255,255,0.08);color:var(--text2)}
+.access-pill.on{background:rgba(16,185,129,0.15);color:var(--green)}
+.access-pill.partial{background:rgba(245,158,11,0.15);color:var(--amber)}
+body.theme-clean .access-pill{background:rgba(0,0,0,0.06)}
+.access-keyrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.access-keyrow input{flex:1;min-width:180px;font-family:var(--font-mono);font-size:12px;letter-spacing:.5px}
+.access-hint{font-size:11px;color:var(--text2);margin-top:8px}
+.access-block{margin-top:20px;padding-top:4px;border-top:1px solid var(--border)}
+.access-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-bottom:1px solid var(--border)}
+.access-row:last-child{border-bottom:0;padding-bottom:0}
+.access-row-title{font-size:14px;font-weight:600}
+.access-row-desc{font-size:12px;color:var(--text2);margin-top:3px;max-width:62ch}
+.access-row select{width:auto;min-width:170px;flex:0 0 auto}
+.access-row.disabled{opacity:.5}
+.access-row.disabled .toggle-wrap,.access-row.disabled select{pointer-events:none}
+.access-confirm{margin:14px 0;padding:16px;border:1px solid var(--accent);border-radius:var(--radius);background:rgba(94,106,210,0.06);font-size:13px}
+body.theme-clean .access-confirm{background:rgba(0,0,0,0.02)}
+.access-confirm h4{font-size:14px;font-weight:600;margin:0 0 10px}
+.access-confirm ol{margin:0 0 12px 18px;padding:0}
+.access-confirm li{margin-bottom:10px}
+.access-confirm code{font-family:var(--font-mono);font-size:12px;word-break:break-all}
+.access-key-clear{display:flex;align-items:center;gap:8px;margin-top:6px}
+.access-key-clear code{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);user-select:all}
+.access-confirm-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.access-confirm-check{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--text);cursor:pointer;margin:0}
+.access-confirm-check input{width:auto;margin:0}
+.access-clients{list-style:none;margin:6px 0 0;padding:0}
+.access-clients li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;margin:0}
+.access-clients li:last-child{border-bottom:0}
+.access-clients .who{font-family:var(--font-mono)}
+.access-clients .meta{color:var(--text2)}
+.access-tag{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(255,255,255,0.08);color:var(--text2)}
+.access-tag.refused{background:rgba(220,38,38,0.12);color:var(--red)}
+body.theme-clean .access-tag{background:rgba(0,0,0,0.06)}
+.access-clients-block{margin-top:18px;padding-top:14px;border-top:1px solid var(--border)}
+@media (max-width:640px){.access-row{flex-direction:column;align-items:flex-start}}
 .load-error{display:none;align-items:center;justify-content:space-between;gap:12px;margin:0 0 16px;padding:12px 16px;border:1px solid var(--red);border-radius:var(--radius);background:rgba(220,38,38,0.08);font-size:13px}
 </style>
 </head>
@@ -151,13 +188,15 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
     </div>
   </div>
 
-  <!-- 1b. API Key -->
+  <!-- 1b. Access: API key, sign-in, sessions -->
   <div class="card" id="card-apikey">
-    <div class="card-title">API Key</div>
-    <div class="card-desc">Protect this instance. When a key is set, every API request and this web UI require it. API clients, fleet polling and Prometheus send it as <code>Authorization: Bearer &lt;key&gt;</code>; a browser signs in with it once.</div>
-    <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
-      <input type="password" id="api-key-display" readonly style="flex:1;font-family:var(--font-mono);font-size:12px;letter-spacing:0.5px" placeholder="No API key set — instance is open">
-      <button class="btn btn-secondary btn-sm" onclick="toggleAPIKeyVisibility()" title="Show/Hide">
+    <div class="card-title">Access <span class="access-pill" id="access-pill"></span></div>
+    <div class="card-desc" id="access-desc">Who can open this NAS Doctor, and what is asked for the API key.</div>
+
+    <label for="api-key-display">API key</label>
+    <div class="access-keyrow">
+      <input type="password" id="api-key-display" readonly placeholder="No API key set">
+      <button class="btn btn-secondary btn-sm" onclick="toggleAPIKeyVisibility()" title="Show or hide the key" aria-label="Show or hide the key">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
       <button class="btn btn-secondary btn-sm" onclick="generateAPIKey()">Generate</button>
@@ -165,7 +204,52 @@ body.theme-clean .webhook-form{border-color:var(--accent);background:rgba(0,0,0,
       <button class="btn btn-danger btn-sm" onclick="revokeAPIKey()">Revoke</button>
       <button class="btn btn-secondary btn-sm" id="api-key-signout" onclick="signOut()" style="display:none">Sign out</button>
     </div>
-    <p style="font-size:11px;color:var(--text2);margin-top:8px">Copy the key somewhere safe before you leave this page: other browsers and other NAS Doctor instances polling this one will need it. This browser stays signed in.</p>
+    <p class="access-hint">Other NAS Doctor instances, scripts and Prometheus send the key as <code>Authorization: Bearer &lt;key&gt;</code>. Lost it? On the host: <code>docker exec nas-doctor /app/nas-doctor -show-api-key</code></p>
+
+    <div class="access-block">
+      <div class="access-row" id="access-signin-row">
+        <div>
+          <div class="access-row-title">Require sign-in</div>
+          <div class="access-row-desc" id="access-signin-desc"></div>
+        </div>
+        <div class="toggle-wrap" onclick="onSignInToggle()" role="switch" tabindex="0" id="access-signin-wrap" aria-label="Require sign-in" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();onSignInToggle();}">
+          <div class="toggle" id="access-signin-toggle"><div class="toggle-knob"></div></div>
+        </div>
+      </div>
+
+      <div class="access-confirm" id="access-confirm" style="display:none" role="group" aria-label="Turn on sign-in"></div>
+
+      <div class="access-row" id="access-session-row">
+        <div>
+          <div class="access-row-title"><label for="access-session-days" style="margin:0;font-size:inherit;text-transform:none;letter-spacing:0;color:inherit;font-weight:inherit">Stay signed in for</label></div>
+          <div class="access-row-desc">Counted from the last time a browser used NAS Doctor, so a browser you use regularly is not asked again. Replacing the key signs every browser out.</div>
+        </div>
+        <select id="access-session-days" onchange="onSessionDaysChange()">
+          <option value="1">1 day</option>
+          <option value="7">7 days</option>
+          <option value="30">30 days</option>
+          <option value="90">90 days</option>
+          <option value="365">1 year</option>
+          <option value="0">Until I sign out</option>
+        </select>
+      </div>
+
+      <div class="access-row" id="access-local-row">
+        <div>
+          <div class="access-row-title">Skip sign-in on the local network</div>
+          <div class="access-row-desc">Devices on your own network open NAS Doctor without the key; everything else is asked for it. <span id="access-local-desc"></span></div>
+        </div>
+        <div class="toggle-wrap" onclick="onTrustLocalToggle()" role="switch" tabindex="0" id="access-local-wrap" aria-label="Skip sign-in on the local network" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();onTrustLocalToggle();}">
+          <div class="toggle" id="access-local-toggle"><div class="toggle-knob"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="access-clients-block" id="access-clients-block" style="display:none">
+      <div class="access-row-title" id="access-clients-title"></div>
+      <div class="access-row-desc" id="access-clients-desc"></div>
+      <ul class="access-clients" id="access-clients"></ul>
+    </div>
   </div>
 
   <!-- 2. Notifications — Webhooks -->
@@ -1857,8 +1941,9 @@ function loadSettings() {
       for (var sk in secIds) { var el = document.getElementById(secIds[sk]); if (el) { if (sec[sk] === false) el.classList.remove("on"); else el.classList.add("on"); } }
       var dashColsSel = document.getElementById("sec-dash-columns");
       if (dashColsSel && sec.dash_columns !== undefined) dashColsSel.value = sec.dash_columns || 0;
-      /* API Key */
+      /* API key and access */
       document.getElementById("api-key-display").value = data.api_key || "";
+      setAccessFromSettings(data);
       /* Drive replacement cost per TB */
       var costEl = document.getElementById("cost-per-tb");
       if (costEl) costEl.value = (data.cost_per_tb && data.cost_per_tb > 0) ? data.cost_per_tb : "";
@@ -1952,9 +2037,7 @@ function loadSettings() {
       document.getElementById("backup-path").value = bk.path || "";
       document.getElementById("backup-keep").value = bk.keep_count > 0 ? bk.keep_count : 4;
       setBackupIntervalUI(bk.interval_hours > 0 ? bk.interval_hours : 168);
-      /* Sign-out is only meaningful when a key protects the instance. */
-      var so = document.getElementById("api-key-signout");
-      if (so) so.style.display = data.api_key ? "" : "none";
+      loadAccessStatus();
 
       settingsLoaded = true;
       setSettingsLoadState("ready");
@@ -2051,6 +2134,7 @@ function buildSettingsPayload() {
       interval_hours: getBackupIntervalH()
     },
     api_key: document.getElementById("api-key-display").value.trim(),
+    access: accessPayload(),
     // fleet and dismissed_findings are deliberately not sent. They are
     // owned by their own endpoints, and the server keeps whatever a save
     // does not mention; echoing this page's copy back used to undo
@@ -2257,8 +2341,8 @@ function saveSettingsImmediate() {
   })
   .then(function(saved) {
     settings = saved;
-    var so = document.getElementById("api-key-signout");
-    if (so) so.style.display = saved.api_key ? "" : "none";
+    setAccessFromSettings(saved);
+    loadAccessStatus();
     webhooks = (saved.notifications && saved.notifications.webhooks) ? saved.notifications.webhooks : webhooks;
     notifRules = (saved.notifications && saved.notifications.rules) ? saved.notifications.rules : notifRules;
     maintenanceWindows = (saved.notifications && saved.notifications.maintenance_windows) ? saved.notifications.maintenance_windows : maintenanceWindows;
@@ -2273,7 +2357,14 @@ function saveSettingsImmediate() {
     renderMaintenanceWindows();
     renderServiceChecks();
   })
-  .catch(function(e) { showToast("Error: " + e.message, "error"); });
+  .catch(function(e) {
+    showToast("Error: " + e.message, "error");
+    /* The Access card must never show a state the server does not have. */
+    if (settings) {
+      document.getElementById("api-key-display").value = settings.api_key || "";
+      setAccessFromSettings(settings);
+    }
+  });
 }
 
 // Debounce window for auto-save flows (#258). 300ms collapses the
@@ -4311,9 +4402,7 @@ function generateAPIKey() {
     showToast("Your browser doesn't support secure random generation", "error");
     return;
   }
-  document.getElementById("api-key-display").value = key;
-  saveSettings();
-  showToast("API key generated — copy it now; other browsers and API clients will need it", "success");
+  applyNewAPIKey(key);
 }
 function copyAPIKey() {
   var el = document.getElementById("api-key-display");
@@ -4356,10 +4445,350 @@ function signOut() {
 }
 
 function revokeAPIKey() {
-  if (!confirm("Revoke the API key? All fleet instances using this key will lose access.")) return;
-  document.getElementById("api-key-display").value = "";
+  var el = document.getElementById("api-key-display");
+  if (!el.value) { showToast("No API key is set", "info"); return; }
+  var msg = "Remove the API key? Other NAS Doctor instances and scripts that send it will no longer be checked.";
+  if (accessState.require_sign_in) {
+    msg += "\n\nSign-in stops as well: NAS Doctor will be open to anyone who can reach this address.";
+  }
+  if (!confirm(msg)) return;
+  closeAccessConfirm();
+  el.value = "";
+  saveSettingsImmediate();
+}
+
+/* ── Access: sign-in, session length, local network ──────────────────
+   accessState mirrors the saved access settings. A control only changes
+   it once the change is confirmed, so the page's auto-save can never
+   send a half-made decision. */
+var accessState = { require_sign_in: true, session_days: 365, trust_local_network: false, local_hosts: [] };
+var accessStatus = null;
+var pendingAccess = null;
+
+function setAccessFromSettings(data) {
+  var a = (data && data.access) || {};
+  accessState = {
+    require_sign_in: !!a.require_sign_in,
+    session_days: (typeof a.session_days === "number") ? a.session_days : 365,
+    trust_local_network: !!a.trust_local_network,
+    local_hosts: (a.local_hosts || []).slice()
+  };
+  renderAccess();
+}
+
+/* accessChoiceMade is set when the user decides, here, to keep the
+   dashboard open. The dashboard's "sign-in is now available" notice has
+   nothing left to tell them, so the save dismisses it. */
+var accessChoiceMade = false;
+
+function accessPayload() {
+  var p = {
+    require_sign_in: accessState.require_sign_in,
+    session_days: accessState.session_days,
+    trust_local_network: accessState.trust_local_network,
+    local_hosts: accessState.trust_local_network ? accessState.local_hosts : []
+  };
+  if (accessChoiceMade) p.notice_dismissed = true;
+  return p;
+}
+
+function loadAccessStatus() {
+  fetch("/api/v1/access")
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(st) { accessStatus = st; renderAccess(); })
+    .catch(function() {});
+}
+
+function currentAPIKey() {
+  return document.getElementById("api-key-display").value.trim();
+}
+
+function agoText(iso) {
+  var t = Date.parse(iso);
+  if (isNaN(t)) return "";
+  var sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (sec < 60) return sec + "s ago";
+  if (sec < 3600) return Math.round(sec / 60) + " min ago";
+  if (sec < 172800) return Math.round(sec / 3600) + " h ago";
+  return Math.round(sec / 86400) + " days ago";
+}
+
+function clientSentence(c) {
+  if (!c || !c.address) return "";
+  var addr = "<code>" + escapeHtml(c.address) + "</code>";
+  var fwd = (c.forwarded_for && c.forwarded_for.length) ? "<code>" + escapeHtml(c.forwarded_for.join(", ")) + "</code>" : "";
+  switch (c.reason) {
+    case "private":
+      return "This browser reaches NAS Doctor from " + (fwd || addr) + ", which counts as local.";
+    case "loopback":
+      return "This browser is on the same machine as NAS Doctor, which counts as local.";
+    case "public":
+      return "This browser reaches NAS Doctor from " + addr + ", which is not a local address, so it would still sign in.";
+    case "gateway":
+      return "This browser appears as " + addr + ", the network gateway: visitor addresses are rewritten before they reach NAS Doctor (some Docker bridge setups do this), so it cannot tell local visitors from others and this option lets nobody in. Host networking avoids that.";
+    case "forwarded_public":
+      return "The proxy in front of NAS Doctor reports this browser as " + fwd + ", which is not a local address, so it would still sign in.";
+    case "forwarded_unknown":
+      return "The proxy in front of NAS Doctor reports a visitor address that cannot be read, so this browser does not count as local.";
+    case "host":
+      return "This browser opened NAS Doctor as <code>" + escapeHtml(c.host || "") + "</code>. Only names NAS Doctor knows as its own count, so that another site cannot pose as a local visitor. <a href=\"#\" onclick=\"trustCurrentHost();return false;\">Trust this name</a>";
+    case "proxy":
+    case "http10":
+      return "This browser comes through a proxy that does not pass on visitor addresses (no X-Forwarded-For), so nobody coming through it counts as local.";
+  }
+  return "";
+}
+
+function clientListHTML(list) {
+  var h = "";
+  for (var i = 0; i < list.length; i++) {
+    var c = list[i];
+    h += "<li><span class=\"who\">" + escapeHtml(c.agent) + "</span>";
+    h += "<span class=\"meta\">" + (c.embedded ? "" : "from " + escapeHtml(c.address) + " → ") + escapeHtml(c.path) + "</span>";
+    h += "<span class=\"meta\">" + c.count + " request" + (c.count === 1 ? "" : "s") + ", last " + escapeHtml(agoText(c.last_seen)) + "</span>";
+    if (c.refused) h += "<span class=\"access-tag refused\">refused</span>";
+    else if (c.local && !c.embedded) h += "<span class=\"access-tag\">local network</span>";
+    h += "</li>";
+  }
+  return h;
+}
+
+function renderAccess() {
+  var key = currentAPIKey();
+  var protectedNow = !!key && accessState.require_sign_in;
+  var st = accessStatus;
+
+  var pill = document.getElementById("access-pill");
+  var desc = document.getElementById("access-desc");
+  pill.className = "access-pill";
+  if (!key) {
+    pill.textContent = "Open";
+    desc.textContent = "No API key is set. Anyone who can reach this address can see the dashboard and change settings. That suits a home network you trust; set a key if yours is not.";
+  } else if (protectedNow) {
+    pill.textContent = "Sign-in required";
+    pill.classList.add("on");
+    desc.textContent = "Every page and every API endpoint asks for the key. A browser signs in once; scripts, Prometheus and other NAS Doctor instances send the key with each request.";
+  } else {
+    pill.textContent = "Key for the API only";
+    pill.classList.add("partial");
+    desc.textContent = "The key is asked of scripts and other NAS Doctor instances that read the status, snapshot, scan and report API. The dashboard, Settings and /metrics are open to anyone who can reach this address. This is how every earlier version worked, and it stays this way until you turn sign-in on.";
+  }
+
+  document.getElementById("access-signin-toggle").classList.toggle("on", accessState.require_sign_in);
+  document.getElementById("access-signin-wrap").setAttribute("aria-checked", accessState.require_sign_in ? "true" : "false");
+  var sd = document.getElementById("access-signin-desc");
+  if (!key) {
+    sd.textContent = accessState.require_sign_in
+      ? "On, and takes effect as soon as an API key is set: the key is then asked for before anything is shown. Turn this off first if you only want a key for other NAS Doctor instances and scripts."
+      : "Off. An API key set now is only asked of scripts reading the status API; the dashboard stays open.";
+  } else if (protectedNow) {
+    var via = st && st.signed_in_via;
+    sd.textContent = "On. " + (via === "local" ? "This browser is let in because it is on the local network."
+      : via === "key" ? "This request carried the key."
+      : "This browser is signed in.");
+  } else {
+    sd.textContent = "Off. Turn on to ask for the key before the dashboard, Settings, /metrics or any API endpoint is shown. You will see the key and what is affected before anything changes.";
+  }
+
+  var sel = document.getElementById("access-session-days");
+  var want = String(accessState.session_days);
+  var found = false;
+  for (var i = 0; i < sel.options.length; i++) if (sel.options[i].value === want) found = true;
+  if (!found) sel.add(new Option(accessState.session_days + " days", want), sel.options[sel.options.length - 1]);
+  sel.value = want;
+
+  document.getElementById("access-local-toggle").classList.toggle("on", accessState.trust_local_network);
+  document.getElementById("access-local-wrap").setAttribute("aria-checked", accessState.trust_local_network ? "true" : "false");
+  var localDesc = st ? clientSentence(st.client) : "";
+  if (accessState.trust_local_network && accessState.local_hosts.length) {
+    localDesc += " Also applies when opened as <code>" + escapeHtml(accessState.local_hosts.join(", ")) + "</code>.";
+  }
+  document.getElementById("access-local-desc").innerHTML = localDesc;
+
+  /* Session length and the local-network option only mean something
+     while sign-in is on. */
+  document.getElementById("access-session-row").classList.toggle("disabled", !accessState.require_sign_in);
+  document.getElementById("access-local-row").classList.toggle("disabled", !accessState.require_sign_in);
+
+  var so = document.getElementById("api-key-signout");
+  if (so) so.style.display = (protectedNow && st && st.signed_in_via === "session") ? "" : "none";
+
+  var block = document.getElementById("access-clients-block");
+  var list = (st && st.keyless_clients) || [];
+  if (!list.length) { block.style.display = "none"; return; }
+  block.style.display = "";
+  var since = st.tracking_since ? " since NAS Doctor started (" + agoText(st.tracking_since) + ")" : "";
+  if (protectedNow) {
+    document.getElementById("access-clients-title").textContent = "Connecting without the key";
+    document.getElementById("access-clients-desc").textContent = "Anything other than a browser that came without the key" + since + ". Refused ones need the key added: Authorization: Bearer <key>.";
+  } else {
+    document.getElementById("access-clients-title").textContent = "What uses NAS Doctor without the key";
+    document.getElementById("access-clients-desc").textContent = "Anything other than a browser" + since + ". These keep working as they are; they would need the key if sign-in were turned on.";
+  }
+  document.getElementById("access-clients").innerHTML = clientListHTML(list);
+}
+
+/* applyNewAPIKey stores a freshly generated key. Where that key would put
+   NAS Doctor behind sign-in for the first time, the confirmation panel
+   comes first. */
+function applyNewAPIKey(key) {
+  var had = !!currentAPIKey();
+  if (had) {
+    var msg = "Replace the current API key? Anything that sends the old key (other NAS Doctor instances, scripts, Prometheus) stops working until it is given the new one.";
+    if (accessState.require_sign_in) msg += "\n\nEvery other browser will have to sign in again. This one stays signed in.";
+    if (!confirm(msg)) return;
+  } else if (accessState.require_sign_in) {
+    openAccessConfirm({ key: key, newKey: true });
+    return;
+  }
+  document.getElementById("api-key-display").value = key;
+  saveSettingsImmediate();
+  showToast(had ? "API key replaced — copy the new one" : "API key set — copy it for the instances and scripts that need it", "success");
+}
+
+function onSignInToggle() {
+  if (!settingsLoaded) return;
+  var key = currentAPIKey();
+  if (accessState.require_sign_in) {
+    if (pendingAccess) { closeAccessConfirm(); return; }
+    if (key && !confirm("Turn sign-in off?\n\nThe dashboard, Settings and /metrics will be open to anyone who can reach this address. The key will still be asked of scripts reading the status API.")) return;
+    accessState.require_sign_in = false;
+    accessChoiceMade = true;
+    renderAccess();
+    saveSettingsImmediate();
+    return;
+  }
+  if (!key) {
+    /* Nothing is protected until a key exists; this only records the
+       choice for when one is set. */
+    accessState.require_sign_in = true;
+    renderAccess();
+    saveSettingsImmediate();
+    return;
+  }
+  openAccessConfirm({ key: key, newKey: false });
+}
+
+function openAccessConfirm(p) {
+  pendingAccess = p;
+  var st = accessStatus;
+  var list = ((st && st.keyless_clients) || []).filter(function(c) { return !c.refused; });
+  var since = (st && st.tracking_since) ? " since NAS Doctor started (" + agoText(st.tracking_since) + ")" : "";
+  var h = "<h4>" + (p.newKey ? "Set this key and turn on sign-in" : "Before sign-in is turned on") + "</h4><ol>";
+  h += "<li><strong>Keep the key.</strong> Every other browser and device will ask for it once, and anything that reads the API needs it.";
+  h += "<div class=\"access-key-clear\"><code id=\"access-confirm-key\">" + escapeHtml(p.key) + "</code><button class=\"btn btn-secondary btn-sm\" type=\"button\" onclick=\"copyPendingKey()\">Copy</button></div></li>";
+  h += "<li><strong>What is affected.</strong> ";
+  if (list.length) {
+    var anyLocal = list.some(function(c) { return c.local && !c.embedded; });
+    h += "These connected without the key" + escapeHtml(since) + " and will be refused until they send it as <code>Authorization: Bearer &lt;key&gt;</code>:";
+    h += "<ul class=\"access-clients\">" + clientListHTML(list) + "</ul>";
+    if (anyLocal) h += "Ones marked <em>local network</em> keep working if you also turn on “Skip sign-in on the local network”.";
+  } else {
+    h += "Nothing other than a browser has connected without the key" + escapeHtml(since) + ". Something that connects rarely may not have shown up yet.";
+  }
+  h += " NAS Doctor shown inside another dashboard on a different address will stop loading there. Other NAS Doctor instances that already have the key carry on.</li>";
+  h += "<li><strong>If the key is ever lost,</strong> read it back on the host: <code>docker exec nas-doctor /app/nas-doctor -show-api-key</code></li>";
+  h += "</ol>";
+  h += "<label class=\"access-confirm-check\"><input type=\"checkbox\" id=\"access-confirm-saved\" onchange=\"document.getElementById('access-confirm-go').disabled=!this.checked\"> I have saved the key somewhere I can find it</label>";
+  h += "<div class=\"access-confirm-actions\"><button class=\"btn btn-primary btn-sm\" type=\"button\" id=\"access-confirm-go\" disabled onclick=\"confirmAccess()\">Turn on sign-in</button>";
+  if (p.newKey) h += "<button class=\"btn btn-secondary btn-sm\" type=\"button\" onclick=\"confirmAccessKeyOnly()\">Set the key, leave the dashboard open</button>";
+  h += "<button class=\"btn btn-secondary btn-sm\" type=\"button\" onclick=\"closeAccessConfirm()\">Cancel</button></div>";
+  var box = document.getElementById("access-confirm");
+  box.innerHTML = h;
+  box.style.display = "";
+  if (box.scrollIntoView) box.scrollIntoView({ block: "nearest" });
+}
+
+function closeAccessConfirm() {
+  pendingAccess = null;
+  var box = document.getElementById("access-confirm");
+  box.style.display = "none";
+  box.innerHTML = "";
+}
+
+function copyPendingKey() {
+  if (!pendingAccess) return;
+  var key = pendingAccess.key;
+  var done = function() { showToast("Copied to clipboard", "success"); };
+  var manual = function() { showToast("Select the key and copy it manually", "info"); };
+  if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    navigator.clipboard.writeText(key).then(done, manual);
+    return;
+  }
+  /* Plain-HTTP pages have no clipboard API; select the text instead. */
+  try {
+    var range = document.createRange();
+    range.selectNodeContents(document.getElementById("access-confirm-key"));
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    if (document.execCommand("copy")) done(); else manual();
+  } catch (e) { manual(); }
+}
+
+function confirmAccess() {
+  if (!pendingAccess) return;
+  var saved = document.getElementById("access-confirm-saved");
+  if (!saved || !saved.checked) return;
+  document.getElementById("api-key-display").value = pendingAccess.key;
+  accessState.require_sign_in = true;
+  closeAccessConfirm();
+  renderAccess();
+  saveSettingsImmediate();
+  showToast("Sign-in is on. This browser is signed in.", "success");
+}
+
+function confirmAccessKeyOnly() {
+  if (!pendingAccess) return;
+  document.getElementById("api-key-display").value = pendingAccess.key;
+  accessState.require_sign_in = false;
+  accessChoiceMade = true;
+  closeAccessConfirm();
+  renderAccess();
+  saveSettingsImmediate();
+  showToast("API key set. The dashboard stays open.", "success");
+}
+
+function onSessionDaysChange() {
+  var v = parseInt(document.getElementById("access-session-days").value, 10);
+  if (isNaN(v) || v < 0) return;
+  accessState.session_days = v;
   saveSettings();
-  showToast("API key revoked — instance is now open", "success");
+}
+
+/* A name such as nas.example.com has to be listed before requests
+   addressed to it can count as local; names that only exist on private
+   networks (an IP address, "tower", "tower.local") need not be. */
+function untrustedCurrentHost() {
+  var c = accessStatus && accessStatus.client;
+  return (c && c.reason === "host" && c.host) ? c.host : "";
+}
+
+function onTrustLocalToggle() {
+  if (!settingsLoaded || !accessState.require_sign_in) return;
+  if (!accessState.trust_local_network) {
+    var host = untrustedCurrentHost();
+    var msg = "Let devices on the local network in without the key?\n\nAnyone on your network will be able to open NAS Doctor and change settings. Leave this off if NAS Doctor is reachable from the internet through a proxy or tunnel that does not pass on visitor addresses.";
+    if (host) msg += "\n\nThe name you are using now (" + host + ") will be remembered as belonging to this NAS Doctor.";
+    if (!confirm(msg)) return;
+    accessState.local_hosts = host ? [host] : [];
+  } else {
+    accessState.local_hosts = [];
+  }
+  accessState.trust_local_network = !accessState.trust_local_network;
+  renderAccess();
+  saveSettingsImmediate();
+}
+
+function trustCurrentHost() {
+  var host = untrustedCurrentHost();
+  if (!host || !accessState.trust_local_network) {
+    if (host) showToast("Switch the option on first", "info");
+    return;
+  }
+  if (accessState.local_hosts.indexOf(host) === -1) accessState.local_hosts.push(host);
+  renderAccess();
+  saveSettingsImmediate();
 }
 
 function testKubernetesConnection() {

@@ -298,13 +298,22 @@ Dropdown-driven notification builder with full granularity — no YAML, no compl
 
 ### API Key Authentication
 
-An optional per-instance key. With no key set the instance is open, as before. With a key set, everything requires it:
+NAS Doctor is open by default. You can set an API key, and separately choose whether that key is asked for before anything is shown (sign-in). Both live in **Settings → Access**.
 
-- **Generate/Copy/Revoke** from Settings — key format `nd-{hex}`
-- Every route is protected: all of `/api/v1/*`, `/metrics`, and the web pages. Only `/api/v1/health` (Docker HEALTHCHECK, Kubernetes probes, fleet discovery) and the sign-in page stay public
-- **API clients** send `Authorization: Bearer <key>` (or `?api_key=<key>`)
-- **Browsers** sign in once at `/login` with the key and keep an HttpOnly session cookie for 30 days. Rotating or revoking the key ends every session. The browser that sets the key stays signed in
-- **Prometheus** needs the key too once one is set:
+| | No API key | API key, sign-in off | API key, sign-in on |
+|---|---|---|---|
+| Dashboard, Settings and the other pages | open | open | sign in once per browser |
+| `/metrics` | open | open | key required |
+| Status, snapshot, scan and report API | open | key required | key required |
+| Rest of `/api/v1/*` (settings, alerts, history, …) | open | open | key required |
+| `/api/v1/health` (Docker HEALTHCHECK, probes) | open | open | open |
+
+- **Generate/Copy/Revoke** the key from Settings — key format `nd-{hex}`. Other NAS Doctor instances, scripts and Prometheus send it as `Authorization: Bearer <key>` (or `?api_key=<key>`)
+- **Upgrading changes nothing.** An install that already had an API key stays in the middle column, which is exactly how it behaved before sign-in existed, so nobody is met by a sign-in page they did not ask for. Its dashboard shows a dismissible notice that sign-in is available
+- **Turning sign-in on** is a switch in Settings. Before anything changes it shows you the key, lists what has been connecting without it (a Prometheus scrape, a script, NAS Doctor embedded in another dashboard) and asks you to confirm the key is saved. The browser you do it from stays signed in. A new install that sets its first key gets the same step, with the option to keep the dashboard open
+- **Stay signed in for** 1 day up to "until I sign out" (default: 1 year). The period counts from a browser's last visit, so one you use regularly is not asked again. Replacing or revoking the key signs every browser out
+- **Skip sign-in on the local network** (optional, off by default) lets requests from a private or loopback address in without the key. NAS Doctor errs on the side of asking: a visitor that a proxy reports as coming from a public address is asked to sign in, and where visitor addresses are hidden from NAS Doctor (some Docker bridge setups show every visitor as the bridge gateway; a proxy that sends no `X-Forwarded-For`) nobody is treated as local. Settings shows how your own browser is seen. Requests must also be addressed to a name NAS Doctor knows as its own (an IP address, a name that only exists on private networks such as `tower` or `tower.local`, or the name in use when the option was switched on), so that another website cannot pose as a local visitor. Leave the option off if NAS Doctor is reachable from the internet through a proxy that does not pass on visitor addresses
+- **Prometheus** needs the key once sign-in is on:
   ```yaml
   scrape_configs:
     - job_name: nas-doctor
@@ -313,11 +322,12 @@ An optional per-instance key. With no key set the instance is open, as before. W
       static_configs:
         - targets: ["nas:8060"]
   ```
-- **Lost the key?** Remove it from the host and set a new one in Settings:
+- **Lost the key?** Read it back from the host, or remove it (which opens the instance until a new key is set):
   ```bash
+  docker exec nas-doctor /app/nas-doctor -show-api-key
   docker exec nas-doctor /app/nas-doctor -reset-api-key
   ```
-- No CORS headers are sent, and state-changing requests from another origin are refused, so a web page open in your browser cannot drive the API. Scripts and other servers are unaffected
+- **Other sites.** A web page on another origin can read monitoring data through your browser while sign-in is off (`GET` on `/metrics` and on `/api/v1/*` other than settings, fleet and backups), as it always could. It can no longer read settings or change anything, and with sign-in on it gets nothing. Scripts and other servers are unaffected
 - Fleet test validates end-to-end with API key before saving
 
 ### Multi-Server Fleet Monitoring
@@ -640,7 +650,7 @@ Captured from demo mode, which renders the UI with generated data.
 All configurable from the web UI at `/settings`, organized with a sticky section nav:
 
 - **General**: Scan interval (preset or custom with cron preview), theme selection, app icon
-- **API Key**: Generate, copy or revoke the key that protects the API, `/metrics` and the web UI; sign out of the current browser
+- **Access**: Generate, copy or revoke the API key; require sign-in; choose how long browsers stay signed in; skip sign-in on the local network; see what connects without the key
 - **Webhooks**: Add/remove/test Discord, Slack, Gotify, Ntfy, or generic HTTP webhooks with optional custom headers and HMAC signing
 - **Notification Rules**: Dropdown-driven rule builder with 13 categories, live target selection, threshold inputs, one-click presets, quiet hours, and maintenance windows
 - **Service Checks**: HTTP, TCP, DNS, Ping/ICMP, SMB, NFS, Traceroute and Speed Test checks with per-check configurable intervals (30s–1h) and a **Test** button
@@ -736,16 +746,17 @@ All configurable from the web UI at `/settings`, organized with a sticky section
 | `/parity` | GET | Parity history detail page (HTML) |
 | `/api/v1/fleet/servers` | GET/PUT | Manage remote server list |
 | `/api/v1/fleet/test` | POST | Test connectivity to a remote server |
-| `/metrics` | GET | Prometheus metrics endpoint (requires the API key when one is set) |
-| `/login` | GET | Sign-in page, shown when an API key is set |
+| `/metrics` | GET | Prometheus metrics endpoint (requires the API key when sign-in is on) |
+| `/login` | GET | Sign-in page, shown when sign-in is on |
 | `/api/v1/auth/login` | POST | Exchange `{"api_key": "…"}` for a session cookie |
 | `/api/v1/auth/logout` | POST | Clear the session cookie |
+| `/api/v1/access` | GET | Access mode, how the caller is seen (local or not), and what has connected without the key |
 
 ---
 
 ## Prometheus Metrics
 
-All metrics prefixed with `nasdoctor_`. When an API key is set, the scrape must send it as a Bearer token (see [API Key Authentication](#api-key-authentication)). Full list:
+All metrics prefixed with `nasdoctor_`. When sign-in is on, the scrape must send the API key as a Bearer token (see [API Key Authentication](#api-key-authentication)). Full list:
 
 <details>
 <summary>Expand metric list (120+ metrics)</summary>

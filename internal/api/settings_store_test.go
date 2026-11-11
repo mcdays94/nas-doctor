@@ -460,7 +460,7 @@ func TestUpdateSettings_KeyChangeKeepsTheBrowserSignedIn(t *testing.T) {
 
 	rr := putSettingsJSON(t, srv, `{"api_key":"nd-new-key"}`)
 	c := sessionCookieFrom(rr)
-	if c == nil || !validSessionToken("nd-new-key", c.Value, time.Now()) {
+	if c == nil || !validSessionToken("nd-new-key", c.Value, time.Now(), 0) {
 		t.Fatalf("setting a key did not issue a valid session cookie: %v", c)
 	}
 

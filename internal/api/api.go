@@ -125,6 +125,9 @@ type Server struct {
 	settingsMu sync.Mutex
 	// loginLimiter throttles failed sign-in attempts. See auth.go.
 	loginLimiter loginLimiter
+	// keyless remembers what uses this instance without the API key, so
+	// Settings can say what turning sign-in on would affect. See access.go.
+	keyless keylessTracker
 	// staticWebhooks are webhooks from the environment or config file
 	// (NAS_DOCTOR_WEBHOOK_URL). They are delivered to alongside the ones
 	// saved in Settings and never written to the settings blob.
@@ -173,24 +176,32 @@ func (s *Server) Router() http.Handler {
 
 	// Baseline middleware — cheap, applied to every route.
 	r.Use(middleware.RequestID)
+	// Before RealIP: the socket's own address is what decides whether a
+	// request is local (access.go).
+	r.Use(capturePeerAddr)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
-	// No CORS headers are sent. The UI is same-origin, and API clients
-	// (fleet polling, Prometheus, scripts) are not browsers. The previous
-	// wildcard policy let any web page read and rewrite settings through
-	// a visitor's browser.
 	r.Use(s.securityHeaders)
 	r.Use(s.limitRequestBody)
+	// Another site's page may read monitoring data on installs without
+	// sign-in, as before. It may no longer read or change configuration:
+	// the previous wildcard policy let any web page rewrite settings
+	// through a visitor's browser.
+	r.Use(s.crossOriginReads)
 	r.Use(s.sameOriginGuard)
-	// One gate for everything. When an API key is set, every route below
-	// requires it except the allow-list in isPublicPath (auth.go).
+	// One gate for everything. What it asks for depends on the access
+	// mode: nothing without an API key, the key on the historical API
+	// routes when sign-in is off, and the key or a signed-in browser on
+	// every route when sign-in is on (access.go, auth.go).
 	r.Use(s.authMiddleware)
 
 	// Sign-in for the browser UI.
 	r.Get("/login", s.handleLoginPage)
 	r.Post("/api/v1/auth/login", s.handleLogin)
 	r.Post("/api/v1/auth/logout", s.handleLogout)
+	r.Get("/api/v1/access", s.handleAccessStatus)
+	r.Post("/api/v1/access/dismiss-notice", s.handleDismissAccessNotice)
 
 	// Long-running test endpoints — registered BEFORE the Timeout group.
 	// Speed-type service-check tests invoke the Ookla CLI, which can take
@@ -350,6 +361,10 @@ type statusResponse struct {
 	// (omitempty) on the happy path so unrelated consumers of the status
 	// endpoint don't need to care. Issue #227.
 	DataEphemeral bool `json:"data_ephemeral,omitempty"`
+	// AccessNotice is true on an install whose API key guards only part
+	// of the API (it predates sign-in) until the notice is dismissed.
+	// The dashboard uses it to say that sign-in is now available.
+	AccessNotice bool `json:"access_notice,omitempty"`
 	// BackupMonitor surfaces the count of enabled external Borg and
 	// Duplicacy repos configured via Settings → Backup Monitors. The
 	// dashboard JS reads these counts to detect the "configured but
@@ -376,6 +391,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	// banner. main.go sets it via SetDataPersistent at startup.
 	resp.DataEphemeral = s.dataEphemeral
 	settings := s.getSettings()
+	resp.AccessNotice = accessNoticeDue(settings)
 	dismissed := make(map[string]struct{}, len(settings.DismissedFindings))
 	for _, title := range settings.DismissedFindings {
 		dismissed[title] = struct{}{}

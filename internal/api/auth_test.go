@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -288,30 +289,39 @@ func TestAuth_LoginIssuesSessionCookie(t *testing.T) {
 	}
 }
 
-func TestSessionToken_ExpiryAndTamper(t *testing.T) {
+func TestSessionToken_LifetimeAndTamper(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	tok := newSessionToken(testAPIKey, now.Add(time.Hour))
-	if !validSessionToken(testAPIKey, tok, now) {
-		t.Fatal("fresh token rejected")
+	day := 24 * time.Hour
+	tok := newSessionToken(testAPIKey, now.Add(-40*day))
+
+	if validSessionToken(testAPIKey, tok, now, 30*day) {
+		t.Error("a session last used 40 days ago was accepted with a 30-day lifetime")
 	}
-	if validSessionToken(testAPIKey, tok, now.Add(2*time.Hour)) {
-		t.Error("expired token accepted")
+	if !validSessionToken(testAPIKey, tok, now, 365*day) {
+		t.Error("a session last used 40 days ago was rejected with a 1-year lifetime")
 	}
-	if validSessionToken("other-key", tok, now) {
+	if !validSessionToken(testAPIKey, tok, now, 0) {
+		t.Error("a session was rejected although sessions are set never to expire")
+	}
+	if validSessionToken("other-key", tok, now, 0) {
 		t.Error("token accepted for a different key")
 	}
-	// Extending the expiry without re-signing must fail.
-	_, mac, _ := strings.Cut(tok, ".")
-	forged := "9999999999." + mac
-	if validSessionToken(testAPIKey, forged, now) {
-		t.Error("token with a forged expiry accepted")
+	// A token dated in the future was not issued by this server's clock.
+	if validSessionToken(testAPIKey, newSessionToken(testAPIKey, now.Add(time.Hour)), now, 0) {
+		t.Error("a token issued in the future was accepted")
 	}
-	for _, bad := range []string{"", ".", "abc", "123.", ".abc"} {
-		if validSessionToken(testAPIKey, bad, now) {
+	// Changing the issue time without re-signing must fail.
+	parts := strings.Split(tok, ".")
+	forged := parts[0] + "." + strconv.FormatInt(now.Unix(), 10) + "." + parts[2]
+	if validSessionToken(testAPIKey, forged, now, 30*day) {
+		t.Error("token with a forged issue time accepted")
+	}
+	for _, bad := range []string{"", ".", "abc", "v2.", "v2.123.", "v1.123.abc", "123.abc"} {
+		if validSessionToken(testAPIKey, bad, now, 0) {
 			t.Errorf("malformed token %q accepted", bad)
 		}
 	}
-	if validSessionToken("", newSessionToken("", now.Add(time.Hour)), now) {
+	if validSessionToken("", newSessionToken("", now), now, 0) {
 		t.Error("token accepted when no key is configured")
 	}
 }
@@ -450,33 +460,6 @@ func TestSameOriginGuard(t *testing.T) {
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Errorf("cross-origin GET = %d, want 200", rr.Code)
-	}
-}
-
-// TestNoCORSHeaders pins the removal of Access-Control-Allow-Origin: *.
-func TestNoCORSHeaders(t *testing.T) {
-	srv := newAuthTestServer(t, "")
-	router := srv.Router()
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
-	req.Header.Set("Origin", "https://evil.example")
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	if v := rr.Header().Get("Access-Control-Allow-Origin"); v != "" {
-		t.Errorf("Access-Control-Allow-Origin = %q on a GET, want none", v)
-	}
-
-	pre := httptest.NewRequest(http.MethodOptions, "/api/v1/settings", nil)
-	pre.Header.Set("Origin", "https://evil.example")
-	pre.Header.Set("Access-Control-Request-Method", "PUT")
-	pre.Header.Set("Access-Control-Request-Headers", "content-type")
-	rr = httptest.NewRecorder()
-	router.ServeHTTP(rr, pre)
-	if v := rr.Header().Get("Access-Control-Allow-Origin"); v != "" {
-		t.Errorf("preflight granted Access-Control-Allow-Origin = %q", v)
-	}
-	if v := rr.Header().Get("Access-Control-Allow-Methods"); v != "" {
-		t.Errorf("preflight granted methods %q", v)
 	}
 }
 

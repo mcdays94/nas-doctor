@@ -18,26 +18,39 @@ import (
 
 // Authentication model
 //
-// When no API key is configured the instance is open, as it always has
-// been. When a key is configured, EVERY route requires it except the small
-// allow-list in isPublicPath (health probe, the sign-in page and the static
-// assets that page needs).
+// Which requests are asked for the API key depends on the access mode
+// (access.go): nothing when no key is set, the historical handful of API
+// routes when a key is set but sign-in is off, and every route once
+// sign-in is on. This file is the sign-in side.
 //
-// A request proves it holds the key in one of three ways:
+// With sign-in on, EVERY route requires proof of the key except the small
+// allow-list in isPublicPath (health probe, the sign-in page and the
+// static assets that page needs). A request proves itself in one of:
 //
 //   - Authorization: Bearer <key>   — API clients, fleet polling, Prometheus
 //   - ?api_key=<key>                — kept for existing integrations
 //   - the nd_session cookie         — the browser UI, issued by /login
+//   - coming from the local network — only if that option is switched on
 //
-// The cookie replaces the old "Referer contains our host" exemption, which
-// any client could satisfy by sending a header. The cookie value is a
-// stateless HMAC over an expiry time, keyed by the API key itself: sessions
-// survive restarts, need no server-side table, and every session dies the
-// moment the key is rotated or revoked.
+// The cookie value is a stateless HMAC over the time it was issued, keyed
+// by the API key itself: sessions survive restarts, need no server-side
+// table, and every session dies the moment the key is rotated or revoked.
+// How long a session lasts is a setting (access.session_days), checked
+// against the issue time on every request, so changing it takes effect at
+// once. The cookie is reissued as the browser is used, so the period
+// counts from the last visit.
 
 const (
 	sessionCookieName = "nd_session"
-	sessionTTL        = 30 * 24 * time.Hour
+	// sessionRenewAfter is how old a session cookie gets before it is
+	// reissued on use.
+	sessionRenewAfter = time.Hour
+	// sessionCookieMaxAge is the longest a browser will keep a cookie
+	// (browsers cap it at about 400 days). A session that never expires
+	// is kept alive by being reissued.
+	sessionCookieMaxAge = 400 * 24 * time.Hour
+	// sessionClockSkew tolerates a clock that was set back slightly.
+	sessionClockSkew = 5 * time.Minute
 	// requestBodyLimit caps every request body. Nothing the UI or the
 	// documented API sends comes close; an unbounded body used to be
 	// persisted verbatim by a few handlers.
@@ -52,33 +65,47 @@ func secureEqual(a, b string) bool {
 	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
 }
 
-func sessionMAC(apiKey string, exp int64) string {
+func sessionMAC(apiKey string, issued int64) string {
 	m := hmac.New(sha256.New, []byte(apiKey))
-	m.Write([]byte("nas-doctor-session-v1|" + strconv.FormatInt(exp, 10)))
+	m.Write([]byte("nas-doctor-session-v2|" + strconv.FormatInt(issued, 10)))
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-// newSessionToken returns a token valid until exp for the given API key.
-func newSessionToken(apiKey string, exp time.Time) string {
-	e := exp.Unix()
-	return strconv.FormatInt(e, 10) + "." + sessionMAC(apiKey, e)
+// newSessionToken returns a token for the given API key, issued at the
+// given time.
+func newSessionToken(apiKey string, issued time.Time) string {
+	i := issued.Unix()
+	return "v2." + strconv.FormatInt(i, 10) + "." + sessionMAC(apiKey, i)
 }
 
-// validSessionToken reports whether token was issued for apiKey and has not
-// expired.
-func validSessionToken(apiKey, token string, now time.Time) bool {
+// sessionIssuedAt returns when token was issued, if it is a genuine token
+// for apiKey.
+func sessionIssuedAt(apiKey, token string) (time.Time, bool) {
 	if apiKey == "" {
+		return time.Time{}, false
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || parts[0] != "v2" {
+		return time.Time{}, false
+	}
+	issued, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if !hmac.Equal([]byte(parts[2]), []byte(sessionMAC(apiKey, issued))) {
+		return time.Time{}, false
+	}
+	return time.Unix(issued, 0), true
+}
+
+// validSessionToken reports whether token was issued for apiKey and is
+// still within lifetime. A lifetime of zero means sessions do not expire.
+func validSessionToken(apiKey, token string, now time.Time, lifetime time.Duration) bool {
+	issued, ok := sessionIssuedAt(apiKey, token)
+	if !ok || issued.After(now.Add(sessionClockSkew)) {
 		return false
 	}
-	expStr, mac, ok := strings.Cut(token, ".")
-	if !ok {
-		return false
-	}
-	exp, err := strconv.ParseInt(expStr, 10, 64)
-	if err != nil || now.Unix() >= exp {
-		return false
-	}
-	return hmac.Equal([]byte(mac), []byte(sessionMAC(apiKey, exp)))
+	return lifetime <= 0 || now.Sub(issued) < lifetime
 }
 
 // requestIsHTTPS reports whether the client reached us over TLS, directly
@@ -90,12 +117,18 @@ func requestIsHTTPS(r *http.Request) bool {
 	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
-func setSessionCookie(w http.ResponseWriter, r *http.Request, apiKey string) {
+// setSessionCookie signs the browser in. lifetime is the configured
+// session length (zero: no expiry).
+func setSessionCookie(w http.ResponseWriter, r *http.Request, apiKey string, lifetime time.Duration) {
+	maxAge := lifetime
+	if maxAge <= 0 || maxAge > sessionCookieMaxAge {
+		maxAge = sessionCookieMaxAge
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
-		Value:    newSessionToken(apiKey, time.Now().Add(sessionTTL)),
+		Value:    newSessionToken(apiKey, time.Now()),
 		Path:     "/",
-		MaxAge:   int(sessionTTL / time.Second),
+		MaxAge:   int(maxAge / time.Second),
 		HttpOnly: true,
 		Secure:   requestIsHTTPS(r),
 		// Lax, not Strict: a link to the dashboard from a chat notification
@@ -127,21 +160,51 @@ func bearerToken(r *http.Request) string {
 	return ""
 }
 
-// requestAuthorized reports whether r carries proof of the API key.
-func requestAuthorized(r *http.Request, apiKey string) bool {
-	if apiKey == "" {
-		return true
+// How a request got past sign-in.
+const (
+	viaKey     = "key"
+	viaSession = "session"
+	viaLocal   = "local"
+)
+
+// signedInVia reports how r satisfies sign-in, or "" if it does not.
+func signedInVia(r *http.Request, settings Settings) string {
+	if requestHasKey(r, settings.APIKey) {
+		return viaKey
 	}
-	if tok := bearerToken(r); tok != "" && secureEqual(tok, apiKey) {
-		return true
+	if c, err := r.Cookie(sessionCookieName); err == nil &&
+		validSessionToken(settings.APIKey, c.Value, time.Now(), settings.sessionLifetime()) {
+		return viaSession
 	}
-	if q := r.URL.Query().Get("api_key"); q != "" && secureEqual(q, apiKey) {
-		return true
+	if settings.Access.TrustLocalNetwork && describeClient(r, settings.Access.LocalHosts).Local {
+		return viaLocal
 	}
-	if c, err := r.Cookie(sessionCookieName); err == nil && validSessionToken(apiKey, c.Value, time.Now()) {
+	return ""
+}
+
+// requestAllowed reports whether r may proceed under the instance's access
+// mode.
+func requestAllowed(r *http.Request, settings Settings) bool {
+	switch settings.accessMode() {
+	case accessOpen:
 		return true
+	case accessKeyForAPI:
+		return !keyGuardedRoute(r.URL.Path) || requestHasKey(r, settings.APIKey) || samePageExemption(r)
 	}
-	return false
+	return signedInVia(r, settings) != ""
+}
+
+// renewSession reissues the session cookie once it is older than
+// sessionRenewAfter, so the session length counts from the last visit.
+func renewSession(w http.ResponseWriter, r *http.Request, settings Settings) {
+	c, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return
+	}
+	issued, ok := sessionIssuedAt(settings.APIKey, c.Value)
+	if ok && time.Since(issued) >= sessionRenewAfter {
+		setSessionCookie(w, r, settings.APIKey, settings.sessionLifetime())
+	}
 }
 
 // isPublicPath lists the routes that stay reachable without the key.
@@ -171,7 +234,7 @@ func isPageRequest(r *http.Request) bool {
 	return p != "/metrics"
 }
 
-// authMiddleware enforces the API key on every route when one is set.
+// authMiddleware applies the instance's access mode to every route.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isPublicPath(r.URL.Path) {
@@ -187,10 +250,34 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "settings unavailable"})
 			return
 		}
-		if requestAuthorized(r, settings.APIKey) {
+		mode := settings.accessMode()
+		if mode != accessSignIn {
+			if !requestAllowed(r, settings) {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing API key"})
+				return
+			}
+			// Remember what gets by without the key, so that Settings can
+			// say what turning sign-in on would affect.
+			if !requestHasKey(r, settings.APIKey) {
+				s.keyless.observe(r, settings, false)
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
+		switch signedInVia(r, settings) {
+		case viaSession:
+			renewSession(w, r, settings)
+			next.ServeHTTP(w, r)
+			return
+		case viaKey:
+			next.ServeHTTP(w, r)
+			return
+		case viaLocal:
+			s.keyless.observe(r, settings, false)
+			next.ServeHTTP(w, r)
+			return
+		}
+		s.keyless.observe(r, settings, true)
 		if isPageRequest(r) {
 			http.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
 			return
@@ -202,7 +289,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 // apiKeyMiddleware is the historical name for authMiddleware, kept so
 // route-level wrappers and tests that reference it keep working. The whole
-// router is now behind authMiddleware, so wrapping a route again is a no-op.
+// router is behind authMiddleware, so wrapping a route again is a no-op.
 func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 	return s.authMiddleware(next)
 }
@@ -389,7 +476,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "settings unavailable"})
 		return
 	}
-	if settings.APIKey == "" {
+	if settings.accessMode() != accessSignIn {
 		// Nothing to sign in to; let the page carry on to the dashboard.
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "auth_required": false})
 		return
@@ -417,7 +504,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "that key is not correct"})
 		return
 	}
-	setSessionCookie(w, r, settings.APIKey)
+	setSessionCookie(w, r, settings.APIKey, settings.sessionLifetime())
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "auth_required": true})
 }
 
@@ -428,11 +515,11 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
 }
 
-// handleLoginPage serves the sign-in form. When no key is configured, or
+// handleLoginPage serves the sign-in form. When sign-in is not required, or
 // the visitor is already signed in, it goes straight to the dashboard.
 // GET /login
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
-	if settings, err := s.loadSettings(); err == nil && requestAuthorized(r, settings.APIKey) {
+	if settings, err := s.loadSettings(); err == nil && requestAllowed(r, settings) {
 		http.Redirect(w, r, safeNextPath(r.URL.Query().Get("next")), http.StatusFound)
 		return
 	}

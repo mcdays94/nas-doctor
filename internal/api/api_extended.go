@@ -42,6 +42,7 @@ type Settings struct {
 	Proxmox           SettingsProxmox         `json:"proxmox"`
 	Kubernetes        SettingsKubernetes      `json:"kubernetes"`
 	APIKey            string                  `json:"api_key,omitempty"` // Instance API key for fleet auth
+	Access            AccessSettings          `json:"access"`            // Who is asked for the key (access.go)
 	Fleet             []internal.RemoteServer `json:"fleet,omitempty"`
 	DismissedFindings []string                `json:"dismissed_findings,omitempty"`
 	CostPerTB         float64                 `json:"cost_per_tb,omitempty"`     // Drive replacement cost per TB (user's currency)
@@ -474,6 +475,10 @@ func defaultSettings() Settings {
 			DashColumns: 3,
 		},
 		ChartRangeHours: 1,
+		// A new install that sets an API key is fully protected by it.
+		// Installs that already had a key keep the old, narrower rules
+		// until they opt in; see migrateSettings.
+		Access: AccessSettings{RequireSignIn: true, SessionDays: DefaultSessionDays},
 		AdvancedScans: AdvancedScansSettings{
 			SMART: AdvancedScansSMART{
 				WakeDrives:  false,
@@ -1094,6 +1099,22 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !settings.Access.TrustLocalNetwork {
+		settings.Access.LocalHosts = nil // the list only serves that option
+	}
+	localHosts, err := normalizeLocalHosts(settings.Access.LocalHosts)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	settings.Access.LocalHosts = localHosts
+	if settings.Access.SessionDays < 0 || settings.Access.SessionDays > MaxSessionDays {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("access.session_days must be between 0 and %d (0 keeps browsers signed in until they sign out)", MaxSessionDays),
+		})
+		return
+	}
+
 	// Retention defaults and bounds. Zero means "not set" and takes the
 	// default; a value below the floor is raised to the floor. (It used
 	// to jump to the default, so asking for 5 days silently gave 90.)
@@ -1107,16 +1128,17 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Keep the browser that changed the key signed in: it proved it was
-	// allowed to (no key was set, or it held a valid session), and
-	// without this it would be bounced to the sign-in page by its own
-	// save.
-	if settings.APIKey != current.APIKey {
-		if settings.APIKey != "" {
-			setSessionCookie(w, r, settings.APIKey)
-		} else {
+	// Keep the browser that made the change signed in. It was allowed to
+	// make it (the instance was open, or it held the key or a session),
+	// and without this its own save would bounce it to the sign-in page:
+	// when it sets or replaces the key, and when it turns sign-in on.
+	switch {
+	case settings.accessMode() != accessSignIn:
+		if current.accessMode() == accessSignIn {
 			clearSessionCookie(w, r)
 		}
+	case settings.APIKey != current.APIKey || current.accessMode() != accessSignIn:
+		setSessionCookie(w, r, settings.APIKey, settings.sessionLifetime())
 	}
 
 	// Dynamically update the scheduler if changed. All scheduler/collector
@@ -1414,6 +1436,17 @@ func migrateSettings(raw []byte, base Settings) Settings {
 	_ = json.Unmarshal(raw, &shape)
 	_, hasAdvancedScans := shape["advanced_scans"]
 	_, hasFlatSMART := shape["smart"]
+
+	// Access settings arrived together with the sign-in page. A blob
+	// without them was written by a version in which the API key guarded
+	// a few API routes and never the web UI. If that install has a key,
+	// it keeps exactly those rules: its owner must not be met by a
+	// sign-in page they never asked for, asking for a key they may not
+	// have kept. Installs without a key have nothing to preserve and take
+	// the defaults; they pass through Settings before a key exists.
+	if _, hasAccess := shape["access"]; !hasAccess && base.APIKey != "" {
+		base.Access.RequireSignIn = false
+	}
 
 	if base.SettingsVersion < 1 {
 		base.Sections.MergedDrives = true

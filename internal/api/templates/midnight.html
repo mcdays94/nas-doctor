@@ -99,6 +99,15 @@ a:hover{color:var(--hover)}
 .backup-card-duplicacy { /* layout inherits from .backup-card */ }
 .duplicacy-kind-tag { font-size:10px; font-weight:600; letter-spacing:0.5px; padding:2px 6px; border-radius:4px; background:rgba(168,85,247,0.15); color:#c084fc }
 .duplicacy-running-badge { font-size:10px; font-weight:600; letter-spacing:0.5px; padding:2px 6px; border-radius:4px; background:rgba( 34,211,238,0.15); color:#22d3ee }
+/* Sign-in notice. Rendered by util.accessNoticeBanner when /api/v1/status
+   reports access_notice=true. Inlined for the same reason as the banner
+   above; see TestThemeTemplates_StyleAccessNotice. */
+.access-notice-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:12px 16px;margin:16px 0 8px;background:rgba(94,106,210,0.08);border:1px solid rgba(94,106,210,0.3);border-left:4px solid var(--accent);border-radius:var(--radius);color:var(--text-primary);font-size:13px;line-height:1.6}
+.access-notice-banner>div:first-child{flex:1;min-width:260px}
+.access-notice-actions{display:flex;align-items:center;gap:12px;white-space:nowrap}
+.access-notice-banner a{color:var(--accent);text-decoration:underline;font-weight:600}
+.access-notice-banner button{font:inherit;font-size:12px;padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:inherit;cursor:pointer}
+.access-notice-banner button:hover{background:rgba(255,255,255,0.06)}
 /* Ephemeral /data warning banner (#227). Rendered by util.ephemeralDataBanner
    when /api/v1/status reports data_ephemeral=true. MUST be inlined here
    because dashboard theme templates do not link /css/shared.css — see
@@ -373,6 +382,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     // OS version banner so it's the first thing users see when /data
     // is not bind-mounted and the DB is about to be wiped.
     h += NasDashboard.util.ephemeralDataBanner(st);
+    h += NasDashboard.util.accessNoticeBanner(st);
 
     // OS version banner
     var upd = sn ? sn.update : null;
