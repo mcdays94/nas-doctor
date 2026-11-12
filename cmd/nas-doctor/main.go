@@ -6,11 +6,17 @@
 //
 // Flags:
 //
-//	-listen     HTTP listen address (default ":8080")
-//	-data       Data directory for SQLite database (default "/data")
-//	-interval   Diagnostic scan interval (default "30m")
-//	-config     Path to JSON config file (optional)
-//	-demo       Run with realistic mock data (for previewing themes)
+//	-listen         HTTP listen address (default ":8060", or NAS_DOCTOR_LISTEN)
+//	-data           Data directory for the SQLite database (default
+//	                "/tmp/nas-doctor-data", or NAS_DOCTOR_DATA; the Docker
+//	                image sets it to "/data")
+//	-interval       Diagnostic scan interval (default "30m", or
+//	                NAS_DOCTOR_INTERVAL); the default until one is saved in
+//	                Settings
+//	-config         Path to JSON config file (optional)
+//	-demo           Run with realistic mock data (for previewing themes)
+//	-reset-api-key  Remove the API key from the stored settings and exit
+//	-show-api-key   Print the stored API key and exit
 package main
 
 import (
@@ -50,10 +56,18 @@ func main() {
 	intervalStr := flag.String("interval", envOr("NAS_DOCTOR_INTERVAL", "30m"), "Diagnostic scan interval")
 	configPath := flag.String("config", envOr("NAS_DOCTOR_CONFIG", ""), "Path to JSON config file")
 	demoMode := flag.Bool("demo", false, "Run with realistic mock data (for previewing themes)")
+	resetAPIKey := flag.Bool("reset-api-key", false, "Remove the API key from the stored settings and exit")
+	showAPIKey := flag.Bool("show-api-key", false, "Print the stored API key and exit (use when the key is lost)")
 	flag.Parse()
 
 	// Logger
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	// The one-shot key commands print their answer on stdout; keep the
+	// log lines out of it.
+	logOut := os.Stdout
+	if *resetAPIKey || *showAPIKey {
+		logOut = os.Stderr
+	}
+	logger := slog.New(slog.NewJSONHandler(logOut, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
@@ -76,6 +90,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	bootInterval := interval
+
 	// Load config
 	cfg := defaultConfig(*listenAddr, *dataDir)
 	if *configPath != "" {
@@ -96,7 +112,7 @@ func main() {
 	// Runs only in production (demo mode writes to a tmpfs path by default
 	// and we don't want to scold users previewing the dashboard).
 	dataPersistent := true
-	if !*demoMode {
+	if !*demoMode && !*resetAPIKey && !*showAPIKey {
 		dataPersistent = warnIfDataEphemeral(logger, cfg.DataDir)
 	}
 
@@ -109,7 +125,46 @@ func main() {
 	}
 	defer store.Close()
 
-	persistedSettings := loadPersistedSettings(store, logger)
+	// Recovery for a lost API key. With sign-in on, the web UI asks for
+	// the key, so the way back in is from the host:
+	//   docker exec nas-doctor /app/nas-doctor -show-api-key
+	//   docker exec nas-doctor /app/nas-doctor -reset-api-key
+	// Both use the same database a running instance uses; a reset is
+	// picked up on the next request.
+	if *showAPIKey {
+		key, err := api.ShowAPIKey(store)
+		if err != nil {
+			logger.Error("failed to read the API key", "error", err)
+			store.Close()
+			os.Exit(1)
+		}
+		if key == "" {
+			fmt.Println("No API key is set. The instance is open.")
+		} else {
+			fmt.Println(key)
+		}
+		return
+	}
+	if *resetAPIKey {
+		removed, err := api.ResetAPIKey(store)
+		if err != nil {
+			logger.Error("failed to reset the API key", "error", err)
+			store.Close()
+			os.Exit(1)
+		}
+		if removed {
+			fmt.Println("API key removed. The instance is open until a new key is generated in Settings.")
+		} else {
+			fmt.Println("No API key was set. Nothing changed.")
+		}
+		return
+	}
+
+	// One read of the persisted settings, with defaults and migrations
+	// applied — the same view the API serves. On a fresh install nothing
+	// is stored yet and this is the defaults, with the scan interval taken
+	// from NAS_DOCTOR_INTERVAL / -interval.
+	runtimeSettings, settingsStored := loadRuntimeSettings(store, interval, logger)
 
 	// Create Prometheus metrics
 	metrics := notifier.NewMetrics()
@@ -339,12 +394,13 @@ func main() {
 		)
 	} else {
 		// Production mode: real collectors
-		interval = intervalFromSettings(persistedSettings, interval, logger)
+		interval = intervalFromSettings(&runtimeSettings, interval, logger)
 
-		webhooks := cfg.Notifications.Webhooks
-		if persistedSettings != nil && persistedSettings.Notifications.Webhooks != nil {
-			webhooks = persistedSettings.Notifications.Webhooks
-		}
+		// Webhooks from the environment or config file are delivered to
+		// alongside the ones saved in Settings. They used to be replaced
+		// by the saved list as soon as any settings existed, so
+		// NAS_DOCTOR_WEBHOOK_URL stopped working after the first save.
+		webhooks := api.MergeWebhooks(runtimeSettings.Notifications.Webhooks, cfg.Notifications.Webhooks)
 		notif := buildNotifier(webhooks, logger, store)
 
 		sched = scheduler.New(coll, store, notif, metrics, logger, interval)
@@ -355,7 +411,23 @@ func main() {
 		// no longer drift. This is the fix for issue #333: previously the
 		// speed-test schedule, notification rules and log forwarding were only
 		// applied on save and silently reverted on every restart.
-		applySchedulerSettingsFromStore(sched, coll, persistedSettings, interval)
+		//
+		// This runs on a fresh install too, with the defaults. Before, an
+		// install that had never saved settings ran without the default
+		// speed-test schedule and Internet Speed check that its own
+		// Settings page showed (settingsStored is only logged).
+		//
+		// The one case left alone is an install that already has scan
+		// history but has never saved a setting. It has been running on
+		// the scheduler's built-in defaults; applying the settings
+		// defaults to it now would add a service check and change its
+		// speed-test and backup cadence on upgrade.
+		if applySettingsAtBoot(settingsStored, hasScanHistory(store)) {
+			logger.Info("runtime settings applied", "stored", settingsStored, "scan_interval", interval.String())
+			applySchedulerSettingsFromStore(sched, coll, &runtimeSettings, interval)
+		} else {
+			logger.Info("existing install with no saved settings: keeping scheduler defaults until settings are saved")
+		}
 		// Defense-in-depth: guarantee the scheduler's in-memory service check
 		// set matches whatever history the DB carries, even when the settings
 		// payload failed to load or was nil (empty DB, corrupt JSON). Without
@@ -386,9 +458,9 @@ func main() {
 		logger.Info("demo fleet data loaded", "servers", len(demo.DemoFleetServers()))
 		// Don't start polling in demo mode — injected statuses are static
 	} else {
-		if persistedSettings != nil && len(persistedSettings.Fleet) > 0 {
-			fleetMgr.SetServers(persistedSettings.Fleet)
-			logger.Info("fleet monitoring loaded", "servers", len(persistedSettings.Fleet))
+		if len(runtimeSettings.Fleet) > 0 {
+			fleetMgr.SetServers(runtimeSettings.Fleet)
+			logger.Info("fleet monitoring loaded", "servers", len(runtimeSettings.Fleet))
 		}
 		fleetMgr.Start(60 * time.Second)
 		defer fleetMgr.Stop()
@@ -397,6 +469,13 @@ func main() {
 	// Create API server
 	apiServer := api.New(store, sched, coll, metrics, fleetMgr, logger, version)
 	apiServer.SetDataPersistent(dataPersistent)
+	if !*demoMode {
+		// What the process was started with: the default scan interval
+		// until the user saves another, and the webhooks that live in the
+		// environment rather than in Settings.
+		apiServer.SetBootScanInterval(bootInterval)
+		apiServer.SetStaticWebhooks(cfg.Notifications.Webhooks)
+	}
 
 	// HTTP server
 	srv := &http.Server{
@@ -526,17 +605,32 @@ func countSev(findings []internal.Finding, sev internal.Severity) int {
 	return n
 }
 
-func loadPersistedSettings(store *storage.DB, logger *slog.Logger) *api.Settings {
-	raw, err := store.GetConfig("settings")
-	if err != nil || raw == "" {
-		return nil
+// applySettingsAtBoot decides whether the loaded settings are pushed into
+// the scheduler at startup: always when settings have been saved, and on a
+// brand-new data directory (so a fresh install runs what its Settings page
+// shows). An existing install that never saved settings is left as it was.
+func applySettingsAtBoot(settingsStored, hasHistory bool) bool {
+	return settingsStored || !hasHistory
+}
+
+// hasScanHistory reports whether the database already holds a snapshot,
+// i.e. this data directory has been used by an earlier run.
+func hasScanHistory(store *storage.DB) bool {
+	snap, err := store.GetLatestSnapshot()
+	return err == nil && snap != nil
+}
+
+// loadRuntimeSettings reads the persisted settings through the same loader
+// the API uses, so startup and the settings endpoints cannot disagree about
+// defaults or migrations. stored is false on a fresh install. A corrupt or
+// unreadable row is logged and treated as defaults rather than aborting
+// startup.
+func loadRuntimeSettings(store *storage.DB, bootInterval time.Duration, logger *slog.Logger) (settings api.Settings, stored bool) {
+	settings, stored, err := api.LoadSettings(store, bootInterval)
+	if err != nil {
+		logger.Warn("failed to read stored settings, starting with defaults", "error", err)
 	}
-	var settings api.Settings
-	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
-		logger.Warn("failed to parse stored settings", "error", err)
-		return nil
-	}
-	return &settings
+	return settings, stored
 }
 
 func intervalFromSettings(settings *api.Settings, fallback time.Duration, logger *slog.Logger) time.Duration {

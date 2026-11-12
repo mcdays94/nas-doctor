@@ -58,6 +58,11 @@ html {
   -webkit-font-smoothing:antialiased;
 }
 body {
+  /* The theme tokens are scoped to body.theme-*, so the page colours have
+     to be applied here. With them only on <html>, the Clean theme kept the
+     Midnight page background and near-white text on every page that uses
+     this stylesheet. */
+  background:var(--bg); color:var(--text);
   min-height:100vh; padding:24px;
   transition:background 0.2s ease,color 0.2s ease;
 }

@@ -173,3 +173,29 @@ func TestThemeTemplates_StyleEphemeralBanner(t *testing.T) {
 		})
 	}
 }
+
+// TestThemeTemplates_StyleAccessNotice: the sign-in notice is emitted by
+// DashboardJS and, like the banner above, needs its CSS inlined in both
+// dashboard themes, which must also call the renderer.
+func TestThemeTemplates_StyleAccessNotice(t *testing.T) {
+	if !strings.Contains(DashboardJS, "util.accessNoticeBanner = function") ||
+		!strings.Contains(DashboardJS, "/api/v1/access/dismiss-notice") {
+		t.Fatal("DashboardJS must define util.accessNoticeBanner and its dismiss call")
+	}
+	for _, f := range []string{
+		filepath.Join("templates", "midnight.html"),
+		filepath.Join("templates", "clean.html"),
+	} {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		content := string(data)
+		if !strings.Contains(content, ".access-notice-banner{") {
+			t.Errorf("%s must style .access-notice-banner", f)
+		}
+		if !strings.Contains(content, "NasDashboard.util.accessNoticeBanner(st)") {
+			t.Errorf("%s must render the sign-in notice", f)
+		}
+	}
+}

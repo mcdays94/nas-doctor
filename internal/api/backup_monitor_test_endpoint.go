@@ -62,6 +62,19 @@ func (s *Server) handleTestBorgMonitor(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid passphrase_env"})
 		return
 	}
+	// Same checks as the settings save. This handler ends in exec'ing
+	// binary_path, so an unchecked value here was "run any file on the
+	// system as root" for whoever could reach the endpoint.
+	//
+	// An entry that is already saved in Settings may be tested as it is:
+	// it was accepted when it was saved, and refusing it here would break
+	// the Test button for installs that predate the stricter rules.
+	if !borgRepoStored(req, s.getSettings().BackupMonitor.Borg) {
+		if err := validateBorgRepo(req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 
 	runner := s.borgRunner
 	if runner == nil {

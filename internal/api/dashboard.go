@@ -181,6 +181,37 @@ util.ephemeralDataBanner = function(st) {
   return h;
 };
 
+/* Sign-in notice. /api/v1/status sets access_notice=true on an install
+   whose API key predates sign-in: the key still guards only the status
+   API, exactly as before, and the dashboard stays open. Upgrading changes
+   nothing for such an install, so this is how its owner learns that the
+   option exists. Shown until dismissed; the choice is stored server-side.
+
+   Like the banner above, the CSS (class=access-notice-banner) is inlined
+   in both theme templates; TestThemeTemplates_StyleAccessNotice pins it. */
+util.accessNoticeBanner = function(st) {
+  if (!st || !st.access_notice) return "";
+  var h = "";
+  h += '<div class="access-notice-banner fade-in" data-access-notice role="status">';
+  h += '<div><strong>Sign-in is now available.</strong> ';
+  h += 'Nothing has changed for this NAS Doctor: its API key is still only asked of scripts and other instances reading the status API, ';
+  h += 'and the dashboard and Settings are open to anyone who can reach this address. ';
+  h += 'You can choose to ask for the key everywhere.</div>';
+  h += '<div class="access-notice-actions">';
+  h += '<a href="/settings#card-apikey">Review in Settings</a>';
+  h += '<button type="button" onclick="NasDashboard.util.dismissAccessNotice(this)">Dismiss</button>';
+  h += '</div></div>';
+  return h;
+};
+
+util.dismissAccessNotice = function(btn) {
+  if (_statusData) _statusData.access_notice = false;
+  var el = btn;
+  while (el && !(el.getAttribute && el.getAttribute("data-access-notice") !== null)) el = el.parentNode;
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+  fetch("/api/v1/access/dismiss-notice", { method: "POST", headers: { "X-Requested-With": "nas-doctor" } }).catch(function() {});
+};
+
 /* ── Polling ───────────────────────────────────────────────────── */
 var polling = {};
 var _pollTimer = null;
@@ -264,7 +295,7 @@ polling.triggerScan = function() {
   if (_scanInProgress) return;
   _scanInProgress = true;
   if (_renderFn) _renderFn();
-  fetch("/api/v1/scan", { method: "POST" })
+  fetch("/api/v1/scan", { method: "POST", headers: { "X-Requested-With": "nas-doctor" } })
     .then(function(r) { return r.json(); })
     .then(function() {
       setTimeout(function() {
@@ -473,7 +504,7 @@ sections.drives = function(sn, st) {
         var ageStr = noData ? '\u2014' : (s.power_on_hours > 8766 ? (s.power_on_hours / 8766).toFixed(1) + 'y' : (s.power_on_hours || 0).toLocaleString() + 'h');
         var slotLabel = s.array_slot || '';
 
-        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px;margin-bottom:6px;cursor:pointer" onclick="window.location=\'/disk/' + encodeURIComponent(s.serial || '') + '\'">';
+        h += '<div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:calc(var(--radius)*1.5);padding:10px 12px;margin-bottom:6px;cursor:pointer" data-href="' + esc('/disk/' + encodeURIComponent(s.serial || '')) + '" onclick="window.location=this.dataset.href">';
         h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
         h += '<span class="status-dot ' + healthDot + '"></span>';
         h += '<span style="font-weight:600;font-size:13px;min-width:55px">' + esc(s.device) + '</span>';
@@ -530,7 +561,7 @@ sections.drives = function(sn, st) {
       for (var di = 0; di < unmatchedDisks.length; di++) {
         var dk = unmatchedDisks[di];
         var pct = dk.used_percent || 0;
-        var storageLabel = dk.label || dk.mount_point;
+        var storageLabel = esc(dk.label || dk.mount_point);
         var mp = dk.mount_point || "";
         if (mp.indexOf("/mnt/disk") === 0) {
           var slotNum = mp.replace("/mnt/disk", "");
@@ -1789,7 +1820,7 @@ var speedtestLive = (function() {
   function cancel() {
     if (!state.testId) return;
     setCancelEnabled(false, 'Cancelling...');
-    fetch('/api/v1/speedtest/cancel/' + state.testId, { method: 'POST' })
+    fetch('/api/v1/speedtest/cancel/' + state.testId, { method: 'POST', headers: { 'X-Requested-With': 'nas-doctor' } })
       .catch(function() {
         /* If the request itself fails (offline, etc.) re-enable the
            button so the user can retry. The SSE stream's terminal
@@ -1803,7 +1834,7 @@ var speedtestLive = (function() {
     if (state.testId && panel && panel.isRunning()) return;
     begin();
     setCancelEnabled(false, 'Cancel');
-    fetch('/api/v1/speedtest/run', { method: 'POST' })
+    fetch('/api/v1/speedtest/run', { method: 'POST', headers: { 'X-Requested-With': 'nas-doctor' } })
       .then(function(r) {
         return r.json().catch(function() { return {}; }).then(function(body) {
           if (!r.ok || !body || !body.test_id) throw new Error((body && body.error) || ('HTTP ' + r.status));

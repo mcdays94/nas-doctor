@@ -21,6 +21,7 @@ var (
 	replacementPlannerHTML string
 	SettingsPage           string
 	DiskDetailPage         string
+	loginPageHTML          string
 )
 
 func init() {
@@ -42,4 +43,5 @@ func init() {
 	replacementPlannerHTML = read("replacement_planner.html")
 	SettingsPage = read("settings.html")
 	DiskDetailPage = read("disk_detail.html")
+	loginPageHTML = read("login.html")
 }

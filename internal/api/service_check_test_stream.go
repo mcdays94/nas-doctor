@@ -120,6 +120,14 @@ func (s *Server) handleTestServiceCheckStream(w http.ResponseWriter, r *http.Req
 	case internal.ServiceCheckTraceroute:
 		s.streamTraceServiceCheck(w, r, cfg)
 	case internal.ServiceCheckSpeed:
+		// One ad hoc speed test at a time. This path runs its own test
+		// outside the dashboard's shared one, so without the cap every
+		// request started another full-bandwidth test.
+		if !s.adHocSpeedTestBusy.CompareAndSwap(false, true) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "a speed test is already running; wait for it to finish"})
+			return
+		}
+		defer s.adHocSpeedTestBusy.Store(false)
 		s.streamSpeedServiceCheck(w, r, cfg)
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{

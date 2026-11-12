@@ -129,6 +129,12 @@ func (r *execBorgRunner) Info(ctx context.Context, repoPath, binaryPath string, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// A repo path starting with '-' would be parsed by borg as an option.
+	// Callers validate this already; refuse here too so no path into the
+	// runner can turn a repository name into a flag.
+	if strings.HasPrefix(strings.TrimSpace(repoPath), "-") {
+		return BorgInfoJSON{}, &BorgRunError{Reason: BorgErrRepoInaccessible, Err: errors.New("repo path must not start with '-'")}
+	}
 
 	// borg list --bypass-lock --json <repo>. --bypass-lock is required
 	// to support Read-Only-mounted repos, since borg's default lock

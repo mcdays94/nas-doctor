@@ -561,7 +561,10 @@ function loadAlerts() {
           html += '<button class="btn btn-secondary btn-sm" onclick="unsnoozeAlert(' + a.id + ')">Unsnooze</button>';
           html += '<button class="btn btn-secondary btn-sm" onclick="ackAlert(' + a.id + ')">Ack</button>';
         }
-        html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertEvents(' + a.id + ', \'' + escapeHtml(a.title || "").replace(/'/g, "\\'") + '\')">Timeline</button>';
+        // The title travels in a data attribute, not inside the handler's
+        // source: quoting it into a JavaScript string let a title ending in
+        // a backslash break out and run as code.
+        html += '<button class="btn btn-secondary btn-sm" data-alert-title="' + escapeHtml(a.title || "") + '" onclick="loadAlertEvents(' + Number(a.id) + ', this.dataset.alertTitle)">Timeline</button>';
         html += '<button class="btn btn-secondary btn-sm" onclick="loadAlertCorrelation(' + a.id + ')">Correlation</button>';
         html += '</td>';
         html += '</tr>';
@@ -886,7 +889,7 @@ function sendTestNotification() {
       return fetch("/api/v1/settings/test-webhook", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: wh.name, type: wh.type, url: wh.url })
+        body: JSON.stringify({ name: wh.name, type: wh.type, url: wh.url, secret: wh.secret || "", headers: wh.headers || {} })
       });
     })
     .then(function(r) {

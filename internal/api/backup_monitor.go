@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -31,42 +32,150 @@ var envVarPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 // phrase directly.
 func validateBackupMonitorBorg(repos []BorgExternalRepo) error {
 	for i, r := range repos {
-		r.Label = strings.TrimSpace(r.Label)
-		r.RepoPath = strings.TrimSpace(r.RepoPath)
-		r.BinaryPath = strings.TrimSpace(r.BinaryPath)
-		r.PassphraseEnv = strings.TrimSpace(r.PassphraseEnv)
-		r.SSHKeyPath = strings.TrimSpace(r.SSHKeyPath)
-
 		// Per-row label for error messages: prefer user-supplied
 		// label when set, else "entry N" 1-indexed.
-		label := r.Label
+		label := strings.TrimSpace(r.Label)
 		if label == "" {
 			label = fmt.Sprintf("entry %d", i+1)
 		}
-
-		if r.Enabled && r.RepoPath == "" {
-			return fmt.Errorf("backup_monitor.borg[%s]: repo_path is required when enabled", label)
-		}
-		// Non-empty BinaryPath must stat() regardless of Enabled —
-		// catches typos the user might have meant to test immediately
-		// via the Test button.
-		if r.BinaryPath != "" {
-			if _, err := os.Stat(r.BinaryPath); err != nil {
-				return fmt.Errorf("backup_monitor.borg[%s]: binary_path %q not accessible: %v", label, r.BinaryPath, err)
-			}
-		}
-		if r.PassphraseEnv != "" {
-			if !envVarPattern.MatchString(r.PassphraseEnv) {
-				return fmt.Errorf("backup_monitor.borg[%s]: passphrase_env %q must match ^[A-Z_][A-Z0-9_]*$", label, r.PassphraseEnv)
-			}
-		}
-		if r.SSHKeyPath != "" {
-			if _, err := os.Stat(r.SSHKeyPath); err != nil {
-				return fmt.Errorf("backup_monitor.borg[%s]: ssh_key_path %q not accessible: %v", label, r.SSHKeyPath, err)
-			}
+		if err := validateBorgRepo(r); err != nil {
+			return fmt.Errorf("backup_monitor.borg[%s]: %v", label, err)
 		}
 	}
 	return nil
+}
+
+// validateBackupMonitorBorgChange validates a saved list against the one it
+// replaces. An entry that is already stored unchanged is held only to the
+// checks it was saved under; the stricter rules apply to entries that are
+// new or edited. Without this, an install with a custom binary whose name
+// does not start with "borg" could no longer save any setting.
+func validateBackupMonitorBorgChange(repos, existing []BorgExternalRepo) error {
+	for i, r := range repos {
+		label := strings.TrimSpace(r.Label)
+		if label == "" {
+			label = fmt.Sprintf("entry %d", i+1)
+		}
+		check := validateBorgRepo
+		if borgRepoStored(r, existing) {
+			check = validateBorgRepoStored
+		}
+		if err := check(r); err != nil {
+			return fmt.Errorf("backup_monitor.borg[%s]: %v", label, err)
+		}
+	}
+	return nil
+}
+
+// borgRepoStored reports whether r matches a stored entry in every field
+// that ends up on a command line or in the environment.
+func borgRepoStored(r BorgExternalRepo, existing []BorgExternalRepo) bool {
+	for _, e := range existing {
+		if strings.TrimSpace(e.RepoPath) == strings.TrimSpace(r.RepoPath) &&
+			strings.TrimSpace(e.BinaryPath) == strings.TrimSpace(r.BinaryPath) &&
+			strings.TrimSpace(e.PassphraseEnv) == strings.TrimSpace(r.PassphraseEnv) &&
+			strings.TrimSpace(e.SSHKeyPath) == strings.TrimSpace(r.SSHKeyPath) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateBorgRepoStored is the validation every entry passed before the
+// stricter rules existed: a repo path when enabled, a well-formed env var
+// name, and paths that exist.
+func validateBorgRepoStored(r BorgExternalRepo) error {
+	repoPath := strings.TrimSpace(r.RepoPath)
+	binaryPath := strings.TrimSpace(r.BinaryPath)
+	passEnv := strings.TrimSpace(r.PassphraseEnv)
+	sshKeyPath := strings.TrimSpace(r.SSHKeyPath)
+	if r.Enabled && repoPath == "" {
+		return fmt.Errorf("repo_path is required when enabled")
+	}
+	if binaryPath != "" {
+		if _, err := os.Stat(binaryPath); err != nil {
+			return fmt.Errorf("binary_path %q not accessible: %v", binaryPath, err)
+		}
+	}
+	if passEnv != "" && !envVarPattern.MatchString(passEnv) {
+		return fmt.Errorf("passphrase_env %q must match ^[A-Z_][A-Z0-9_]*$", passEnv)
+	}
+	if sshKeyPath != "" {
+		if _, err := os.Stat(sshKeyPath); err != nil {
+			return fmt.Errorf("ssh_key_path %q not accessible: %v", sshKeyPath, err)
+		}
+	}
+	return nil
+}
+
+// validateBorgRepo checks one external-Borg entry. It is shared by the
+// settings save and the Test endpoint: both end in exec'ing BinaryPath
+// with RepoPath on its command line and SSHKeyPath in BORG_RSH, so both
+// must refuse the same inputs. The Test endpoint used to skip these checks
+// entirely and would run whatever binary_path named.
+func validateBorgRepo(r BorgExternalRepo) error {
+	repoPath := strings.TrimSpace(r.RepoPath)
+	binaryPath := strings.TrimSpace(r.BinaryPath)
+	passEnv := strings.TrimSpace(r.PassphraseEnv)
+	sshKeyPath := strings.TrimSpace(r.SSHKeyPath)
+
+	if r.Enabled && repoPath == "" {
+		return fmt.Errorf("repo_path is required when enabled")
+	}
+	if strings.HasPrefix(repoPath, "-") {
+		// Would be read by borg as an option, not a repository.
+		return fmt.Errorf("repo_path %q must not start with '-'", repoPath)
+	}
+	if hasControlChars(repoPath) {
+		return fmt.Errorf("repo_path contains control characters")
+	}
+	// Non-empty BinaryPath is checked regardless of Enabled — catches
+	// typos the user might have meant to test immediately via the Test
+	// button. It must be a real borg binary: an absolute path to an
+	// executable regular file whose name starts with "borg".
+	if binaryPath != "" {
+		if !filepath.IsAbs(binaryPath) {
+			return fmt.Errorf("binary_path %q must be an absolute path", binaryPath)
+		}
+		if !strings.HasPrefix(filepath.Base(binaryPath), "borg") {
+			return fmt.Errorf("binary_path %q must point at a borg binary (file name starting with \"borg\")", binaryPath)
+		}
+		fi, err := os.Stat(binaryPath)
+		if err != nil {
+			return fmt.Errorf("binary_path %q not accessible: %v", binaryPath, err)
+		}
+		if !fi.Mode().IsRegular() || fi.Mode().Perm()&0o111 == 0 {
+			return fmt.Errorf("binary_path %q is not an executable file", binaryPath)
+		}
+	}
+	if passEnv != "" && !envVarPattern.MatchString(passEnv) {
+		return fmt.Errorf("passphrase_env %q must match ^[A-Z_][A-Z0-9_]*$", passEnv)
+	}
+	if sshKeyPath != "" {
+		if !filepath.IsAbs(sshKeyPath) {
+			return fmt.Errorf("ssh_key_path %q must be an absolute path", sshKeyPath)
+		}
+		if hasControlChars(sshKeyPath) {
+			return fmt.Errorf("ssh_key_path contains control characters")
+		}
+		fi, err := os.Stat(sshKeyPath)
+		if err != nil {
+			return fmt.Errorf("ssh_key_path %q not accessible: %v", sshKeyPath, err)
+		}
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("ssh_key_path %q is not a file", sshKeyPath)
+		}
+	}
+	return nil
+}
+
+func hasControlChars(s string) bool {
+	for _, c := range s {
+		if c < 0x20 || c == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // apiBorgReposToCollector converts the API-layer representation into

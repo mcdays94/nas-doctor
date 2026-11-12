@@ -4,6 +4,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -2380,6 +2381,9 @@ func (d *DB) GetConfig(key string) (string, error) {
 	row := d.db.QueryRow("SELECT value FROM config WHERE key = ?", key)
 	var val string
 	if err := row.Scan(&val); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrConfigNotFound
+		}
 		return "", err
 	}
 	return val, nil

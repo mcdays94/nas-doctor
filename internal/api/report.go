@@ -987,6 +987,9 @@ func writeStatCard(b *strings.Builder, value, label, valueClass string) {
 	b.WriteString("    </div>\n")
 }
 
+// writeComponentRow writes one table row. details is inserted as HTML, so
+// callers must pass text through escHTML first; component and status are
+// escaped here.
 func writeComponentRow(b *strings.Builder, component, details, status, statusClass string) {
 	b.WriteString("      <tr>\n")
 	b.WriteString(fmt.Sprintf("        <td><strong>%s</strong></td>\n", escHTML(component)))
@@ -1395,7 +1398,7 @@ func writeZFS(b *strings.Builder, snap *internal.Snapshot) {
 		b.WriteString(fmt.Sprintf("    <h3 class=\"sub-heading\" style=\"margin-top:0\">Pool: %s</h3>\n", escHTML(pool.Name)))
 
 		b.WriteString("    <div class=\"component-grid\">\n")
-		writeComponentRow(b, "State", pool.State, stateClass, stateClass)
+		writeComponentRow(b, "State", escHTML(pool.State), stateClass, stateClass)
 		writeComponentRow(b, "Size", fmt.Sprintf("%.1f GB total, %.1f GB used (%.0f%%)", pool.TotalGB, pool.UsedGB, pool.UsedPct), "", "")
 		if pool.Fragmentation > 0 {
 			fragClass := ""
@@ -1409,10 +1412,10 @@ func writeZFS(b *strings.Builder, snap *internal.Snapshot) {
 			if pool.ScanErrors > 0 {
 				scanClass = "val-bad"
 			}
-			writeComponentRow(b, "Last Scrub", fmt.Sprintf("%s — %s (%d errors)", pool.ScanType, pool.ScanDate, pool.ScanErrors), "", scanClass)
+			writeComponentRow(b, "Last Scrub", fmt.Sprintf("%s — %s (%d errors)", escHTML(pool.ScanType), escHTML(pool.ScanDate), pool.ScanErrors), "", scanClass)
 		}
 		if pool.Status != "" {
-			writeComponentRow(b, "Status", pool.Status, "", "")
+			writeComponentRow(b, "Status", escHTML(pool.Status), "", "")
 		}
 		b.WriteString("    </div>\n")
 
@@ -1498,7 +1501,7 @@ func writeUPS(b *strings.Builder, snap *internal.Snapshot) {
 		b.WriteString(fmt.Sprintf("    <p style=\"color:var(--cf-text-muted);font-size:9pt;margin-bottom:8px\">%s</p>\n", escHTML(ups.Model)))
 	}
 	b.WriteString("    <div class=\"component-grid\">\n")
-	writeComponentRow(b, "Status", ups.StatusHuman, statusClass, statusClass)
+	writeComponentRow(b, "Status", escHTML(ups.StatusHuman), statusClass, statusClass)
 	writeComponentRow(b, "Battery", fmt.Sprintf("%.0f%%", ups.BatteryPct), "", "")
 	writeComponentRow(b, "Load", fmt.Sprintf("%.0f%%", ups.LoadPct), "", "")
 	writeComponentRow(b, "Runtime", fmt.Sprintf("%.0f min", ups.RuntimeMins), "", "")
@@ -1512,7 +1515,7 @@ func writeUPS(b *strings.Builder, snap *internal.Snapshot) {
 		writeComponentRow(b, "Temperature", fmt.Sprintf("%.0f°C", ups.Temperature), "", "")
 	}
 	if ups.LastTransfer != "" {
-		writeComponentRow(b, "Last Transfer", ups.LastTransfer, "", "")
+		writeComponentRow(b, "Last Transfer", escHTML(ups.LastTransfer), "", "")
 	}
 	b.WriteString("    </div>\n")
 	b.WriteString("  </div>\n")

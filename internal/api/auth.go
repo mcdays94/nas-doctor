@@ -1,0 +1,541 @@
+package api
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Authentication model
+//
+// Which requests are asked for the API key depends on the access mode
+// (access.go): nothing when no key is set, the historical handful of API
+// routes when a key is set but sign-in is off, and every route once
+// sign-in is on. This file is the sign-in side.
+//
+// With sign-in on, EVERY route requires proof of the key except the small
+// allow-list in isPublicPath (health probe, the sign-in page and the
+// static assets that page needs). A request proves itself in one of:
+//
+//   - Authorization: Bearer <key>   — API clients, fleet polling, Prometheus
+//   - ?api_key=<key>                — kept for existing integrations
+//   - the nd_session cookie         — the browser UI, issued by /login
+//   - coming from the local network — only if that option is switched on
+//
+// The cookie value is a stateless HMAC over the time it was issued, keyed
+// by the API key itself: sessions survive restarts, need no server-side
+// table, and every session dies the moment the key is rotated or revoked.
+// How long a session lasts is a setting (access.session_days), checked
+// against the issue time on every request, so changing it takes effect at
+// once. The cookie is reissued as the browser is used, so the period
+// counts from the last visit.
+
+const (
+	sessionCookieName = "nd_session"
+	// sessionRenewAfter is how old a session cookie gets before it is
+	// reissued on use.
+	sessionRenewAfter = time.Hour
+	// sessionCookieMaxAge is the longest a browser will keep a cookie
+	// (browsers cap it at about 400 days). A session that never expires
+	// is kept alive by being reissued.
+	sessionCookieMaxAge = 400 * 24 * time.Hour
+	// sessionClockSkew tolerates a clock that was set back slightly.
+	sessionClockSkew = 5 * time.Minute
+	// requestBodyLimit caps every request body. Nothing the UI or the
+	// documented API sends comes close; an unbounded body used to be
+	// persisted verbatim by a few handlers.
+	requestBodyLimit = 1 << 20
+)
+
+// secureEqual compares two secrets in constant time without leaking their
+// lengths.
+func secureEqual(a, b string) bool {
+	ha := sha256.Sum256([]byte(a))
+	hb := sha256.Sum256([]byte(b))
+	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
+}
+
+func sessionMAC(apiKey string, issued int64) string {
+	m := hmac.New(sha256.New, []byte(apiKey))
+	m.Write([]byte("nas-doctor-session-v2|" + strconv.FormatInt(issued, 10)))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// newSessionToken returns a token for the given API key, issued at the
+// given time.
+func newSessionToken(apiKey string, issued time.Time) string {
+	i := issued.Unix()
+	return "v2." + strconv.FormatInt(i, 10) + "." + sessionMAC(apiKey, i)
+}
+
+// sessionIssuedAt returns when token was issued, if it is a genuine token
+// for apiKey.
+func sessionIssuedAt(apiKey, token string) (time.Time, bool) {
+	if apiKey == "" {
+		return time.Time{}, false
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || parts[0] != "v2" {
+		return time.Time{}, false
+	}
+	issued, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if !hmac.Equal([]byte(parts[2]), []byte(sessionMAC(apiKey, issued))) {
+		return time.Time{}, false
+	}
+	return time.Unix(issued, 0), true
+}
+
+// validSessionToken reports whether token was issued for apiKey and is
+// still within lifetime. A lifetime of zero means sessions do not expire.
+func validSessionToken(apiKey, token string, now time.Time, lifetime time.Duration) bool {
+	issued, ok := sessionIssuedAt(apiKey, token)
+	if !ok || issued.After(now.Add(sessionClockSkew)) {
+		return false
+	}
+	return lifetime <= 0 || now.Sub(issued) < lifetime
+}
+
+// requestIsHTTPS reports whether the client reached us over TLS, directly
+// or through a reverse proxy that says so.
+func requestIsHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+// setSessionCookie signs the browser in. lifetime is the configured
+// session length (zero: no expiry).
+func setSessionCookie(w http.ResponseWriter, r *http.Request, apiKey string, lifetime time.Duration) {
+	maxAge := lifetime
+	if maxAge <= 0 || maxAge > sessionCookieMaxAge {
+		maxAge = sessionCookieMaxAge
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    newSessionToken(apiKey, time.Now()),
+		Path:     "/",
+		MaxAge:   int(maxAge / time.Second),
+		HttpOnly: true,
+		Secure:   requestIsHTTPS(r),
+		// Lax, not Strict: a link to the dashboard from a chat notification
+		// should not bounce a signed-in user through the sign-in page. Lax
+		// cookies are never sent on cross-site POST/PUT/DELETE, and every
+		// state-changing route is non-GET.
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   requestIsHTTPS(r),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// bearerToken extracts the token from an Authorization: Bearer header.
+func bearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	if len(h) > 7 && strings.EqualFold(h[:7], "Bearer ") {
+		return strings.TrimSpace(h[7:])
+	}
+	return ""
+}
+
+// How a request got past sign-in.
+const (
+	viaKey     = "key"
+	viaSession = "session"
+	viaLocal   = "local"
+)
+
+// signedInVia reports how r satisfies sign-in, or "" if it does not.
+func signedInVia(r *http.Request, settings Settings) string {
+	if requestHasKey(r, settings.APIKey) {
+		return viaKey
+	}
+	if c, err := r.Cookie(sessionCookieName); err == nil &&
+		validSessionToken(settings.APIKey, c.Value, time.Now(), settings.sessionLifetime()) {
+		return viaSession
+	}
+	if settings.Access.TrustLocalNetwork && describeClient(r, settings.Access.LocalHosts).Local {
+		return viaLocal
+	}
+	return ""
+}
+
+// requestAllowed reports whether r may proceed under the instance's access
+// mode.
+func requestAllowed(r *http.Request, settings Settings) bool {
+	switch settings.accessMode() {
+	case accessOpen:
+		return true
+	case accessKeyForAPI:
+		return !keyGuardedRoute(r.URL.Path) || requestHasKey(r, settings.APIKey) || samePageExemption(r)
+	}
+	return signedInVia(r, settings) != ""
+}
+
+// renewSession reissues the session cookie once it is older than
+// sessionRenewAfter, so the session length counts from the last visit.
+func renewSession(w http.ResponseWriter, r *http.Request, settings Settings) {
+	c, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return
+	}
+	issued, ok := sessionIssuedAt(settings.APIKey, c.Value)
+	if ok && time.Since(issued) >= sessionRenewAfter {
+		setSessionCookie(w, r, settings.APIKey, settings.sessionLifetime())
+	}
+}
+
+// isPublicPath lists the routes that stay reachable without the key.
+func isPublicPath(path string) bool {
+	switch path {
+	case "/api/v1/health", // Docker HEALTHCHECK, Kubernetes probes, fleet discovery
+		"/login", "/api/v1/auth/login", "/api/v1/auth/logout",
+		"/css/shared.css", "/icon.png", "/favicon.png": // what the sign-in page renders with
+		return true
+	}
+	return strings.HasPrefix(path, "/icons/")
+}
+
+// isPageRequest reports whether an unauthenticated request should be sent
+// to the sign-in page (a person navigating) rather than answered with a
+// JSON 401 (a script or API client).
+func isPageRequest(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	p := r.URL.Path
+	for _, prefix := range []string{"/api/", "/js/", "/css/"} {
+		if strings.HasPrefix(p, prefix) {
+			return false
+		}
+	}
+	return p != "/metrics"
+}
+
+// authMiddleware applies the instance's access mode to every route.
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isPublicPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		settings, err := s.loadSettings()
+		if err != nil {
+			// Fail closed. Treating an unreadable settings row as "no key
+			// configured" would switch authentication off exactly when the
+			// database is in trouble.
+			s.logger.Error("auth: cannot read settings", "error", err)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "settings unavailable"})
+			return
+		}
+		mode := settings.accessMode()
+		if mode != accessSignIn {
+			if !requestAllowed(r, settings) {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing API key"})
+				return
+			}
+			// Remember what gets by without the key, so that Settings can
+			// say what turning sign-in on would affect.
+			if !requestHasKey(r, settings.APIKey) {
+				s.keyless.observe(r, settings, false)
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		switch signedInVia(r, settings) {
+		case viaSession:
+			renewSession(w, r, settings)
+			next.ServeHTTP(w, r)
+			return
+		case viaKey:
+			next.ServeHTTP(w, r)
+			return
+		case viaLocal:
+			s.keyless.observe(r, settings, false)
+			next.ServeHTTP(w, r)
+			return
+		}
+		s.keyless.observe(r, settings, true)
+		if isPageRequest(r) {
+			http.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
+			return
+		}
+		w.Header().Set("WWW-Authenticate", `Bearer realm="nas-doctor"`)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing API key"})
+	})
+}
+
+// apiKeyMiddleware is the historical name for authMiddleware, kept so
+// route-level wrappers and tests that reference it keep working. The whole
+// router is behind authMiddleware, so wrapping a route again is a no-op.
+func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
+	return s.authMiddleware(next)
+}
+
+// sameHost compares two host[:port] values case-insensitively.
+func sameHost(a, b string) bool {
+	return a != "" && strings.EqualFold(a, b)
+}
+
+// sameOriginGuard rejects state-changing requests that a browser sent from
+// another site. It is what stops any web page the user happens to visit
+// from POSTing to the NAS on their behalf — which matters most on installs
+// with no API key, where there is no cookie to withhold.
+//
+// Non-browser clients (curl, the fleet poller, Prometheus) send neither
+// Origin nor Sec-Fetch-Site and pass untouched. A request that presents the
+// API key as a Bearer token is an explicit API client and also passes.
+func (s *Server) sameOriginGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only a POST can reach us from another site without the browser
+		// asking permission first. PUT, PATCH and DELETE always trigger a
+		// CORS preflight, and so does a POST that carries a JSON body, an
+		// Authorization header or any custom header; this server never
+		// grants a preflight, so those requests cannot come from a foreign
+		// page. That leaves "simple" POSTs (form posts, bodyless fetches)
+		// as the only ones worth inspecting — and means a reverse proxy
+		// that rewrites the Host header cannot make the UI's own JSON
+		// requests look foreign.
+		if r.Method != http.MethodPost || bearerToken(r) != "" || isJSONRequest(r) || r.Header.Get("X-Requested-With") != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		switch r.Header.Get("Sec-Fetch-Site") {
+		case "same-origin", "none":
+			next.ServeHTTP(w, r)
+			return
+		case "cross-site", "same-site":
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-origin request refused"})
+			return
+		}
+		// Sec-Fetch-Site is only sent in secure contexts. On plain-HTTP LAN
+		// access fall back to comparing Origin with the host we were
+		// addressed as (or the host a reverse proxy says the client used).
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		u, err := url.Parse(origin)
+		if err == nil && (sameHost(u.Host, r.Host) || sameHost(u.Host, r.Header.Get("X-Forwarded-Host"))) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-origin request refused"})
+	})
+}
+
+// contentSecurityPolicy is deliberately minimal: no plugins, no <base>
+// hijacking. It does not restrict scripts, styles, images or connections.
+// A stricter policy was tried and dropped, because it would break installs
+// that sit behind a proxy which injects its own script (Cloudflare Rocket
+// Loader or Web Analytics, for example), and with inline handlers allowed
+// it bought little.
+const contentSecurityPolicy = "object-src 'none'; base-uri 'self'"
+
+// isJSONRequest reports whether the request declares a JSON body.
+func isJSONRequest(r *http.Request) bool {
+	ct := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
+	return strings.HasPrefix(ct, "application/json")
+}
+
+// securityHeaders sets response headers that apply to every route.
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// limitRequestBody caps every request body at requestBodyLimit.
+func (s *Server) limitRequestBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil && r.Body != http.NoBody {
+			r.Body = http.MaxBytesReader(w, r.Body, requestBodyLimit)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ---------- Sign-in ----------
+
+// loginLimiter slows key guessing through the sign-in form: a handful of
+// failures per client address, plus a global ceiling so rotating the
+// (spoofable) forwarded address does not help.
+type loginLimiter struct {
+	mu      sync.Mutex
+	perIP   map[string]*loginWindow
+	global  loginWindow
+	nowFunc func() time.Time
+}
+
+type loginWindow struct {
+	start time.Time
+	fails int
+}
+
+const (
+	loginWindowLen      = 5 * time.Minute
+	loginMaxFailsPerIP  = 10
+	loginMaxFailsGlobal = 100
+)
+
+func (l *loginLimiter) now() time.Time {
+	if l.nowFunc != nil {
+		return l.nowFunc()
+	}
+	return time.Now()
+}
+
+func (w *loginWindow) roll(now time.Time) {
+	if now.Sub(w.start) >= loginWindowLen {
+		w.start, w.fails = now, 0
+	}
+}
+
+// blocked reports whether ip has used up its attempts for this window.
+func (l *loginLimiter) blocked(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	l.global.roll(now)
+	if l.global.fails >= loginMaxFailsGlobal {
+		return true
+	}
+	if w := l.perIP[ip]; w != nil {
+		w.roll(now)
+		return w.fails >= loginMaxFailsPerIP
+	}
+	return false
+}
+
+func (l *loginLimiter) recordFailure(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	l.global.roll(now)
+	l.global.fails++
+	if l.perIP == nil {
+		l.perIP = make(map[string]*loginWindow)
+	}
+	// Opportunistic cleanup so the map cannot grow without bound.
+	if len(l.perIP) > 1024 {
+		for k, w := range l.perIP {
+			if now.Sub(w.start) >= loginWindowLen {
+				delete(l.perIP, k)
+			}
+		}
+	}
+	w := l.perIP[ip]
+	if w == nil {
+		w = &loginWindow{start: now}
+		l.perIP[ip] = w
+	}
+	w.roll(now)
+	w.fails++
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// handleLogin exchanges the API key for a session cookie.
+// POST /api/v1/auth/login {"api_key":"..."}
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.loadSettings()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "settings unavailable"})
+		return
+	}
+	if settings.accessMode() != accessSignIn {
+		// Nothing to sign in to; let the page carry on to the dashboard.
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "auth_required": false})
+		return
+	}
+	ip := clientIP(r)
+	if s.loginLimiter.blocked(ip) {
+		w.Header().Set("Retry-After", strconv.Itoa(int(loginWindowLen/time.Second)))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many attempts, try again in a few minutes"})
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
+		return
+	}
+	var req struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if !secureEqual(strings.TrimSpace(req.APIKey), settings.APIKey) {
+		s.loginLimiter.recordFailure(ip)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "that key is not correct"})
+		return
+	}
+	setSessionCookie(w, r, settings.APIKey, settings.sessionLifetime())
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "auth_required": true})
+}
+
+// handleLogout clears the session cookie.
+// POST /api/v1/auth/logout
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	clearSessionCookie(w, r)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
+}
+
+// handleLoginPage serves the sign-in form. When sign-in is not required, or
+// the visitor is already signed in, it goes straight to the dashboard.
+// GET /login
+func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	if settings, err := s.loadSettings(); err == nil && requestAllowed(r, settings) {
+		http.Redirect(w, r, safeNextPath(r.URL.Query().Get("next")), http.StatusFound)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.servePage(w, loginPageHTML)
+}
+
+// safeNextPath returns next when it is a local path, otherwise "/". It
+// keeps the sign-in redirect from being used to bounce people to another
+// site.
+func safeNextPath(next string) string {
+	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.HasPrefix(next, "/\\") {
+		return "/"
+	}
+	if strings.HasPrefix(next, "/login") {
+		return "/"
+	}
+	return next
+}
