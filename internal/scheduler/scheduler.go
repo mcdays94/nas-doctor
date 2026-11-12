@@ -118,8 +118,12 @@ type Scheduler struct {
 	retention     RetentionConfig
 	alerting      AlertingConfig
 	serviceChecks []internal.ServiceCheckConfig
-	checker       *ServiceChecker
-	retentionMgr  *RetentionManager
+	// svcSaveMu makes saving service check results atomic with
+	// UpdateServiceChecks' replace-and-prune, so a run that started
+	// before a check was removed can't write it back (issue #190).
+	svcSaveMu    sync.Mutex
+	checker      *ServiceChecker
+	retentionMgr *RetentionManager
 
 	// smartMaxAgeDays is the Settings.SMART.MaxAgeDays value driving
 	// the StaleSMARTChecker (issue #238). 0 disables the feature
@@ -1104,6 +1108,9 @@ func (s *Scheduler) UpdateServiceChecks(checks []internal.ServiceCheckConfig) {
 		normalized = append(normalized, check)
 	}
 
+	s.svcSaveMu.Lock()
+	defer s.svcSaveMu.Unlock()
+
 	s.mu.Lock()
 	s.serviceChecks = normalized
 	s.mu.Unlock()
@@ -1111,7 +1118,12 @@ func (s *Scheduler) UpdateServiceChecks(checks []internal.ServiceCheckConfig) {
 	// Purge orphaned history for any check that was removed from the config.
 	s.pruneOrphanServiceCheckHistory(normalized)
 
+	names := make([]string, 0, len(normalized))
+	for _, c := range normalized {
+		names = append(names, c.Name)
+	}
 	s.logger.Info("service check config updated", "checks", len(normalized))
+	s.logger.Debug("service check config updated", "names", names)
 }
 
 // PurgeOrphanServiceCheckHistory removes history rows for any check_key NOT
@@ -1126,6 +1138,8 @@ func (s *Scheduler) UpdateServiceChecks(checks []internal.ServiceCheckConfig) {
 //
 // Returns the number of rows deleted.
 func (s *Scheduler) PurgeOrphanServiceCheckHistory() (int, error) {
+	s.svcSaveMu.Lock()
+	defer s.svcSaveMu.Unlock()
 	s.mu.RLock()
 	checks := make([]internal.ServiceCheckConfig, len(s.serviceChecks))
 	copy(checks, s.serviceChecks)
@@ -1153,6 +1167,45 @@ func (s *Scheduler) pruneOrphanServiceCheckHistory(checks []internal.ServiceChec
 		s.logger.Info("pruned orphaned service check history", "rows", pruned)
 	}
 	return pruned
+}
+
+// saveServiceCheckResults persists the results of a scheduled or manual
+// run, dropping any whose check is no longer configured, and returns the
+// results it kept. A run copies the check list and saves only after every
+// check has finished, which takes minutes for a speed test. If a settings
+// save removed or edited a check in that window, its history has already
+// been pruned, and saving the stale result would leave an orphan row that
+// only the next startup purge clears (issue #190).
+func (s *Scheduler) saveServiceCheckResults(results []internal.ServiceCheckResult) ([]internal.ServiceCheckResult, error) {
+	if len(results) == 0 {
+		return results, nil
+	}
+	s.svcSaveMu.Lock()
+	defer s.svcSaveMu.Unlock()
+
+	s.mu.RLock()
+	configured := make(map[string]bool, len(s.serviceChecks))
+	for _, c := range s.serviceChecks {
+		configured[CheckKey(c)] = true
+	}
+	s.mu.RUnlock()
+
+	kept := make([]internal.ServiceCheckResult, 0, len(results))
+	var dropped []string
+	for _, r := range results {
+		if configured[r.Key] {
+			kept = append(kept, r)
+		} else {
+			dropped = append(dropped, r.Name)
+		}
+	}
+	if len(dropped) > 0 {
+		s.logger.Info("service checks: dropped results for checks removed during the run", "checks", dropped)
+	}
+	if len(kept) == 0 {
+		return kept, nil
+	}
+	return kept, s.store.SaveServiceCheckResults(kept)
 }
 
 // RunServiceChecksNow executes configured service checks immediately and persists results.
@@ -1380,13 +1433,7 @@ func (s *Scheduler) runServiceChecks(now time.Time) ([]internal.ServiceCheckResu
 		results = append(results, result)
 	}
 
-	if len(results) == 0 {
-		return results, nil
-	}
-	if err := s.store.SaveServiceCheckResults(results); err != nil {
-		return results, err
-	}
-	return results, nil
+	return s.saveServiceCheckResults(results)
 }
 
 // collectContainerStats runs a lightweight Docker stats collection and saves to DB.
@@ -1774,7 +1821,10 @@ func (s *Scheduler) runDueServiceChecks() {
 	checks := make([]internal.ServiceCheckConfig, len(s.serviceChecks))
 	copy(checks, s.serviceChecks)
 	s.mu.RUnlock()
-	s.checker.RunDueChecks(checks, time.Now())
+	results := s.checker.runDue(checks, time.Now())
+	if _, err := s.saveServiceCheckResults(results); err != nil {
+		s.logger.Warn("failed to save service check results", "error", err)
+	}
 }
 
 func (s *Scheduler) dispatchNotifications(notif *notifier.Notifier, snap *internal.Snapshot, hostname string, now time.Time) {

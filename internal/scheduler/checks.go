@@ -105,6 +105,19 @@ func (sc *ServiceChecker) SetCollectDetails(enabled bool) {
 // executes them, tracks consecutive failures, and persists results.
 // It returns the slice of results for checks that were actually executed.
 func (sc *ServiceChecker) RunDueChecks(checks []internal.ServiceCheckConfig, now time.Time) []internal.ServiceCheckResult {
+	results := sc.runDue(checks, now)
+	if len(results) == 0 {
+		return results
+	}
+	if err := sc.store.SaveServiceCheckResults(results); err != nil {
+		sc.logger.Warn("failed to save service check results", "error", err)
+	}
+	return results
+}
+
+// runDue is RunDueChecks without the save. The scheduler calls it directly
+// so it can drop results for checks removed while they ran (issue #190).
+func (sc *ServiceChecker) runDue(checks []internal.ServiceCheckConfig, now time.Time) []internal.ServiceCheckResult {
 	var due []internal.ServiceCheckConfig
 	for _, check := range checks {
 		if !check.Enabled {
@@ -159,11 +172,6 @@ func (sc *ServiceChecker) RunDueChecks(checks []internal.ServiceCheckConfig, now
 		sc.mu.Lock()
 		sc.lastRun[result.Key] = now
 		sc.mu.Unlock()
-	}
-
-	// Persist results.
-	if err := sc.store.SaveServiceCheckResults(results); err != nil {
-		sc.logger.Warn("failed to save service check results", "error", err)
 	}
 
 	return results
